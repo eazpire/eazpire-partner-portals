@@ -329,3 +329,46 @@ describe("partner login poll + exchange", () => {
     expect(pollBody.status).toBe("pending");
   });
 });
+
+describe("handlePartnerAuthRequest", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("returns application_required when email has no account or application", async () => {
+    const db = {
+      prepare: (sql) => {
+        const chain = {
+          bind: () => chain,
+          first: async () => {
+            if (sql.includes("partner_email_blocks")) return null;
+            if (sql.includes("manufacturer_users")) return null;
+            if (sql.includes("partner_applications")) return null;
+            if (sql.trim() === "SELECT 1 FROM manufacturers LIMIT 1") return { ok: 1 };
+            return null;
+          },
+          run: async () => ({}),
+        };
+        return chain;
+      },
+    };
+    const env = {
+      MANUFACTURER_DB: db,
+      PARTNER_PORTAL_URL: "https://partner.eazpire.com",
+      JOBS: { get: async () => null, put: async () => {} },
+    };
+    const { handlePartnerAuthRequest } = await import("../../src/features/manufacturers/partnerAuth.js");
+    const res = await handlePartnerAuthRequest(
+      new Request("https://partner.eazpire.com/?op=partner-auth-request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "nobody@example.com" }),
+      }),
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("application_required");
+  });
+});

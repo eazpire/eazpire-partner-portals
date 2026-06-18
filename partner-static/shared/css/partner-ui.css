@@ -137,6 +137,16 @@ html, body { margin: 0; min-height: 100%; max-width: 100%; overflow-x: hidden; f
 .login-card { width: 420px; max-width: calc(100vw - 32px); padding: 28px; border-radius: 24px; background: #fff; box-shadow: var(--shadow); border: 1px solid var(--line); }
 .login-card h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.04em; }
 .login-card p { color: var(--muted); line-height: 1.5; }
+.login-message--apply-hint { color: var(--text) !important; font-weight: 500; }
+.btn-attention-pulse {
+  animation: btn-attention-pulse 0.45s ease-in-out 2;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 0 rgba(109, 40, 217, 0.45);
+}
+@keyframes btn-attention-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(109, 40, 217, 0.35); }
+  50% { transform: scale(1.04); box-shadow: 0 0 0 10px rgba(109, 40, 217, 0); }
+}
 .login-waiting { text-align: center; }
 .login-waiting-spinner {
   width: 48px;

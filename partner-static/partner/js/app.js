@@ -17,6 +17,8 @@ const LOGIN_POLL_TTL_MS = 15 * 60 * 1000;
 const LOGIN_POLL_INTERVAL_MS = 2500;
 
 const BLOCKED_EMAIL_MESSAGE = "This email address cannot be used for partner applications.";
+const APPLICATION_REQUIRED_MESSAGE =
+  "We don't have a partner application for this email yet. Please complete the Become a Partner form first — then you can sign in with a magic link.";
 
 const loginWaitState = {
   pollToken: null,
@@ -744,6 +746,9 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = document.getElementById("login-email").value.trim();
   const submitBtn = e.target.querySelector('button[type="submit"]');
+  const loginMessage = document.getElementById("login-message");
+  loginMessage.textContent = "";
+  loginMessage.classList.remove("login-message--apply-hint");
   if (submitBtn) submitBtn.disabled = true;
   try {
     const data = await partnerFetch("partner-auth-request", { method: "POST", body: { email } });
@@ -751,19 +756,37 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       startLoginWait(email, data.poll_token);
     } else {
       showLoginFormPanel();
-      document.getElementById("login-message").textContent =
+      loginMessage.textContent =
         "If this email is registered or has a partner application on file, you will receive a sign-in link within a few minutes. Check spam or contact Eazpire if you were invited but receive nothing.";
     }
   } catch (err) {
-    const blocked = err.message === "email_blocked" || err.data?.error === "email_blocked";
-    document.getElementById("login-message").textContent = blocked
-      ? BLOCKED_EMAIL_MESSAGE
-      : err.message || "Could not send sign-in link. Please try again.";
-    showLoginFormPanel();
+    const code = err.message || err.data?.error;
+    if (code === "application_required") {
+      loginMessage.textContent = APPLICATION_REQUIRED_MESSAGE;
+      loginMessage.classList.add("login-message--apply-hint");
+      showLoginFormPanel();
+      pulseBecomePartnerButton();
+    } else {
+      const blocked = code === "email_blocked";
+      loginMessage.textContent = blocked
+        ? BLOCKED_EMAIL_MESSAGE
+        : err.message || "Could not send sign-in link. Please try again.";
+      showLoginFormPanel();
+    }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }
 });
+
+function pulseBecomePartnerButton() {
+  const btn = document.getElementById("btn-show-apply");
+  if (!btn) return;
+  btn.classList.remove("btn-attention-pulse");
+  void btn.offsetWidth;
+  btn.classList.add("btn-attention-pulse");
+  btn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  window.setTimeout(() => btn.classList.remove("btn-attention-pulse"), 1600);
+}
 
 document.getElementById("btn-login-waiting-cancel").addEventListener("click", () => {
   stopLoginWait();

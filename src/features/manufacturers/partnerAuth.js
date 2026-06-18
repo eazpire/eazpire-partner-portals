@@ -240,6 +240,9 @@ export async function handlePartnerAuthRequest(request, env) {
   if (!result.ok && result.reason === "email_blocked") {
     return json({ ok: false, error: "email_blocked" }, 403, cors);
   }
+  if (!result.ok && result.reason === "user_not_registered") {
+    return json({ ok: false, error: "application_required" }, 404, cors);
+  }
 
   const pollToken = await createPartnerLoginPoll(env, {
     email,

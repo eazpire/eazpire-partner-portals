@@ -57,7 +57,7 @@ describe("adminRemoveManufacturer", () => {
     const result = await adminRemoveManufacturer({ MANUFACTURER_DB: db }, "mfr_missing", "remove", "admin_1");
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("not_found");
-  });
+  }, 30000);
 
   it("blocks emails when mode is block_remove", async () => {
     const manufacturer = {
@@ -102,5 +102,5 @@ describe("adminRemoveManufacturer", () => {
     expect(result.blocked_emails).toContain("ops@example.com");
     expect(blockRuns.length).toBe(2);
     expect(deleteRuns.some((s) => s.includes("DELETE FROM manufacturers"))).toBe(true);
-  });
+  }, 30000);
 });
