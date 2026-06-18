@@ -90,6 +90,7 @@
     "partner:secrets": "node scripts/partner/ensure-partner-worker-secrets.cjs",
     "partner:create-repo": "node scripts/partner/create-partner-repo.js",
     "partner:sync": "node scripts/partner/sync-to-partner-repo.js",
+    "partner:set-github-secret": "node scripts/partner/set-github-secret.cjs",
     "postinstall": "node scripts/deployment/postinstall-cf-workers-queues.cjs",
     "queues:create": "node scripts/deployment/queues-create.cjs",
     "cf:deploy": "npm run queues:create && wrangler deploy",
