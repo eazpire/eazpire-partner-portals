@@ -10,7 +10,7 @@ const NAV_CORE = [
   { route: "/partner/certification", label: "Certification HQ", icon: "✓" },
 ];
 
-const NAV_OPS = [];
+const NAV_OPS = [{ route: "/partner/requests", label: "Partner Requests", icon: "✉" }];
 
 const NETWORK_TABS = [
   { key: "pending", label: "Pending" },
@@ -73,7 +73,7 @@ function getNetworkTab() {
   if (fromUrl && NETWORK_TABS.some((t) => t.key === fromUrl)) return fromUrl;
   const stored = sessionStorage.getItem("admin_network_tab");
   if (stored && NETWORK_TABS.some((t) => t.key === stored)) return stored;
-  return "approved";
+  return "pending";
 }
 
 function setNetworkTab(tab) {
@@ -1102,7 +1102,10 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   if (await ensureAdminSession()) {
     showShell();
     initShell({
-      navSections: [{ title: "Core Portal", items: NAV_CORE }],
+      navSections: [
+        { title: "Core Portal", items: NAV_CORE },
+        ...(NAV_OPS.length ? [{ title: "Operations", items: NAV_OPS }] : []),
+      ],
       onRoute,
       brandSub: "Admin Ops",
       crumbLabels: CRUMB_LABELS,

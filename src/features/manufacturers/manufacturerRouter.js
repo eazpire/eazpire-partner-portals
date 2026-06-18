@@ -246,8 +246,13 @@ export async function handleManufacturerRouter(request, env) {
       return json({ ok: true, ...data }, 200, cors);
     }
     if (op === "admin-manufacturer-network-board" && request.method === "GET") {
-      const board = await adminGetPartnerNetworkBoard(db);
-      return json({ ok: true, board }, 200, cors);
+      try {
+        const board = await adminGetPartnerNetworkBoard(db);
+        return json({ ok: true, board }, 200, cors);
+      } catch (err) {
+        console.error("[admin-manufacturer-network-board]", err);
+        return json({ ok: false, error: "network_board_failed", detail: String(err?.message || err) }, 500, cors);
+      }
     }
     if (op === "admin-manufacturer-list" && request.method === "GET") {
       const manufacturers = await adminListManufacturers(db, { status: url.searchParams.get("status") });
