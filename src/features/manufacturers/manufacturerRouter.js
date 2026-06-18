@@ -231,6 +231,19 @@ export async function handleManufacturerRouter(request, env) {
     if (auth.mode !== "applicant") {
       return json({ ok: false, error: "not_applicant_session" }, 400, cors);
     }
+    const { upgradeApprovedApplicantToFullSession } = await import("./partnerApplicationService.js");
+    const { partnerCookieName, sessionCookieHeader } = await import("./rbac.js");
+    const upgraded = await upgradeApprovedApplicantToFullSession(env, {
+      applicationId: auth.application_id,
+      email: auth.email,
+    });
+    if (upgraded) {
+      return json(
+        { ok: true, upgraded: true, session: upgraded.session },
+        200,
+        { ...cors, "Set-Cookie": sessionCookieHeader(partnerCookieName(), upgraded.jwt) }
+      );
+    }
     const application = await getPartnerApplicationById(db, auth.application_id);
     if (!application) return json({ ok: false, error: "not_found" }, 404, cors);
     return json({ ok: true, application }, 200, cors);

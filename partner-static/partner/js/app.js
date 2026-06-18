@@ -12,6 +12,7 @@ const NAV = [
 
 let session = null;
 let sessionMode = null;
+let shellInitialized = false;
 
 const LOGIN_POLL_TTL_MS = 15 * 60 * 1000;
 const LOGIN_POLL_INTERVAL_MS = 2500;
@@ -89,17 +90,16 @@ async function pollLoginStatus() {
       });
       const mode = exchanged.mode || data.mode;
       if (mode === "applicant") {
-        const me = await ensureSession();
-        if (me === "applicant") {
-          showApplicantShell();
-          await renderApplicationStatus();
-          history.replaceState({}, "", "/application-status");
-        } else {
-          showLogin();
+        const meMode = await ensureSession();
+        if (meMode === "full") {
+          await enterFullPortal("/");
+          return;
         }
+        showApplicantShell();
+        await renderApplicationStatus();
+        history.replaceState({}, "", "/application-status");
       } else {
-        showShell();
-        initShell({ navItems: NAV, onRoute, brandSub: "Manufacturer Portal" });
+        await enterFullPortal("/");
       }
       return;
     }
@@ -133,12 +133,32 @@ async function ensureSession() {
     const me = await partnerFetch("partner-auth-me");
     session = me.session;
     sessionMode = session?.mode || (session?.manufacturer_id ? "full" : null);
+    if (me.upgraded || sessionMode === "full") {
+      sessionMode = "full";
+      return "full";
+    }
     return sessionMode;
   } catch {
     session = null;
     sessionMode = null;
     return null;
   }
+}
+
+async function enterFullPortal(route = "/") {
+  sessionMode = "full";
+  showShell();
+  if (!shellInitialized) {
+    initShell({ navItems: NAV, onRoute, brandSub: "Manufacturer Portal" });
+    shellInitialized = true;
+  }
+  const onStatusPage =
+    route.includes("application-status") || location.pathname.includes("application-status");
+  const target = onStatusPage ? "/" : route || "/";
+  if (location.pathname !== target) {
+    history.replaceState({}, "", target);
+  }
+  await onRoute(target);
 }
 
 function showLogin(authErrorCode = "") {
@@ -173,8 +193,21 @@ function showApplicantShell() {
 }
 
 async function renderApplicationStatus() {
-  const el = document.getElementById("view-applicant-status");
+  const mode = await ensureSession();
+  if (mode === "full") {
+    await enterFullPortal("/");
+    return;
+  }
+
   const data = await partnerFetch("partner-application-status");
+  if (data.upgraded) {
+    session = data.session;
+    sessionMode = "full";
+    await enterFullPortal("/");
+    return;
+  }
+
+  const el = document.getElementById("view-applicant-status");
   const app = data.application || session?.application || {};
   const status = app.status || "pending_review";
   const statusLabel = {
@@ -192,14 +225,12 @@ async function renderApplicationStatus() {
         <p class="stage-desc" style="margin-top:8px">Thank you for applying to become an Eazpire manufacturing partner.</p>
         ${
           status === "pending_review"
-            ? `<p style="margin-top:16px">Your application is being reviewed by our team. You will receive an email when a decision is made. Once approved, sign in with a magic link to access the full partner portal.</p>`
+            ? `<p style="margin-top:16px">Your application is being reviewed by our team. You will receive an email when a decision is made. Once approved, you will be taken to the full partner portal automatically.</p>`
             : status === "pending_email_verification"
               ? `<p style="margin-top:16px">Please check your inbox for a verification link to continue. You can also request a magic link from the sign-in page to view this status.</p>`
-              : status === "approved"
-                ? `<p style="margin-top:16px">Your application has been approved. Sign out and use the magic link we sent to your email to access the full portal.</p>`
-                : status === "rejected"
-                  ? `<p style="margin-top:16px">Unfortunately we could not approve your application at this time.${app.rejection_reason ? ` Reason: ${escapeHtml(app.rejection_reason)}` : ""}</p>`
-                  : ""
+              : status === "rejected"
+                ? `<p style="margin-top:16px">Unfortunately we could not approve your application at this time.${app.rejection_reason ? ` Reason: ${escapeHtml(app.rejection_reason)}` : ""}</p>`
+                : ""
         }
         <dl style="margin-top:20px;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14px">
           <dt>Contact</dt><dd>${escapeHtml(app.contact_name || "—")}</dd>
@@ -1014,14 +1045,10 @@ document.getElementById("apply-form").addEventListener("submit", async (e) => {
 (async function boot() {
   const mode = await ensureSession();
   if (mode === "full") {
-    showShell();
-    initShell({ navItems: NAV, onRoute, brandSub: "Manufacturer Portal" });
+    await enterFullPortal(location.pathname.includes("application-status") ? "/" : location.pathname || "/");
   } else if (mode === "applicant") {
     showApplicantShell();
     await renderApplicationStatus();
-    if (location.pathname === "/application-status" || location.pathname.endsWith("/application-status")) {
-      history.replaceState({}, "", "/application-status");
-    }
   } else {
     const authError = new URLSearchParams(location.search).get("auth_error") || "";
     showLogin(authError);

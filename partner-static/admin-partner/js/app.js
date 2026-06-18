@@ -10,8 +10,6 @@ const NAV_CORE = [
   { route: "/partner/certification", label: "Certification HQ", icon: "✓" },
 ];
 
-const NAV_OPS = [{ route: "/partner/requests", label: "Partner Requests", icon: "✉" }];
-
 const NETWORK_TABS = [
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved" },
@@ -1102,10 +1100,7 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   if (await ensureAdminSession()) {
     showShell();
     initShell({
-      navSections: [
-        { title: "Core Portal", items: NAV_CORE },
-        ...(NAV_OPS.length ? [{ title: "Operations", items: NAV_OPS }] : []),
-      ],
+      navSections: [{ title: "Core Portal", items: NAV_CORE }],
       onRoute,
       brandSub: "Admin Ops",
       crumbLabels: CRUMB_LABELS,

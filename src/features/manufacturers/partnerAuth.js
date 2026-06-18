@@ -437,12 +437,36 @@ export async function handlePartnerAuthVerify(request, env) {
     });
   }
 
-  const jwt =
-    verifyMode === "applicant"
-      ? await completeApplicantAuthLogin(env, row)
-      : await completePartnerAuthLogin(env, row);
+  let jwt;
+  let finalMode = verifyMode;
 
-  await markPartnerLoginPollVerified(env, rawToken, jwt, verifyMode);
+  if (verifyMode === "applicant") {
+    const { getPartnerApplicationById, upgradeApprovedApplicantToFullSession } = await import(
+      "./partnerApplicationService.js"
+    );
+    const application = await getPartnerApplicationById(db, row.application_id);
+    const upgraded =
+      application?.status === "approved"
+        ? await upgradeApprovedApplicantToFullSession(env, {
+            applicationId: row.application_id,
+            email: row.email,
+          })
+        : null;
+    if (upgraded) {
+      await getManufacturerDb(env)
+        .prepare(`UPDATE partner_application_tokens SET used_at = ? WHERE id = ?`)
+        .bind(Date.now(), row.id)
+        .run();
+      jwt = upgraded.jwt;
+      finalMode = "full";
+    } else {
+      jwt = await completeApplicantAuthLogin(env, row);
+    }
+  } else {
+    jwt = await completePartnerAuthLogin(env, row);
+  }
+
+  await markPartnerLoginPollVerified(env, rawToken, jwt, finalMode);
 
   const headers = {
     ...cors,
@@ -450,11 +474,11 @@ export async function handlePartnerAuthVerify(request, env) {
   };
 
   const redirectTo =
-    verifyMode === "applicant" ? `${partnerBaseUrl(env)}/application-status` : `${partnerBaseUrl(env)}/`;
+    finalMode === "applicant" ? `${partnerBaseUrl(env)}/application-status` : `${partnerBaseUrl(env)}/`;
 
   if (wantsJsonVerifyResponse(request, url)) {
     const body =
-      verifyMode === "applicant"
+      finalMode === "applicant"
         ? { ok: true, mode: "applicant", application_id: row.application_id, status: row.application_status }
         : { ok: true, mode: "full", manufacturer_id: row.manufacturer_id };
     return json(body, 200, headers);
@@ -484,7 +508,20 @@ export async function handlePartnerAuthMe(request, env) {
       const u = manufacturerDbUnavailable(cors);
       return json(u.body, u.status, cors);
     }
-    const { getPartnerApplicationById } = await import("./partnerApplicationService.js");
+    const { getPartnerApplicationById, upgradeApprovedApplicantToFullSession } = await import(
+      "./partnerApplicationService.js"
+    );
+    const upgraded = await upgradeApprovedApplicantToFullSession(env, {
+      applicationId: auth.application_id,
+      email: auth.email,
+    });
+    if (upgraded) {
+      return json(
+        { ok: true, session: upgraded.session, upgraded: true },
+        200,
+        { ...cors, "Set-Cookie": sessionCookieHeader(partnerCookieName(), upgraded.jwt) }
+      );
+    }
     const application = await getPartnerApplicationById(db, auth.application_id);
     return json(
       {

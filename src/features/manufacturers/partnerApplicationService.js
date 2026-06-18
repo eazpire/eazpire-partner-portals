@@ -67,8 +67,49 @@ async function existingManufacturerUser(db, email) {
        WHERE lower(mu.email) = ? AND mu.status = 'active'
        LIMIT 1`
     )
-    .bind(email)
+    .bind(normalizeEmail(email))
     .first();
+}
+
+/** Upgrade limited applicant session to full portal when application was approved. */
+export async function upgradeApprovedApplicantToFullSession(env, { applicationId, email }) {
+  const db = getManufacturerDb(env);
+  if (!db) return null;
+
+  const application = applicationId ? await getPartnerApplicationById(db, applicationId) : null;
+  if (!application || application.status !== "approved") return null;
+
+  const user = await existingManufacturerUser(db, application.email || email);
+  if (!user) return null;
+  if (["suspended"].includes(String(user.manufacturer_status || ""))) return null;
+
+  const { signPartnerSession } = await import("./rbac.js");
+  const jwt = await signPartnerSession(env, {
+    manufacturer_id: user.manufacturer_id,
+    user_id: user.id,
+    role: user.role || "owner",
+    email: user.email,
+  });
+
+  await writeAuditLog(env, {
+    manufacturer_id: user.manufacturer_id,
+    user_id: user.id,
+    action: "partner_applicant_upgraded_to_full",
+    entity_type: "partner_application",
+    entity_id: application.id,
+    after_json: { email: user.email },
+  });
+
+  return {
+    jwt,
+    session: {
+      mode: "full",
+      manufacturer_id: user.manufacturer_id,
+      user_id: user.id,
+      role: user.role || "owner",
+      email: user.email,
+    },
+  };
 }
 
 async function findActiveApplication(db, email) {

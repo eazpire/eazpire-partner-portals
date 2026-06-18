@@ -152,25 +152,71 @@ describe("issuePartnerMagicLink application fallback", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("returns user_not_registered when no user or application", async () => {
+});
+
+describe("upgradeApprovedApplicantToFullSession", () => {
+  it("issues full session when application is approved and manufacturer user exists", async () => {
+    const { upgradeApprovedApplicantToFullSession } = await import(
+      "../../src/features/manufacturers/partnerApplicationService.js"
+    );
     const db = {
-      prepare: (sql) => {
-        const chain = {
-          bind: () => chain,
+      prepare: (sql) => ({
+        bind: (...args) => ({
           first: async () => {
-            if (sql.trim() === "SELECT 1 FROM manufacturers LIMIT 1") return { ok: 1 };
-            if (sql.includes("manufacturer_users")) return null;
-            if (sql.includes("partner_applications")) return null;
+            if (sql.includes("partner_applications WHERE id")) {
+              return {
+                id: "papp_1",
+                email: "applicant@example.com",
+                status: "approved",
+              };
+            }
+            if (sql.includes("manufacturer_users")) {
+              return {
+                id: "musr_1",
+                manufacturer_id: "mfg_1",
+                email: "applicant@example.com",
+                role: "owner",
+                manufacturer_status: "approved_for_test",
+              };
+            }
             return null;
           },
           run: async () => ({}),
-        };
-        return chain;
-      },
+        }),
+      }),
     };
-    const { issuePartnerMagicLink } = await import("../../src/features/manufacturers/partnerAuth.js");
-    const result = await issuePartnerMagicLink({ MANUFACTURER_DB: db }, "unknown@example.com");
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("user_not_registered");
+
+    const result = await upgradeApprovedApplicantToFullSession(
+      { MANUFACTURER_DB: db, JWT_APP_SECRET: "test-secret-key-for-jwt-signing" },
+      { applicationId: "papp_1", email: "applicant@example.com" }
+    );
+
+    expect(result).not.toBeNull();
+    expect(result.session.mode).toBe("full");
+    expect(result.session.manufacturer_id).toBe("mfg_1");
+    expect(result.jwt).toBeTruthy();
+  });
+
+  it("returns null when application is not approved", async () => {
+    const { upgradeApprovedApplicantToFullSession } = await import(
+      "../../src/features/manufacturers/partnerApplicationService.js"
+    );
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({
+            id: "papp_1",
+            email: "applicant@example.com",
+            status: "pending_review",
+          }),
+        }),
+      }),
+    };
+
+    const result = await upgradeApprovedApplicantToFullSession(
+      { MANUFACTURER_DB: db },
+      { applicationId: "papp_1", email: "applicant@example.com" }
+    );
+    expect(result).toBeNull();
   });
 });
