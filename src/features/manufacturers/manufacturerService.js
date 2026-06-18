@@ -5,6 +5,7 @@
 import { getManufacturerDb, newId, slugify, rowToManufacturer, parseJson } from "./db.js";
 import { writeAuditLog } from "./rbac.js";
 import { blockPartnerEmail, normalizePartnerEmail } from "./partnerEmailBlocks.js";
+import { sendPartnerManufacturerSuspendedEmail } from "./email.js";
 
 export async function getManufacturerById(db, manufacturerId) {
   const row = await db.prepare(`SELECT * FROM manufacturers WHERE id = ?`).bind(manufacturerId).first();
@@ -410,6 +411,88 @@ export async function adminUpdateManufacturerStatus(env, manufacturerId, status,
     after_json: { status },
   });
   return getManufacturerById(db, manufacturerId);
+}
+
+async function collectManufacturerEmails(db, manufacturer) {
+  const emails = new Set();
+  const users = await db
+    .prepare(`SELECT email FROM manufacturer_users WHERE manufacturer_id = ?`)
+    .bind(manufacturer.id)
+    .all();
+  for (const row of users.results || []) {
+    const normalized = normalizePartnerEmail(row.email);
+    if (normalized) emails.add(normalized);
+  }
+  for (const field of [manufacturer.support_email, manufacturer.business_email]) {
+    const normalized = normalizePartnerEmail(field);
+    if (normalized) emails.add(normalized);
+  }
+  return emails;
+}
+
+/** Suspend a manufacturer and optionally block associated emails. */
+export async function adminSuspendManufacturer(env, manufacturerId, adminOwnerId, options = {}) {
+  const db = getManufacturerDb(env);
+  if (!db) return { ok: false, reason: "manufacturer_db_unavailable" };
+
+  const manufacturer = await getManufacturerById(db, manufacturerId);
+  if (!manufacturer) return { ok: false, reason: "not_found" };
+  if (manufacturer.status === "suspended") {
+    return { ok: true, manufacturer, blocked: false };
+  }
+
+  const block = !!options.block;
+  const suspendReason = String(options.reason || "").trim() || null;
+  const now = Date.now();
+
+  await db
+    .prepare(
+      `UPDATE manufacturers
+       SET status = 'suspended', suspend_reason = ?, suspended_at = ?, suspended_by = ?, updated_at = ?
+       WHERE id = ?`
+    )
+    .bind(suspendReason, now, adminOwnerId, now, manufacturerId)
+    .run();
+
+  const emails = await collectManufacturerEmails(db, manufacturer);
+  if (block) {
+    for (const email of emails) {
+      await blockPartnerEmail(db, email, adminOwnerId, suspendReason || "manufacturer_suspended");
+    }
+  }
+
+  await writeAuditLog(env, {
+    manufacturer_id: manufacturerId,
+    user_id: adminOwnerId,
+    action: "admin_manufacturer_suspended",
+    entity_type: "manufacturer",
+    entity_id: manufacturerId,
+    after_json: {
+      suspend_reason: suspendReason,
+      blocked: block,
+      blocked_emails: block ? [...emails] : [],
+    },
+  });
+
+  const notifyEmail = [...emails][0] || null;
+  if (notifyEmail) {
+    const mail = await sendPartnerManufacturerSuspendedEmail(env, {
+      to: notifyEmail,
+      companyName: manufacturer.name,
+      reason: suspendReason,
+      blocked: block,
+    });
+    if (!mail.ok && !mail.skipped) {
+      console.error("[admin-manufacturer-suspend] email failed", mail.error);
+    }
+  }
+
+  return {
+    ok: true,
+    manufacturer: await getManufacturerById(db, manufacturerId),
+    blocked: block,
+    blocked_emails: block ? [...emails] : [],
+  };
 }
 
 export async function adminNetworkOverview(db) {

@@ -1,5 +1,5 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/partner/shared/js/partner-api.js";
-import { initShell, openModal, closeModal, confirmAction, showToast, renderTable, setTopbarExtra } from "/partner/shared/js/partner-shell.js";
+import { initShell, openModal, closeModal, confirmAction, openActionModeModal, showToast, renderTable, setTopbarExtra } from "/partner/shared/js/partner-shell.js";
 
 const NAV_CORE = [
   { route: "/partner", label: "Command Center", icon: "⌘" },
@@ -10,7 +10,15 @@ const NAV_CORE = [
   { route: "/partner/certification", label: "Certification HQ", icon: "✓" },
 ];
 
-const NAV_OPS = [{ route: "/partner/requests", label: "Partner Requests", icon: "✉" }];
+const NAV_OPS = [];
+
+const NETWORK_TABS = [
+  { key: "pending", label: "Pending" },
+  { key: "approved", label: "Approved" },
+  { key: "rejected", label: "Rejected" },
+  { key: "suspended", label: "Suspended" },
+  { key: "blocked", label: "Blocked" },
+];
 
 const CRUMB_LABELS = {
   "/partner": "Command Center",
@@ -58,6 +66,72 @@ function getCatalogTab() {
 function setCatalogTab(tab) {
   sessionStorage.setItem("admin_catalog_tab", tab === "blueprints" ? "blueprints" : "products");
   renderCatalog();
+}
+
+function getNetworkTab() {
+  const fromUrl = new URLSearchParams(location.search).get("tab");
+  if (fromUrl && NETWORK_TABS.some((t) => t.key === fromUrl)) return fromUrl;
+  const stored = sessionStorage.getItem("admin_network_tab");
+  if (stored && NETWORK_TABS.some((t) => t.key === stored)) return stored;
+  return "approved";
+}
+
+function setNetworkTab(tab) {
+  sessionStorage.setItem("admin_network_tab", tab);
+  const url = new URL(location.href);
+  if (tab === "approved") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab);
+  history.replaceState({}, "", url.pathname + url.search);
+  renderManufacturers();
+}
+
+function formatNetworkDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function priorHistoryLabel(event) {
+  const date = formatNetworkDate(event.at);
+  if (event.type === "rejected") return `Rejected on ${date}`;
+  if (event.type === "suspended") return `Suspended on ${date}`;
+  return `Prior event on ${date}`;
+}
+
+function priorHistoryHtml(history) {
+  if (!history?.length) return "";
+  return `<div class="prior-history-list">${history
+    .map((event) => {
+      const payload = encodeURIComponent(JSON.stringify(event));
+      return `<button type="button" class="prior-history-chip" data-prior="${payload}">${escapeHtml(priorHistoryLabel(event))}</button>`;
+    })
+    .join("")}</div>`;
+}
+
+function openReasonInfoModal({ title, subtitle, reason, dateLabel, dateValue }) {
+  openModal({
+    title,
+    bodyHtml: `
+      ${subtitle ? `<p class="confirm-modal-message">${escapeHtml(subtitle)}</p>` : ""}
+      ${dateLabel ? `<p><strong>${escapeHtml(dateLabel)}:</strong> ${escapeHtml(dateValue || "—")}</p>` : ""}
+      <div class="field" style="margin-top:12px">
+        <label>Reason</label>
+        <div class="info-reason-box">${reason ? escapeHtml(reason) : "No reason was provided."}</div>
+      </div>`,
+    onSave: null,
+  });
+  const saveBtn = document.getElementById("modal-save");
+  if (saveBtn) saveBtn.style.display = "none";
+}
+
+function openPriorHistoryModal(event) {
+  const title = event.type === "rejected" ? "Previous rejection" : "Previous suspension";
+  openReasonInfoModal({
+    title,
+    subtitle: event.company_name ? `Company: ${event.company_name}` : "",
+    dateLabel: event.type === "rejected" ? "Rejected on" : "Suspended on",
+    dateValue: formatNetworkDate(event.at),
+    reason: event.reason,
+  });
 }
 
 function initials(name) {
@@ -219,77 +293,295 @@ function navigateToManufacturers() {
 async function renderManufacturers() {
   setTopbarExtra(`<button type="button" class="btn btn-primary" id="btn-invite">Invite Partner</button>`);
   const el = document.getElementById("view-manufacturers");
-  const { manufacturers } = await partnerFetch("admin-manufacturer-list");
+  const tab = getNetworkTab();
+  const { board } = await partnerFetch("admin-manufacturer-network-board");
+  const counts = board?.counts || {};
+
+  const tabsHtml = NETWORK_TABS.map(
+    (t) =>
+      `<button type="button" class="pill-tab ${tab === t.key ? "active" : ""}" data-network-tab="${t.key}">${escapeHtml(t.label)}${counts[t.key] ? `<span class="pill-tab-count">${counts[t.key]}</span>` : ""}</button>`
+  ).join("");
 
   el.innerHTML = `
     ${stageHeading(
       "Core Portal",
       "Manufacturers",
-      "Invite, approve, and suspend partners in the Eazpire manufacturer network.",
+      "Review applications and manage approved partners in the Eazpire manufacturer network.",
       `<button type="button" class="btn btn-primary" id="btn-invite-heading">Invite Partner</button>`
     )}
+    <div class="catalog-toolbar" style="margin-bottom:14px">
+      <div class="pill-tabs">${tabsHtml}</div>
+    </div>
     <div class="panel">
       <div class="panel-header">
-        <div><h2 class="panel-title">Manufacturer Health</h2><p class="panel-subtitle">Onboarding and lifecycle management</p></div>
+        <div><h2 class="panel-title">${escapeHtml(NETWORK_TABS.find((t) => t.key === tab)?.label || "Network")}</h2><p class="panel-subtitle">${escapeHtml(networkTabSubtitle(tab))}</p></div>
+        <span class="badge badge-neutral">${escapeHtml(String(counts[tab] ?? 0))}</span>
       </div>
-      ${renderTable(
-        ["Manufacturer", "Region", "Mode", "Quality", "Status", "Actions"],
-        (manufacturers || [])
-          .map(
-            (m) => `<tr>
+      <div class="panel-body">${renderNetworkTabPanel(tab, board)}</div>
+    </div>`;
+
+  el.querySelectorAll("[data-network-tab]").forEach((btn) => {
+    btn.onclick = () => setNetworkTab(btn.dataset.networkTab);
+  });
+
+  const openInvite = () => inviteManufacturerModal(el);
+  document.getElementById("btn-invite")?.addEventListener("click", openInvite);
+  document.getElementById("btn-invite-heading")?.addEventListener("click", openInvite);
+
+  bindNetworkTabActions(el, tab);
+}
+
+function networkTabSubtitle(tab) {
+  const map = {
+    pending: "Applications awaiting operator decision",
+    approved: "Verified partners active in the network",
+    rejected: "Declined partner applications",
+    suspended: "Partners with suspended portal access",
+    blocked: "Emails blocked from new applications",
+  };
+  return map[tab] || "";
+}
+
+function renderNetworkTabPanel(tab, board) {
+  if (tab === "pending") return renderPendingPanel(board?.pending || []);
+  if (tab === "approved") return renderApprovedPanel(board?.approved || []);
+  if (tab === "rejected") return renderRejectedPanel(board?.rejected || []);
+  if (tab === "suspended") return renderSuspendedPanel(board?.suspended || []);
+  if (tab === "blocked") return renderBlockedPanel(board?.blocked || []);
+  return `<div class="empty-state"><p>No data</p></div>`;
+}
+
+function renderPendingPanel(applications) {
+  return renderTable(
+    ["Company", "Contact", "Email", "Country", "Status", "Actions"],
+    applications
+      .map((app) => {
+        const historyHtml = priorHistoryHtml(app.prior_history);
+        const companyCell = `${entityCell(app.company_name, app.product_types || "")}${historyHtml}`;
+        const actions =
+          app.status === "pending_review"
+            ? `<button type="button" class="btn btn-primary btn-app-approve" data-id="${escapeHtml(app.id)}">Approve</button>
+               <button type="button" class="btn btn-ghost btn-app-reject" data-id="${escapeHtml(app.id)}" data-name="${escapeHtml(app.company_name)}">Reject</button>`
+            : `<span class="stage-desc">Awaiting email verify</span>`;
+        return `<tr>
+          <td>${companyCell}</td>
+          <td>${escapeHtml(app.contact_name)}</td>
+          <td>${escapeHtml(app.email)}</td>
+          <td>${escapeHtml(app.country || "—")}</td>
+          <td><span class="badge ${badgeForStatus(app.status)}">${escapeHtml(app.status)}</span></td>
+          <td>${actions}</td>
+        </tr>`;
+      })
+      .join("") || '<tr><td colspan="6" class="empty">No pending applications</td></tr>'
+  );
+}
+
+function renderApprovedPanel(manufacturers) {
+  return renderTable(
+    ["Manufacturer", "Region", "Mode", "Quality", "Status", "Actions"],
+    manufacturers
+      .map(
+        (m) => `<tr>
           <td>${entityCell(m.name, m.owner_email || "")}</td>
           <td>${escapeHtml(m.country || "—")}</td>
           <td><span class="badge ${manufacturerModeBadge(m)}">${manufacturerModeLabel(m)}</span></td>
           <td>${escapeHtml(m.quality_score ?? "—")}</td>
           <td><span class="badge ${badgeForStatus(m.status)}">${escapeHtml(m.status)}</span></td>
           <td>
-            ${m.status === "pending_review" ? `<button type="button" class="btn btn-secondary btn-approve" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Approve</button>` : ""}
-            ${m.status === "suspended" ? `<button type="button" class="btn btn-secondary btn-reactivate" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Reactivate</button>` : ""}
-            ${m.status !== "suspended" ? `<button type="button" class="btn btn-ghost btn-suspend" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Suspend</button>` : ""}
-            <button type="button" class="btn btn-ghost btn-remove" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Remove</button>
+            ${m.status === "approved_for_test" ? `<button type="button" class="btn btn-secondary btn-approve" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Verify</button>` : ""}
+            <button type="button" class="btn btn-ghost btn-suspend" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Suspend</button>
           </td>
         </tr>`
-          )
-          .join("") || '<tr><td colspan="6" class="empty">No manufacturers</td></tr>'
-      )}
-    </div>`;
+      )
+      .join("") || '<tr><td colspan="6" class="empty">No approved manufacturers</td></tr>'
+  );
+}
 
-  const openInvite = () => inviteManufacturerModal(el);
-  document.getElementById("btn-invite")?.addEventListener("click", openInvite);
-  document.getElementById("btn-invite-heading")?.addEventListener("click", openInvite);
+function renderRejectedPanel(applications) {
+  return renderTable(
+    ["Company", "Contact", "Email", "Rejected", "Actions"],
+    applications
+      .map((app) => {
+        const reasonPayload = encodeURIComponent(JSON.stringify({ type: "rejected", reason: app.rejection_reason, at: app.reviewed_at, company_name: app.company_name }));
+        return `<tr>
+          <td>${entityCell(app.company_name, app.product_types || "")}</td>
+          <td>${escapeHtml(app.contact_name)}</td>
+          <td>${escapeHtml(app.email)}</td>
+          <td>${escapeHtml(formatNetworkDate(app.reviewed_at))}</td>
+          <td><button type="button" class="btn btn-ghost btn-reason-info" data-reason="${reasonPayload}">View reason</button></td>
+        </tr>`;
+      })
+      .join("") || '<tr><td colspan="5" class="empty">No rejected applications</td></tr>'
+  );
+}
 
-  el.querySelectorAll(".btn-approve").forEach((btn) => {
+function renderSuspendedPanel(manufacturers) {
+  return renderTable(
+    ["Manufacturer", "Email", "Region", "Suspended", "Actions"],
+    manufacturers
+      .map((m) => {
+        const reasonPayload = encodeURIComponent(
+          JSON.stringify({ type: "suspended", reason: m.suspend_reason, at: m.suspended_at, company_name: m.name })
+        );
+        return `<tr>
+          <td>${entityCell(m.name, m.country || "")}</td>
+          <td>${escapeHtml(m.owner_email || "—")}</td>
+          <td>${escapeHtml(m.country || "—")}</td>
+          <td>${escapeHtml(formatNetworkDate(m.suspended_at))}</td>
+          <td>
+            <button type="button" class="btn btn-secondary btn-reactivate" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Reactivate</button>
+            <button type="button" class="btn btn-ghost btn-reason-info" data-reason="${reasonPayload}">View reason</button>
+          </td>
+        </tr>`;
+      })
+      .join("") || '<tr><td colspan="5" class="empty">No suspended manufacturers</td></tr>'
+  );
+}
+
+function renderBlockedPanel(blocks) {
+  return renderTable(
+    ["Email", "Blocked", "Reason", "Actions"],
+    blocks
+      .map((row) => {
+        const reasonPayload = encodeURIComponent(JSON.stringify({ type: "blocked", reason: row.reason, at: row.blocked_at, email: row.email }));
+        return `<tr>
+          <td>${escapeHtml(row.email)}</td>
+          <td>${escapeHtml(formatNetworkDate(row.blocked_at))}</td>
+          <td>${row.reason ? escapeHtml(row.reason.slice(0, 80)) : "—"}</td>
+          <td><button type="button" class="btn btn-ghost btn-reason-info" data-reason="${reasonPayload}">View details</button></td>
+        </tr>`;
+      })
+      .join("") || '<tr><td colspan="4" class="empty">No blocked emails</td></tr>'
+  );
+}
+
+function bindNetworkTabActions(root) {
+  root.querySelectorAll(".prior-history-chip").forEach((btn) => {
     btn.onclick = () => {
-      const name = btn.dataset.name || "this manufacturer";
+      try {
+        openPriorHistoryModal(JSON.parse(decodeURIComponent(btn.dataset.prior || "%7B%7D")));
+      } catch {
+        showToast("Error", "Could not load history details");
+      }
+    };
+  });
+
+  root.querySelectorAll(".btn-reason-info").forEach((btn) => {
+    btn.onclick = () => {
+      try {
+        const data = JSON.parse(decodeURIComponent(btn.dataset.reason || "%7B%7D"));
+        if (data.type === "blocked") {
+          openReasonInfoModal({
+            title: "Blocked email",
+            subtitle: data.email || "",
+            dateLabel: "Blocked on",
+            dateValue: formatNetworkDate(data.at),
+            reason: data.reason,
+          });
+          return;
+        }
+        openPriorHistoryModal(data);
+      } catch {
+        showToast("Error", "Could not load reason details");
+      }
+    };
+  });
+
+  root.querySelectorAll(".btn-app-approve").forEach((btn) => {
+    btn.onclick = () => {
       confirmAction({
-        title: "Approve manufacturer",
-        message: `Approve ${name}? They will be verified and can access the partner portal.`,
+        title: "Approve application",
+        message: "Approve this partner application? A manufacturer account and magic link will be created.",
         confirmLabel: "Approve",
         onConfirm: async () => {
-          await partnerFetch("admin-manufacturer-approve", { method: "POST", body: { manufacturer_id: btn.dataset.id } });
-          showToast("Approved", "Manufacturer verified");
+          await partnerFetch("admin-partner-application-approve", {
+            method: "POST",
+            body: { application_id: btn.dataset.id },
+          });
+          showToast("Application approved", "Magic link sent to applicant");
           await renderManufacturers();
         },
       });
     };
   });
-  el.querySelectorAll(".btn-suspend").forEach((btn) => {
+
+  root.querySelectorAll(".btn-app-reject").forEach((btn) => {
+    btn.onclick = () => {
+      const name = btn.dataset.name || "this application";
+      openActionModeModal({
+        title: "Reject application",
+        message: `Reject ${name}? The applicant will be notified by email.`,
+        modes: [
+          { value: "reject", label: "Just Reject", description: "Decline this application. They may apply again later." },
+          { value: "reject_block", label: "Reject and Block", description: "Decline and block this email from future applications." },
+        ],
+        defaultMode: "reject",
+        reasonPlaceholder: "Optional note for the applicant (included in email)…",
+        confirmLabels: { reject: "Reject", reject_block: "Reject and Block" },
+        confirmClasses: { reject_block: "btn-danger" },
+        onConfirm: async ({ mode, reason }) => {
+          await partnerFetch("admin-partner-application-reject", {
+            method: "POST",
+            body: {
+              application_id: btn.dataset.id,
+              mode,
+              reason: reason || undefined,
+            },
+          });
+          showToast("Application rejected", mode === "reject_block" ? "Email blocked" : "");
+          await renderManufacturers();
+        },
+      });
+    };
+  });
+
+  root.querySelectorAll(".btn-approve").forEach((btn) => {
     btn.onclick = () => {
       const name = btn.dataset.name || "this manufacturer";
       confirmAction({
-        title: "Suspend manufacturer",
-        message: `Suspend ${name}? They will lose partner portal access until reactivated.`,
-        confirmLabel: "Suspend",
-        confirmClass: "btn-warning",
+        title: "Verify manufacturer",
+        message: `Verify ${name}? They will be fully approved in the partner network.`,
+        confirmLabel: "Verify",
         onConfirm: async () => {
-          await partnerFetch("admin-manufacturer-suspend", { method: "POST", body: { manufacturer_id: btn.dataset.id } });
-          showToast("Suspended", "Manufacturer access revoked");
+          await partnerFetch("admin-manufacturer-approve", { method: "POST", body: { manufacturer_id: btn.dataset.id } });
+          showToast("Verified", "Manufacturer fully approved");
           await renderManufacturers();
         },
       });
     };
   });
-  el.querySelectorAll(".btn-reactivate").forEach((btn) => {
+
+  root.querySelectorAll(".btn-suspend").forEach((btn) => {
+    btn.onclick = () => {
+      const name = btn.dataset.name || "this manufacturer";
+      openActionModeModal({
+        title: "Suspend manufacturer",
+        message: `Suspend ${name}? They will lose partner portal access until reactivated.`,
+        modes: [
+          { value: "suspend", label: "Suspend", description: "Revoke portal access. They may apply again later." },
+          { value: "suspend_block", label: "Suspend and Block", description: "Revoke access and block this email from new applications." },
+        ],
+        defaultMode: "suspend",
+        reasonPlaceholder: "Optional note for the partner (included in email)…",
+        confirmLabels: { suspend: "Suspend", suspend_block: "Suspend and Block" },
+        confirmClasses: { suspend: "btn-warning", suspend_block: "btn-danger" },
+        onConfirm: async ({ mode, reason }) => {
+          await partnerFetch("admin-manufacturer-suspend", {
+            method: "POST",
+            body: {
+              manufacturer_id: btn.dataset.id,
+              mode,
+              reason: reason || undefined,
+            },
+          });
+          showToast("Suspended", mode === "suspend_block" ? "Partner suspended and email blocked" : "Partner access revoked");
+          await renderManufacturers();
+        },
+      });
+    };
+  });
+
+  root.querySelectorAll(".btn-reactivate").forEach((btn) => {
     btn.onclick = () => {
       const name = btn.dataset.name || "this manufacturer";
       confirmAction({
@@ -304,46 +596,6 @@ async function renderManufacturers() {
       });
     };
   });
-  el.querySelectorAll(".btn-remove").forEach((btn) => {
-    btn.onclick = () => openRemoveManufacturerModal(btn.dataset.id, btn.dataset.name || "this manufacturer");
-  });
-}
-
-function openRemoveManufacturerModal(manufacturerId, name) {
-  openModal({
-    title: "Remove manufacturer?",
-    bodyHtml: `
-      <p class="confirm-modal-message">Permanently remove <strong>${escapeHtml(name)}</strong> from the manufacturer network.</p>
-      <div class="remove-mode-options" style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
-        <label class="remove-mode-option" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="radio" name="remove-mode" value="remove" checked style="margin-top:4px" />
-          <span><strong>Just Remove</strong> — Delete this manufacturer. They can apply again with the same email.</span>
-        </label>
-        <label class="remove-mode-option" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="radio" name="remove-mode" value="block_remove" style="margin-top:4px" />
-          <span><strong>Block &amp; Remove</strong> — Delete and block this email from future partner applications.</span>
-        </label>
-      </div>`,
-    onSave: async () => {
-      const mode = document.querySelector('input[name="remove-mode"]:checked')?.value || "remove";
-      await partnerFetch("admin-manufacturer-remove", {
-        method: "POST",
-        body: { manufacturer_id: manufacturerId, mode },
-      });
-      showToast(
-        "Removed",
-        mode === "block_remove" ? "Manufacturer deleted and email blocked" : "Manufacturer deleted"
-      );
-      await renderManufacturers();
-    },
-  });
-  const saveBtn = document.getElementById("modal-save");
-  const modal = document.querySelector("#modal-backdrop .modal");
-  modal?.classList.add("confirm-modal");
-  if (saveBtn) {
-    saveBtn.textContent = "Remove";
-    saveBtn.className = "btn btn-danger";
-  }
 }
 
 function inviteManufacturerModal(el) {
@@ -807,110 +1059,8 @@ async function renderCertification() {
 }
 
 async function renderPartnerRequests() {
-  setTopbarExtra("");
-  const el = document.getElementById("view-requests");
-  const { applications } = await partnerFetch("admin-partner-application-list");
-  const pending = (applications || []).filter((a) => ["pending_email_verification", "pending_review"].includes(a.status));
-  const history = (applications || []).filter((a) => ["approved", "rejected"].includes(a.status));
-
-  el.innerHTML = `
-    ${stageHeading(
-      "Operations",
-      "Partner Requests",
-      "Review applications from manufacturers who want to join the Eazpire network."
-    )}
-    <div class="panel">
-      <div class="panel-header">
-        <div><h2 class="panel-title">Pending review</h2><p class="panel-subtitle">Applications awaiting operator decision</p></div>
-        <span class="badge badge-warning">${pending.length}</span>
-      </div>
-      <div class="panel-body">${renderTable(
-        ["Company", "Contact", "Email", "Country", "Status", "Actions"],
-        pending.map((a) => requestRow(a, true)).join("") ||
-          '<tr><td colspan="6" class="empty">No pending applications</td></tr>'
-      )}</div>
-    </div>
-    <div class="panel" style="margin-top:18px">
-      <div class="panel-header">
-        <div><h2 class="panel-title">Recent decisions</h2><p class="panel-subtitle">Approved and rejected applications</p></div>
-      </div>
-      <div class="panel-body">${renderTable(
-        ["Company", "Contact", "Email", "Status", "Decided"],
-        history.slice(0, 25).map((a) => requestRow(a, false)).join("") ||
-          '<tr><td colspan="5" class="empty">No decisions yet</td></tr>'
-      )}</div>
-    </div>`;
-
-  bindRequestActions(el);
-}
-
-function requestRow(app, showActions) {
-  const id = escapeHtml(app.id);
-  const status = escapeHtml(app.status);
-  const decided = app.reviewed_at ? new Date(app.reviewed_at).toLocaleDateString() : "—";
-  const actions =
-    showActions && app.status === "pending_review"
-      ? `<button type="button" class="btn btn-primary btn-app-approve" data-id="${id}">Approve</button>
-         <button type="button" class="btn btn-ghost btn-app-reject" data-id="${id}">Reject</button>`
-      : showActions
-        ? `<span class="stage-desc">Awaiting email verify</span>`
-        : decided;
-  if (!showActions) {
-    return `<tr>
-      <td>${entityCell(app.company_name, app.product_types || "")}</td>
-      <td>${escapeHtml(app.contact_name)}</td>
-      <td>${escapeHtml(app.email)}</td>
-      <td><span class="badge ${badgeForStatus(app.status)}">${status}</span></td>
-      <td>${decided}</td>
-    </tr>`;
-  }
-  return `<tr>
-    <td>${entityCell(app.company_name, app.product_types || "")}</td>
-    <td>${escapeHtml(app.contact_name)}</td>
-    <td>${escapeHtml(app.email)}</td>
-    <td>${escapeHtml(app.country || "—")}</td>
-    <td><span class="badge ${badgeForStatus(app.status)}">${status}</span></td>
-    <td>${actions}</td>
-  </tr>`;
-}
-
-function bindRequestActions(root) {
-  root.querySelectorAll(".btn-app-approve").forEach((btn) => {
-    btn.onclick = () => {
-      confirmAction({
-        title: "Approve application",
-        message: "Approve this partner application? A manufacturer account and magic link will be created.",
-        confirmLabel: "Approve",
-        onConfirm: async () => {
-          await partnerFetch("admin-partner-application-approve", {
-            method: "POST",
-            body: { application_id: btn.dataset.id },
-          });
-          showToast("Application approved", "Magic link sent to applicant");
-          await renderPartnerRequests();
-        },
-      });
-    };
-  });
-  root.querySelectorAll(".btn-app-reject").forEach((btn) => {
-    btn.onclick = () => {
-      openModal({
-        title: "Reject application",
-        bodyHtml: `<div class="field"><label>Reason (optional)</label><textarea class="textarea" id="reject-reason" rows="3" placeholder="Brief note for the applicant…"></textarea></div>`,
-        onSave: async () => {
-          await partnerFetch("admin-partner-application-reject", {
-            method: "POST",
-            body: {
-              application_id: btn.dataset.id,
-              reason: document.getElementById("reject-reason").value.trim() || undefined,
-            },
-          });
-          showToast("Application rejected", "");
-          await renderPartnerRequests();
-        },
-      });
-    };
-  });
+  sessionStorage.setItem("admin_network_tab", "pending");
+  document.querySelector('[data-route="/partner/manufacturers"]')?.click();
 }
 
 const ROUTES = {
@@ -952,10 +1102,7 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   if (await ensureAdminSession()) {
     showShell();
     initShell({
-      navSections: [
-        { title: "Core Portal", items: NAV_CORE },
-        { title: "Operations", items: NAV_OPS },
-      ],
+      navSections: [{ title: "Core Portal", items: NAV_CORE }],
       onRoute,
       brandSub: "Admin Ops",
       crumbLabels: CRUMB_LABELS,

@@ -629,6 +629,60 @@ html[data-portal="admin"] .pill-tab.active {
   color: var(--text);
   box-shadow: var(--shadow-sm);
 }
+html[data-portal="admin"] .pill-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 10px;
+  font-weight: 800;
+}
+html[data-portal="admin"] .prior-history-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+html[data-portal="admin"] .prior-history-chip {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font: inherit;
+}
+html[data-portal="admin"] .action-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+html[data-portal="admin"] .action-mode-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+html[data-portal="admin"] .action-mode-option input {
+  margin-top: 4px;
+}
+html[data-portal="admin"] .info-reason-box {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 html[data-portal="admin"] .command-time-hint {
   margin: -6px 0 16px;
   font-size: 12px;

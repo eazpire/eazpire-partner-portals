@@ -60,6 +60,9 @@ export function rowToManufacturer(row) {
     delivery_score: row.delivery_score,
     support_score: row.support_score,
     artifact_ready_score: row.artifact_ready_score,
+    suspend_reason: row.suspend_reason ?? null,
+    suspended_at: row.suspended_at ?? null,
+    suspended_by: row.suspended_by ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

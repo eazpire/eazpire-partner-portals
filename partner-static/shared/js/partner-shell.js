@@ -64,6 +64,63 @@ export function closeModal() {
   resetModalFooter();
 }
 
+/** Reject/suspend style modal with mode radios and optional reason textarea. */
+export function openActionModeModal({
+  title,
+  message,
+  modes,
+  defaultMode,
+  reasonLabel = "Reason (optional)",
+  reasonPlaceholder = "",
+  confirmLabels = {},
+  confirmClasses = {},
+  onConfirm,
+}) {
+  const defaultVal = defaultMode || modes[0]?.value;
+  const modesHtml = (modes || [])
+    .map(
+      (mode) => `<label class="action-mode-option">
+        <input type="radio" name="action-mode" value="${escapeHtml(mode.value)}" ${mode.value === defaultVal ? "checked" : ""} />
+        <span><strong>${escapeHtml(mode.label)}</strong> — ${escapeHtml(mode.description || "")}</span>
+      </label>`
+    )
+    .join("");
+
+  openModal({
+    title,
+    bodyHtml: `
+      ${message ? `<p class="confirm-modal-message">${escapeHtml(message)}</p>` : ""}
+      <div class="action-mode-options">${modesHtml}</div>
+      <div class="field" style="margin-top:16px">
+        <label>${escapeHtml(reasonLabel)}</label>
+        <textarea class="textarea" id="action-mode-reason" rows="3" placeholder="${escapeHtml(reasonPlaceholder)}"></textarea>
+      </div>`,
+    onSave: async () => {
+      const mode = document.querySelector('input[name="action-mode"]:checked')?.value;
+      const reason = document.getElementById("action-mode-reason")?.value?.trim() || "";
+      if (onConfirm) await onConfirm({ mode, reason });
+    },
+  });
+
+  modalCancelHandler = null;
+  const saveBtn = document.getElementById("modal-save");
+  const modal = document.querySelector("#modal-backdrop .modal");
+  modal?.classList.add("confirm-modal", "action-mode-modal");
+
+  const updateSaveBtn = () => {
+    const mode = document.querySelector('input[name="action-mode"]:checked')?.value;
+    if (!saveBtn || !mode) return;
+    saveBtn.textContent = confirmLabels[mode] || "Confirm";
+    saveBtn.className = `btn ${confirmClasses[mode] || "btn-primary"}`;
+    saveBtn.style.display = "";
+  };
+
+  document.querySelectorAll('input[name="action-mode"]').forEach((radio) => {
+    radio.addEventListener("change", updateSaveBtn);
+  });
+  updateSaveBtn();
+}
+
 /** Styled confirmation dialog using the shared modal shell (replaces window.confirm). */
 export function confirmAction({
   title,

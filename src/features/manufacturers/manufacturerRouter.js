@@ -42,8 +42,10 @@ import {
   adminListManufacturers,
   adminUpdateManufacturerStatus,
   adminRemoveManufacturer,
+  adminSuspendManufacturer,
   adminNetworkOverview,
 } from "./manufacturerService.js";
+import { adminGetPartnerNetworkBoard } from "./partnerNetworkBoard.js";
 import {
   listProducts,
   getProduct,
@@ -148,6 +150,7 @@ const ADMIN_OPS = new Set([
   "admin-partner-session-logout",
   "admin-partner-session-me",
   "admin-manufacturer-network-overview",
+  "admin-manufacturer-network-board",
   "admin-manufacturer-list",
   "admin-manufacturer-create",
   "admin-manufacturer-approve",
@@ -242,6 +245,10 @@ export async function handleManufacturerRouter(request, env) {
       const data = await adminNetworkOverview(db);
       return json({ ok: true, ...data }, 200, cors);
     }
+    if (op === "admin-manufacturer-network-board" && request.method === "GET") {
+      const board = await adminGetPartnerNetworkBoard(db);
+      return json({ ok: true, board }, 200, cors);
+    }
     if (op === "admin-manufacturer-list" && request.method === "GET") {
       const manufacturers = await adminListManufacturers(db, { status: url.searchParams.get("status") });
       return json({ ok: true, manufacturers }, 200, cors);
@@ -258,8 +265,12 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-manufacturer-suspend" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const manufacturer = await adminUpdateManufacturerStatus(env, body.manufacturer_id, "suspended", admin.owner_id);
-      return json({ ok: true, manufacturer }, 200, cors);
+      const result = await adminSuspendManufacturer(env, body.manufacturer_id, admin.owner_id, {
+        reason: body.reason,
+        block: body.mode === "suspend_block" || !!body.block,
+      });
+      if (!result.ok) return json({ ok: false, error: result.reason }, result.reason === "not_found" ? 404 : 400, cors);
+      return json({ ok: true, ...result }, 200, cors);
     }
     if (op === "admin-manufacturer-reactivate" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
@@ -322,9 +333,12 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-partner-application-reject" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const result = await adminRejectPartnerApplication(env, body.application_id, admin.owner_id, body.reason);
+      const result = await adminRejectPartnerApplication(env, body.application_id, admin.owner_id, {
+        reason: body.reason,
+        block: body.mode === "reject_block" || !!body.block,
+      });
       if (!result.ok) return json({ ok: false, error: result.reason }, 400, cors);
-      return json({ ok: true, application: result.application }, 200, cors);
+      return json({ ok: true, application: result.application, blocked: result.blocked }, 200, cors);
     }
     if (op === "admin-blueprint-list" && request.method === "GET") {
       const blueprints = await adminListBlueprints(db, { status: url.searchParams.get("status") });

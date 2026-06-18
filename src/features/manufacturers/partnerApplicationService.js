@@ -10,6 +10,7 @@ import {
   sendPartnerApplicationApprovedEmail,
 } from "./email.js";
 import { adminCreateManufacturer } from "./manufacturerService.js";
+import { blockPartnerEmail } from "./partnerEmailBlocks.js";
 
 const ACTIVE_APPLICATION_STATUSES = new Set([
   "pending_email_verification",
@@ -376,7 +377,10 @@ export async function adminApprovePartnerApplication(env, applicationId, adminOw
   };
 }
 
-export async function adminRejectPartnerApplication(env, applicationId, adminOwnerId, reason) {
+export async function adminRejectPartnerApplication(env, applicationId, adminOwnerId, options = {}) {
+  const reason = typeof options === "string" ? options : options?.reason;
+  const block = typeof options === "object" && options !== null ? !!options.block : false;
+
   const db = getManufacturerDb(env);
   const application = await getPartnerApplicationById(db, applicationId);
   if (!application) return { ok: false, reason: "not_found" };
@@ -396,13 +400,22 @@ export async function adminRejectPartnerApplication(env, applicationId, adminOwn
     .bind(rejectionReason, adminOwnerId, now, now, applicationId)
     .run();
 
+  if (block) {
+    await blockPartnerEmail(
+      db,
+      application.email,
+      adminOwnerId,
+      rejectionReason || "application_rejected"
+    );
+  }
+
   await writeAuditLog(env, {
     manufacturer_id: application.manufacturer_id,
     user_id: adminOwnerId,
     action: "partner_application_rejected",
     entity_type: "partner_application",
     entity_id: applicationId,
-    after_json: { rejection_reason: rejectionReason },
+    after_json: { rejection_reason: rejectionReason, blocked: block },
   });
 
   let statusUrl = null;
@@ -418,10 +431,11 @@ export async function adminRejectPartnerApplication(env, applicationId, adminOwn
     companyName: application.company_name,
     reason: rejectionReason,
     statusUrl,
+    blocked: block,
   });
   if (!mail.ok && !mail.skipped) {
     console.error("[partner-application] rejection email failed", mail.error);
   }
 
-  return { ok: true, application: await getPartnerApplicationById(db, applicationId) };
+  return { ok: true, application: await getPartnerApplicationById(db, applicationId), blocked: block };
 }

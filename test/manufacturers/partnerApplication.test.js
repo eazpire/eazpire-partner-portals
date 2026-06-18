@@ -10,6 +10,7 @@ describe("partner application ops", () => {
       "admin-partner-application-list",
       "admin-partner-application-approve",
       "admin-partner-application-reject",
+      "admin-manufacturer-network-board",
     ];
     for (const op of ops) expect(isManufacturerOp(op)).toBe(true);
   });

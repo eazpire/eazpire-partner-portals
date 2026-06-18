@@ -161,7 +161,7 @@ export async function sendPartnerApplicationApprovedEmail(env, { to, verifyUrl, 
   return { ok: true };
 }
 
-export async function sendPartnerApplicationRejectedEmail(env, { to, companyName, reason, statusUrl }) {
+export async function sendPartnerApplicationRejectedEmail(env, { to, companyName, reason, statusUrl, blocked }) {
   const key = String(env.RESEND_API_KEY || "").trim();
   if (!key) return { ok: false, skipped: true, error: "resend_not_configured" };
 
@@ -171,6 +171,10 @@ export async function sendPartnerApplicationRejectedEmail(env, { to, companyName
 
   const reasonBlock = reason
     ? `<p><strong>Note from our team:</strong> ${reason}</p>`
+    : "";
+
+  const blockBlock = blocked
+    ? `<p>Your email address has been blocked from submitting new partner applications.</p>`
     : "";
 
   const statusBlock = statusUrl
@@ -190,7 +194,49 @@ export async function sendPartnerApplicationRejectedEmail(env, { to, companyName
       html: `<p>Thank you for your interest in partnering with Eazpire${companyName ? ` as ${companyName}` : ""}.</p>
 <p>After review, we are unable to approve your application at this time.</p>
 ${reasonBlock}
+${blockBlock}
 ${statusBlock}
+<p>If you believe this was a mistake, please contact us at support@eazpire.com.</p>`,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return { ok: false, error: "resend_error", detail: text.slice(0, 300) };
+  }
+  return { ok: true };
+}
+
+export async function sendPartnerManufacturerSuspendedEmail(env, { to, companyName, reason, blocked }) {
+  const key = String(env.RESEND_API_KEY || "").trim();
+  if (!key) return { ok: false, skipped: true, error: "resend_not_configured" };
+
+  const from =
+    String(env.PARTNER_FROM_EMAIL || env.ACCOUNT_DELETION_FROM_EMAIL || "").trim() ||
+    "Eazpire <noreply@eazpire.com>";
+
+  const reasonBlock = reason
+    ? `<p><strong>Note from our team:</strong> ${reason}</p>`
+    : "";
+
+  const blockBlock = blocked
+    ? `<p>Your email address has also been blocked from submitting new partner applications.</p>`
+    : "";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject: "Your Eazpire partner account has been suspended",
+      html: `<p>Hello${companyName ? ` from ${companyName}` : ""},</p>
+<p>Your Eazpire manufacturer partner account has been suspended and partner portal access is currently disabled.</p>
+${reasonBlock}
+${blockBlock}
 <p>If you believe this was a mistake, please contact us at support@eazpire.com.</p>`,
     }),
   });
