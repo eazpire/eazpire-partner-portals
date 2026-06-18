@@ -1,0 +1,44 @@
+# eazpire-partner-portals — Partner + Admin portal Worker (separate from creator-engine)
+#
+# Deploy: npm run deploy:partner
+# Dev:    npm run dev:partner
+#
+# Secrets (wrangler secret put -c wrangler-partner.toml):
+#   RESEND_API_KEY, PARTNER_JWT_SECRET (optional if using JWT_APP_SECRET)
+
+name = "eazpire-partner-portals"
+main = "src/partner-worker.js"
+compatibility_date = "2025-01-15"
+compatibility_flags = [ "nodejs_compat" ]
+
+workers_dev = true
+
+[[routes]]
+pattern = "partner.eazpire.com/*"
+zone_name = "eazpire.com"
+
+[[routes]]
+pattern = "admin.eazpire.com/*"
+zone_name = "eazpire.com"
+
+[vars]
+PARTNER_PORTAL_URL = "https://partner.eazpire.com"
+ADMIN_PARTNER_URL = "https://admin.eazpire.com/partner"
+ADMIN_OWNER_IDS = "9415375946010"
+ADMIN_OWNER_EMAILS = "tobi.muss@hotmail.com"
+ACCOUNT_DELETION_FROM_EMAIL = "Eazpire <noreply@eazpire.com>"
+
+[[kv_namespaces]]
+binding = "JOBS"
+id = "46fe4f02bc6544c286ea28ac0b4d9e22"
+
+[[d1_databases]]
+binding = "MANUFACTURER_DB"
+database_name = "manufacturer-db"
+database_id = "e6eef5c7-d29d-46ec-b052-96a787ec40e4"
+migrations_dir = "migrations-manufacturer"
+
+[assets]
+binding = "PARTNER_ASSETS"
+directory = "partner-static"
+run_worker_first = ["/partner", "/partner/*"]

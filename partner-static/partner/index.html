@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Eazpire Partner Portal</title>
+  <style>[hidden]{display:none!important}.modal-backdrop:not(.show){display:none!important}</style>
+  <link rel="stylesheet" href="/shared/css/partner-ui.css" />
+</head>
+<body>
+  <div id="app-shell" class="app-root" hidden>
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="logo-mark">EZ</div>
+        <div>
+          <div class="brand-name">Eazpire Partners</div>
+          <div class="brand-sub">Manufacturer Portal</div>
+        </div>
+      </div>
+      <nav id="partner-nav"></nav>
+      <div class="sidebar-card" id="sidebar-progress">Artifact Ready — loading…</div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <header class="topbar">
+      <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
+      <div class="topbar-start">
+        <div class="crumbs">Partner / <strong id="crumb-current">overview</strong></div>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-ghost" id="btn-logout">Sign out</button>
+      </div>
+    </header>
+    <main class="main">
+      <section class="view active" data-route="/" id="view-overview"></section>
+      <section class="view" data-route="/company" id="view-company"></section>
+      <section class="view" data-route="/catalog" id="view-catalog"></section>
+      <section class="view" data-route="/orders" id="view-orders"></section>
+      <section class="view" data-route="/api" id="view-api"></section>
+      <section class="view" data-route="/certification" id="view-certification"></section>
+      <section class="view" data-route="/application-status" id="view-application-status"></section>
+    </main>
+  </div>
+
+  <div id="app-applicant" class="app-root app-root--full" hidden>
+    <header class="topbar">
+      <div class="crumbs">Partner / <strong>Application status</strong></div>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-ghost" id="btn-applicant-logout">Sign out</button>
+      </div>
+    </header>
+    <main class="main">
+      <section class="view active" id="view-applicant-status"></section>
+    </main>
+  </div>
+
+  <div id="app-login" class="partner-screen" hidden>
+    <div class="login-card" id="login-panel">
+      <div class="logo-mark" style="margin-bottom:14px">EZ</div>
+      <h1>Partner sign in</h1>
+      <p>Sign in with a magic link sent to your email. If your application is under review, you'll see your status after signing in.</p>
+      <form id="login-form" style="margin-top:20px">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input class="input" id="login-email" type="email" required autocomplete="email" />
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Send magic link</button>
+      </form>
+      <p id="login-message" class="stage-desc" style="margin-top:16px"></p>
+      <hr style="border:0;border-top:1px solid var(--line);margin:24px 0" />
+      <p class="stage-desc">New to Eazpire manufacturing?</p>
+      <button type="button" class="btn btn-secondary" id="btn-show-apply" style="width:100%;margin-top:10px">Become a Partner</button>
+    </div>
+
+    <div id="login-waiting" class="login-card login-waiting" hidden>
+      <div class="login-waiting-spinner" aria-hidden="true"></div>
+      <h1>Check your email</h1>
+      <p class="login-waiting-lead">We sent a sign-in link to <strong id="login-waiting-email"></strong></p>
+      <p class="stage-desc">Open the link on any device — this page will sign you in automatically.</p>
+      <div class="login-waiting-timer" aria-live="polite">
+        <span class="login-waiting-timer-label">Link expires in</span>
+        <span class="login-waiting-timer-value" id="login-waiting-countdown">15:00</span>
+      </div>
+      <button type="button" class="btn btn-secondary" id="btn-login-waiting-cancel" style="width:100%;margin-top:20px">Cancel</button>
+    </div>
+
+    <div id="apply-wizard" class="apply-wizard partner-typeform" hidden>
+      <div class="apply-wizard-top">
+        <div class="apply-wizard-progress-track" aria-hidden="true">
+          <div class="apply-wizard-progress-fill" id="apply-progress-fill"></div>
+        </div>
+        <div class="apply-wizard-progress-label" id="apply-progress-label">1 of 7</div>
+      </div>
+
+      <form id="apply-form" class="apply-wizard-form" novalidate>
+        <div class="apply-step" data-step="0">
+          <span class="apply-step-badge">1</span>
+          <h2 class="apply-question">What is your company name?</h2>
+          <p class="apply-hint">Legal or trading name — we'll use this on your partner profile.</p>
+          <input class="apply-input" id="apply-company" type="text" autocomplete="organization" />
+          <p class="apply-error" id="apply-error-0" hidden></p>
+        </div>
+
+        <div class="apply-step" data-step="1" hidden>
+          <span class="apply-step-badge">2</span>
+          <h2 class="apply-question">Who is our main contact?</h2>
+          <p class="apply-hint">Full name of the person we'll reach out to.</p>
+          <input class="apply-input" id="apply-contact" type="text" autocomplete="name" />
+          <p class="apply-error" id="apply-error-1" hidden></p>
+        </div>
+
+        <div class="apply-step" data-step="2" hidden>
+          <span class="apply-step-badge">3</span>
+          <h2 class="apply-question">What is your business email?</h2>
+          <p class="apply-hint">We'll send your application status and sign-in link here.</p>
+          <input class="apply-input" id="apply-email" type="email" autocomplete="email" />
+          <p class="apply-error" id="apply-error-2" hidden></p>
+        </div>
+
+        <div class="apply-step" data-step="3" hidden>
+          <span class="apply-step-badge">4</span>
+          <h2 class="apply-question">Where is your company based?</h2>
+          <p class="apply-hint">Country code or full country name (e.g. DE or Germany).</p>
+          <input class="apply-input" id="apply-country" type="text" autocomplete="country-name" />
+          <p class="apply-error" id="apply-error-3" hidden></p>
+        </div>
+
+        <div class="apply-step" data-step="4" hidden>
+          <span class="apply-step-badge">5</span>
+          <h2 class="apply-question">Do you have a website?</h2>
+          <p class="apply-hint">Optional — press Next to skip if you don't have one yet.</p>
+          <input class="apply-input" id="apply-website" type="url" placeholder="https://" autocomplete="url" />
+          <p class="apply-error" id="apply-error-4" hidden></p>
+        </div>
+
+        <div class="apply-step" data-step="5" hidden>
+          <span class="apply-step-badge">6</span>
+          <h2 class="apply-question">What do you manufacture?</h2>
+          <p class="apply-hint">Product types and capabilities, e.g. apparel, mugs, posters.</p>
+          <input class="apply-input" id="apply-products" type="text" />
+          <p class="apply-error" id="apply-error-5" hidden></p>
+        </div>
+
+        <div class="apply-step apply-step-review" data-step="6" hidden>
+          <span class="apply-step-badge">7</span>
+          <h2 class="apply-question">Ready to submit?</h2>
+          <p class="apply-hint">Review your details below. Add an optional message, then submit.</p>
+          <dl class="apply-review" id="apply-review-summary"></dl>
+          <label class="apply-review-label" for="apply-message-text">Message (optional)</label>
+          <textarea class="apply-textarea" id="apply-message-text" rows="3" placeholder="Tell us about your production capacity…"></textarea>
+          <p class="apply-error" id="apply-error-6" hidden></p>
+        </div>
+      </form>
+
+      <div id="apply-success" class="apply-success" hidden>
+        <div class="apply-success-icon">✓</div>
+        <h2 class="apply-question">Application received</h2>
+        <p class="apply-hint">Check your email for a verification link to continue. If you don't see it, check spam.</p>
+      </div>
+
+      <div class="apply-wizard-actions" id="apply-wizard-actions">
+        <button type="button" class="apply-btn-back" id="btn-apply-back" hidden>Back</button>
+        <button type="button" class="apply-btn-next" id="btn-apply-next">Next</button>
+        <button type="submit" class="apply-btn-next apply-btn-submit" id="btn-apply-submit" form="apply-form" hidden>Submit application</button>
+      </div>
+
+      <button type="button" class="apply-back-login" id="btn-back-login">← Back to sign in</button>
+    </div>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <strong id="modal-title">Modal</strong>
+        <button type="button" class="btn btn-ghost" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+  <div id="partner-toast" class="toast"><strong></strong><span></span></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
