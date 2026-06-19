@@ -56,6 +56,22 @@ function commandTimeTabsHtml(activeKey) {
   ).join("")}</div>`;
 }
 
+const CATALOG_STUDIO_TABS = [
+  { key: "partners", label: "Partners" },
+  { key: "eazpire", label: "Eazpire Products" },
+  { key: "review", label: "Review Queue" },
+];
+
+function getCatalogStudioTab() {
+  const tab = sessionStorage.getItem("admin_catalog_studio_tab") || "partners";
+  return CATALOG_STUDIO_TABS.some((t) => t.key === tab) ? tab : "partners";
+}
+
+function setCatalogStudioTab(tab) {
+  sessionStorage.setItem("admin_catalog_studio_tab", tab);
+  renderCatalog();
+}
+
 function getCatalogTab() {
   const tab = sessionStorage.getItem("admin_catalog_tab") || "products";
   return tab === "blueprints" ? "blueprints" : "products";
@@ -623,7 +639,7 @@ function inviteManufacturerModal(el) {
 async function renderCatalog() {
   setTopbarExtra("");
   const el = document.getElementById("view-catalog");
-  const tab = getCatalogTab();
+  const studioTab = getCatalogStudioTab();
   const { products: pendingProducts } = await partnerFetch("admin-manufacturer-product-list", {
     query: { status: "pending_review" },
   });
@@ -637,45 +653,260 @@ async function renderCatalog() {
     ${stageHeading(
       "Catalog Studio",
       "Catalog Studio",
-      "Review manufacturer products and Universal Blueprints before they go live for creators.",
-      `<button type="button" class="btn btn-primary" id="btn-catalog-refresh">Refresh queue</button>`
+      "Manage partner catalogs, Eazpire shop products, and manufacturer review queues.",
+      `<button type="button" class="btn btn-secondary" id="btn-catalog-mirror">Mirror to publish index</button>
+       <button type="button" class="btn btn-primary" id="btn-catalog-refresh">Refresh</button>`
     )}
-    <div class="studio-shell">
-      <aside class="panel">
-        <div class="panel-header">
-          <div><h2 class="panel-title">Filters</h2><p class="panel-subtitle">Review queue filters</p></div>
-        </div>
-        <div class="panel-body filter-list">
-          <div class="field"><label>Search catalog</label><input class="input" id="catalog-search" placeholder="Product, blueprint, manufacturer…" /></div>
-          <div class="filter-item"><div><strong>Product review</strong><span>Pending admin approval</span></div><span class="badge badge-warning">${pendingCount}</span></div>
-          <div class="filter-item"><div><strong>Blueprint review</strong><span>Universal blueprint queue</span></div><span class="badge badge-info">${blueprintCount}</span></div>
-          <div class="split-row">
-            <button type="button" class="btn ${tab === "products" ? "btn-primary" : "btn-secondary"}" id="btn-tab-products">Products</button>
-            <button type="button" class="btn ${tab === "blueprints" ? "btn-primary" : "btn-secondary"}" id="btn-tab-blueprints">Blueprints</button>
-          </div>
-        </div>
-      </aside>
-      <section>
-        <div class="catalog-toolbar">
-          <div class="pill-tabs">
-            <button type="button" class="pill-tab ${tab === "products" ? "active" : ""}" data-admin-tab="products">Product review</button>
-            <button type="button" class="pill-tab ${tab === "blueprints" ? "active" : ""}" data-admin-tab="blueprints">Blueprint review</button>
-          </div>
-        </div>
-        <div id="admin-catalog-panel"></div>
-      </section>
-    </div>`;
+    <div class="catalog-toolbar" style="margin-bottom:16px">
+      <div class="pill-tabs">
+        ${CATALOG_STUDIO_TABS.map(
+          (t) =>
+            `<button type="button" class="pill-tab ${studioTab === t.key ? "active" : ""}" data-studio-tab="${t.key}">${t.label}${
+              t.key === "review" ? ` (${pendingCount + blueprintCount})` : ""
+            }</button>`
+        ).join("")}
+      </div>
+    </div>
+    <div id="admin-catalog-panel"></div>`;
 
-  el.querySelectorAll("[data-admin-tab]").forEach((btn) => {
-    btn.onclick = () => setCatalogTab(btn.dataset.adminTab);
+  el.querySelectorAll("[data-studio-tab]").forEach((btn) => {
+    btn.onclick = () => setCatalogStudioTab(btn.dataset.studioTab);
   });
-  document.getElementById("btn-tab-products").onclick = () => setCatalogTab("products");
-  document.getElementById("btn-tab-blueprints").onclick = () => setCatalogTab("blueprints");
   document.getElementById("btn-catalog-refresh").onclick = () => renderCatalog();
+  document.getElementById("btn-catalog-mirror").onclick = async () => {
+    const result = await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: {} });
+    showToast("Mirror complete", `${result.mirrored ?? 0} product(s) synced to publish index`);
+    await renderCatalog();
+  };
 
   const panel = document.getElementById("admin-catalog-panel");
-  if (tab === "blueprints") await renderBlueprintReview(panel, pendingBlueprints || []);
-  else await renderProductReview(panel, pendingProducts || []);
+  if (studioTab === "partners") await renderPartnerCatalogPanel(panel);
+  else if (studioTab === "eazpire") await renderEazpireProductsPanel(panel);
+  else await renderCatalogReviewPanel(panel, pendingProducts || [], pendingBlueprints || []);
+}
+
+async function renderPartnerCatalogPanel(panel) {
+  const { partners } = await partnerFetch("admin-partner-list");
+  const printify = (partners || []).find((p) => p.slug === "printify") || partners?.[0];
+  let providers = [];
+  let blueprints = [];
+  if (printify) {
+    const provData = await partnerFetch("admin-partner-fulfillment-providers", {
+      query: { manufacturer_id: printify.id },
+    });
+    providers = provData.providers || [];
+    const bpData = await partnerFetch("admin-partner-catalog-blueprints", {
+      query: { manufacturer_id: printify.id, status: "live" },
+    });
+    blueprints = bpData.blueprints || [];
+  }
+
+  panel.innerHTML = `
+    <div class="split-row" style="align-items:flex-start;gap:16px">
+      <div class="panel" style="flex:1">
+        <div class="panel-header">
+          <div><h2 class="panel-title">Partners</h2><p class="panel-subtitle">Fulfillment aggregators & manufacturers</p></div>
+          <button type="button" class="btn btn-primary" id="btn-sync-printify">Sync Printify catalog</button>
+        </div>
+        <div class="panel-body">${renderTable(
+          ["Partner", "Type", "Sub-providers", "Blueprints", "Eazpire products"],
+          (partners || [])
+            .map(
+              (p) => `<tr>
+            <td>${entityCell(p.name, p.slug)}</td>
+            <td>${escapeHtml(p.integration_type)}</td>
+            <td>${escapeHtml(p.fulfillment_provider_count ?? 0)}</td>
+            <td>${escapeHtml(p.live_blueprint_count ?? 0)}</td>
+            <td>${escapeHtml(p.eazpire_product_count ?? 0)}</td>
+          </tr>`
+            )
+            .join("")
+        )}</div>
+      </div>
+      <div class="panel" style="flex:1">
+        <div class="panel-header"><div><h2 class="panel-title">${escapeHtml(printify?.name || "Partner")} — Sub-providers</h2></div></div>
+        <div class="panel-body">${providers.length ? renderTable(
+          ["Name", "External ID", "Status"],
+          providers
+            .map(
+              (fp) => `<tr>
+            <td>${escapeHtml(fp.name)}</td>
+            <td>${escapeHtml(fp.external_provider_id)}</td>
+            <td><span class="badge badge-success">${escapeHtml(fp.status)}</span></td>
+          </tr>`
+            )
+            .join("")
+        ) : `<div class="empty-state"><p>No sub-providers synced yet. Run Printify sync.</p></div>`}</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-header"><div><h2 class="panel-title">Partner catalog (live blueprints)</h2><p class="panel-subtitle">${blueprints.length} blueprint(s)</p></div></div>
+      <div class="panel-body">${blueprints.length ? renderTable(
+        ["Title", "Category", "Quality", "Updated"],
+        blueprints
+          .slice(0, 50)
+          .map(
+            (b) => `<tr>
+          <td>${escapeHtml(b.title)}</td>
+          <td>${escapeHtml(b.normalized_category || "—")}</td>
+          <td>${escapeHtml(b.quality_score ?? "—")}</td>
+          <td>${escapeHtml(b.updated_at ? new Date(b.updated_at).toLocaleDateString() : "—")}</td>
+        </tr>`
+          )
+          .join("")
+      ) : `<div class="empty-state"><p>Run Printify sync to import blueprints for online products.</p></div>`}</div>
+    </div>`;
+
+  document.getElementById("btn-sync-printify").onclick = async () => {
+    showToast("Syncing Printify…", "Online products only");
+    const result = await partnerFetch("admin-partner-sync-printify", { method: "POST", body: {} });
+    const s = result.sync?.synced || {};
+    showToast("Printify sync complete", `${s.blueprints ?? 0} blueprint(s), ${result.import?.count ?? 0} product(s) imported`);
+    await renderCatalog();
+  };
+}
+
+async function renderEazpireProductsPanel(panel) {
+  const { products } = await partnerFetch("admin-eazpire-product-list");
+  let driftHtml = "";
+  try {
+    const drift = await partnerFetch("admin-eazpire-catalog-mirror-status");
+    driftHtml = `<p class="panel-subtitle">${drift.in_sync ?? 0} / ${drift.total ?? 0} in sync with publish index</p>`;
+  } catch {
+    driftHtml = "";
+  }
+
+  panel.innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div><h2 class="panel-title">Eazpire shop products</h2>${driftHtml}</div>
+        <button type="button" class="btn btn-secondary" id="btn-import-catalog">Import from publish index</button>
+      </div>
+      <div class="panel-body">${(products || []).length ? renderTable(
+        ["Product key", "Title", "Status", "Versions", ""],
+        (products || [])
+          .map(
+            (p) => `<tr>
+          <td><code>${escapeHtml(p.product_key)}</code></td>
+          <td>${escapeHtml(p.title)}</td>
+          <td><span class="badge ${p.catalog_status === "online" ? "badge-success" : "badge-secondary"}">${escapeHtml(p.catalog_status)}</span></td>
+          <td>${escapeHtml(p.version_count ?? 0)}</td>
+          <td><button type="button" class="btn btn-secondary btn-edit-eaz-product" data-key="${escapeHtml(p.product_key)}">Versions</button></td>
+        </tr>`
+          )
+          .join("")
+      ) : `<div class="empty-state"><h3>No Eazpire products yet</h3><p>Run Printify sync or import from publish index.</p></div>`}</div>
+    </div>`;
+
+  document.getElementById("btn-import-catalog").onclick = async () => {
+    const result = await partnerFetch("admin-eazpire-catalog-import", { method: "POST", body: {} });
+    showToast("Import complete", `${result.count ?? 0} online product(s)`);
+    await renderCatalog();
+  };
+
+  panel.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
+    btn.onclick = () => openEazpireProductVersionsModal(btn.dataset.key);
+  });
+}
+
+async function openEazpireProductVersionsModal(productKey) {
+  const data = await partnerFetch("admin-eazpire-product-get", { query: { product_key: productKey } });
+  const product = data.product;
+  const versions = data.versions || [];
+
+  openModal({
+    title: `Product versions — ${product.title}`,
+    bodyHtml: `
+      <p><strong>Product key:</strong> <code>${escapeHtml(product.product_key)}</code></p>
+      <p><strong>Status:</strong> ${escapeHtml(product.catalog_status)} · <strong>Regions:</strong> ${escapeHtml((product.regions || []).join(", ") || "—")}</p>
+      <div class="field"><label>Catalog status</label>
+        <select class="input" id="ep-catalog-status">
+          <option value="offline" ${product.catalog_status === "offline" ? "selected" : ""}>Offline</option>
+          <option value="preview" ${product.catalog_status === "preview" ? "selected" : ""}>Preview</option>
+          <option value="online" ${product.catalog_status === "online" ? "selected" : ""}>Online</option>
+        </select>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <div class="panel-header"><h3 class="panel-title">Versions (${versions.length})</h3></div>
+        <div class="panel-body">${versions.length ? renderTable(
+          ["Display name", "Provider", "Auto-publish", ""],
+          versions
+            .map(
+              (v) => `<tr>
+            <td>${escapeHtml(v.display_name)}</td>
+            <td>${escapeHtml(v.provider_name || v.external_provider_id || "—")}</td>
+            <td>${v.auto_publish_config?.auto_publish_enabled ? "Yes" : "No"}</td>
+            <td><button type="button" class="btn btn-secondary btn-edit-version" data-id="${escapeHtml(v.id)}">Edit</button></td>
+          </tr>`
+            )
+            .join("")
+        ) : `<p>No versions yet.</p>`}</div>
+      </div>`,
+    onSave: async () => {
+      await partnerFetch("admin-eazpire-product-update", {
+        method: "POST",
+        body: {
+          product_key: productKey,
+          catalog_status: document.getElementById("ep-catalog-status").value,
+        },
+      });
+      await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: { product_key: productKey } });
+      showToast("Product saved", "Mirrored to publish index");
+    },
+  });
+
+  panelModalVersions(productKey, versions);
+}
+
+function panelModalVersions(productKey, versions) {
+  document.querySelectorAll(".btn-edit-version").forEach((btn) => {
+    btn.onclick = async () => {
+      const v = versions.find((x) => x.id === btn.dataset.id);
+      if (!v) return;
+      openModal({
+        title: `Edit version — ${v.display_name}`,
+        bodyHtml: `
+          <div class="field"><label>Display name</label><input class="input" id="ver-display-name" value="${escapeHtml(v.display_name)}" /></div>
+          <div class="field"><label><input type="checkbox" id="ver-auto-publish" ${v.auto_publish_config?.auto_publish_enabled ? "checked" : ""} /> Auto-publish enabled</label></div>
+          <div class="field"><label><input type="checkbox" id="ver-publish-enabled" ${v.publish_enabled ? "checked" : ""} /> Publish enabled</label></div>`,
+        onSave: async () => {
+          await partnerFetch("admin-eazpire-product-version-update", {
+            method: "POST",
+            body: {
+              id: v.id,
+              display_name: document.getElementById("ver-display-name").value,
+              auto_publish_config: {
+                ...v.auto_publish_config,
+                auto_publish_enabled: document.getElementById("ver-auto-publish").checked,
+              },
+              publish_enabled: document.getElementById("ver-publish-enabled").checked,
+            },
+          });
+          await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: { product_key: productKey } });
+          showToast("Version saved", "");
+          openEazpireProductVersionsModal(productKey);
+        },
+      });
+    };
+  });
+}
+
+async function renderCatalogReviewPanel(panel, pendingProducts, pendingBlueprints) {
+  const tab = getCatalogTab();
+  panel.innerHTML = `
+    <div class="catalog-toolbar">
+      <div class="pill-tabs">
+        <button type="button" class="pill-tab ${tab === "products" ? "active" : ""}" data-admin-tab="products">Product review (${pendingProducts.length})</button>
+        <button type="button" class="pill-tab ${tab === "blueprints" ? "active" : ""}" data-admin-tab="blueprints">Blueprint review (${pendingBlueprints.length})</button>
+      </div>
+    </div>
+    <div id="admin-catalog-review-inner"></div>`;
+  panel.querySelectorAll("[data-admin-tab]").forEach((btn) => {
+    btn.onclick = () => setCatalogTab(btn.dataset.adminTab);
+  });
+  const inner = document.getElementById("admin-catalog-review-inner");
+  if (tab === "blueprints") await renderBlueprintReview(inner, pendingBlueprints);
+  else await renderProductReview(inner, pendingProducts);
 }
 
 async function renderProductReview(panel, products) {

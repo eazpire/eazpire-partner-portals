@@ -88,6 +88,8 @@ export function normalizeFromProviderJson(raw, { manufacturerId, sourceType = "j
   });
 }
 
+export { normalizePrintifyCatalogBlueprint } from "../adapters/printify/printifyBlueprintNormalizer.js";
+
 export function parseCsvVariants(csvText) {
   const lines = String(csvText || "")
     .trim()

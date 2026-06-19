@@ -171,6 +171,18 @@ const ADMIN_OPS = new Set([
   "admin-blueprint-reject",
   "admin-blueprint-request-changes",
   "admin-blueprint-rerun-conversion",
+  "admin-partner-list",
+  "admin-partner-fulfillment-providers",
+  "admin-partner-catalog-blueprints",
+  "admin-partner-sync-printify",
+  "admin-eazpire-product-list",
+  "admin-eazpire-product-get",
+  "admin-eazpire-product-update",
+  "admin-eazpire-product-version-list",
+  "admin-eazpire-product-version-update",
+  "admin-eazpire-catalog-import",
+  "admin-eazpire-catalog-mirror-status",
+  "admin-eazpire-catalog-mirror-run",
 ]);
 
 export function isManufacturerOp(op) {
@@ -403,6 +415,101 @@ export async function handleManufacturerRouter(request, env) {
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }
+
+    const {
+      listPartnersForAdmin,
+      getPartnerByIdOrSlug,
+      listFulfillmentProviders,
+      listEazpireProducts,
+      getEazpireProduct,
+      updateEazpireProduct,
+      listProductVersions,
+      getProductVersion,
+      updateProductVersion,
+      runFullPrintifyPartnerSetup,
+      importOnlineProductsFromCatalogDb,
+      getCatalogMirrorDriftStatus,
+      mirrorAllEazpireProductsToCatalogDb,
+      mirrorEazpireProductToCatalogDb,
+    } = await import("./partnerCatalog/partnerCatalogOps.js");
+    const { listPartnerCatalogBlueprints } = await import("./adapters/printify/printifyCatalogSync.js");
+
+    if (op === "admin-partner-list" && request.method === "GET") {
+      const partners = await listPartnersForAdmin(db);
+      return json({ ok: true, partners }, 200, cors);
+    }
+    if (op === "admin-partner-fulfillment-providers" && request.method === "GET") {
+      const partnerId = url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id");
+      const partner = await getPartnerByIdOrSlug(db, partnerId);
+      if (!partner) return json({ ok: false, error: "partner_not_found" }, 404, cors);
+      const providers = await listFulfillmentProviders(db, partner.id);
+      return json({ ok: true, partner, providers }, 200, cors);
+    }
+    if (op === "admin-partner-catalog-blueprints" && request.method === "GET") {
+      const partnerId = url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id");
+      const partner = await getPartnerByIdOrSlug(db, partnerId);
+      if (!partner) return json({ ok: false, error: "partner_not_found" }, 404, cors);
+      const blueprints = await listPartnerCatalogBlueprints(db, partner.id, {
+        status: url.searchParams.get("status") || "live",
+      });
+      return json({ ok: true, partner, blueprints }, 200, cors);
+    }
+    if (op === "admin-partner-sync-printify" && request.method === "POST") {
+      const result = await runFullPrintifyPartnerSetup(env);
+      if (!result.ok) return json(result, result.error === "printify_api_key_not_configured" ? 503 : 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-list" && request.method === "GET") {
+      const products = await listEazpireProducts(db, {
+        manufacturerId: url.searchParams.get("manufacturer_id") || undefined,
+        catalogStatus: url.searchParams.get("catalog_status") || undefined,
+      });
+      return json({ ok: true, products }, 200, cors);
+    }
+    if (op === "admin-eazpire-product-get" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const product = await getEazpireProduct(db, productKey);
+      if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
+      const versions = await listProductVersions(db, productKey);
+      return json({ ok: true, product, versions }, 200, cors);
+    }
+    if (op === "admin-eazpire-product-update" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const product = await updateEazpireProduct(db, body.product_key, body);
+      if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
+      return json({ ok: true, product }, 200, cors);
+    }
+    if (op === "admin-eazpire-product-version-list" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const versions = await listProductVersions(db, productKey);
+      return json({ ok: true, versions }, 200, cors);
+    }
+    if (op === "admin-eazpire-product-version-update" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const version = await updateProductVersion(db, body.id, body);
+      if (!version) return json({ ok: false, error: "not_found" }, 404, cors);
+      return json({ ok: true, version }, 200, cors);
+    }
+    if (op === "admin-eazpire-catalog-import" && request.method === "POST") {
+      const result = await importOnlineProductsFromCatalogDb(env);
+      if (!result.ok) return json(result, 503, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-catalog-mirror-status" && request.method === "GET") {
+      const status = await getCatalogMirrorDriftStatus(env);
+      if (!status.ok) return json(status, 503, cors);
+      return json(status, 200, cors);
+    }
+    if (op === "admin-eazpire-catalog-mirror-run" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const productKey = body.product_key || url.searchParams.get("product_key");
+      const result = productKey
+        ? await mirrorEazpireProductToCatalogDb(env, productKey)
+        : await mirrorAllEazpireProductsToCatalogDb(env);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);
   }
 
