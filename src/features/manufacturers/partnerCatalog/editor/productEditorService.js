@@ -13,6 +13,7 @@ import {
 import { listFulfillmentProviders } from "../fulfillmentProviderService.js";
 import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
+import { enhanceProvidersBundle } from "./partnerEditorExtensions.js";
 
 async function queryAll(db, sql, ...binds) {
   try {
@@ -46,7 +47,7 @@ export async function getProductEditorBundle(env, productKey) {
     `SELECT * FROM eazpire_product_active_providers WHERE product_key = ?`,
     productKey
   );
-  const publishProfiles = await queryAll(
+  const publishProfileRows = await queryAll(
     db,
     `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ?`,
     productKey
@@ -56,6 +57,7 @@ export async function getProductEditorBundle(env, productKey) {
     `SELECT * FROM eazpire_product_publish_plans WHERE product_key = ?`,
     productKey
   );
+  const publishProfiles = publishProfilesRowsToMap(publishProfileRows);
   const productDrift = await getCatalogDriftV2ForProduct(env, productKey);
 
   return {
@@ -64,11 +66,19 @@ export async function getProductEditorBundle(env, productKey) {
     versions,
     providers,
     active_providers: activeProviders,
-    publish_profiles: publishProfiles.map(rowToPublishProfile),
-    publish_plans: publishPlans,
+    publish_profiles: publishProfiles,
+    publish_plans: publishPlans.map((plan) => ({ ...plan, profile: publishProfiles.get(plan.publish_profile_id) || null })),
     drift: productDrift,
     tabs: ["provider", "template", "mockups", "variants", "print_area", "meta_data", "products", "automations"],
   };
+}
+
+function publishProfilesRowsToMap(rows) {
+  const list = (rows || []).map(rowToPublishProfile);
+  const map = new Map();
+  for (const row of list) map.set(row.id, row);
+  list.get = map.get.bind(map);
+  return list;
 }
 
 function rowToPublishProfile(row) {
@@ -205,15 +215,20 @@ export async function saveProductMeta(env, productKey, body) {
 }
 
 export async function getProvidersBundle(env, productKey) {
+  const enhanced = await enhanceProvidersBundle(env, productKey);
+  if (!enhanced.ok) return enhanced;
   const bundle = await getProductEditorBundle(env, productKey);
   if (!bundle.ok) return bundle;
+
   return {
     ok: true,
     product: bundle.product,
     providers: bundle.providers,
+    merged_providers: enhanced.merged_providers || [],
+    blueprint_providers: enhanced.blueprint_providers || [],
     active_providers: bundle.active_providers,
     versions: bundle.versions,
-    publish_plans: bundle.publish_plans,
+    publish_plans: enhanced.publish_plans || bundle.publish_plans,
   };
 }
 
@@ -392,6 +407,14 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
     variant_config: variantConfig ? parseJson(variantConfig.config_json, {}) : null,
     prices_json: profile ? parseJson(profile.prices_json, null) : null,
     variants_json: profile ? parseJson(profile.variants_json, null) : template ? parseJson(template.variants_json, null) : null,
+    product_data:
+      (profile ? parseJson(profile.product_data_json, null) : null) ||
+      (template ? parseJson(template.product_data_json, null) : null) ||
+      null,
+    product_data_json:
+      (profile ? parseJson(profile.product_data_json, null) : null) ||
+      (template ? parseJson(template.product_data_json, null) : null) ||
+      null,
     template,
   };
 }
@@ -585,12 +608,20 @@ export async function saveAutomations(env, versionId, body) {
 export async function getPublishedBundle(env, productKey) {
   const creatorDb = env.CREATOR_DB;
   if (!creatorDb) return { ok: false, error: "creator_db_unavailable" };
-  const published = await queryAll(
+  const publishedRows = await queryAll(
     creatorDb,
     `SELECT * FROM published_designs WHERE product_key = ? ORDER BY updated_at DESC LIMIT 200`,
     productKey
   );
   const versions = env.MANUFACTURER_DB ? await listProductVersions(env.MANUFACTURER_DB, productKey) : [];
+  const published = publishedRows.map((row) => ({
+    ...row,
+    channels: {
+      shopify: row.shopify_product_id ? 1 : 0,
+      printify: row.printify_product_id ? 1 : 0,
+      amazon: row.amazon_listing_id || row.amazon_asin || row.amazon_product_id ? 1 : 0,
+    },
+  }));
   return { ok: true, published, versions, template_versions: versions };
 }
 

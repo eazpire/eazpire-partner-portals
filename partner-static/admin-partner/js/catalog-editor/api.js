@@ -131,3 +131,41 @@ export async function updatePublished(body) {
 export async function deletePublished(body) {
   return partnerFetch("admin-eazpire-published-delete", { method: "POST", body });
 }
+
+export async function fetchProductReadiness(productKey) {
+  return partnerFetch("admin-eazpire-product-readiness", { query: { product_key: productKey } });
+}
+
+export async function resolveCountries(codes = []) {
+  return partnerFetch("admin-eazpire-resolve-countries", {
+    query: { codes: (codes || []).join(",") },
+  });
+}
+
+export async function loadPrintifySettings(body) {
+  return partnerFetch("admin-eazpire-load-printify-settings", { method: "POST", body });
+}
+
+export async function savePrintAreaRect(body) {
+  return partnerFetch("admin-eazpire-print-area-rect-save", { method: "POST", body });
+}
+
+export async function savePrintAreasConfig(body) {
+  return partnerFetch("admin-eazpire-print-areas-config-save", { method: "POST", body });
+}
+
+export async function refreshVariantsFromTemplate(body) {
+  return partnerFetch("admin-eazpire-variants-refresh-from-template", { method: "POST", body });
+}
+
+export async function createTemplateDraft(body) {
+  return partnerFetch("admin-eazpire-template-create-draft", { method: "POST", body });
+}
+
+export async function fetchPrintifyMockups(body) {
+  return partnerFetch("admin-eazpire-fetch-printify-mockups", { method: "POST", body });
+}
+
+export async function updatePublishedAll(body) {
+  return partnerFetch("admin-eazpire-published-update-all", { method: "POST", body });
+}

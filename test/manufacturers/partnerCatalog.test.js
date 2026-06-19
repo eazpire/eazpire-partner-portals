@@ -47,6 +47,15 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-published-bundle",
     "admin-eazpire-published-update",
     "admin-eazpire-published-delete",
+    "admin-eazpire-product-readiness",
+    "admin-eazpire-resolve-countries",
+    "admin-eazpire-load-printify-settings",
+    "admin-eazpire-print-area-rect-save",
+    "admin-eazpire-print-areas-config-save",
+    "admin-eazpire-variants-refresh-from-template",
+    "admin-eazpire-template-create-draft",
+    "admin-eazpire-fetch-printify-mockups",
+    "admin-eazpire-published-update-all",
   ];
 
   for (const op of ops) {

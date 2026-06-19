@@ -123,6 +123,7 @@ function renderTabs(ctx) {
 }
 
 async function loadActiveTab(ctx) {
+  window.__catalogEditorState = ctx;
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;
   try {
@@ -248,6 +249,7 @@ export async function openProductEditor(productKey) {
     bundle: null,
     reloadTab: () => loadActiveTab(editorState),
   };
+  window.__catalogEditorState = editorState;
 
   const ctx = editorState;
   overlayEl.querySelector("#ce-title").textContent = productKey;
@@ -272,4 +274,5 @@ export function closeProductEditor() {
   overlayEl.hidden = true;
   document.body.classList.remove("catalog-editor-open");
   editorState = null;
+  window.__catalogEditorState = null;
 }

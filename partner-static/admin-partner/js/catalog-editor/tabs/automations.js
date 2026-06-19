@@ -13,13 +13,31 @@ export function renderAutomationsTab(ctx) {
     .join("");
   return `
     <div class="ce-tab-panel">
-      <div class="field"><label>Product version</label>
-        <select class="input" id="ce-auto-version">${versionOptions}</select></div>
-      <div class="field"><label><input type="checkbox" id="ce-auto-publish" ${auto.auto_publish_enabled ? "checked" : ""} /> Auto-publish enabled</label></div>
-      <div class="field"><label><input type="checkbox" id="ce-auto-shopify" ${auto.automation_shopify_sync_enabled ? "checked" : ""} /> Shopify sync automation</label></div>
-      <div class="field"><label><input type="checkbox" id="ce-auto-amazon" ${auto.automation_amazon_publish_enabled ? "checked" : ""} /> Amazon publish automation</label></div>
-      <div class="field"><label>Social automation JSON</label>
-        <textarea class="textarea ce-code" id="ce-auto-social" rows="6">${escapeHtml(JSON.stringify(auto.automation_social || {}, null, 2))}</textarea></div>
+      <div class="ce-automation-layout">
+        <aside class="ce-automation-side">
+          <div class="field"><label>Product version</label>
+            <select class="input" id="ce-auto-version">${versionOptions}</select></div>
+          <div class="ce-hint">Marketplace sections</div>
+          <div class="ce-check-list">
+            <label class="ce-check-row"><input type="checkbox" id="ce-auto-publish" ${
+              auto.auto_publish_enabled ? "checked" : ""
+            } /> Printify publishing</label>
+            <label class="ce-check-row"><input type="checkbox" id="ce-auto-shopify" ${
+              auto.automation_shopify_sync_enabled ? "checked" : ""
+            } /> Shopify sync</label>
+            <label class="ce-check-row"><input type="checkbox" id="ce-auto-amazon" ${
+              auto.automation_amazon_publish_enabled ? "checked" : ""
+            } /> Amazon publish</label>
+          </div>
+        </aside>
+        <section class="ce-automation-main">
+          <h3 class="ce-section-title">Social automations</h3>
+          <div class="field"><label>automation_social JSON</label>
+            <textarea class="textarea ce-code" id="ce-auto-social" rows="10">${escapeHtml(
+              JSON.stringify(auto.automation_social || {}, null, 2)
+            )}</textarea></div>
+        </section>
+      </div>
     </div>`;
 }
 

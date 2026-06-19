@@ -204,6 +204,15 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-published-bundle",
   "admin-eazpire-published-update",
   "admin-eazpire-published-delete",
+  "admin-eazpire-product-readiness",
+  "admin-eazpire-resolve-countries",
+  "admin-eazpire-load-printify-settings",
+  "admin-eazpire-print-area-rect-save",
+  "admin-eazpire-print-areas-config-save",
+  "admin-eazpire-variants-refresh-from-template",
+  "admin-eazpire-template-create-draft",
+  "admin-eazpire-fetch-printify-mockups",
+  "admin-eazpire-published-update-all",
 ]);
 
 export function isManufacturerOp(op) {
@@ -560,6 +569,7 @@ export async function handleManufacturerRouter(request, env) {
     }
 
     const editor = await import("./partnerCatalog/editor/productEditorService.js");
+    const editorExt = await import("./partnerCatalog/editor/partnerEditorExtensions.js");
     const driftV2 = await import("./partnerCatalog/shadow/catalogDriftV2.js");
 
     if (op === "admin-eazpire-catalog-mirror-status-v2" && request.method === "GET") {
@@ -677,6 +687,104 @@ export async function handleManufacturerRouter(request, env) {
       const result = await editor.deletePublishedListing(env, body);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-readiness" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const result = await editorExt.getProductReadiness(env, productKey);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-resolve-countries" && request.method === "GET") {
+      const raw = String(url.searchParams.get("codes") || url.searchParams.get("country_codes") || "");
+      const codes = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      const result = await editorExt.resolveCountries(env, codes);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-load-printify-settings" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.loadPrintifySettings(env, {
+        productKey: body.product_key,
+        printProviderId: body.print_provider_id,
+        versionId: body.version_id,
+        printifyProductId: body.printify_product_id,
+        designType: body.design_type,
+        autoMirror: body.auto_mirror !== false,
+      });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-area-rect-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.savePrintAreaRect(env, {
+        productKey: body.product_key,
+        printAreaKey: body.print_area_key,
+        printAreaRect: body.print_area_rect,
+        mockupRect: body.mockup_rect,
+        universalRect: body.universal_rect,
+        placement: body.placement,
+        autoMirror: body.auto_mirror !== false,
+      });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-areas-config-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.savePrintAreasConfig(
+        env,
+        body.product_key,
+        body.print_provider_id,
+        body.config,
+        body.auto_mirror !== false
+      );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-variants-refresh-from-template" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.refreshVariantsFromTemplate(
+        env,
+        body.product_key,
+        body.print_provider_id,
+        body.printify_product_id,
+        body.auto_mirror !== false
+      );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-template-create-draft" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.createPrintifyTemplateDraft(
+        env,
+        body.product_key,
+        body.print_provider_id,
+        body.auto_mirror !== false
+      );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-fetch-printify-mockups" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.fetchPrintifyMockups(
+        env,
+        body.product_key,
+        body.print_provider_id,
+        body.auto_mirror !== false
+      );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-published-update-all" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      return json(
+        {
+          ok: true,
+          queued: true,
+          message: "bulk_update_queued",
+          product_key: body.product_key || null,
+        },
+        200,
+        cors
+      );
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

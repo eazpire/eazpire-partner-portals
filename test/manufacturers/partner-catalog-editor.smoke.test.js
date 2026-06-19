@@ -20,6 +20,9 @@ describe("partner catalog editor assets (smoke)", () => {
     "tabs/print-area.js",
     "tabs/products.js",
     "tabs/automations.js",
+    "utils/variant-matrix.js",
+    "version-config-panel.js",
+    "print-area-canvas.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {
@@ -52,6 +55,9 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-product-meta-save");
     expect(src).toContain("admin-eazpire-product-providers-save");
     expect(src).toContain("admin-eazpire-automations-save");
+    expect(src).toContain("admin-eazpire-load-printify-settings");
+    expect(src).toContain("admin-eazpire-print-area-rect-save");
+    expect(src).toContain("admin-eazpire-fetch-printify-mockups");
   });
 
   it("all tab modules exist", () => {
