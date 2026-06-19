@@ -30,7 +30,8 @@ async function findEazpireBlueprintIdForPrintifyBlueprint(db, manufacturerId, bl
 export async function importOnlineProductsFromCatalogDb(env) {
   const mfgDb = env.MANUFACTURER_DB;
   const catalogDb = env.CATALOG_DB;
-  if (!mfgDb || !catalogDb) return { ok: false, error: "database_unavailable" };
+  if (!mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
+  if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
   const partnerId = await ensurePrintifyPartner(mfgDb);
   const products = await catalogDb.prepare(`SELECT * FROM product_catalog WHERE is_active = 2`).all();

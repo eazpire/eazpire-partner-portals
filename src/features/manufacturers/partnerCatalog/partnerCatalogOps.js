@@ -19,6 +19,26 @@ export {
 } from "./mirrorToCatalogDb.js";
 
 export async function runFullPrintifyPartnerSetup(env) {
+  if (!env.MANUFACTURER_DB) {
+    return { ok: false, error: "manufacturer_db_unavailable" };
+  }
+  if (!env.CATALOG_DB) {
+    return {
+      ok: false,
+      error: "catalog_db_unavailable",
+      hint: "Partner worker needs CATALOG_DB binding to catalog-db (see wrangler-partner.toml).",
+    };
+  }
+
+  const { getPrintifyApiKey, PRINTIFY_API_KEY_MISSING_HINT } = await import("../../../utils/printifyEnv.js");
+  if (!getPrintifyApiKey(env)) {
+    return {
+      ok: false,
+      error: "printify_api_key_not_configured",
+      hint: PRINTIFY_API_KEY_MISSING_HINT,
+    };
+  }
+
   const { syncPrintifyPartnerCatalog } = await import("../adapters/printify/printifyCatalogSync.js");
   const syncResult = await syncPrintifyPartnerCatalog(env);
   if (!syncResult.ok) return syncResult;

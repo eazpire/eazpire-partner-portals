@@ -456,7 +456,13 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-partner-sync-printify" && request.method === "POST") {
       const result = await runFullPrintifyPartnerSetup(env);
-      if (!result.ok) return json(result, result.error === "printify_api_key_not_configured" ? 503 : 400, cors);
+      if (!result.ok) {
+        const status =
+          result.error === "printify_api_key_not_configured" || result.error === "catalog_db_unavailable"
+            ? 503
+            : 400;
+        return json(result, status, cors);
+      }
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-product-list" && request.method === "GET") {

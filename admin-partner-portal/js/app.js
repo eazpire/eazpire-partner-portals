@@ -758,11 +758,16 @@ async function renderPartnerCatalogPanel(panel) {
     </div>`;
 
   document.getElementById("btn-sync-printify").onclick = async () => {
-    showToast("Syncing Printify…", "Online products only");
-    const result = await partnerFetch("admin-partner-sync-printify", { method: "POST", body: {} });
-    const s = result.sync?.synced || {};
-    showToast("Printify sync complete", `${s.blueprints ?? 0} blueprint(s), ${result.import?.count ?? 0} product(s) imported`);
-    await renderCatalog();
+    try {
+      showToast("Syncing Printify…", "Online products only");
+      const result = await partnerFetch("admin-partner-sync-printify", { method: "POST", body: {} });
+      const s = result.sync?.synced || {};
+      showToast("Printify sync complete", `${s.blueprints ?? 0} blueprint(s), ${result.import?.count ?? 0} product(s) imported`);
+      await renderCatalog();
+    } catch (e) {
+      const hint = e.data?.hint ? String(e.data.hint).slice(0, 120) : "";
+      showToast("Sync failed", `${e.message}${hint ? " — " + hint : ""}`);
+    }
   };
 }
 
