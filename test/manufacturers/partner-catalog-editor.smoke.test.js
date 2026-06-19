@@ -73,6 +73,11 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain('import { openProductEditor } from "./catalog-editor/shell.js"');
     expect(studioSrc).toContain("admin-eazpire-catalog-mirror-run");
     expect(studioSrc).toContain("admin-catalog-studio-tree");
+    expect(studioSrc).toContain("admin-catalog-studio-set-status");
+    expect(studioSrc).toContain("admin-catalog-studio-remove-product");
+    expect(studioSrc).toContain("cs-mock-carousel");
+    expect(studioSrc).toContain("openMockViewer");
+    expect(studioSrc).toContain("openStatusPicker");
     expect(studioSrc).toContain("openProductEditor");
   });
 

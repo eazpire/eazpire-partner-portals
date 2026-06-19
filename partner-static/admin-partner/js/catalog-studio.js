@@ -1,5 +1,5 @@
 import { partnerFetch, escapeHtml } from "/partner/shared/js/partner-api.js";
-import { showToast, renderTable } from "/partner/shared/js/partner-shell.js";
+import { showToast, renderTable, openModal, closeModal, confirmAction } from "/partner/shared/js/partner-shell.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
 
 const STATUS_FILTERS = [
@@ -68,14 +68,268 @@ function setStudioSidebarCollapsed(collapsed) {
   sessionStorage.setItem(STORAGE.studioSidebar, collapsed ? "1" : "0");
 }
 
-function statusBadge(status) {
+function statusBadge(status, { clickable = false, productKey = "" } = {}) {
   const map = {
     online: "badge-success",
     preview: "badge-warning",
-    offline: "badge-secondary",
+    offline: "badge-neutral",
     available: "badge-info",
   };
-  return `<span class="badge ${map[status] || "badge-secondary"}">${escapeHtml(status)}</span>`;
+  const cls = map[status] || "badge-neutral";
+  const label = escapeHtml(status);
+  if (clickable && productKey) {
+    return `<button type="button" class="badge ${cls} cs-status-btn" data-product-key="${escapeHtml(productKey)}" data-status="${escapeHtml(status)}" title="Change status">${label}</button>`;
+  }
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function formatPrintAreaLabel(key) {
+  return String(key || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function renderPrintAreaBadges(areas) {
+  if (!areas?.length) return `<span class="text-muted">—</span>`;
+  return `<div class="cs-print-areas">${areas
+    .map((key) => `<span class="badge badge-neutral cs-print-area-badge">${escapeHtml(formatPrintAreaLabel(key))}</span>`)
+    .join("")}</div>`;
+}
+
+function mockPlaceholderSvg() {
+  return `<div class="cs-mock-carousel__placeholder" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+}
+
+function buildMockCarouselHtml(images, rowId) {
+  const urls = (images || []).filter((u) => typeof u === "string" && u);
+  if (!urls.length) return `<div class="cs-mock-carousel cs-mock-carousel--empty">${mockPlaceholderSvg()}</div>`;
+  if (urls.length === 1) {
+    return `<div class="cs-mock-carousel cs-mock-carousel--single" data-images="${escapeHtml(JSON.stringify(urls))}" data-row-id="${escapeHtml(rowId)}">
+      <button type="button" class="cs-mock-carousel__open" data-idx="0" aria-label="View mockup">
+        <img src="${escapeHtml(urls[0])}" alt="" loading="lazy" decoding="async" />
+      </button>
+    </div>`;
+  }
+  const slides = urls
+    .map(
+      (url, i) =>
+        `<div class="cs-mock-carousel__slide"><button type="button" class="cs-mock-carousel__open" data-idx="${i}" aria-label="View mockup ${i + 1}"><img src="${escapeHtml(url)}" alt="" loading="${i === 0 ? "eager" : "lazy"}" decoding="async" /></button></div>`
+    )
+    .join("");
+  const dots = urls
+    .map((_, i) => `<button type="button" class="cs-mock-carousel__dot${i === 0 ? " cs-mock-carousel__dot--active" : ""}" data-idx="${i}" aria-label="Slide ${i + 1}"></button>`)
+    .join("");
+  return `<div class="cs-mock-carousel" data-count="${urls.length}" data-images="${escapeHtml(JSON.stringify(urls))}" data-row-id="${escapeHtml(rowId)}">
+    <div class="cs-mock-carousel__track">${slides}</div>
+    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--prev" aria-label="Previous mockup">&#8249;</button>
+    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--next" aria-label="Next mockup">&#8250;</button>
+    <div class="cs-mock-carousel__dots">${dots}</div>
+  </div>`;
+}
+
+function initMockCarousels(container) {
+  if (!container) return;
+  container.querySelectorAll(".cs-mock-carousel[data-count]").forEach((carousel) => {
+    if (carousel.dataset.init) return;
+    carousel.dataset.init = "1";
+    const track = carousel.querySelector(".cs-mock-carousel__track");
+    const dots = carousel.querySelectorAll(".cs-mock-carousel__dot");
+    const count = parseInt(carousel.dataset.count, 10) || 1;
+    let cur = 0;
+    let startX = 0;
+    let dx = 0;
+    let swiping = false;
+
+    function goTo(idx) {
+      const next = ((idx % count) + count) % count;
+      cur = next;
+      track.style.transform = `translateX(-${cur * 100}%)`;
+      dots.forEach((d, i) => d.classList.toggle("cs-mock-carousel__dot--active", i === cur));
+    }
+
+    carousel.querySelector(".cs-mock-carousel__arrow--prev")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      goTo(cur - 1);
+    });
+    carousel.querySelector(".cs-mock-carousel__arrow--next")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      goTo(cur + 1);
+    });
+    dots.forEach((d) =>
+      d.addEventListener("click", (e) => {
+        e.stopPropagation();
+        goTo(+d.dataset.idx);
+      })
+    );
+    track.addEventListener(
+      "touchstart",
+      (e) => {
+        startX = e.touches[0].clientX;
+        dx = 0;
+        swiping = true;
+        track.style.transition = "none";
+      },
+      { passive: true }
+    );
+    track.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!swiping) return;
+        dx = e.touches[0].clientX - startX;
+        track.style.transform = `translateX(${-(cur * 100) + (dx / track.offsetWidth) * 100}%)`;
+      },
+      { passive: true }
+    );
+    track.addEventListener("touchend", () => {
+      if (!swiping) return;
+      swiping = false;
+      track.style.transition = "";
+      const threshold = track.offsetWidth * 0.2;
+      if (dx < -threshold) goTo(cur + 1);
+      else if (dx > threshold) goTo(cur - 1);
+      else goTo(cur);
+    });
+  });
+}
+
+let mockViewerState = null;
+
+function ensureMockViewer() {
+  let el = document.getElementById("cs-mock-viewer");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "cs-mock-viewer";
+  el.className = "cs-mock-viewer";
+  el.hidden = true;
+  el.innerHTML = `<div class="cs-mock-viewer__backdrop" data-close="1"></div>
+    <div class="cs-mock-viewer__panel" role="dialog" aria-modal="true" aria-label="Mockup viewer">
+      <button type="button" class="cs-mock-viewer__close" aria-label="Close">&times;</button>
+      <button type="button" class="cs-mock-viewer__arrow cs-mock-viewer__arrow--prev" aria-label="Previous">&#8249;</button>
+      <div class="cs-mock-viewer__stage"><img src="" alt="" /></div>
+      <button type="button" class="cs-mock-viewer__arrow cs-mock-viewer__arrow--next" aria-label="Next">&#8250;</button>
+      <div class="cs-mock-viewer__counter"></div>
+    </div>`;
+  document.body.appendChild(el);
+
+  const close = () => closeMockViewer();
+  el.querySelector(".cs-mock-viewer__close").onclick = close;
+  el.querySelector(".cs-mock-viewer__backdrop").onclick = close;
+  el.querySelector(".cs-mock-viewer__arrow--prev").onclick = () => stepMockViewer(-1);
+  el.querySelector(".cs-mock-viewer__arrow--next").onclick = () => stepMockViewer(1);
+
+  document.addEventListener("keydown", (e) => {
+    if (!mockViewerState) return;
+    if (e.key === "Escape") closeMockViewer();
+    if (e.key === "ArrowLeft") stepMockViewer(-1);
+    if (e.key === "ArrowRight") stepMockViewer(1);
+  });
+
+  return el;
+}
+
+function renderMockViewer() {
+  if (!mockViewerState) return;
+  const viewer = ensureMockViewer();
+  const { images, index } = mockViewerState;
+  const img = viewer.querySelector(".cs-mock-viewer__stage img");
+  const counter = viewer.querySelector(".cs-mock-viewer__counter");
+  img.src = images[index] || "";
+  counter.textContent = images.length > 1 ? `${index + 1} / ${images.length}` : "";
+  viewer.querySelector(".cs-mock-viewer__arrow--prev").style.display = images.length > 1 ? "" : "none";
+  viewer.querySelector(".cs-mock-viewer__arrow--next").style.display = images.length > 1 ? "" : "none";
+}
+
+function openMockViewer(images, startIndex = 0) {
+  const urls = (images || []).filter((u) => typeof u === "string" && u);
+  if (!urls.length) return;
+  mockViewerState = { images: urls, index: Math.max(0, Math.min(startIndex, urls.length - 1)) };
+  const viewer = ensureMockViewer();
+  viewer.hidden = false;
+  viewer.classList.add("is-open");
+  renderMockViewer();
+}
+
+function closeMockViewer() {
+  mockViewerState = null;
+  const viewer = document.getElementById("cs-mock-viewer");
+  if (viewer) {
+    viewer.classList.remove("is-open");
+    viewer.hidden = true;
+  }
+}
+
+function stepMockViewer(delta) {
+  if (!mockViewerState) return;
+  const { images, index } = mockViewerState;
+  mockViewerState.index = (index + delta + images.length) % images.length;
+  renderMockViewer();
+}
+
+function openStatusPicker(productKey, currentStatus, onChanged) {
+  const options = [
+    { value: "online", label: "Online", description: "Visible in the live catalog", badge: "badge-success" },
+    { value: "preview", label: "Preview", description: "Visible for preview/testing only", badge: "badge-warning" },
+    { value: "offline", label: "Offline", description: "Hidden from storefront", badge: "badge-neutral" },
+    { value: "remove", label: "Remove", description: "Delete product and return blueprint to Available", badge: "badge-danger" },
+  ];
+
+  const bodyHtml = `<p class="confirm-modal-message">Choose a new status for <code>${escapeHtml(productKey)}</code>.</p>
+    <div class="cs-status-options">${options
+      .map(
+        (opt) => `<button type="button" class="cs-status-option ${opt.value === currentStatus ? "is-current" : ""}" data-status-choice="${escapeHtml(opt.value)}">
+          <span class="badge ${opt.badge}">${escapeHtml(opt.label)}</span>
+          <span class="cs-status-option__desc">${escapeHtml(opt.description)}</span>
+        </button>`
+      )
+      .join("")}</div>`;
+
+  openModal({ title: "Product status", bodyHtml, onSave: null });
+  const backdrop = document.getElementById("modal-backdrop");
+  const modal = backdrop?.querySelector(".modal");
+  modal?.classList.add("confirm-modal", "cs-status-modal");
+  const saveBtn = document.getElementById("modal-save");
+  const cancelBtn = document.getElementById("modal-cancel");
+  if (saveBtn) saveBtn.style.display = "none";
+  if (cancelBtn) cancelBtn.textContent = "Close";
+
+  backdrop?.querySelectorAll("[data-status-choice]").forEach((btn) => {
+    btn.onclick = async () => {
+      const choice = btn.dataset.statusChoice;
+      closeModal();
+      if (choice === "remove") {
+        confirmAction({
+          title: "Remove product",
+          message: `Remove "${productKey}" from the catalog? The blueprint will return to Available.`,
+          confirmLabel: "Remove",
+          confirmClass: "btn-danger",
+          onConfirm: async () => {
+            try {
+              await partnerFetch("admin-catalog-studio-remove-product", {
+                method: "POST",
+                body: { product_key: productKey },
+              });
+              showToast("Product removed", "Blueprint is available again");
+              await onChanged();
+            } catch (e) {
+              showToast("Remove failed", e.message || String(e));
+            }
+          },
+        });
+        return;
+      }
+      if (choice === currentStatus) return;
+      try {
+        await partnerFetch("admin-catalog-studio-set-status", {
+          method: "POST",
+          body: { product_key: productKey, catalog_status: choice },
+        });
+        showToast("Status updated", `${productKey} is now ${choice}`);
+        await onChanged();
+      } catch (e) {
+        showToast("Status update failed", e.message || String(e));
+      }
+    };
+  });
 }
 
 function initials(name) {
@@ -170,35 +424,70 @@ function renderProductsTable(items, filter) {
 
   if (filter === "available") {
     return renderTable(
-      ["Title", "Blueprint key", "Category", "Status", ""],
+      ["", "Title", "Blueprint key", "Category", "Country", "Print areas", "Status"],
       items
-        .map(
-          (row) => `<tr>
+        .map((row, i) => {
+          const rowId = `bp-${row.blueprint_id || i}`;
+          return `<tr>
+        <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
         <td>${escapeHtml(row.title)}</td>
         <td><code>${escapeHtml(row.blueprint_key || "—")}</code></td>
         <td>${escapeHtml(row.category || "—")}</td>
+        <td>${escapeHtml(row.manufacturer_country || "—")}</td>
+        <td>${renderPrintAreaBadges(row.print_areas)}</td>
         <td>${statusBadge("available")}</td>
-        <td><span class="text-muted">Not in Eazpire yet</span></td>
-      </tr>`
-        )
+      </tr>`;
+        })
         .join("")
     );
   }
 
   return renderTable(
-    ["Product key", "Title", "Status", "Versions", ""],
+    ["", "Title", "Country", "Print areas", "Status", "Versions", ""],
     items
-      .map(
-        (row) => `<tr>
-      <td><code>${escapeHtml(row.product_key)}</code></td>
-      <td>${escapeHtml(row.title)}</td>
-      <td>${statusBadge(row.catalog_status)}</td>
+      .map((row, i) => {
+        const rowId = `pk-${row.product_key || i}`;
+        return `<tr data-product-key="${escapeHtml(row.product_key)}">
+      <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
+      <td><strong>${escapeHtml(row.title)}</strong><br><code class="text-muted">${escapeHtml(row.product_key)}</code></td>
+      <td>${escapeHtml(row.manufacturer_country || "—")}</td>
+      <td>${renderPrintAreaBadges(row.print_areas)}</td>
+      <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
       <td>${escapeHtml(row.version_count ?? 0)}</td>
       <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(row.product_key)}">Edit</button></td>
-    </tr>`
-      )
+    </tr>`;
+      })
       .join("")
   );
+}
+
+function wireProductsTable(container, reload) {
+  const productsEl = container.querySelector("#catalog-studio-products");
+  if (!productsEl) return;
+
+  initMockCarousels(productsEl);
+
+  productsEl.querySelectorAll(".cs-mock-carousel__open").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const carousel = btn.closest(".cs-mock-carousel");
+      let images = [];
+      try {
+        images = JSON.parse(carousel?.dataset.images || "[]");
+      } catch {
+        images = [];
+      }
+      openMockViewer(images, +(btn.dataset.idx || 0));
+    });
+  });
+
+  productsEl.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
+    btn.onclick = () => openProductEditor(btn.dataset.key);
+  });
+
+  productsEl.querySelectorAll(".cs-status-btn").forEach((btn) => {
+    btn.onclick = () => openStatusPicker(btn.dataset.productKey, btn.dataset.status, reload);
+  });
 }
 
 function bindTreeEvents(root, onSelect) {
@@ -365,7 +654,5 @@ export async function mountCatalogStudio(container) {
   });
 
   productsEl.innerHTML = renderProductsTable(productData.items || [], filter);
-  productsEl.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
-    btn.onclick = () => openProductEditor(btn.dataset.key);
-  });
+  wireProductsTable(container, () => mountCatalogStudio(container));
 }

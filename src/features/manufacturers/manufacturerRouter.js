@@ -178,6 +178,8 @@ const ADMIN_OPS = new Set([
   "admin-partner-sync-printify",
   "admin-catalog-studio-tree",
   "admin-catalog-studio-products",
+  "admin-catalog-studio-set-status",
+  "admin-catalog-studio-remove-product",
   "admin-eazpire-product-list",
   "admin-eazpire-product-get",
   "admin-eazpire-product-update",
@@ -538,6 +540,29 @@ export async function handleManufacturerRouter(request, env) {
         filter,
       });
       if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-catalog-studio-set-status" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await catalogStudio.setCatalogStudioProductStatus(env, {
+        productKey: body.product_key,
+        catalogStatus: body.catalog_status,
+      });
+      if (!result.ok) {
+        const status = result.error === "product_not_found" ? 404 : 400;
+        return json(result, status, cors);
+      }
+      return json(result, 200, cors);
+    }
+    if (op === "admin-catalog-studio-remove-product" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await catalogStudio.removeCatalogStudioProduct(env, {
+        productKey: body.product_key,
+      });
+      if (!result.ok) {
+        const status = result.error === "product_not_found" ? 404 : 400;
+        return json(result, status, cors);
+      }
       return json(result, 200, cors);
     }
 

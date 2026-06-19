@@ -30,6 +30,8 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-catalog-mirror-status-v2",
     "admin-catalog-studio-tree",
     "admin-catalog-studio-products",
+    "admin-catalog-studio-set-status",
+    "admin-catalog-studio-remove-product",
     "admin-eazpire-product-editor-bundle",
     "admin-eazpire-product-meta-save",
     "admin-eazpire-product-providers-bundle",
@@ -292,6 +294,84 @@ describe("product editor service exports", () => {
     expect(typeof svc.getPublishedBundle).toBe("function");
     expect(typeof svc.createProductVersion).toBe("function");
     expect(typeof svc.deleteProductVersion).toBe("function");
+  });
+});
+
+describe("catalog studio service", () => {
+  it("exports status and remove handlers", async () => {
+    const svc = await import("../../src/features/manufacturers/partnerCatalog/catalogStudioService.js");
+    expect(typeof svc.setCatalogStudioProductStatus).toBe("function");
+    expect(typeof svc.removeCatalogStudioProduct).toBe("function");
+    expect(typeof svc.formatPrintAreaLabel).toBe("function");
+  });
+
+  it("rejects invalid catalog status", async () => {
+    const { setCatalogStudioProductStatus } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const result = await setCatalogStudioProductStatus({}, { productKey: "x", catalogStatus: "bogus" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("invalid_catalog_status");
+  });
+
+  it("removes product from manufacturer and catalog dbs", async () => {
+    const deleted = [];
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => {
+            if (sql.includes("FROM eazpire_products WHERE")) {
+              return { product_key: "test-tee", source_blueprint_id: "eb_1" };
+            }
+            return null;
+          },
+          run: async () => {
+            if (sql.startsWith("DELETE FROM")) deleted.push({ db: "mfg", sql, key: handler._args[0] });
+            return { meta: { changes: 1 } };
+          },
+        };
+        return handler;
+      },
+    };
+    const catalogDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          run: async () => {
+            if (sql.startsWith("DELETE FROM")) deleted.push({ db: "catalog", sql, key: handler._args[0] });
+            return { meta: { changes: 1 } };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const { removeCatalogStudioProduct } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const result = await removeCatalogStudioProduct(
+      { MANUFACTURER_DB: mfgDb, CATALOG_DB: catalogDb },
+      { productKey: "test-tee" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.source_blueprint_id).toBe("eb_1");
+    expect(deleted.some((d) => d.db === "mfg" && d.sql.includes("eazpire_products"))).toBe(true);
+    expect(deleted.some((d) => d.db === "catalog" && d.sql.includes("product_catalog"))).toBe(true);
+  });
+
+  it("formats print area labels", async () => {
+    const { formatPrintAreaLabel } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    expect(formatPrintAreaLabel("sleeve_left")).toBe("Sleeve Left");
   });
 });
 
