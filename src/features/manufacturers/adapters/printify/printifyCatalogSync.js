@@ -18,12 +18,26 @@ import { normalizePrintifyCatalogBlueprint } from "./printifyBlueprintNormalizer
 
 async function getOnlineProductScope(env) {
   if (!env.CATALOG_DB) return [];
-  const products = await env.CATALOG_DB.prepare(
-    `SELECT product_key, title, regions_json, is_active, visible_design_types_json,
-            catalog_category_group, catalog_category_leaf, catalog_audience_json, catalog_production_type,
-            print_area_edit_use_mocks
-     FROM product_catalog WHERE is_active = 2`
-  ).all();
+
+  let products;
+  try {
+    products = await env.CATALOG_DB.prepare(
+      `SELECT product_key, title, regions_json, is_active, visible_design_types_json,
+              catalog_category_group, catalog_category_leaf, catalog_audience_json, catalog_production_type,
+              print_area_edit_use_mocks
+       FROM product_catalog WHERE is_active = 2`
+    ).all();
+  } catch (err) {
+    console.warn("[printifyCatalogSync] product_catalog extended query failed:", err?.message || err);
+    try {
+      products = await env.CATALOG_DB.prepare(
+        `SELECT product_key, title, regions_json, is_active
+         FROM product_catalog WHERE is_active = 2`
+      ).all();
+    } catch (err2) {
+      return { ok: false, error: "catalog_db_query_failed", detail: String(err2?.message || err2) };
+    }
+  }
 
   const scope = [];
   for (const row of products?.results || []) {
@@ -59,6 +73,14 @@ async function getOnlineProductScope(env) {
     });
   }
   return scope;
+}
+
+function printifyErrorHint(error) {
+  if (error === "printify_api_key_not_configured") return null;
+  if (error === "printify_unauthorized") {
+    return "Printify API rejected the token. Regenerate the API key in Printify and update PRINTIFY_API_KEY on eazpire-partner-portals.";
+  }
+  return null;
 }
 
 async function upsertProviderBlueprint(db, manufacturerId, blueprintId, raw) {
@@ -197,89 +219,123 @@ export async function syncPrintifyPartnerCatalog(env) {
   const db = env.MANUFACTURER_DB;
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
 
-  const partnerId = await ensurePrintifyPartner(db);
-  const scope = await getOnlineProductScope(env);
-  if (!scope.length) {
-    return { ok: true, synced: { providers: 0, blueprints: 0, scope_products: 0 }, message: "no_online_products_in_catalog" };
-  }
-
-  const neededProviderIds = new Set();
-  const neededBlueprintIds = new Set();
-  for (const item of scope) {
-    neededBlueprintIds.add(item.blueprint_id);
-    for (const pid of item.print_provider_ids) neededProviderIds.add(pid);
-  }
-
-  const providersResult = await fetchAllPrintProviders(env);
-  if (!providersResult.ok) return { ok: false, error: providersResult.error };
-
-  let providersSynced = 0;
-  for (const p of providersResult.providers) {
-    if (!neededProviderIds.has(Number(p.id))) continue;
-    await upsertFulfillmentProvider(db, partnerId, {
-      external_provider_id: String(p.id),
-      integration_system: "printify",
-      name: p.title || `Provider ${p.id}`,
-      location: p.location || {},
-      synced_at: Date.now(),
-    });
-    providersSynced++;
-  }
-
-  let blueprintsSynced = 0;
-  const blueprintIdToEazpireId = new Map();
-
-  for (const blueprintId of neededBlueprintIds) {
-    const bpResult = await fetchBlueprint(env, blueprintId);
-    if (!bpResult.ok) continue;
-    const raw = { ...bpResult.blueprint, id: blueprintId };
-
-    const providerBlueprintId = await upsertProviderBlueprint(db, partnerId, blueprintId, raw);
-    const firstProviderId = [...neededProviderIds][0];
-    let variantsPayload = null;
-    if (firstProviderId) {
-      const vResult = await fetchBlueprintProviderVariants(env, blueprintId, firstProviderId);
-      if (vResult.ok) variantsPayload = vResult;
+  try {
+    const partnerId = await ensurePrintifyPartner(db);
+    const scopeResult = await getOnlineProductScope(env);
+    if (scopeResult && scopeResult.ok === false) {
+      return scopeResult;
+    }
+    const scope = Array.isArray(scopeResult) ? scopeResult : [];
+    if (!scope.length) {
+      return { ok: true, synced: { providers: 0, blueprints: 0, scope_products: 0 }, message: "no_online_products_in_catalog" };
     }
 
-    const normalized = normalizePrintifyCatalogBlueprint(raw, {
-      manufacturerId: partnerId,
-      printProviderId: firstProviderId,
-      variantsPayload,
-    });
-    const validation = validateUniversalBlueprint(normalized);
-    await recordPrintifyConversionRun(db, providerBlueprintId, {
-      status: validation.ok ? "ok" : "failed",
-      warnings: validation.warnings,
-      errors: validation.errors,
-      inputHash: hashJson(raw),
-      outputHash: hashJson(normalized),
-    });
-    const eazpireBlueprintId = await upsertEazpireBlueprintFromNormalized(
-      db,
-      providerBlueprintId,
-      partnerId,
-      normalized,
-      validation
-    );
-    blueprintIdToEazpireId.set(blueprintId, eazpireBlueprintId);
-    blueprintsSynced++;
-  }
+    const neededProviderIds = new Set();
+    const neededBlueprintIds = new Set();
+    for (const item of scope) {
+      neededBlueprintIds.add(item.blueprint_id);
+      for (const pid of item.print_provider_ids) neededProviderIds.add(pid);
+    }
 
-  return {
-    ok: true,
-    synced: {
-      providers: providersSynced,
-      blueprints: blueprintsSynced,
-      scope_products: scope.length,
-    },
-    scope: scope.map((s) => ({
-      product_key: s.product_key,
-      blueprint_id: s.blueprint_id,
-      eazpire_blueprint_id: blueprintIdToEazpireId.get(s.blueprint_id) || null,
-      print_provider_ids: s.print_provider_ids,
-    })),
-  };
+    const providersResult = await fetchAllPrintProviders(env);
+    if (!providersResult.ok) {
+      return {
+        ok: false,
+        error: providersResult.error,
+        status: providersResult.status,
+        detail: providersResult.detail,
+        hint: printifyErrorHint(providersResult.error),
+      };
+    }
+
+    let providersSynced = 0;
+    for (const p of providersResult.providers) {
+      if (!neededProviderIds.has(Number(p.id))) continue;
+      await upsertFulfillmentProvider(db, partnerId, {
+        external_provider_id: String(p.id),
+        integration_system: "printify",
+        name: p.title || `Provider ${p.id}`,
+        location: p.location || {},
+        synced_at: Date.now(),
+      });
+      providersSynced++;
+    }
+
+    let blueprintsSynced = 0;
+    const blueprintIdToEazpireId = new Map();
+    const blueprintErrors = [];
+
+    for (const blueprintId of neededBlueprintIds) {
+      const bpResult = await fetchBlueprint(env, blueprintId);
+      if (!bpResult.ok) {
+        blueprintErrors.push({ blueprint_id: blueprintId, error: bpResult.error, detail: bpResult.detail });
+        continue;
+      }
+      const raw = { ...bpResult.blueprint, id: blueprintId };
+
+      const providerBlueprintId = await upsertProviderBlueprint(db, partnerId, blueprintId, raw);
+      const firstProviderId = [...neededProviderIds][0];
+      let variantsPayload = null;
+      if (firstProviderId) {
+        const vResult = await fetchBlueprintProviderVariants(env, blueprintId, firstProviderId);
+        if (vResult.ok) variantsPayload = vResult;
+      }
+
+      const normalized = normalizePrintifyCatalogBlueprint(raw, {
+        manufacturerId: partnerId,
+        printProviderId: firstProviderId,
+        variantsPayload,
+      });
+      const validation = validateUniversalBlueprint(normalized);
+      await recordPrintifyConversionRun(db, providerBlueprintId, {
+        status: validation.ok ? "ok" : "failed",
+        warnings: validation.warnings,
+        errors: validation.errors,
+        inputHash: hashJson(raw),
+        outputHash: hashJson(normalized),
+      });
+      const eazpireBlueprintId = await upsertEazpireBlueprintFromNormalized(
+        db,
+        providerBlueprintId,
+        partnerId,
+        normalized,
+        validation
+      );
+      blueprintIdToEazpireId.set(blueprintId, eazpireBlueprintId);
+      blueprintsSynced++;
+    }
+
+    if (!blueprintsSynced && blueprintErrors.length) {
+      const first = blueprintErrors[0];
+      return {
+        ok: false,
+        error: first.error || "printify_catalog_error",
+        status: first.status,
+        detail: first.detail,
+        hint: printifyErrorHint(first.error),
+        blueprint_errors: blueprintErrors,
+      };
+    }
+
+    return {
+      ok: true,
+      synced: {
+        providers: providersSynced,
+        blueprints: blueprintsSynced,
+        scope_products: scope.length,
+      },
+      scope: scope.map((s) => ({
+        product_key: s.product_key,
+        blueprint_id: s.blueprint_id,
+        eazpire_blueprint_id: blueprintIdToEazpireId.get(s.blueprint_id) || null,
+        print_provider_ids: s.print_provider_ids,
+      })),
+      blueprint_errors: blueprintErrors.length ? blueprintErrors : undefined,
+    };
+  } catch (err) {
+    console.error("[syncPrintifyPartnerCatalog]", err);
+    return { ok: false, error: "sync_failed", detail: String(err?.message || err) };
+  }
 }
 
 export async function listPartnerCatalogBlueprints(db, manufacturerId, { status = "live" } = {}) {

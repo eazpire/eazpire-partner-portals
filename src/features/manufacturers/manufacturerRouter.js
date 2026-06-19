@@ -3,6 +3,7 @@
  */
 
 import { json, getCorsHeaders } from "../../utils/response.js";
+import { httpStatusForPrintifyUpstreamError } from "../../utils/printifyEnv.js";
 import { getManufacturerDb, manufacturerDbUnavailable } from "./db.js";
 import { ensureManufacturerSchema } from "./ensureManufacturerSchema.js";
 import {
@@ -187,6 +188,22 @@ const ADMIN_OPS = new Set([
 
 export function isManufacturerOp(op) {
   return PARTNER_OPS.has(op) || ADMIN_OPS.has(op);
+}
+
+function partnerSyncErrorStatus(result) {
+  const err = result?.error;
+  if (
+    err === "printify_api_key_not_configured" ||
+    err === "catalog_db_unavailable" ||
+    err === "manufacturer_db_unavailable"
+  ) {
+    return 503;
+  }
+  if (err === "printify_unauthorized" || err === "printify_catalog_error" || err === "printify_rate_limited") {
+    return httpStatusForPrintifyUpstreamError(result.status);
+  }
+  if (err === "sync_failed" || err === "catalog_db_query_failed") return 500;
+  return 400;
 }
 
 export async function handleManufacturerRouter(request, env) {
@@ -455,15 +472,21 @@ export async function handleManufacturerRouter(request, env) {
       return json({ ok: true, partner, blueprints }, 200, cors);
     }
     if (op === "admin-partner-sync-printify" && request.method === "POST") {
-      const result = await runFullPrintifyPartnerSetup(env);
-      if (!result.ok) {
-        const status =
-          result.error === "printify_api_key_not_configured" || result.error === "catalog_db_unavailable"
-            ? 503
-            : 400;
-        return json(result, status, cors);
+      try {
+        const result = await runFullPrintifyPartnerSetup(env);
+        if (!result.ok) {
+          const status = partnerSyncErrorStatus(result);
+          return json(result, status, cors);
+        }
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-partner-sync-printify]", err);
+        return json(
+          { ok: false, error: "sync_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
       }
-      return json(result, 200, cors);
     }
     if (op === "admin-eazpire-product-list" && request.method === "GET") {
       const products = await listEazpireProducts(db, {

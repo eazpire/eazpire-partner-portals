@@ -30,26 +30,31 @@ export async function runFullPrintifyPartnerSetup(env) {
     };
   }
 
-  const { getPrintifyApiKey, PRINTIFY_API_KEY_MISSING_HINT } = await import("../../../utils/printifyEnv.js");
+  const { getPrintifyApiKey, PARTNER_PRINTIFY_API_KEY_MISSING_HINT } = await import("../../../utils/printifyEnv.js");
   if (!getPrintifyApiKey(env)) {
     return {
       ok: false,
       error: "printify_api_key_not_configured",
-      hint: PRINTIFY_API_KEY_MISSING_HINT,
+      hint: PARTNER_PRINTIFY_API_KEY_MISSING_HINT,
     };
   }
 
-  const { syncPrintifyPartnerCatalog } = await import("../adapters/printify/printifyCatalogSync.js");
-  const syncResult = await syncPrintifyPartnerCatalog(env);
-  if (!syncResult.ok) return syncResult;
+  try {
+    const { syncPrintifyPartnerCatalog } = await import("../adapters/printify/printifyCatalogSync.js");
+    const syncResult = await syncPrintifyPartnerCatalog(env);
+    if (!syncResult.ok) return syncResult;
 
-  const { importOnlineProductsFromCatalogDb } = await import("./importFromCatalogDb.js");
-  const importResult = await importOnlineProductsFromCatalogDb(env);
-  if (!importResult.ok) return { ok: false, error: importResult.error, sync: syncResult };
+    const { importOnlineProductsFromCatalogDb } = await import("./importFromCatalogDb.js");
+    const importResult = await importOnlineProductsFromCatalogDb(env);
+    if (!importResult.ok) return { ok: false, error: importResult.error, sync: syncResult };
 
-  return {
-    ok: true,
-    sync: syncResult,
-    import: importResult,
-  };
+    return {
+      ok: true,
+      sync: syncResult,
+      import: importResult,
+    };
+  } catch (err) {
+    console.error("[runFullPrintifyPartnerSetup]", err);
+    return { ok: false, error: "sync_failed", detail: String(err?.message || err) };
+  }
 }

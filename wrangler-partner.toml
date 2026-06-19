@@ -5,6 +5,8 @@
 #
 # Secrets (wrangler secret put -c wrangler-partner.toml):
 #   RESEND_API_KEY, PARTNER_JWT_SECRET (optional if using JWT_APP_SECRET)
+#   PRINTIFY_API_KEY (required for Catalog Studio → Sync Printify; copy from creator-engine:
+#     node scripts/deployment/sync-partner-printify-secret.cjs)
 
 name = "eazpire-partner-portals"
 main = "src/partner-worker.js"

@@ -10,6 +10,8 @@ import {
   patRowToStudioConfig,
   patRowToAutoPublishConfig,
 } from "../../src/features/manufacturers/partnerCatalog/eazpireProductVersionService.js";
+import { runFullPrintifyPartnerSetup } from "../../src/features/manufacturers/partnerCatalog/partnerCatalogOps.js";
+import { fetchAllPrintProviders } from "../../src/features/manufacturers/adapters/printify/printifyCatalogClient.js";
 
 describe("partner catalog ops registration", () => {
   const ops = [
@@ -77,6 +79,43 @@ describe("PAT field mapping", () => {
     expect(studio.print_provider_id).toBe(30);
     const auto = patRowToAutoPublishConfig(pat);
     expect(auto.auto_publish_enabled).toBe(true);
+  });
+});
+
+describe("printify catalog client errors", () => {
+  it("returns structured error when API key missing", async () => {
+    const result = await fetchAllPrintProviders({});
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("printify_api_key_not_configured");
+  });
+
+  it("returns structured error on Printify 401 (no throw)", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("unauthorized", { status: 401 });
+    try {
+      const result = await fetchAllPrintProviders({ PRINTIFY_API_KEY: "test-key" });
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("printify_unauthorized");
+      expect(result.status).toBe(401);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("runFullPrintifyPartnerSetup prechecks", () => {
+  it("returns catalog_db_unavailable without CATALOG_DB", async () => {
+    const result = await runFullPrintifyPartnerSetup({ MANUFACTURER_DB: { prepare: () => ({}) } });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("catalog_db_unavailable");
+    expect(result.hint).toContain("CATALOG_DB");
+  });
+
+  it("returns printify_api_key_not_configured when key missing", async () => {
+    const result = await runFullPrintifyPartnerSetup({ MANUFACTURER_DB: {}, CATALOG_DB: {} });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("printify_api_key_not_configured");
+    expect(result.hint).toContain("eazpire-partner-portals");
   });
 });
 
