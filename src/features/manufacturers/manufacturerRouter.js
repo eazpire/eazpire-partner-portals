@@ -533,14 +533,23 @@ export async function handleManufacturerRouter(request, env) {
       return json(result, 200, cors);
     }
     if (op === "admin-catalog-studio-products" && request.method === "GET") {
-      const filter = url.searchParams.get("filter") || "available";
-      const result = await catalogStudio.getCatalogStudioProducts(db, env, {
-        manufacturerId: url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id"),
-        providerExternalId: url.searchParams.get("provider_id") || url.searchParams.get("print_provider_id"),
-        filter,
-      });
-      if (!result.ok) return json(result, 400, cors);
-      return json(result, 200, cors);
+      try {
+        const filter = url.searchParams.get("filter") || "available";
+        const result = await catalogStudio.getCatalogStudioProducts(db, env, {
+          manufacturerId: url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id"),
+          providerExternalId: url.searchParams.get("provider_id") || url.searchParams.get("print_provider_id"),
+          filter,
+        });
+        if (!result.ok) return json(result, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-catalog-studio-products]", err);
+        return json(
+          { ok: false, error: "catalog_studio_products_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
     }
     if (op === "admin-catalog-studio-set-status" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));

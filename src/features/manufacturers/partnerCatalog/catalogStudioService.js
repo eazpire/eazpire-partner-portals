@@ -13,6 +13,8 @@ import { fetchBlueprint } from "../adapters/printify/printifyCatalogClient.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
+/** List view must not fan out to Printify (subrequest / CPU limits with ~1000+ blueprints). */
+const BLUEPRINT_API_LIST_FALLBACK_MAX = 0;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
@@ -534,19 +536,25 @@ async function fetchBlueprintEnrichmentByExternalIds(env, externalIds) {
   return map;
 }
 
-async function enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items) {
+async function enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items, { allowApiFallback = false } = {}) {
   if (!items.length) return items;
 
   const externalIds = items.map((item) => String(item.printify_blueprint_id || item.blueprint_key || "")).filter(Boolean);
   const cached = await loadCachedBlueprintEnrichmentByExternalIds(mfgDb, manufacturerId, externalIds);
 
-  const missingPrintAreas = externalIds.filter((id) => {
-    const cachedEntry = cached.get(id);
-    const item = items.find((row) => String(row.printify_blueprint_id || row.blueprint_key) === id);
-    const hasAreas = (cachedEntry?.print_areas?.length || item?.print_areas?.length) > 0;
-    return !hasAreas;
-  });
-  const apiFetched = missingPrintAreas.length ? await fetchBlueprintEnrichmentByExternalIds(env, missingPrintAreas) : new Map();
+  let apiFetched = new Map();
+  if (allowApiFallback && BLUEPRINT_API_LIST_FALLBACK_MAX > 0) {
+    const missingPrintAreas = externalIds.filter((id) => {
+      const cachedEntry = cached.get(id);
+      const item = items.find((row) => String(row.printify_blueprint_id || row.blueprint_key) === id);
+      const hasAreas = (cachedEntry?.print_areas?.length || item?.print_areas?.length) > 0;
+      return !hasAreas;
+    });
+    const toFetch = missingPrintAreas.slice(0, BLUEPRINT_API_LIST_FALLBACK_MAX);
+    if (toFetch.length) {
+      apiFetched = await fetchBlueprintEnrichmentByExternalIds(env, toFetch);
+    }
+  }
 
   return items.map((item) => {
     const externalId = String(item.printify_blueprint_id || item.blueprint_key || "");
@@ -678,7 +686,7 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
     });
   }
 
-  return enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items);
+  return enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items, { allowApiFallback: false });
 }
 
 export {
