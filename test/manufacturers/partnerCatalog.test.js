@@ -480,17 +480,13 @@ describe("catalog studio service", () => {
         images_json: '["https://catalog/mock.png"]',
         print_providers_json: '[{"id":26},{"id":30}]',
         print_provider_count: 2,
+        print_areas_json: '["neck"]',
       },
     ];
     const catalogDb = {
       prepare: (sql) => ({
         bind: (...args) => ({
-          all: async () => {
-            if (sql.includes("print_areas_json")) {
-              return { results: [{ id: 145, print_areas_json: '["neck"]' }] };
-            }
-            return { results: [] };
-          },
+          all: async () => ({ results: [] }),
         }),
         all: async () => {
           if (sql.includes("FROM product_publish_profiles")) return { results: [] };

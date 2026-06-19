@@ -179,11 +179,16 @@ function renderCategorySidebar(sidebar, categoryTree, items, catFilter, openGrou
 }
 
 function refreshProductsPanel(container, allItems, categoryTree, filter, reload) {
-  const catFilter = getCatFilter();
-  const filtered = filterByCategory(allItems, catFilter, categoryTree);
+  let catFilter = getCatFilter();
+  let filtered = filterByCategory(allItems, catFilter, categoryTree);
+  if (catFilter && filtered.length === 0 && allItems.length > 0) {
+    setCatFilter(null);
+    catFilter = null;
+    filtered = allItems;
+  }
   const productsEl = container.querySelector("#catalog-studio-products");
   if (productsEl) {
-    productsEl.innerHTML = renderProductsTable(filtered, filter);
+    productsEl.innerHTML = renderProductsTable(filtered, filter, { total: allItems.length });
     wireProductsTable(container, reload);
   }
   const catTreeEl = container.querySelector("#catalog-studio-category-tree");
@@ -604,9 +609,13 @@ function renderTree(partners, selectedPartnerId, selectedProviderId) {
     <div class="cs-tree-collapsed-rail">${renderCollapsedRail(partners, selectedPartnerId, selectedProviderId)}</div>`;
 }
 
-function renderProductsTable(items, filter) {
+function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {}) {
   if (!items?.length) {
-    return `<div class="empty-state"><h3>No products</h3><p>Nothing matches this filter for the current selection.</p></div>`;
+    const hint =
+      total > 0
+        ? `<p>${total} product(s) loaded — adjust the category filter or click <strong>All</strong> in the filter sidebar.</p>`
+        : `<p>Nothing matches this filter for the current selection.</p>`;
+    return `<div class="empty-state"><h3>No products</h3>${hint}</div>`;
   }
 
   if (filter === "available") {

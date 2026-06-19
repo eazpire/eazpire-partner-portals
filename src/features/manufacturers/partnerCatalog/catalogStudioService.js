@@ -319,6 +319,26 @@ function enrichItemsWithCategory(items) {
   return items.map((row) => ({ ...row, ...itemCategoryFields(row) }));
 }
 
+function slimAvailableListItem(row) {
+  const codes = shippingCodesForItem(row.shipping_country_codes, row.shipping_countries_raw);
+  return {
+    kind: row.kind,
+    blueprint_id: row.blueprint_id,
+    printify_blueprint_id: row.printify_blueprint_id,
+    blueprint_key: row.blueprint_key,
+    title: row.title,
+    category: row.category,
+    audience: row.audience,
+    catalog_status: row.catalog_status,
+    mock_images: row.mock_images || [],
+    print_areas: row.print_areas || [],
+    provider_count: row.provider_count ?? 0,
+    printify_choice: row.printify_choice || null,
+    shipping_country_codes: codes,
+    shipping_countries: formatShippingCountriesDisplay(codes),
+  };
+}
+
 function slimMockImagesForList(urls, max = 3) {
   return (urls || []).slice(0, max);
 }
@@ -807,16 +827,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       isPrintify && env?.CATALOG_DB
         ? await listAvailablePrintifyBlueprints(env, db, manufacturerId, providerId)
         : await listAvailableBlueprints(db, manufacturerId);
-    const items = rows.map((row) => {
-      const codes = shippingCodesForItem(row.shipping_country_codes, row.shipping_countries_raw);
-      return {
-        ...row,
-        shipping_country_codes: codes,
-        shipping_countries: formatShippingCountriesDisplay(codes),
-        print_areas: row.print_areas || [],
-        mock_images: row.mock_images || [],
-      };
-    });
+    const items = rows.map((row) => slimAvailableListItem(row));
     return buildProductsResponse(filter, items);
   }
 
@@ -1126,10 +1137,41 @@ async function listAvailableBlueprints(db, manufacturerId) {
 }
 
 /** Printify Available — full CATALOG_DB catalog minus legacy usage and active eazpire products. */
+async function loadPrintifyBlueprintCatalogRows(catalogDb) {
+  const queries = [
+    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json
+     FROM printify_blueprints ORDER BY category, title`,
+    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
+     FROM printify_blueprints ORDER BY category, title`,
+    `SELECT id, title, images_json, print_provider_count FROM printify_blueprints ORDER BY title`,
+  ];
+
+  for (const sql of queries) {
+    try {
+      const all = await catalogDb.prepare(sql).all();
+      const rows = all?.results || [];
+      if (sql.includes("print_areas_json")) return rows;
+      return rows.map((row) => ({
+        ...row,
+        category: row.category ?? null,
+        audience: row.audience ?? null,
+        shipping_countries: row.shipping_countries ?? null,
+        print_providers_json: row.print_providers_json ?? null,
+        print_areas_json: null,
+      }));
+    } catch (queryErr) {
+      const msg = String(queryErr?.message || queryErr);
+      if (!msg.includes("no such column")) throw queryErr;
+    }
+  }
+  return [];
+}
+
 async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, providerExternalId = null) {
   const catalogDb = env.CATALOG_DB;
   if (!catalogDb) return listAvailableBlueprints(mfgDb, manufacturerId);
 
+  let items = [];
   try {
     const linkedRows = await queryAll(
       mfgDb,
@@ -1148,40 +1190,12 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
          WHERE blueprint_id IS NOT NULL AND source_system = 'printify'`
       )
       .all();
-    const usedCatalogIds = new Set((usedInCatalog?.results || []).map((r) => r.blueprint_id));
+    const usedCatalogIds = new Set((usedInCatalog?.results || []).map((r) => String(r.blueprint_id)));
 
-    let blueprintRows = [];
-    try {
-      const all = await catalogDb
-        .prepare(
-          `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
-           FROM printify_blueprints
-           ORDER BY category, title`
-        )
-        .all();
-      blueprintRows = all?.results || [];
-    } catch (queryErr) {
-      const msg = String(queryErr?.message || queryErr);
-      if (!msg.includes("no such column")) throw queryErr;
-      const all = await catalogDb
-        .prepare(
-          `SELECT id, title, images_json, print_provider_count
-           FROM printify_blueprints
-           ORDER BY title`
-        )
-        .all();
-      blueprintRows = (all?.results || []).map((row) => ({
-        ...row,
-        category: null,
-        audience: null,
-        shipping_countries: null,
-        print_providers_json: null,
-      }));
-    }
+    const blueprintRows = await loadPrintifyBlueprintCatalogRows(catalogDb);
 
-    const items = [];
     for (const bp of blueprintRows) {
-      if (usedCatalogIds.has(bp.id)) continue;
+      if (usedCatalogIds.has(String(bp.id))) continue;
       if (linkedExternalIds.has(String(bp.id))) continue;
       if (!blueprintSupportsProvider(bp.print_providers_json, providerExternalId)) continue;
 
@@ -1195,22 +1209,28 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
         audience: bp.audience,
         catalog_status: "available",
         mock_images: slimMockImagesForList(parseCatalogImagesJson(bp.images_json)),
-        print_areas: [],
-        print_providers_json: bp.print_providers_json,
+        print_areas: printAreasFromStoredJson(bp.print_areas_json),
         printify_choice: resolvePrintifyChoiceType(bp.print_providers_json),
         provider_count: bp.print_provider_count || 0,
         shipping_countries_raw: bp.shipping_countries,
       });
     }
-
-    const externalIds = items.map((item) => String(item.printify_blueprint_id));
-    const fromCatalog = await loadPrintAreasFromCatalogColumn(catalogDb, externalIds);
-    const fromMfg = await loadPrintAreasLightByExternalIds(mfgDb, manufacturerId, externalIds);
-    return applyPrintAreasToAvailableItems(items, fromCatalog, fromMfg);
   } catch (err) {
     console.error("[catalog-studio] listAvailablePrintifyBlueprints failed:", err?.message || err);
     return listAvailableBlueprints(mfgDb, manufacturerId);
   }
+
+  if (items.length > 0 && items.length <= 100) {
+    try {
+      const externalIds = items.map((item) => String(item.printify_blueprint_id));
+      const fromMfg = await loadPrintAreasLightByExternalIds(mfgDb, manufacturerId, externalIds);
+      items = applyPrintAreasToAvailableItems(items, new Map(), fromMfg);
+    } catch (err) {
+      console.warn("[catalog-studio] optional print area merge skipped:", err?.message || err);
+    }
+  }
+
+  return items;
 }
 
 export {
