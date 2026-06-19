@@ -1,5 +1,6 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { initShell, openModal, closeModal, confirmAction, openActionModeModal, showToast, renderTable, setTopbarExtra } from "/partner/shared/js/partner-shell.js";
+import { openProductEditor } from "./catalog-editor/shell.js";
 
 const NAV_CORE = [
   { route: "/partner", label: "Command Center", icon: "⌘" },
@@ -775,8 +776,8 @@ async function renderEazpireProductsPanel(panel) {
   const { products } = await partnerFetch("admin-eazpire-product-list");
   let driftHtml = "";
   try {
-    const drift = await partnerFetch("admin-eazpire-catalog-mirror-status");
-    driftHtml = `<p class="panel-subtitle">${drift.in_sync ?? 0} / ${drift.total ?? 0} in sync with publish index</p>`;
+    const drift = await partnerFetch("admin-eazpire-catalog-mirror-status-v2");
+    driftHtml = `<p class="panel-subtitle">${drift.in_sync ?? 0} / ${drift.total ?? 0} in sync with publish index (drift v2)</p>`;
   } catch {
     driftHtml = "";
   }
@@ -796,7 +797,7 @@ async function renderEazpireProductsPanel(panel) {
           <td>${escapeHtml(p.title)}</td>
           <td><span class="badge ${p.catalog_status === "online" ? "badge-success" : "badge-secondary"}">${escapeHtml(p.catalog_status)}</span></td>
           <td>${escapeHtml(p.version_count ?? 0)}</td>
-          <td><button type="button" class="btn btn-secondary btn-edit-eaz-product" data-key="${escapeHtml(p.product_key)}">Versions</button></td>
+          <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(p.product_key)}">Edit</button></td>
         </tr>`
           )
           .join("")
@@ -810,89 +811,7 @@ async function renderEazpireProductsPanel(panel) {
   };
 
   panel.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
-    btn.onclick = () => openEazpireProductVersionsModal(btn.dataset.key);
-  });
-}
-
-async function openEazpireProductVersionsModal(productKey) {
-  const data = await partnerFetch("admin-eazpire-product-get", { query: { product_key: productKey } });
-  const product = data.product;
-  const versions = data.versions || [];
-
-  openModal({
-    title: `Product versions — ${product.title}`,
-    bodyHtml: `
-      <p><strong>Product key:</strong> <code>${escapeHtml(product.product_key)}</code></p>
-      <p><strong>Status:</strong> ${escapeHtml(product.catalog_status)} · <strong>Regions:</strong> ${escapeHtml((product.regions || []).join(", ") || "—")}</p>
-      <div class="field"><label>Catalog status</label>
-        <select class="input" id="ep-catalog-status">
-          <option value="offline" ${product.catalog_status === "offline" ? "selected" : ""}>Offline</option>
-          <option value="preview" ${product.catalog_status === "preview" ? "selected" : ""}>Preview</option>
-          <option value="online" ${product.catalog_status === "online" ? "selected" : ""}>Online</option>
-        </select>
-      </div>
-      <div class="panel" style="margin-top:12px">
-        <div class="panel-header"><h3 class="panel-title">Versions (${versions.length})</h3></div>
-        <div class="panel-body">${versions.length ? renderTable(
-          ["Display name", "Provider", "Auto-publish", ""],
-          versions
-            .map(
-              (v) => `<tr>
-            <td>${escapeHtml(v.display_name)}</td>
-            <td>${escapeHtml(v.provider_name || v.external_provider_id || "—")}</td>
-            <td>${v.auto_publish_config?.auto_publish_enabled ? "Yes" : "No"}</td>
-            <td><button type="button" class="btn btn-secondary btn-edit-version" data-id="${escapeHtml(v.id)}">Edit</button></td>
-          </tr>`
-            )
-            .join("")
-        ) : `<p>No versions yet.</p>`}</div>
-      </div>`,
-    onSave: async () => {
-      await partnerFetch("admin-eazpire-product-update", {
-        method: "POST",
-        body: {
-          product_key: productKey,
-          catalog_status: document.getElementById("ep-catalog-status").value,
-        },
-      });
-      await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: { product_key: productKey } });
-      showToast("Product saved", "Mirrored to publish index");
-    },
-  });
-
-  panelModalVersions(productKey, versions);
-}
-
-function panelModalVersions(productKey, versions) {
-  document.querySelectorAll(".btn-edit-version").forEach((btn) => {
-    btn.onclick = async () => {
-      const v = versions.find((x) => x.id === btn.dataset.id);
-      if (!v) return;
-      openModal({
-        title: `Edit version — ${v.display_name}`,
-        bodyHtml: `
-          <div class="field"><label>Display name</label><input class="input" id="ver-display-name" value="${escapeHtml(v.display_name)}" /></div>
-          <div class="field"><label><input type="checkbox" id="ver-auto-publish" ${v.auto_publish_config?.auto_publish_enabled ? "checked" : ""} /> Auto-publish enabled</label></div>
-          <div class="field"><label><input type="checkbox" id="ver-publish-enabled" ${v.publish_enabled ? "checked" : ""} /> Publish enabled</label></div>`,
-        onSave: async () => {
-          await partnerFetch("admin-eazpire-product-version-update", {
-            method: "POST",
-            body: {
-              id: v.id,
-              display_name: document.getElementById("ver-display-name").value,
-              auto_publish_config: {
-                ...v.auto_publish_config,
-                auto_publish_enabled: document.getElementById("ver-auto-publish").checked,
-              },
-              publish_enabled: document.getElementById("ver-publish-enabled").checked,
-            },
-          });
-          await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: { product_key: productKey } });
-          showToast("Version saved", "");
-          openEazpireProductVersionsModal(productKey);
-        },
-      });
-    };
+    btn.onclick = () => openProductEditor(btn.dataset.key);
   });
 }
 

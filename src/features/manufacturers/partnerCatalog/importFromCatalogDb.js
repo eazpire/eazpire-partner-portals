@@ -13,6 +13,7 @@ import {
   patRowToAutoPublishConfig,
 } from "./eazpireProductVersionService.js";
 import { parseJson } from "../db.js";
+import { importShadowTablesForProduct } from "./shadow/shadowImportFromCatalogDb.js";
 
 async function findEazpireBlueprintIdForPrintifyBlueprint(db, manufacturerId, blueprintId) {
   const row = await db
@@ -113,7 +114,14 @@ export async function importOnlineProductsFromCatalogDb(env) {
       versionCount++;
     }
 
-    imported.push({ product_key: productKey, versions: versionCount, source_blueprint_id: sourceBlueprintId });
+    const shadowResult = await importShadowTablesForProduct(env, productKey);
+
+    imported.push({
+      product_key: productKey,
+      versions: versionCount,
+      source_blueprint_id: sourceBlueprintId,
+      shadow: shadowResult.ok ? shadowResult.counts : { error: shadowResult.error },
+    });
   }
 
   return { ok: true, imported, count: imported.length };

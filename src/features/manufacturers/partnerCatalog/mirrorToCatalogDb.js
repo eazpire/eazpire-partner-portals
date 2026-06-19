@@ -153,7 +153,7 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
       continue;
     }
 
-    await catalogDb
+    const insertResult = await catalogDb
       .prepare(
         `INSERT INTO print_area_printify_templates
           (product_key, print_provider_id, display_name, description, printify_product_id,
@@ -185,10 +185,20 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
         now
       )
       .run();
+    const newPatId = insertResult.meta?.last_row_id;
+    if (newPatId) {
+      await mfgDb
+        .prepare(`UPDATE eazpire_product_versions SET catalog_pat_id = ?, updated_at = ? WHERE id = ?`)
+        .bind(newPatId, now, v.id)
+        .run();
+    }
     patUpdated++;
   }
 
-  return { ok: true, product_key: productKey, pat_updated: patUpdated };
+  const { mirrorShadowTablesForProduct } = await import("./shadow/shadowMirrorToCatalogDb.js");
+  const shadowResult = await mirrorShadowTablesForProduct(env, productKey);
+
+  return { ok: true, product_key: productKey, pat_updated: patUpdated, shadow: shadowResult.counts || shadowResult.stats };
 }
 
 export async function mirrorAllEazpireProductsToCatalogDb(env) {

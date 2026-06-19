@@ -241,6 +241,31 @@ async function applyPartnerCatalogSchemaPatches(db) {
   } catch (e) {
     console.warn("[ensureManufacturerSchema] printify partner seed skipped:", e?.message || e);
   }
+
+  await applyEazpireShadowSchemaPatches(db);
+}
+
+async function applyEazpireShadowSchemaPatches(db) {
+  const migrationPath = new URL("../../../../migrations-manufacturer/0015_eazpire_catalog_shadow_tables.sql", import.meta.url);
+  try {
+    const { readFileSync } = await import("node:fs");
+    const sql = readFileSync(migrationPath, "utf8");
+    const statements = sql
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s && !s.startsWith("--") && !s.startsWith("PRAGMA"));
+    for (const stmt of statements) {
+      try {
+        await db.prepare(stmt).run();
+      } catch (e) {
+        if (!String(e?.message || "").includes("already exists")) {
+          console.warn("[ensureManufacturerSchema] shadow stmt skipped:", e?.message || e);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[ensureManufacturerSchema] 0015 shadow tables skipped:", e?.message || e);
+  }
 }
 
 export async function ensureManufacturerSchema(env) {

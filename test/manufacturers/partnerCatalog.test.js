@@ -119,6 +119,140 @@ describe("runFullPrintifyPartnerSetup prechecks", () => {
   });
 });
 
+describe("shadow catalog ops exports", () => {
+  it("exports shadow import/mirror and drift v2 helpers", async () => {
+    const ops = await import("../../src/features/manufacturers/partnerCatalog/partnerCatalogOps.js");
+    expect(typeof ops.importShadowTablesForProduct).toBe("function");
+    expect(typeof ops.importShadowTablesFromCatalogDb).toBe("function");
+    expect(typeof ops.mirrorShadowTablesForProduct).toBe("function");
+    expect(typeof ops.mirrorShadowTablesToCatalogDb).toBe("function");
+    expect(typeof ops.getCatalogDriftV2ForProduct).toBe("function");
+    expect(typeof ops.getCatalogDriftV2Status).toBe("function");
+  });
+});
+
+describe("catalog_pat_id backfill on PAT insert", () => {
+  it("writes catalog_pat_id from last_row_id after PAT INSERT", async () => {
+    const updates = [];
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => ({
+            product_key: "test-tee",
+            title: "Test Tee",
+            regions_json: "[]",
+            catalog_status: "online",
+            visible_design_types_json: null,
+            catalog_category_group: null,
+            catalog_category_leaf: null,
+            catalog_audience_json: null,
+            catalog_production_type: null,
+            print_area_edit_use_mocks: 0,
+          }),
+          all: async () => ({
+            results: [
+              {
+                id: "epv_test",
+                product_key: "test-tee",
+                display_name: "Default",
+                description: null,
+                sort_order: 0,
+                studio_config_json: "{}",
+                auto_publish_config_json: "{}",
+                external_template_product_id: "tpl-1",
+                product_version_config_json: null,
+                qr_logo_snapshot_json: null,
+                is_active: 1,
+                publish_enabled: 1,
+                catalog_pat_id: null,
+                external_provider_id: "30",
+              },
+            ],
+          }),
+          run: async () => {
+            if (sql.includes("UPDATE eazpire_product_versions SET catalog_pat_id")) {
+              updates.push({ patId: handler._args[0], versionId: handler._args[2] });
+            }
+            return { meta: { changes: 1 } };
+          },
+        };
+        return handler;
+      },
+    };
+    const catalogDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: () => handler,
+          first: async () => null,
+          run: async () => {
+            if (sql.includes("INSERT INTO print_area_printify_templates")) {
+              return { meta: { last_row_id: 42 } };
+            }
+            if (sql.includes("INSERT INTO product_catalog")) {
+              return { meta: { last_row_id: 1 } };
+            }
+            return { meta: { changes: 1 } };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const { mirrorEazpireProductToCatalogDb } = await import(
+      "../../src/features/manufacturers/partnerCatalog/mirrorToCatalogDb.js"
+    );
+    const result = await mirrorEazpireProductToCatalogDb(
+      { MANUFACTURER_DB: mfgDb, CATALOG_DB: catalogDb },
+      "test-tee"
+    );
+
+    expect(result.ok).toBe(true);
+    expect(updates).toEqual([{ patId: 42, versionId: "epv_test" }]);
+  });
+});
+
+describe("shadow import counts shape", () => {
+  it("returns per-table counts for a product", async () => {
+    const empty = { results: [] };
+    const catalogDb = {
+      prepare: () => ({
+        bind: () => ({
+          all: async () => empty,
+        }),
+      }),
+    };
+    const mfgDb = {
+      prepare: () => ({
+        bind: () => ({
+          run: async () => ({ meta: { changes: 0 } }),
+          all: async () => empty,
+        }),
+      }),
+    };
+
+    const { importShadowTablesForProduct } = await import(
+      "../../src/features/manufacturers/partnerCatalog/shadow/shadowImportFromCatalogDb.js"
+    );
+    const result = await importShadowTablesForProduct(
+      { MANUFACTURER_DB: mfgDb, CATALOG_DB: catalogDb },
+      "test-tee"
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.counts).toMatchObject({
+      publish_profiles: 0,
+      publish_plans: 0,
+      active_providers: 0,
+      mockup_defaults: 0,
+      variant_config: 0,
+    });
+  });
+});
+
 describe("mirror drift status shape", () => {
   it("returns drift array from mock env", async () => {
     const makeDb = () => ({

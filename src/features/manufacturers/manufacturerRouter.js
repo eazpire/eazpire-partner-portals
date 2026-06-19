@@ -184,6 +184,26 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-catalog-import",
   "admin-eazpire-catalog-mirror-status",
   "admin-eazpire-catalog-mirror-run",
+  "admin-eazpire-catalog-mirror-status-v2",
+  "admin-eazpire-product-editor-bundle",
+  "admin-eazpire-product-meta-save",
+  "admin-eazpire-product-providers-bundle",
+  "admin-eazpire-product-providers-save",
+  "admin-eazpire-product-version-create",
+  "admin-eazpire-product-version-delete",
+  "admin-eazpire-product-version-config-save",
+  "admin-eazpire-print-area-bundle",
+  "admin-eazpire-print-area-snapshot-save",
+  "admin-eazpire-variants-bundle",
+  "admin-eazpire-variants-save",
+  "admin-eazpire-template-bundle",
+  "admin-eazpire-template-save",
+  "admin-eazpire-mockups-bundle",
+  "admin-eazpire-mockups-save",
+  "admin-eazpire-automations-save",
+  "admin-eazpire-published-bundle",
+  "admin-eazpire-published-update",
+  "admin-eazpire-published-delete",
 ]);
 
 export function isManufacturerOp(op) {
@@ -535,6 +555,126 @@ export async function handleManufacturerRouter(request, env) {
       const result = productKey
         ? await mirrorEazpireProductToCatalogDb(env, productKey)
         : await mirrorAllEazpireProductsToCatalogDb(env);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+
+    const editor = await import("./partnerCatalog/editor/productEditorService.js");
+    const driftV2 = await import("./partnerCatalog/shadow/catalogDriftV2.js");
+
+    if (op === "admin-eazpire-catalog-mirror-status-v2" && request.method === "GET") {
+      const status = await driftV2.getCatalogDriftV2Status(env);
+      if (!status.ok) return json(status, 503, cors);
+      return json(status, 200, cors);
+    }
+    if (op === "admin-eazpire-product-editor-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const result = await editor.getProductEditorBundle(env, productKey);
+      if (!result.ok) return json(result, result.error === "not_found" ? 404 : 503, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-meta-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveProductMeta(env, body.product_key, body);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-providers-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const result = await editor.getProvidersBundle(env, productKey);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-providers-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveProviders(env, body.product_key, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-version-create" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.createProductVersion(env, body.product_key, body);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-version-delete" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.deleteProductVersion(env, body.id);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-version-config-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveVersionConfig(env, body.id, body);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-area-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const result = await editor.getPrintAreaBundle(env, productKey, {
+        printProviderId: url.searchParams.get("print_provider_id"),
+        versionId: url.searchParams.get("version_id"),
+      });
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-area-snapshot-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.savePrintAreaSnapshot(env, body.version_id, body);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-variants-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const printProviderId = url.searchParams.get("print_provider_id");
+      const result = await editor.getVariantsBundle(env, productKey, printProviderId);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-variants-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveVariants(env, body.product_key, body.print_provider_id, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-template-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const printProviderId = url.searchParams.get("print_provider_id");
+      const result = await editor.getTemplateBundle(env, productKey, printProviderId);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-template-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveTemplate(env, body.product_key, body.print_provider_id, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-mockups-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const printProviderId = url.searchParams.get("print_provider_id");
+      const result = await editor.getMockupsBundle(env, productKey, printProviderId);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-mockups-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveMockups(env, body.product_key, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-automations-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.saveAutomations(env, body.version_id, body);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-published-bundle" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const result = await editor.getPublishedBundle(env, productKey);
+      if (!result.ok) return json(result, 503, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-published-update" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.updatePublishedListing(env, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-published-delete" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editor.deletePublishedListing(env, body);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }

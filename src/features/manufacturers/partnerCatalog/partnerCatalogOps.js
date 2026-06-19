@@ -17,6 +17,15 @@ export {
   mirrorAllEazpireProductsToCatalogDb,
   getCatalogMirrorDriftStatus,
 } from "./mirrorToCatalogDb.js";
+export {
+  importShadowTablesForProduct,
+  importShadowTablesFromCatalogDb,
+} from "./shadow/shadowImportFromCatalogDb.js";
+export {
+  mirrorShadowTablesForProduct,
+  mirrorShadowTablesToCatalogDb,
+} from "./shadow/shadowMirrorToCatalogDb.js";
+export { getCatalogDriftV2ForProduct, getCatalogDriftV2Status } from "./shadow/catalogDriftV2.js";
 
 export async function runFullPrintifyPartnerSetup(env) {
   if (!env.MANUFACTURER_DB) {

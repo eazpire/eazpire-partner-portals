@@ -1,0 +1,609 @@
+/**
+ * Partner Admin product editor — bundle loaders and save handlers (master DB)
+ */
+
+import { parseJson, newId } from "../../db.js";
+import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
+import {
+  listProductVersions,
+  getProductVersion,
+  upsertProductVersion,
+  updateProductVersion,
+} from "../eazpireProductVersionService.js";
+import { listFulfillmentProviders } from "../fulfillmentProviderService.js";
+import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
+import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
+
+async function queryAll(db, sql, ...binds) {
+  try {
+    const stmt = db.prepare(sql);
+    const res = binds.length ? await stmt.bind(...binds).all() : await stmt.all();
+    return res?.results || [];
+  } catch {
+    return [];
+  }
+}
+
+async function queryFirst(db, sql, ...binds) {
+  try {
+    return await db.prepare(sql).bind(...binds).first();
+  } catch {
+    return null;
+  }
+}
+
+export async function getProductEditorBundle(env, productKey) {
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+
+  const product = await getEazpireProduct(db, productKey);
+  if (!product) return { ok: false, error: "not_found" };
+
+  const versions = await listProductVersions(db, productKey);
+  const providers = await listFulfillmentProviders(db, product.manufacturer_id);
+  const activeProviders = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_active_providers WHERE product_key = ?`,
+    productKey
+  );
+  const publishProfiles = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ?`,
+    productKey
+  );
+  const publishPlans = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_publish_plans WHERE product_key = ?`,
+    productKey
+  );
+  const productDrift = await getCatalogDriftV2ForProduct(env, productKey);
+
+  return {
+    ok: true,
+    product,
+    versions,
+    providers,
+    active_providers: activeProviders,
+    publish_profiles: publishProfiles.map(rowToPublishProfile),
+    publish_plans: publishPlans,
+    drift: productDrift,
+    tabs: ["provider", "template", "mockups", "variants", "print_area", "meta_data", "products", "automations"],
+  };
+}
+
+function rowToPublishProfile(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    print_provider_id: row.print_provider_id,
+    title: row.title,
+    shopify_category_id: row.shopify_category_id,
+    standard_product_display_name: row.standard_product_display_name,
+    product_features: row.product_features,
+    care_instructions: row.care_instructions,
+    size_table_html: row.size_table_html,
+    gpsr_html: row.gpsr_html,
+    variants_json: parseJson(row.variants_json, null),
+    prices_json: parseJson(row.prices_json, null),
+    print_areas_config_json: parseJson(row.print_areas_config_json, null),
+    qr_logo_mapping_json: parseJson(row.qr_logo_mapping_json, null),
+  };
+}
+
+export async function saveProductMeta(env, productKey, body) {
+  const db = env.MANUFACTURER_DB;
+  const product = await updateEazpireProduct(db, productKey, {
+    title: body.title,
+    catalog_status: body.catalog_status,
+    regions: body.regions,
+    visible_design_types: body.visible_design_types,
+    catalog_category_group: body.catalog_category_group,
+    catalog_category_leaf: body.catalog_category_leaf,
+    catalog_audience: body.catalog_audience,
+    catalog_production_type: body.catalog_production_type,
+    print_area_edit_use_mocks: body.print_area_edit_use_mocks,
+  });
+  if (!product) return { ok: false, error: "not_found" };
+
+  const printProviderId = body.print_provider_id;
+  if (printProviderId != null) {
+    const now = Date.now();
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      printProviderId
+    );
+    const fields = {
+      title: body.profile_title ?? product.title,
+      shopify_category_id: body.shopify_category_id ?? null,
+      standard_product_display_name: body.standard_product_display_name ?? null,
+      product_features: body.product_features ?? null,
+      care_instructions: body.care_instructions ?? null,
+      size_table_html: body.size_table_html ?? null,
+      gpsr_html: body.gpsr_html ?? null,
+      updated_at: now,
+    };
+    if (existing?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_publish_profiles SET
+            title = ?, shopify_category_id = ?, standard_product_display_name = ?,
+            product_features = ?, care_instructions = ?, size_table_html = ?, gpsr_html = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          fields.title,
+          fields.shopify_category_id,
+          fields.standard_product_display_name,
+          fields.product_features,
+          fields.care_instructions,
+          fields.size_table_html,
+          fields.gpsr_html,
+          fields.updated_at,
+          existing.id
+        )
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_publish_profiles
+            (id, product_key, title, source_system, source_product_id, print_provider_id,
+             shopify_category_id, standard_product_display_name, product_features, care_instructions,
+             size_table_html, gpsr_html, collected_at, updated_at, is_active, revision)
+           VALUES (?, ?, ?, 'printify', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
+        )
+        .bind(
+          newId(),
+          productKey,
+          fields.title,
+          printProviderId,
+          fields.shopify_category_id,
+          fields.standard_product_display_name,
+          fields.product_features,
+          fields.care_instructions,
+          fields.size_table_html,
+          fields.gpsr_html,
+          now,
+          now
+        )
+        .run();
+    }
+
+    if (body.publish_plan) {
+      const plan = body.publish_plan;
+      const planExisting = await queryFirst(
+        db,
+        `SELECT id FROM eazpire_product_publish_plans WHERE product_key = ? AND provider_name = ?`,
+        productKey,
+        plan.provider_name || ""
+      );
+      if (planExisting?.id) {
+        await db
+          .prepare(
+            `UPDATE eazpire_product_publish_plans SET
+              region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
+             WHERE id = ?`
+          )
+          .bind(
+            JSON.stringify(plan.region_codes || []),
+            JSON.stringify(plan.country_codes || []),
+            plan.priority ?? 100,
+            plan.is_enabled !== false ? 1 : 0,
+            now,
+            planExisting.id
+          )
+          .run();
+      }
+    }
+  }
+
+  if (body.auto_mirror !== false) {
+    await mirrorEazpireProductToCatalogDb(env, productKey);
+  }
+  return { ok: true, product };
+}
+
+export async function getProvidersBundle(env, productKey) {
+  const bundle = await getProductEditorBundle(env, productKey);
+  if (!bundle.ok) return bundle;
+  return {
+    ok: true,
+    product: bundle.product,
+    providers: bundle.providers,
+    active_providers: bundle.active_providers,
+    versions: bundle.versions,
+    publish_plans: bundle.publish_plans,
+  };
+}
+
+export async function saveProviders(env, productKey, body) {
+  const db = env.MANUFACTURER_DB;
+  const now = Date.now();
+  const activeIds = Array.isArray(body.active_print_provider_ids) ? body.active_print_provider_ids : [];
+
+  await db.prepare(`DELETE FROM eazpire_product_active_providers WHERE product_key = ?`).bind(productKey).run();
+  for (const pid of activeIds) {
+    await db
+      .prepare(
+        `INSERT INTO eazpire_product_active_providers (id, product_key, print_provider_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .bind(newId(), productKey, Number(pid), now, now)
+      .run();
+  }
+
+  if (Array.isArray(body.publish_plan_updates)) {
+    for (const plan of body.publish_plan_updates) {
+      const existing = plan.id
+        ? await queryFirst(db, `SELECT id FROM eazpire_product_publish_plans WHERE id = ?`, plan.id)
+        : null;
+      if (existing?.id) {
+        await db
+          .prepare(
+            `UPDATE eazpire_product_publish_plans SET
+              region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
+             WHERE id = ?`
+          )
+          .bind(
+            JSON.stringify(plan.region_codes || []),
+            JSON.stringify(plan.country_codes || []),
+            plan.priority ?? 100,
+            plan.is_enabled !== false ? 1 : 0,
+            now,
+            existing.id
+          )
+          .run();
+      }
+    }
+  }
+
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true };
+}
+
+export async function createProductVersion(env, productKey, body) {
+  const db = env.MANUFACTURER_DB;
+  const fp = await queryFirst(
+    db,
+    `SELECT id FROM manufacturer_fulfillment_providers WHERE external_provider_id = ? LIMIT 1`,
+    String(body.print_provider_id)
+  );
+  if (!fp?.id) return { ok: false, error: "provider_not_found" };
+  const version = await upsertProductVersion(db, {
+    product_key: productKey,
+    fulfillment_provider_id: fp.id,
+    display_name: body.display_name || "New version",
+    external_template_product_id: body.external_template_product_id || "",
+    sort_order: body.sort_order ?? 99,
+  });
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true, version };
+}
+
+export async function deleteProductVersion(env, versionId) {
+  const db = env.MANUFACTURER_DB;
+  const v = await getProductVersion(db, versionId);
+  if (!v) return { ok: false, error: "not_found" };
+  await db.prepare(`DELETE FROM eazpire_product_versions WHERE id = ?`).bind(versionId).run();
+  await mirrorEazpireProductToCatalogDb(env, v.product_key);
+  return { ok: true };
+}
+
+export async function saveVersionConfig(env, versionId, body) {
+  const db = env.MANUFACTURER_DB;
+  const version = await updateProductVersion(db, versionId, {
+    display_name: body.display_name,
+    product_version_config: body.product_version_config,
+    publish_enabled: body.publish_enabled,
+    is_active: body.is_active,
+  });
+  if (!version) return { ok: false, error: "not_found" };
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
+  return { ok: true, version };
+}
+
+export async function getPrintAreaBundle(env, productKey, { printProviderId, versionId } = {}) {
+  const db = env.MANUFACTURER_DB;
+  const versions = await listProductVersions(db, productKey);
+  let version = versionId ? versions.find((v) => v.id === versionId) : versions[0];
+  if (printProviderId) {
+    version = versions.find((v) => String(v.external_provider_id) === String(printProviderId)) || version;
+  }
+  const mockupDefaults = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`,
+    productKey
+  );
+  const variantPrintAreas = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_variant_print_areas WHERE product_key = ?`,
+    productKey
+  );
+  return { ok: true, version, versions, mockup_defaults: mockupDefaults, variant_print_areas: variantPrintAreas };
+}
+
+export async function savePrintAreaSnapshot(env, versionId, body) {
+  const db = env.MANUFACTURER_DB;
+  const existing = await getProductVersion(db, versionId);
+  if (!existing) return { ok: false, error: "not_found" };
+  const studio = { ...existing.studio_config, ...(body.studio_config || {}) };
+  const version = await updateProductVersion(db, versionId, {
+    studio_config: studio,
+    qr_logo_snapshot: body.qr_logo_snapshot !== undefined ? body.qr_logo_snapshot : existing.qr_logo_snapshot,
+    product_version_config: body.product_version_config !== undefined ? body.product_version_config : existing.product_version_config,
+  });
+  if (body.mockup_default) {
+    const md = body.mockup_default;
+    const row = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_mockup_defaults WHERE product_key = ? AND print_area_key = ?`,
+      existing.product_key,
+      md.print_area_key || "front"
+    );
+    const now = Date.now();
+    if (row?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_mockup_defaults SET
+            print_area_rect_json = ?, mockup_print_area_rect_json = ?, universal_print_area_rect_json = ?,
+            placement_x = ?, placement_y = ?, placement_scale = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          md.print_area_rect_json ? JSON.stringify(md.print_area_rect_json) : null,
+          md.mockup_print_area_rect_json ? JSON.stringify(md.mockup_print_area_rect_json) : null,
+          md.universal_print_area_rect_json ? JSON.stringify(md.universal_print_area_rect_json) : null,
+          md.placement_x ?? 0.5,
+          md.placement_y ?? 0.5,
+          md.placement_scale ?? 1,
+          now,
+          row.id
+        )
+        .run();
+    }
+  }
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, existing.product_key);
+  return { ok: true, version };
+}
+
+export async function getVariantsBundle(env, productKey, printProviderId) {
+  const db = env.MANUFACTURER_DB;
+  const variantConfig = await queryFirst(
+    db,
+    `SELECT * FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  const profile = await queryFirst(
+    db,
+    `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  const template = await queryFirst(
+    db,
+    `SELECT * FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  return {
+    ok: true,
+    variant_config: variantConfig ? parseJson(variantConfig.config_json, {}) : null,
+    prices_json: profile ? parseJson(profile.prices_json, null) : null,
+    variants_json: profile ? parseJson(profile.variants_json, null) : template ? parseJson(template.variants_json, null) : null,
+    template,
+  };
+}
+
+export async function saveVariants(env, productKey, printProviderId, body) {
+  const db = env.MANUFACTURER_DB;
+  const now = Date.now();
+  if (body.config != null) {
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      Number(printProviderId)
+    );
+    const configJson = JSON.stringify(body.config);
+    if (existing?.id) {
+      await db
+        .prepare(`UPDATE eazpire_product_variant_config SET config_json = ?, updated_at = ? WHERE id = ?`)
+        .bind(configJson, now, existing.id)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_variant_config (id, product_key, print_provider_id, config_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(newId(), productKey, Number(printProviderId), configJson, now, now)
+        .run();
+    }
+  }
+  if (body.prices_json != null || body.variants_json != null) {
+    const profile = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      Number(printProviderId)
+    );
+    if (profile?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_publish_profiles SET
+            prices_json = COALESCE(?, prices_json), variants_json = COALESCE(?, variants_json), updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          body.prices_json != null ? JSON.stringify(body.prices_json) : null,
+          body.variants_json != null ? JSON.stringify(body.variants_json) : null,
+          now,
+          profile.id
+        )
+        .run();
+    }
+  }
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true };
+}
+
+export async function getTemplateBundle(env, productKey, printProviderId) {
+  const db = env.MANUFACTURER_DB;
+  const template = await queryFirst(
+    db,
+    `SELECT * FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  const versions = await listProductVersions(db, productKey);
+  const version = versions.find((v) => String(v.external_provider_id) === String(printProviderId));
+  return { ok: true, template, version };
+}
+
+export async function saveTemplate(env, productKey, printProviderId, body) {
+  const db = env.MANUFACTURER_DB;
+  const now = Date.now();
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  const fields = {
+    printify_product_id: String(body.printify_product_id || ""),
+    title: body.title ?? null,
+    variants_json: body.variants_json != null ? JSON.stringify(body.variants_json) : null,
+    prices_json: body.prices_json != null ? JSON.stringify(body.prices_json) : null,
+    updated_at: now,
+  };
+  if (existing?.id) {
+    await db
+      .prepare(
+        `UPDATE eazpire_template_products SET printify_product_id = ?, title = ?, variants_json = ?, prices_json = ?, updated_at = ? WHERE id = ?`
+      )
+      .bind(fields.printify_product_id, fields.title, fields.variants_json, fields.prices_json, fields.updated_at, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO eazpire_template_products
+          (id, product_key, print_provider_id, printify_product_id, title, variants_json, prices_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(newId(), productKey, Number(printProviderId), fields.printify_product_id, fields.title, fields.variants_json, fields.prices_json, now, now)
+      .run();
+  }
+  const versions = await listProductVersions(db, productKey);
+  const version = versions.find((v) => String(v.external_provider_id) === String(printProviderId));
+  if (version && body.printify_product_id) {
+    await updateProductVersion(db, version.id, { external_template_product_id: String(body.printify_product_id) });
+  }
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true };
+}
+
+export async function getMockupsBundle(env, productKey, printProviderId) {
+  const db = env.MANUFACTURER_DB;
+  const product = await getEazpireProduct(db, productKey);
+  let images = await queryAll(db, `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ?`, productKey);
+  if (printProviderId != null) {
+    images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
+  }
+  const viewRandom = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_mockup_view_random WHERE product_key = ?`,
+    productKey
+  );
+  const defaults = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`,
+    productKey
+  );
+  return { ok: true, product, images, view_random: viewRandom, mockup_defaults: defaults };
+}
+
+export async function saveMockups(env, productKey, body) {
+  const db = env.MANUFACTURER_DB;
+  const now = Date.now();
+  if (body.print_area_edit_use_mocks !== undefined) {
+    await updateEazpireProduct(db, productKey, { print_area_edit_use_mocks: body.print_area_edit_use_mocks });
+  }
+  if (body.image_rules && Array.isArray(body.image_rules)) {
+    for (const rule of body.image_rules) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_mockup_images SET preview_template_ids_json = ? WHERE id = ?`
+        )
+        .bind(JSON.stringify(rule.preview_template_ids || []), rule.id)
+        .run();
+    }
+  }
+  if (body.view_random_rules && Array.isArray(body.view_random_rules)) {
+    for (const rule of body.view_random_rules) {
+      const existing = await queryFirst(
+        db,
+        `SELECT id FROM eazpire_product_mockup_view_random WHERE product_key = ? AND view_key = ?`,
+        productKey,
+        rule.view_key
+      );
+      if (existing?.id) {
+        await db
+          .prepare(`UPDATE eazpire_product_mockup_view_random SET template_ids_json = ?, updated_at = ? WHERE id = ?`)
+          .bind(JSON.stringify(rule.template_ids || []), now, existing.id)
+          .run();
+      } else {
+        await db
+          .prepare(
+            `INSERT INTO eazpire_product_mockup_view_random (id, product_key, view_key, template_ids_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .bind(newId(), productKey, rule.view_key, JSON.stringify(rule.template_ids || []), now, now)
+          .run();
+      }
+    }
+  }
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true };
+}
+
+export async function saveAutomations(env, versionId, body) {
+  const db = env.MANUFACTURER_DB;
+  const auto = {
+    auto_publish_enabled: !!body.auto_publish_enabled,
+    automation_shopify_sync_enabled: !!body.automation_shopify_sync_enabled,
+    automation_amazon_publish_enabled: !!body.automation_amazon_publish_enabled,
+    automation_social: body.automation_social ?? null,
+  };
+  const version = await updateProductVersion(db, versionId, { auto_publish_config: auto });
+  if (!version) return { ok: false, error: "not_found" };
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
+  return { ok: true, version };
+}
+
+export async function getPublishedBundle(env, productKey) {
+  const creatorDb = env.CREATOR_DB;
+  if (!creatorDb) return { ok: false, error: "creator_db_unavailable" };
+  const published = await queryAll(
+    creatorDb,
+    `SELECT * FROM published_designs WHERE product_key = ? ORDER BY updated_at DESC LIMIT 200`,
+    productKey
+  );
+  const versions = env.MANUFACTURER_DB ? await listProductVersions(env.MANUFACTURER_DB, productKey) : [];
+  return { ok: true, published, versions, template_versions: versions };
+}
+
+export async function updatePublishedListing(env, body) {
+  const creatorDb = env.CREATOR_DB;
+  if (!creatorDb) return { ok: false, error: "creator_db_unavailable" };
+  return { ok: true, queued: true, message: "update_queued", design_id: body.design_id };
+}
+
+export async function deletePublishedListing(env, body) {
+  const creatorDb = env.CREATOR_DB;
+  if (!creatorDb) return { ok: false, error: "creator_db_unavailable" };
+  if (!body.design_id) return { ok: false, error: "design_id_required" };
+  await creatorDb.prepare(`DELETE FROM published_designs WHERE design_id = ?`).bind(body.design_id).run();
+  return { ok: true };
+}

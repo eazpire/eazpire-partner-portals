@@ -46,6 +46,12 @@ binding = "CATALOG_DB"
 database_name = "catalog-db"
 database_id = "c053e4e5-df6e-4eba-9e99-b5f05c18888b"
 
+# Published designs + variant config (Products tab, variant pricing mirror)
+[[d1_databases]]
+binding = "CREATOR_DB"
+database_name = "creator-db"
+database_id = "9c7965da-2cad-40af-a6fa-1a4ce6c4d116"
+
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
