@@ -281,7 +281,11 @@ export async function handleManufacturerRouter(request, env) {
     const u = manufacturerDbUnavailable(cors);
     return json(u.body, u.status, cors);
   }
-  await ensureManufacturerSchema(env);
+  try {
+    await ensureManufacturerSchema(env);
+  } catch (err) {
+    console.warn("[manufacturerRouter] ensureManufacturerSchema:", err?.message || err);
+  }
 
   if (op === "partner-application-status" && request.method === "GET") {
     const auth = await requirePartnerSession(request, env);
