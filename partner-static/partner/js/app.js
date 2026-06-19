@@ -1,5 +1,14 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/shared/js/partner-api.js";
-import { initShell, openModal, closeModal, showToast, renderTable } from "/shared/js/partner-shell.js";
+import { initShell, openModal, closeModal, showToast, renderTable, setTopbarExtra } from "/shared/js/partner-shell.js";
+
+const PAGE_LABELS = {
+  "/": "Overview",
+  "/company": "Company",
+  "/catalog": "Catalog",
+  "/orders": "Orders",
+  "/api": "API",
+  "/certification": "Certification",
+};
 
 const NAV = [
   { route: "/", label: "Overview", icon: "⌘" },
@@ -149,7 +158,7 @@ async function enterFullPortal(route = "/") {
   sessionMode = "full";
   showShell();
   if (!shellInitialized) {
-    initShell({ navItems: NAV, onRoute, brandSub: "Manufacturer Portal" });
+    initShell({ navItems: NAV, onRoute, brandSub: "Manufacturer Portal", crumbLabels: PAGE_LABELS });
     shellInitialized = true;
   }
   const onStatusPage =
@@ -245,12 +254,11 @@ async function renderApplicationStatus() {
 
 async function renderOverview() {
   const el = document.getElementById("view-overview");
+  setTopbarExtra("");
   const { dashboard } = await partnerFetch("manufacturer-dashboard");
   const kpis = dashboard?.kpis || {};
   el.innerHTML = `
-    <h1 class="stage-title">Overview</h1>
-    <p class="stage-desc">Your manufacturer workspace at a glance.</p>
-    <div class="kpi-grid" style="margin-top:20px">
+    <div class="kpi-grid">
       ${kpiCard("Products", kpis.products_total ?? 0)}
       ${kpiCard("Pending review", kpis.products_pending ?? 0)}
       ${kpiCard("Open orders", kpis.orders_open ?? 0)}
@@ -272,16 +280,13 @@ function actionRow(item) {
 
 async function renderCompany() {
   const el = document.getElementById("view-company");
+  setTopbarExtra(`<button type="button" class="btn btn-primary" id="btn-add-location">Add location</button>`);
   const [{ manufacturer, certification_progress }, { locations }] = await Promise.all([
     partnerFetch("manufacturer-get"),
     partnerFetch("manufacturer-location-list"),
   ]);
   document.getElementById("sidebar-progress").textContent = `Artifact Ready ${certification_progress?.pct ?? 0}%`;
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:18px">
-      <div><h1 class="stage-title">Company & locations</h1><p class="stage-desc">Legal profile and fulfillment locations.</p></div>
-      <button type="button" class="btn btn-primary" id="btn-add-location">Add location</button>
-    </div>
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-header"><strong>Company profile</strong><button type="button" class="btn btn-secondary" id="btn-save-company">Save</button></div>
       <div class="panel-body split-row">
@@ -342,17 +347,13 @@ function field(key, label, value) {
 async function renderCatalog() {
   const el = document.getElementById("view-catalog");
   const tab = sessionStorage.getItem("catalog_tab") || "products";
+  setTopbarExtra(`<button type="button" class="btn btn-primary" id="btn-catalog-primary">${tab === "blueprints" ? "New blueprint" : "Add product"}</button>`);
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:18px">
-      <div>
-        <h1 class="stage-title">Catalog</h1>
-        <p class="stage-desc">Products and Universal Blueprints for creator-ready listings.</p>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button type="button" class="btn ${tab === "products" ? "btn-primary" : "btn-secondary"}" data-catalog-tab="products">Products</button>
-          <button type="button" class="btn ${tab === "blueprints" ? "btn-primary" : "btn-secondary"}" data-catalog-tab="blueprints">Blueprints</button>
-        </div>
+    <div class="catalog-toolbar" style="margin-bottom:14px">
+      <div class="pill-tabs">
+        <button type="button" class="pill-tab ${tab === "products" ? "active" : ""}" data-catalog-tab="products">Products</button>
+        <button type="button" class="pill-tab ${tab === "blueprints" ? "active" : ""}" data-catalog-tab="blueprints">Blueprints</button>
       </div>
-      <button type="button" class="btn btn-primary" id="btn-catalog-primary">${tab === "blueprints" ? "New blueprint" : "Add product"}</button>
     </div>
     <div id="catalog-panel"></div>`;
 
@@ -667,11 +668,10 @@ async function openProductModal(productId) {
 
 async function renderOrders() {
   const el = document.getElementById("view-orders");
+  setTopbarExtra("");
   const { orders } = await partnerFetch("manufacturer-order-list");
   el.innerHTML = `
-    <h1 class="stage-title">Orders & fulfillment</h1>
-    <p class="stage-desc">Accept test orders, download print files, add tracking.</p>
-    <div class="panel" style="margin-top:18px"><div class="panel-body">${renderTable(
+    <div class="panel"><div class="panel-body">${renderTable(
       ["Order", "Status", "Tracking", "Actions"],
       (orders || []).map((o) => `<tr>
         <td>${escapeHtml(o.order_number || o.id)}</td>
@@ -731,15 +731,15 @@ function bindOrderActions(root) {
 }
 
 function renderApiDocs() {
+  setTopbarExtra("");
   document.getElementById("view-api").innerHTML = `
-    <h1 class="stage-title">API & webhooks</h1>
-    <p class="stage-desc">V1: documentation preview. API keys ship in a later release.</p>
     <div class="code-panel"><pre>POST ${location.origin}?op=manufacturer-product-list
 Cookie: partner_session=…</pre></div>`;
 }
 
 async function renderCertification() {
   const el = document.getElementById("view-certification");
+  setTopbarExtra("");
   const { certifications } = await partnerFetch("manufacturer-certification-list");
   el.innerHTML = `
     <div class="cert-hero"><h2>Certification</h2><p>Complete checklist items to unlock Artifact Ready status.</p></div>

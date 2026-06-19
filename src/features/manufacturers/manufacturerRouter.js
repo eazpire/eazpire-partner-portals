@@ -176,6 +176,8 @@ const ADMIN_OPS = new Set([
   "admin-partner-fulfillment-providers",
   "admin-partner-catalog-blueprints",
   "admin-partner-sync-printify",
+  "admin-catalog-studio-tree",
+  "admin-catalog-studio-products",
   "admin-eazpire-product-list",
   "admin-eazpire-product-get",
   "admin-eazpire-product-update",
@@ -521,6 +523,24 @@ export async function handleManufacturerRouter(request, env) {
         );
       }
     }
+
+    const catalogStudio = await import("./partnerCatalog/catalogStudioService.js");
+
+    if (op === "admin-catalog-studio-tree" && request.method === "GET") {
+      const result = await catalogStudio.getCatalogStudioTree(db);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-catalog-studio-products" && request.method === "GET") {
+      const filter = url.searchParams.get("filter") || "available";
+      const result = await catalogStudio.getCatalogStudioProducts(db, {
+        manufacturerId: url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id"),
+        providerExternalId: url.searchParams.get("provider_id") || url.searchParams.get("print_provider_id"),
+        filter,
+      });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+
     if (op === "admin-eazpire-product-list" && request.method === "GET") {
       const products = await listEazpireProducts(db, {
         manufacturerId: url.searchParams.get("manufacturer_id") || undefined,

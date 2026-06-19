@@ -150,10 +150,56 @@ export function confirmAction({
 }
 
 function navItemHtml(item) {
-  return `<button type="button" class="nav-item" data-route="${escapeHtml(item.route)}"><span class="nav-icon">${item.icon || "•"}</span>${escapeHtml(item.label)}</button>`;
+  return `<button type="button" class="nav-item" data-route="${escapeHtml(item.route)}"><span class="nav-icon">${item.icon || "•"}</span><span class="nav-label">${escapeHtml(item.label)}</span></button>`;
 }
 
 const MOBILE_DRAWER_MQ = "(max-width: 768px)";
+const DESKTOP_SIDEBAR_MQ = "(min-width: 769px)";
+const SIDEBAR_COLLAPSED_KEY = "partner_shell_sidebar_collapsed";
+
+function isDesktopSidebar() {
+  return window.matchMedia(DESKTOP_SIDEBAR_MQ).matches;
+}
+
+function isSidebarCollapsed() {
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+}
+
+function setSidebarCollapsed(collapsed) {
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  document.querySelectorAll(".app-root:not(.app-root--full)").forEach((shell) => {
+    shell.classList.toggle("sidebar-collapsed", collapsed && isDesktopSidebar());
+    const btn = shell.querySelector("#sidebar-collapse");
+    if (btn) {
+      btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+      btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+      btn.textContent = collapsed ? "›" : "‹";
+    }
+  });
+}
+
+function initDesktopSidebarCollapse(shell) {
+  if (!shell || shell.classList.contains("app-root--full")) return;
+
+  const collapseBtn = shell.querySelector("#sidebar-collapse");
+  if (!collapseBtn) return;
+
+  const apply = () => {
+    const collapsed = isSidebarCollapsed();
+    shell.classList.toggle("sidebar-collapsed", collapsed && isDesktopSidebar());
+    collapseBtn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    collapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    collapseBtn.textContent = collapsed ? "›" : "‹";
+  };
+
+  apply();
+  collapseBtn.addEventListener("click", () => {
+    if (!isDesktopSidebar()) return;
+    setSidebarCollapsed(!isSidebarCollapsed());
+  });
+
+  window.matchMedia(DESKTOP_SIDEBAR_MQ).addEventListener("change", apply);
+}
 
 function getActiveShell() {
   return document.querySelector(".app-root:not([hidden]):not(.app-root--full)");
@@ -268,6 +314,7 @@ export function initShell({ navItems, navSections, onRoute, brandSub = "Manufact
 
   const shell = document.getElementById("app-shell");
   initMobileShell(shell);
+  initDesktopSidebarCollapse(shell);
 
   const initial = location.pathname.replace(/\/$/, "") || "/";
   navigate(initial === "" ? "/" : initial, onRoute, true);
@@ -284,11 +331,14 @@ export function navigate(route, onRoute, replace = false) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   const view = document.querySelector(`.view[data-route="${path}"]`) || document.querySelector('.view[data-route="/"]');
   view?.classList.add("active");
-  const crumb = document.getElementById("crumb-current");
-  if (crumb) {
-    const labels = initShell._crumbLabels || {};
-    crumb.textContent = labels[path] || (path === "/" ? "Overview" : path.replace(/^\/partner\/?/, "").replace(/\//g, " / ") || "Overview");
-  }
+  const titleEl = document.getElementById("page-title");
+  const labels = initShell._crumbLabels || {};
+  const pageTitle =
+    labels[path] ||
+    (path === "/" || path === "/partner" ? labels["/"] || labels["/partner"] || "Overview" : path.replace(/^\/partner\/?/, "").replace(/\//g, " / ") || "Overview");
+  if (titleEl) titleEl.textContent = pageTitle;
+  const legacyCrumb = document.getElementById("crumb-current");
+  if (legacyCrumb) legacyCrumb.textContent = pageTitle;
   onRoute(path);
 }
 

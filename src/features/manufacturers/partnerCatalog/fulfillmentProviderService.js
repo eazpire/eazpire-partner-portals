@@ -1,5 +1,5 @@
 /**
- * Fulfillment providers (sub-providers under a partner)
+ * Fulfillment providers (Providers under a Partner)
  */
 
 import { newId, parseJson } from "../db.js";

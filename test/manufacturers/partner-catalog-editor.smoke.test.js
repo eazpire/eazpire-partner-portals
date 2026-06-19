@@ -66,11 +66,14 @@ describe("partner catalog editor assets (smoke)", () => {
     }
   });
 
-  it("app.js opens editor from Eazpire products list", () => {
-    const src = readFileSync(join(root, "admin-partner-portal/js/app.js"), "utf8");
-    expect(src).toContain('import { openProductEditor } from "./catalog-editor/shell.js"');
-    expect(src).toContain("admin-eazpire-catalog-mirror-status-v2");
-    expect(src).toContain("openProductEditor");
+  it("catalog studio opens editor and mirror from product list", () => {
+    const appSrc = readFileSync(join(root, "admin-partner-portal/js/app.js"), "utf8");
+    expect(appSrc).toContain('import { mountCatalogStudio } from "./catalog-studio.js"');
+    const studioSrc = readFileSync(join(root, "admin-partner-portal/js/catalog-studio.js"), "utf8");
+    expect(studioSrc).toContain('import { openProductEditor } from "./catalog-editor/shell.js"');
+    expect(studioSrc).toContain("admin-eazpire-catalog-mirror-run");
+    expect(studioSrc).toContain("admin-catalog-studio-tree");
+    expect(studioSrc).toContain("openProductEditor");
   });
 
   it("migration 0015 defines shadow tables", () => {

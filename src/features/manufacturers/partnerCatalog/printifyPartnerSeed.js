@@ -61,7 +61,9 @@ export async function listPartnersForAdmin(db) {
     slug: row.slug,
     status: row.status,
     integration_type: row.integration_type,
+    /** @deprecated use provider_count */
     fulfillment_provider_count: Number(row.fulfillment_provider_count || 0),
+    provider_count: Number(row.fulfillment_provider_count || 0),
     live_blueprint_count: Number(row.live_blueprint_count || 0),
     eazpire_product_count: Number(row.eazpire_product_count || 0),
   }));

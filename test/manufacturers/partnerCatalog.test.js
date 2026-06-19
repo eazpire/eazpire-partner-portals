@@ -28,6 +28,8 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-catalog-mirror-status",
     "admin-eazpire-catalog-mirror-run",
     "admin-eazpire-catalog-mirror-status-v2",
+    "admin-catalog-studio-tree",
+    "admin-catalog-studio-products",
     "admin-eazpire-product-editor-bundle",
     "admin-eazpire-product-meta-save",
     "admin-eazpire-product-providers-bundle",

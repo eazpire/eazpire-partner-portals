@@ -1,6 +1,7 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { initShell, openModal, closeModal, confirmAction, openActionModeModal, showToast, renderTable, setTopbarExtra } from "/partner/shared/js/partner-shell.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
+import { mountCatalogStudio } from "./catalog-studio.js";
 
 const NAV_CORE = [
   { route: "/partner", label: "Command Center", icon: "⌘" },
@@ -57,31 +58,6 @@ function commandTimeTabsHtml(activeKey) {
   ).join("")}</div>`;
 }
 
-const CATALOG_STUDIO_TABS = [
-  { key: "partners", label: "Partners" },
-  { key: "eazpire", label: "Eazpire Products" },
-  { key: "review", label: "Review Queue" },
-];
-
-function getCatalogStudioTab() {
-  const tab = sessionStorage.getItem("admin_catalog_studio_tab") || "partners";
-  return CATALOG_STUDIO_TABS.some((t) => t.key === tab) ? tab : "partners";
-}
-
-function setCatalogStudioTab(tab) {
-  sessionStorage.setItem("admin_catalog_studio_tab", tab);
-  renderCatalog();
-}
-
-function getCatalogTab() {
-  const tab = sessionStorage.getItem("admin_catalog_tab") || "products";
-  return tab === "blueprints" ? "blueprints" : "products";
-}
-
-function setCatalogTab(tab) {
-  sessionStorage.setItem("admin_catalog_tab", tab === "blueprints" ? "blueprints" : "products");
-  renderCatalog();
-}
 
 function getNetworkTab() {
   const fromUrl = new URLSearchParams(location.search).get("tab");
@@ -161,10 +137,6 @@ function entityCell(name, sub = "") {
   return `<div class="entity"><div class="avatar">${escapeHtml(initials(name))}</div><div><strong>${escapeHtml(name)}</strong>${sub ? `<span>${escapeHtml(sub)}</span>` : ""}</div></div>`;
 }
 
-function stageHeading(kicker, title, desc, actionsHtml = "") {
-  return `<div class="stage-heading"><div><div class="stage-kicker">${escapeHtml(kicker)}</div><h1 class="stage-title">${escapeHtml(title)}</h1><p class="stage-desc">${escapeHtml(desc)}</p></div>${actionsHtml}</div>`;
-}
-
 function applyRouteTheme(route) {
   const body = document.body;
   body.classList.remove("theme-studio", "theme-ops", "theme-api", "theme-cert");
@@ -228,12 +200,9 @@ async function renderCommand() {
   const timeLabel = COMMAND_TIME_RANGES.find((r) => r.key === timeRange)?.label || "Today";
 
   el.innerHTML = `
-    ${stageHeading(
-      "Overview",
-      "Command Center",
-      "Network health, risk radar, and manufacturer onboarding pipeline.",
-      commandTimeTabsHtml(timeRange)
-    )}
+    <div class="page-toolbar" style="margin-bottom:14px;display:flex;justify-content:flex-end">
+      ${commandTimeTabsHtml(timeRange)}
+    </div>
     <p class="command-time-hint">Showing all-time network data · selected range: ${escapeHtml(timeLabel)} (V1)</p>
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label">Active Manufacturers</div><div class="kpi-value">${escapeHtml(kpis.manufacturers_total ?? 0)}</div><div class="kpi-trend">↗ network total</div></div>
@@ -318,12 +287,6 @@ async function renderManufacturers() {
   ).join("");
 
   el.innerHTML = `
-    ${stageHeading(
-      "Core Portal",
-      "Manufacturers",
-      "Review applications and manage approved partners in the Eazpire manufacturer network.",
-      `<button type="button" class="btn btn-primary" id="btn-invite-heading">Invite Partner</button>`
-    )}
     <div class="catalog-toolbar" style="margin-bottom:14px">
       <div class="pill-tabs">${tabsHtml}</div>
     </div>
@@ -341,7 +304,6 @@ async function renderManufacturers() {
 
   const openInvite = () => inviteManufacturerModal(el);
   document.getElementById("btn-invite")?.addEventListener("click", openInvite);
-  document.getElementById("btn-invite-heading")?.addEventListener("click", openInvite);
 
   bindNetworkTabActions(el, tab);
 }
@@ -640,253 +602,8 @@ function inviteManufacturerModal(el) {
 async function renderCatalog() {
   setTopbarExtra("");
   const el = document.getElementById("view-catalog");
-  const studioTab = getCatalogStudioTab();
-  const { products: pendingProducts } = await partnerFetch("admin-manufacturer-product-list", {
-    query: { status: "pending_review" },
-  });
-  const { blueprints: pendingBlueprints } = await partnerFetch("admin-blueprint-list", {
-    query: { status: "pending_admin_review" },
-  });
-  const pendingCount = (pendingProducts || []).length;
-  const blueprintCount = (pendingBlueprints || []).length;
-
-  el.innerHTML = `
-    ${stageHeading(
-      "Catalog Studio",
-      "Catalog Studio",
-      "Manage partner catalogs, Eazpire shop products, and manufacturer review queues.",
-      `<button type="button" class="btn btn-secondary" id="btn-catalog-mirror">Mirror to publish index</button>
-       <button type="button" class="btn btn-primary" id="btn-catalog-refresh">Refresh</button>`
-    )}
-    <div class="catalog-toolbar" style="margin-bottom:16px">
-      <div class="pill-tabs">
-        ${CATALOG_STUDIO_TABS.map(
-          (t) =>
-            `<button type="button" class="pill-tab ${studioTab === t.key ? "active" : ""}" data-studio-tab="${t.key}">${t.label}${
-              t.key === "review" ? ` (${pendingCount + blueprintCount})` : ""
-            }</button>`
-        ).join("")}
-      </div>
-    </div>
-    <div id="admin-catalog-panel"></div>`;
-
-  el.querySelectorAll("[data-studio-tab]").forEach((btn) => {
-    btn.onclick = () => setCatalogStudioTab(btn.dataset.studioTab);
-  });
-  document.getElementById("btn-catalog-refresh").onclick = () => renderCatalog();
-  document.getElementById("btn-catalog-mirror").onclick = async () => {
-    const result = await partnerFetch("admin-eazpire-catalog-mirror-run", { method: "POST", body: {} });
-    showToast("Mirror complete", `${result.mirrored ?? 0} product(s) synced to publish index`);
-    await renderCatalog();
-  };
-
-  const panel = document.getElementById("admin-catalog-panel");
-  if (studioTab === "partners") await renderPartnerCatalogPanel(panel);
-  else if (studioTab === "eazpire") await renderEazpireProductsPanel(panel);
-  else await renderCatalogReviewPanel(panel, pendingProducts || [], pendingBlueprints || []);
-}
-
-async function renderPartnerCatalogPanel(panel) {
-  const { partners } = await partnerFetch("admin-partner-list");
-  const printify = (partners || []).find((p) => p.slug === "printify") || partners?.[0];
-  let providers = [];
-  let blueprints = [];
-  if (printify) {
-    const provData = await partnerFetch("admin-partner-fulfillment-providers", {
-      query: { manufacturer_id: printify.id },
-    });
-    providers = provData.providers || [];
-    const bpData = await partnerFetch("admin-partner-catalog-blueprints", {
-      query: { manufacturer_id: printify.id, status: "live" },
-    });
-    blueprints = bpData.blueprints || [];
-  }
-
-  panel.innerHTML = `
-    <div class="split-row" style="align-items:flex-start;gap:16px">
-      <div class="panel" style="flex:1">
-        <div class="panel-header">
-          <div><h2 class="panel-title">Partners</h2><p class="panel-subtitle">Fulfillment aggregators & manufacturers</p></div>
-          <button type="button" class="btn btn-primary" id="btn-sync-printify">Sync Printify catalog</button>
-        </div>
-        <div class="panel-body">${renderTable(
-          ["Partner", "Type", "Sub-providers", "Blueprints", "Eazpire products"],
-          (partners || [])
-            .map(
-              (p) => `<tr>
-            <td>${entityCell(p.name, p.slug)}</td>
-            <td>${escapeHtml(p.integration_type)}</td>
-            <td>${escapeHtml(p.fulfillment_provider_count ?? 0)}</td>
-            <td>${escapeHtml(p.live_blueprint_count ?? 0)}</td>
-            <td>${escapeHtml(p.eazpire_product_count ?? 0)}</td>
-          </tr>`
-            )
-            .join("")
-        )}</div>
-      </div>
-      <div class="panel" style="flex:1">
-        <div class="panel-header"><div><h2 class="panel-title">${escapeHtml(printify?.name || "Partner")} — Sub-providers</h2></div></div>
-        <div class="panel-body">${providers.length ? renderTable(
-          ["Name", "External ID", "Status"],
-          providers
-            .map(
-              (fp) => `<tr>
-            <td>${escapeHtml(fp.name)}</td>
-            <td>${escapeHtml(fp.external_provider_id)}</td>
-            <td><span class="badge badge-success">${escapeHtml(fp.status)}</span></td>
-          </tr>`
-            )
-            .join("")
-        ) : `<div class="empty-state"><p>No sub-providers synced yet. Run Printify sync.</p></div>`}</div>
-      </div>
-    </div>
-    <div class="panel" style="margin-top:16px">
-      <div class="panel-header"><div><h2 class="panel-title">Partner catalog (live blueprints)</h2><p class="panel-subtitle">${blueprints.length} blueprint(s)</p></div></div>
-      <div class="panel-body">${blueprints.length ? renderTable(
-        ["Title", "Category", "Quality", "Updated"],
-        blueprints
-          .slice(0, 50)
-          .map(
-            (b) => `<tr>
-          <td>${escapeHtml(b.title)}</td>
-          <td>${escapeHtml(b.normalized_category || "—")}</td>
-          <td>${escapeHtml(b.quality_score ?? "—")}</td>
-          <td>${escapeHtml(b.updated_at ? new Date(b.updated_at).toLocaleDateString() : "—")}</td>
-        </tr>`
-          )
-          .join("")
-      ) : `<div class="empty-state"><p>Run Printify sync to import blueprints for online products.</p></div>`}</div>
-    </div>`;
-
-  document.getElementById("btn-sync-printify").onclick = async () => {
-    try {
-      showToast("Syncing Printify…", "Online products only");
-      const result = await partnerFetch("admin-partner-sync-printify", { method: "POST", body: {} });
-      const s = result.sync?.synced || {};
-      showToast("Printify sync complete", `${s.blueprints ?? 0} blueprint(s), ${result.import?.count ?? 0} product(s) imported`);
-      await renderCatalog();
-    } catch (e) {
-      const hint = e.data?.hint ? String(e.data.hint).slice(0, 120) : "";
-      showToast("Sync failed", `${e.message}${hint ? " — " + hint : ""}`);
-    }
-  };
-}
-
-async function renderEazpireProductsPanel(panel) {
-  const { products } = await partnerFetch("admin-eazpire-product-list");
-  let driftHtml = "";
-  try {
-    const drift = await partnerFetch("admin-eazpire-catalog-mirror-status-v2");
-    driftHtml = `<p class="panel-subtitle">${drift.in_sync ?? 0} / ${drift.total ?? 0} in sync with publish index (drift v2)</p>`;
-  } catch {
-    driftHtml = "";
-  }
-
-  panel.innerHTML = `
-    <div class="panel">
-      <div class="panel-header">
-        <div><h2 class="panel-title">Eazpire shop products</h2>${driftHtml}</div>
-        <button type="button" class="btn btn-secondary" id="btn-import-catalog">Import from publish index</button>
-      </div>
-      <div class="panel-body">${(products || []).length ? renderTable(
-        ["Product key", "Title", "Status", "Versions", ""],
-        (products || [])
-          .map(
-            (p) => `<tr>
-          <td><code>${escapeHtml(p.product_key)}</code></td>
-          <td>${escapeHtml(p.title)}</td>
-          <td><span class="badge ${p.catalog_status === "online" ? "badge-success" : "badge-secondary"}">${escapeHtml(p.catalog_status)}</span></td>
-          <td>${escapeHtml(p.version_count ?? 0)}</td>
-          <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(p.product_key)}">Edit</button></td>
-        </tr>`
-          )
-          .join("")
-      ) : `<div class="empty-state"><h3>No Eazpire products yet</h3><p>Run Printify sync or import from publish index.</p></div>`}</div>
-    </div>`;
-
-  document.getElementById("btn-import-catalog").onclick = async () => {
-    const result = await partnerFetch("admin-eazpire-catalog-import", { method: "POST", body: {} });
-    showToast("Import complete", `${result.count ?? 0} online product(s)`);
-    await renderCatalog();
-  };
-
-  panel.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
-    btn.onclick = () => openProductEditor(btn.dataset.key);
-  });
-}
-
-async function renderCatalogReviewPanel(panel, pendingProducts, pendingBlueprints) {
-  const tab = getCatalogTab();
-  panel.innerHTML = `
-    <div class="catalog-toolbar">
-      <div class="pill-tabs">
-        <button type="button" class="pill-tab ${tab === "products" ? "active" : ""}" data-admin-tab="products">Product review (${pendingProducts.length})</button>
-        <button type="button" class="pill-tab ${tab === "blueprints" ? "active" : ""}" data-admin-tab="blueprints">Blueprint review (${pendingBlueprints.length})</button>
-      </div>
-    </div>
-    <div id="admin-catalog-review-inner"></div>`;
-  panel.querySelectorAll("[data-admin-tab]").forEach((btn) => {
-    btn.onclick = () => setCatalogTab(btn.dataset.adminTab);
-  });
-  const inner = document.getElementById("admin-catalog-review-inner");
-  if (tab === "blueprints") await renderBlueprintReview(inner, pendingBlueprints);
-  else await renderProductReview(inner, pendingProducts);
-}
-
-async function renderProductReview(panel, products) {
-  if (!products?.length) {
-    panel.innerHTML = `<div class="empty-state"><div class="icon">▦</div><h3>No products pending</h3><p>Manufacturer product submissions will appear here for review.</p></div>`;
-    return;
-  }
-
-  panel.innerHTML = `<div class="card-grid catalog-grid">${products
-    .map(
-      (p) => `<article class="product-card">
-      <div class="product-image">📦</div>
-      <div class="product-card-content">
-        <h3>${escapeHtml(p.title)}</h3>
-        <p>${escapeHtml(p.manufacturer_name || p.manufacturer_id)} · pending review</p>
-        <div class="meta-row">
-          <span class="badge ${badgeForStatus(p.status)}">${escapeHtml(p.status)}</span>
-          <div style="display:flex;gap:6px">
-            <button type="button" class="btn btn-primary btn-approve-product" data-id="${escapeHtml(p.id)}">Approve</button>
-            <button type="button" class="btn btn-secondary btn-reject-product" data-id="${escapeHtml(p.id)}">Reject</button>
-          </div>
-        </div>
-      </div>
-    </article>`
-    )
-    .join("")}</div>`;
-
-  panel.querySelectorAll(".btn-approve-product").forEach((btn) => {
-    btn.onclick = () => {
-      confirmAction({
-        title: "Approve product",
-        message: "Approve this product for the catalog?",
-        confirmLabel: "Approve",
-        onConfirm: async () => {
-          await partnerFetch("admin-manufacturer-product-review", { method: "POST", body: { product_id: btn.dataset.id, approve: true } });
-          showToast("Product approved", "");
-          await renderCatalog();
-        },
-      });
-    };
-  });
-  panel.querySelectorAll(".btn-reject-product").forEach((btn) => {
-    btn.onclick = () => {
-      confirmAction({
-        title: "Reject product",
-        message: "Reject this product? The manufacturer will need to revise and resubmit.",
-        confirmLabel: "Reject",
-        confirmClass: "btn-danger",
-        onConfirm: async () => {
-          await partnerFetch("admin-manufacturer-product-review", { method: "POST", body: { product_id: btn.dataset.id, approve: false } });
-          showToast("Product rejected", "");
-          await renderCatalog();
-        },
-      });
-    };
-  });
+  el.innerHTML = "";
+  await mountCatalogStudio(el);
 }
 
 async function renderBlueprintReview(panel, blueprints) {
@@ -1014,18 +731,9 @@ async function renderOrders() {
   const el = document.getElementById("view-orders");
   const { board } = await partnerFetch("admin-manufacturer-orders-board");
 
-  el.innerHTML = `
-    ${stageHeading(
-      "Order Ops",
-      "Order Operations",
-      "Kanban command board for manufacturer order routing, production status, and fulfillment tracking.",
-      `<button type="button" class="btn btn-primary" id="btn-test-order-heading">Create Test Order</button>`
-    )}
-    <div class="kanban-board">${KANBAN_COLS.map((col) => kanbanCol(col, board?.[col.key] || [])).join("")}</div>`;
+  el.innerHTML = `<div class="kanban-board">${KANBAN_COLS.map((col) => kanbanCol(col, board?.[col.key] || [])).join("")}</div>`;
 
-  const openTestOrder = () => testOrderModal();
-  document.getElementById("btn-test-order")?.addEventListener("click", openTestOrder);
-  document.getElementById("btn-test-order-heading")?.addEventListener("click", openTestOrder);
+  document.getElementById("btn-test-order")?.addEventListener("click", testOrderModal);
 }
 
 function kanbanCol(col, orders) {
@@ -1069,12 +777,6 @@ async function renderApi() {
   setTopbarExtra(`<button type="button" class="btn btn-primary" disabled title="Coming in V2">Generate API Key</button>`);
   const el = document.getElementById("view-api");
   el.innerHTML = `
-    ${stageHeading(
-      "API Console",
-      "API Developer Console",
-      "Documentation-first developer experience for API partners: keys, webhooks, sandbox orders, and payload examples.",
-      `<button type="button" class="btn btn-primary" disabled>Generate API Key</button>`
-    )}
     <div class="api-layout">
       <aside class="panel">
         <div class="panel-header"><div><h2 class="panel-title">API Navigation</h2><p class="panel-subtitle">Docs sidebar component</p></div></div>
@@ -1122,12 +824,6 @@ async function renderCertification() {
   const ringPct = avgScore === "—" ? 0 : Math.min(100, Number(avgScore));
 
   el.innerHTML = `
-    ${stageHeading(
-      "Certification HQ",
-      "Certification HQ",
-      "Trust, safety and certification dashboard for Verified Manufacturer, Artifact Ready, and quality badges.",
-      `<button type="button" class="btn btn-primary" disabled>Run Review</button>`
-    )}
     <div class="cert-layout">
       <section>
         <div class="cert-hero">
