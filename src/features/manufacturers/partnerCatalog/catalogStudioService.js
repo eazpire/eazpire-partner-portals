@@ -15,6 +15,8 @@ const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
 /** List view must not fan out to Printify (subrequest / CPU limits with ~1000+ blueprints). */
 const BLUEPRINT_API_LIST_FALLBACK_MAX = 0;
+/** Skip manufacturer raw_json enrichment above this count (Worker CPU/memory). */
+const AVAILABLE_BULK_ENRICHMENT_MAX = 0;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
@@ -312,6 +314,10 @@ function itemCategoryFields(item) {
 
 function enrichItemsWithCategory(items) {
   return items.map((row) => ({ ...row, ...itemCategoryFields(row) }));
+}
+
+function slimMockImagesForList(urls, max = 3) {
+  return (urls || []).slice(0, max);
 }
 
 function buildProductsResponse(filter, items) {
@@ -832,57 +838,86 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
   const catalogDb = env.CATALOG_DB;
   if (!catalogDb) return listAvailableBlueprints(mfgDb, manufacturerId);
 
-  const linkedRows = await queryAll(
-    mfgDb,
-    `SELECT DISTINCT pb.external_blueprint_id
-     FROM eazpire_products ep
-     INNER JOIN manufacturer_eazpire_blueprints eb ON eb.id = ep.source_blueprint_id
-     INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
-     WHERE ep.manufacturer_id = ?`,
-    manufacturerId
-  );
-  const linkedExternalIds = new Set(linkedRows.map((r) => String(r.external_blueprint_id)));
+  try {
+    const linkedRows = await queryAll(
+      mfgDb,
+      `SELECT DISTINCT pb.external_blueprint_id
+       FROM eazpire_products ep
+       INNER JOIN manufacturer_eazpire_blueprints eb ON eb.id = ep.source_blueprint_id
+       INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
+       WHERE ep.manufacturer_id = ?`,
+      manufacturerId
+    );
+    const linkedExternalIds = new Set(linkedRows.map((r) => String(r.external_blueprint_id)));
 
-  const usedInCatalog = await catalogDb
-    .prepare(
-      `SELECT DISTINCT blueprint_id FROM product_publish_profiles
-       WHERE blueprint_id IS NOT NULL AND source_system = 'printify'`
-    )
-    .all();
-  const usedCatalogIds = new Set((usedInCatalog?.results || []).map((r) => r.blueprint_id));
+    const usedInCatalog = await catalogDb
+      .prepare(
+        `SELECT DISTINCT blueprint_id FROM product_publish_profiles
+         WHERE blueprint_id IS NOT NULL AND source_system = 'printify'`
+      )
+      .all();
+    const usedCatalogIds = new Set((usedInCatalog?.results || []).map((r) => r.blueprint_id));
 
-  const all = await catalogDb
-    .prepare(
-      `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
-       FROM printify_blueprints
-       ORDER BY category, title`
-    )
-    .all();
+    let blueprintRows = [];
+    try {
+      const all = await catalogDb
+        .prepare(
+          `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
+           FROM printify_blueprints
+           ORDER BY category, title`
+        )
+        .all();
+      blueprintRows = all?.results || [];
+    } catch (queryErr) {
+      const msg = String(queryErr?.message || queryErr);
+      if (!msg.includes("no such column")) throw queryErr;
+      const all = await catalogDb
+        .prepare(
+          `SELECT id, title, images_json, print_provider_count
+           FROM printify_blueprints
+           ORDER BY title`
+        )
+        .all();
+      blueprintRows = (all?.results || []).map((row) => ({
+        ...row,
+        category: null,
+        audience: null,
+        shipping_countries: null,
+        print_providers_json: null,
+      }));
+    }
 
-  const items = [];
-  for (const bp of all?.results || []) {
-    if (usedCatalogIds.has(bp.id)) continue;
-    if (linkedExternalIds.has(String(bp.id))) continue;
-    if (!blueprintSupportsProvider(bp.print_providers_json, providerExternalId)) continue;
+    const items = [];
+    for (const bp of blueprintRows) {
+      if (usedCatalogIds.has(bp.id)) continue;
+      if (linkedExternalIds.has(String(bp.id))) continue;
+      if (!blueprintSupportsProvider(bp.print_providers_json, providerExternalId)) continue;
 
-    items.push({
-      kind: "blueprint",
-      blueprint_id: `printify-${bp.id}`,
-      printify_blueprint_id: bp.id,
-      blueprint_key: String(bp.id),
-      title: bp.title,
-      category: bp.category || "Sonstiges",
-      audience: bp.audience,
-      catalog_status: "available",
-      mock_images: parseCatalogImagesJson(bp.images_json),
-      print_areas: [],
-      provider_count: bp.print_provider_count || 0,
-      shipping_countries_raw: bp.shipping_countries,
-      shipping_countries: formatShippingCountriesDisplay(parseShippingCountriesString(bp.shipping_countries)),
-    });
+      items.push({
+        kind: "blueprint",
+        blueprint_id: `printify-${bp.id}`,
+        printify_blueprint_id: bp.id,
+        blueprint_key: String(bp.id),
+        title: bp.title,
+        category: bp.category || "Sonstiges",
+        audience: bp.audience,
+        catalog_status: "available",
+        mock_images: slimMockImagesForList(parseCatalogImagesJson(bp.images_json)),
+        print_areas: [],
+        provider_count: bp.print_provider_count || 0,
+        shipping_countries_raw: bp.shipping_countries,
+        shipping_countries: formatShippingCountriesDisplay(parseShippingCountriesString(bp.shipping_countries)),
+      });
+    }
+
+    if (items.length <= AVAILABLE_BULK_ENRICHMENT_MAX) {
+      return enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items, { allowApiFallback: false });
+    }
+    return items;
+  } catch (err) {
+    console.error("[catalog-studio] listAvailablePrintifyBlueprints failed:", err?.message || err);
+    return listAvailableBlueprints(mfgDb, manufacturerId);
   }
-
-  return enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items, { allowApiFallback: false });
 }
 
 export {

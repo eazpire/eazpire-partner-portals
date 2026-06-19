@@ -807,7 +807,15 @@ export async function mountCatalogStudio(container) {
       provider_id: providerId || undefined,
       filter,
     },
+  }).catch((err) => {
+    productsEl.innerHTML = `<div class="empty-state"><h3>Could not load products</h3><p>${escapeHtml(err.message || String(err))}</p><button type="button" class="btn btn-primary" id="btn-catalog-retry">Retry</button></div>`;
+    productsEl.querySelector("#btn-catalog-retry")?.addEventListener("click", () => mountCatalogStudio(container));
+    const catTreeEl = container.querySelector("#catalog-studio-category-tree");
+    if (catTreeEl) catTreeEl.innerHTML = `<p class="text-muted">—</p>`;
+    return null;
   });
+
+  if (!productData) return;
 
   const allItems = productData.items || [];
   const categoryTree = productData.category_tree || [];

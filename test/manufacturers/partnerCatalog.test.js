@@ -469,7 +469,7 @@ describe("catalog studio service", () => {
     expect(merged.print_areas).toEqual(["back", "front"]);
   });
 
-  it("enriches available printify products from cached blueprint rows", async () => {
+  it("loads available printify products from catalog without bulk raw_json enrichment", async () => {
     const catalogRows = [
       {
         id: 145,
@@ -543,8 +543,8 @@ describe("catalog studio service", () => {
     expect(result.items[0].parent_group).toBe("Kleidung");
     expect(result.items[0].shipping_countries).toBe("CA, US");
     expect(result.items[0].mock_images).toContain("https://catalog/mock.png");
-    expect(result.items[0].mock_images).toContain("https://raw/mock.png");
-    expect(result.items[0].print_areas).toEqual(["back", "front", "sleeve_left"]);
+    expect(result.items[0].mock_images).not.toContain("https://raw/mock.png");
+    expect(result.items[0].print_areas).toEqual([]);
   });
 
   it("normalizes technical catalog_category_leaf for category tree", async () => {
@@ -563,6 +563,56 @@ describe("catalog studio service", () => {
       category: "T-Shirt",
       parent_group: "Kleidung",
     });
+  });
+
+  it("builds category tree for large available lists without throwing", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const catalogRows = Array.from({ length: 1200 }, (_, i) => ({
+      id: i + 1,
+      title: `Product ${i}`,
+      category: i % 2 === 0 ? "T-Shirts" : "Mugs",
+      audience: "Unisex",
+      shipping_countries: "US",
+      images_json: '["https://example.com/img.png"]',
+      print_providers_json: '[{"id":26}]',
+      print_provider_count: 1,
+    }));
+    const catalogDb = {
+      prepare: (sql) => ({
+        all: async () => {
+          if (sql.includes("FROM product_publish_profiles")) return { results: [] };
+          if (sql.includes("FROM printify_blueprints")) return { results: catalogRows };
+          return { results: [] };
+        },
+      }),
+    };
+    const mfgDb = {
+      prepare: (sql) => ({
+        bind: () => ({
+          first: async () => {
+            if (sql.includes("FROM manufacturers WHERE id = ? OR slug = ?")) {
+              return { id: "mfg_printify", slug: "printify" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products ep")) return { results: [] };
+            return { results: [] };
+          },
+        }),
+      }),
+    };
+
+    const result = await getCatalogStudioProducts(mfgDb, { CATALOG_DB: catalogDb }, {
+      manufacturerId: "mfg_printify",
+      filter: "available",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.total).toBe(1200);
+    expect(result.category_tree.length).toBeGreaterThan(0);
   });
 
   it("filters available printify products by provider id", async () => {
