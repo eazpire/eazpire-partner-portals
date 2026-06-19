@@ -484,6 +484,14 @@ describe("catalog studio service", () => {
     ];
     const catalogDb = {
       prepare: (sql) => ({
+        bind: (...args) => ({
+          all: async () => {
+            if (sql.includes("print_areas_json")) {
+              return { results: [{ id: 145, print_areas_json: '["neck"]' }] };
+            }
+            return { results: [] };
+          },
+        }),
         all: async () => {
           if (sql.includes("FROM product_publish_profiles")) return { results: [] };
           if (sql.includes("FROM printify_blueprints")) return { results: catalogRows };
@@ -542,9 +550,27 @@ describe("catalog studio service", () => {
     expect(result.items[0].category).toBe("T-Shirt");
     expect(result.items[0].parent_group).toBe("Kleidung");
     expect(result.items[0].shipping_countries).toBe("CA, US");
+    expect(result.items[0].shipping_country_codes).toEqual(["CA", "US"]);
     expect(result.items[0].mock_images).toContain("https://catalog/mock.png");
     expect(result.items[0].mock_images).not.toContain("https://raw/mock.png");
-    expect(result.items[0].print_areas).toEqual([]);
+    expect(result.items[0].print_areas).toEqual(["back", "front", "neck"]);
+  });
+
+  it("resolves Printify Choice US vs World from print_providers_json", async () => {
+    const { resolvePrintifyChoiceType } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    expect(
+      resolvePrintifyChoiceType(
+        JSON.stringify([{ id: 26, title: "Standard" }, { id: 99, title: "Printify Choice", location: { country: "US" } }])
+      )
+    ).toBe("us");
+    expect(
+      resolvePrintifyChoiceType(
+        JSON.stringify([{ id: 99, title: "Printify Choice World", location: { country: "US" } }])
+      )
+    ).toBe("world");
+    expect(resolvePrintifyChoiceType(JSON.stringify([{ id: 26 }]))).toBeNull();
   });
 
   it("normalizes technical catalog_category_leaf for category tree", async () => {
@@ -581,6 +607,12 @@ describe("catalog studio service", () => {
     }));
     const catalogDb = {
       prepare: (sql) => ({
+        bind: () => ({
+          all: async () => {
+            if (sql.includes("print_areas_json")) return { results: [] };
+            return { results: [] };
+          },
+        }),
         all: async () => {
           if (sql.includes("FROM product_publish_profiles")) return { results: [] };
           if (sql.includes("FROM printify_blueprints")) return { results: catalogRows };
@@ -599,6 +631,7 @@ describe("catalog studio service", () => {
           },
           all: async () => {
             if (sql.includes("FROM eazpire_products ep")) return { results: [] };
+            if (sql.includes("FROM manufacturer_provider_blueprints pb")) return { results: [] };
             return { results: [] };
           },
         }),
@@ -637,8 +670,19 @@ describe("catalog studio service", () => {
       },
     ];
     const catalogDb = {
-      prepare: () => ({
-        all: async () => ({ results: catalogRows }),
+      prepare: (sql) => ({
+        bind: () => ({
+          all: async () => {
+            if (sql.includes("print_areas_json")) return { results: [] };
+            if (sql.includes("FROM product_publish_profiles")) return { results: [] };
+            return { results: [] };
+          },
+        }),
+        all: async () => {
+          if (sql.includes("FROM product_publish_profiles")) return { results: [] };
+          if (sql.includes("FROM printify_blueprints")) return { results: catalogRows };
+          return { results: [] };
+        },
       }),
     };
     const mfgDb = {

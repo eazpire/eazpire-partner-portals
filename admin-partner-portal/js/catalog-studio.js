@@ -213,6 +213,69 @@ function formatPrintAreaLabel(key) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+let countryDisplayNames;
+function getCountryDisplayName(code) {
+  const c = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return c;
+  try {
+    if (!countryDisplayNames) {
+      countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+    }
+    return countryDisplayNames.of(c) || c;
+  } catch {
+    return c;
+  }
+}
+
+function countryCodeToFlag(code) {
+  const c = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return "";
+  const base = 0x1f1e6;
+  return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65);
+}
+
+function shippingCountryCodesFromRow(row) {
+  if (Array.isArray(row?.shipping_country_codes) && row.shipping_country_codes.length) {
+    return row.shipping_country_codes;
+  }
+  const raw = row?.shipping_countries;
+  if (!raw || typeof raw !== "string") return [];
+  return raw
+    .split(/[,;|/]+/)
+    .map((part) => part.trim().toUpperCase())
+    .filter((code) => /^[A-Z]{2}$/.test(code));
+}
+
+function renderShippingCountryFlags(row) {
+  const codes = shippingCountryCodesFromRow(row);
+  if (!codes.length) return `<span class="text-muted">—</span>`;
+  return `<div class="cs-country-flags">${codes
+    .map((code) => {
+      const flag = countryCodeToFlag(code);
+      const name = escapeHtml(getCountryDisplayName(code));
+      return `<span class="cs-country-flag" title="${name}" aria-label="${name}">${flag}</span>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderPrintifyChoiceBadge(choice) {
+  if (!choice) return "";
+  const labels = {
+    us: "Printify Choice US",
+    world: "Printify Choice World",
+  };
+  const label = labels[choice] || "Printify Choice";
+  const cls = choice === "world" ? "cs-pc-badge--world" : "cs-pc-badge--us";
+  return `<span class="badge cs-pc-badge ${cls}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function renderTitleCell(row) {
+  const title = escapeHtml(row.title || "—");
+  const badge = renderPrintifyChoiceBadge(row.printify_choice);
+  if (!badge) return title;
+  return `<div class="cs-title-cell"><span class="cs-title-cell__text">${title}</span>${badge}</div>`;
+}
+
 function renderPrintAreaBadges(areas) {
   if (!areas?.length) return `<span class="text-muted">—</span>`;
   return `<div class="cs-print-areas">${areas
@@ -554,10 +617,10 @@ function renderProductsTable(items, filter) {
           const rowId = `bp-${row.blueprint_id || i}`;
           return `<tr>
         <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
-        <td>${escapeHtml(row.title)}</td>
+        <td>${renderTitleCell(row)}</td>
         <td><code>${escapeHtml(row.blueprint_key || "—")}</code></td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${escapeHtml(row.shipping_countries || "—")}</td>
+        <td>${renderShippingCountryFlags(row)}</td>
         <td>${renderPrintAreaBadges(row.print_areas)}</td>
         <td>${statusBadge("available")}</td>
       </tr>`;
@@ -573,8 +636,8 @@ function renderProductsTable(items, filter) {
         const rowId = `pk-${row.product_key || i}`;
         return `<tr data-product-key="${escapeHtml(row.product_key)}">
       <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
-      <td><strong>${escapeHtml(row.title)}</strong><br><code class="text-muted">${escapeHtml(row.product_key)}</code></td>
-      <td>${escapeHtml(row.shipping_countries || "—")}</td>
+      <td><div class="cs-title-cell cs-title-cell--product"><strong class="cs-title-cell__text">${escapeHtml(row.title)}</strong>${renderPrintifyChoiceBadge(row.printify_choice)}<br><code class="text-muted">${escapeHtml(row.product_key)}</code></div></td>
+      <td>${renderShippingCountryFlags(row)}</td>
       <td>${renderPrintAreaBadges(row.print_areas)}</td>
       <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
       <td>${escapeHtml(row.version_count ?? 0)}</td>
