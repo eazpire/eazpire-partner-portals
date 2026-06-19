@@ -165,16 +165,22 @@ function isSidebarCollapsed() {
   return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
 }
 
+function updateSidebarRailUi(shell, collapsed) {
+  const btn = shell?.querySelector("#sidebar-collapse");
+  if (!btn) return;
+  const expanded = collapsed && isDesktopSidebar();
+  btn.setAttribute("aria-label", expanded ? "Expand sidebar" : "Collapse sidebar");
+  btn.title = expanded ? "Expand sidebar" : "Collapse sidebar";
+  const label = btn.querySelector(".sidebar-rail__label");
+  if (label) label.textContent = expanded ? "Expand" : "Collapse";
+}
+
 function setSidebarCollapsed(collapsed) {
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   document.querySelectorAll(".app-root:not(.app-root--full)").forEach((shell) => {
-    shell.classList.toggle("sidebar-collapsed", collapsed && isDesktopSidebar());
-    const btn = shell.querySelector("#sidebar-collapse");
-    if (btn) {
-      btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
-      btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
-      btn.textContent = collapsed ? "›" : "‹";
-    }
+    const isCollapsed = collapsed && isDesktopSidebar();
+    shell.classList.toggle("sidebar-collapsed", isCollapsed);
+    updateSidebarRailUi(shell, collapsed);
   });
 }
 
@@ -187,9 +193,7 @@ function initDesktopSidebarCollapse(shell) {
   const apply = () => {
     const collapsed = isSidebarCollapsed();
     shell.classList.toggle("sidebar-collapsed", collapsed && isDesktopSidebar());
-    collapseBtn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
-    collapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    collapseBtn.textContent = collapsed ? "›" : "‹";
+    updateSidebarRailUi(shell, collapsed);
   };
 
   apply();

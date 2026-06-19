@@ -241,13 +241,18 @@ export async function mountCatalogStudio(container) {
   const collapsed = isStudioSidebarCollapsed();
   container.innerHTML = `
     <div class="catalog-studio ${collapsed ? "catalog-studio--sidebar-collapsed" : ""}">
-      <aside class="catalog-studio-sidebar" id="catalog-studio-sidebar">
-        <div class="catalog-studio-sidebar-head">
-          <span class="catalog-studio-sidebar-label">Partners</span>
-          <button type="button" class="icon-btn catalog-studio-sidebar-toggle" id="catalog-studio-sidebar-toggle" aria-label="Collapse partner sidebar">‹</button>
-        </div>
-        <div class="catalog-studio-tree" id="catalog-studio-tree"><p class="catalog-studio-loading">Loading…</p></div>
-      </aside>
+      <div class="catalog-studio-sidebar-wrap">
+        <aside class="catalog-studio-sidebar" id="catalog-studio-sidebar">
+          <div class="catalog-studio-sidebar-head">
+            <span class="catalog-studio-sidebar-label">Partners</span>
+          </div>
+          <div class="catalog-studio-tree" id="catalog-studio-tree"><p class="catalog-studio-loading">Loading…</p></div>
+        </aside>
+        <button type="button" class="catalog-studio-rail" id="catalog-studio-sidebar-toggle" aria-label="Collapse partner sidebar" title="Collapse">
+          <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
+          <span class="catalog-studio-rail__label">${collapsed ? "Expand" : "Collapse"}</span>
+        </button>
+      </div>
       <div class="catalog-studio-main">
         <div class="catalog-studio-toolbar">
           <div class="pill-tabs" id="catalog-status-tabs"></div>
@@ -280,8 +285,16 @@ export async function mountCatalogStudio(container) {
   });
 
   container.querySelector("#catalog-studio-sidebar-toggle").onclick = () => {
-    setStudioSidebarCollapsed(!isStudioSidebarCollapsed());
-    studioEl.classList.toggle("catalog-studio--sidebar-collapsed");
+    const next = !isStudioSidebarCollapsed();
+    setStudioSidebarCollapsed(next);
+    studioEl.classList.toggle("catalog-studio--sidebar-collapsed", next);
+    const label = container.querySelector(".catalog-studio-rail__label");
+    const toggle = container.querySelector("#catalog-studio-sidebar-toggle");
+    if (label) label.textContent = next ? "Expand" : "Collapse";
+    if (toggle) {
+      toggle.setAttribute("aria-label", next ? "Expand partner sidebar" : "Collapse partner sidebar");
+      toggle.title = next ? "Expand" : "Collapse";
+    }
   };
 
   container.querySelector("#btn-catalog-refresh").onclick = () => mountCatalogStudio(container);

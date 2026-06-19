@@ -11,16 +11,23 @@
 <body>
   <div id="app-shell" class="app-root" hidden>
     <aside class="sidebar">
-      <div class="brand-block">
-        <div class="logo-mark">EZ</div>
-        <div>
-          <div class="brand-name">Eazpire Partners</div>
-          <div class="brand-sub">Manufacturer Portal</div>
+      <div class="sidebar-inner">
+        <div class="sidebar-content">
+          <div class="brand-block">
+            <div class="logo-mark">EZ</div>
+            <div>
+              <div class="brand-name">Eazpire Partners</div>
+              <div class="brand-sub">Manufacturer Portal</div>
+            </div>
+          </div>
+          <nav id="partner-nav"></nav>
+          <div class="sidebar-card" id="sidebar-progress">Artifact Ready — loading…</div>
         </div>
+        <button type="button" class="sidebar-rail" id="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <span class="sidebar-rail__arrow-zone" aria-hidden="true"><span class="sidebar-rail__arrow">‹</span></span>
+          <span class="sidebar-rail__label">Collapse</span>
+        </button>
       </div>
-      <nav id="partner-nav"></nav>
-      <div class="sidebar-card" id="sidebar-progress">Artifact Ready — loading…</div>
-      <button type="button" class="sidebar-collapse-btn" id="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar">‹</button>
     </aside>
     <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     <header class="topbar">
