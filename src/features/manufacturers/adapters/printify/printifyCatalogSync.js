@@ -255,7 +255,10 @@ export async function syncPrintifyPartnerCatalog(env) {
         external_provider_id: String(p.id),
         integration_system: "printify",
         name: p.title || `Provider ${p.id}`,
-        location: p.location || {},
+        location: {
+          ...(p.location && typeof p.location === "object" ? p.location : {}),
+          logo_url: p.logo || p.logo_url || p.image_url || p.image || null,
+        },
         synced_at: Date.now(),
       });
       providersSynced++;

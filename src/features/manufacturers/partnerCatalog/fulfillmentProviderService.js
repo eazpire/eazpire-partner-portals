@@ -13,6 +13,7 @@ function rowToFulfillmentProvider(row) {
     integration_system: row.integration_system,
     name: row.name,
     location: parseJson(row.location_json, {}),
+    logo_url: parseJson(row.location_json, {}).logo_url || null,
     ships_to: parseJson(row.ships_to_json, []),
     production_days_min: row.production_days_min,
     production_days_max: row.production_days_max,

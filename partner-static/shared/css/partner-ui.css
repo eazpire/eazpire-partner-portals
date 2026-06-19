@@ -600,7 +600,7 @@ html[data-portal="admin"] .stage-desc {
 }
 
 /* Catalog Studio — partner/provider tree + product list */
-html[data-portal="admin"] #view-catalog.layout-stage {
+html[data-portal="admin"] #view-catalog.layout-stage.active {
   margin: -28px;
   min-height: calc(100vh - var(--topbar));
   height: calc(100vh - var(--topbar));
@@ -623,7 +623,7 @@ html[data-portal="admin"] #view-catalog.layout-stage {
   background: rgba(255,255,255,.92);
   transition: width 0.22s ease;
 }
-.catalog-studio--sidebar-collapsed .catalog-studio-sidebar { width: 52px; }
+.catalog-studio--sidebar-collapsed .catalog-studio-sidebar { width: 60px; }
 .catalog-studio-sidebar-head {
   display: flex;
   align-items: center;
@@ -671,7 +671,7 @@ html[data-portal="admin"] #view-catalog.layout-stage {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   height: 34px;
   padding: 0 10px;
   border: 0;
@@ -717,8 +717,50 @@ html[data-portal="admin"] #view-catalog.layout-stage {
   cursor: pointer;
 }
 .cs-tree-provider-btn.active { color: #0369a1; }
-.catalog-studio--sidebar-collapsed .catalog-studio-tree,
-.catalog-studio--sidebar-collapsed .cs-tree-providers { display: none; }
+.cs-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.cs-avatar--sm { width: 26px; height: 26px; border-radius: 8px; font-size: 10px; }
+.cs-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cs-tree-expanded .cs-tree-partner-btn .cs-avatar { margin-right: 8px; }
+.cs-tree-expanded .cs-tree-provider-btn { display: flex; align-items: center; gap: 8px; }
+.cs-tree-collapsed-rail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  width: 100%;
+}
+.catalog-studio--sidebar-collapsed .cs-tree-expanded { display: none; }
+.catalog-studio--sidebar-collapsed .cs-tree-collapsed-rail { display: flex; }
+.cs-rail-partner-group { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
+.cs-rail-partner-btn,
+.cs-rail-provider-btn {
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.cs-rail-partner-btn:hover,
+.cs-rail-provider-btn:hover { background: var(--surface-3); }
+.cs-rail-partner-btn.active .cs-avatar,
+.cs-rail-provider-btn.active .cs-avatar {
+  box-shadow: 0 0 0 2px rgba(14,165,233,.45);
+}
+.cs-rail-providers { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.catalog-studio--sidebar-collapsed .catalog-studio-sidebar-toggle { transform: rotate(180deg); }
 .catalog-studio-main {
   flex: 1;
   min-width: 0;

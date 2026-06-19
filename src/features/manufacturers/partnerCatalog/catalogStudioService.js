@@ -6,6 +6,17 @@ import { listPartnersForAdmin } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
 import { listEazpireProducts } from "./eazpireProductService.js";
 
+/** Known partner logos by slug (fallback when DB has no logo_url). */
+const PARTNER_LOGO_BY_SLUG = {
+  printify: "https://www.printify.com/favicon.ico",
+};
+
+function resolvePartnerLogo(partner) {
+  if (partner.logo_url) return partner.logo_url;
+  const slug = String(partner.slug || "").toLowerCase();
+  return PARTNER_LOGO_BY_SLUG[slug] || null;
+}
+
 async function queryAll(db, sql, ...binds) {
   const stmt = db.prepare(sql);
   const res = binds.length ? await stmt.bind(...binds).all() : await stmt.all();
@@ -21,6 +32,7 @@ export async function getCatalogStudioTree(db) {
       id: partner.id,
       name: partner.name,
       slug: partner.slug,
+      logo_url: resolvePartnerLogo(partner),
       integration_type: partner.integration_type,
       provider_count: partner.fulfillment_provider_count,
       live_blueprint_count: partner.live_blueprint_count,
@@ -30,6 +42,7 @@ export async function getCatalogStudioTree(db) {
         name: fp.name,
         external_provider_id: fp.external_provider_id,
         status: fp.status,
+        logo_url: fp.logo_url || null,
       })),
     });
   }

@@ -78,7 +78,23 @@ function statusBadge(status) {
   return `<span class="badge ${map[status] || "badge-secondary"}">${escapeHtml(status)}</span>`;
 }
 
-function renderTree(partners, selectedPartnerId, selectedProviderId) {
+function initials(name) {
+  return String(name || "?")
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("");
+}
+
+function renderAvatar(name, logoUrl, sizeClass = "") {
+  const cls = `cs-avatar ${sizeClass}`.trim();
+  if (logoUrl) {
+    return `<span class="${cls}"><img src="${escapeHtml(logoUrl)}" alt="" loading="lazy" /></span>`;
+  }
+  return `<span class="${cls} cs-avatar--initials">${escapeHtml(initials(name))}</span>`;
+}
+
+function renderExpandedTree(partners, selectedPartnerId, selectedProviderId) {
   const openSet = getPartnersOpenSet();
   return partners
     .map((partner) => {
@@ -90,6 +106,7 @@ function renderTree(partners, selectedPartnerId, selectedProviderId) {
         <div class="cs-tree-partner-row">
           <button type="button" class="cs-tree-chevron-btn" data-tree-toggle="${escapeHtml(partner.id)}" aria-label="Toggle providers">${isOpen ? "▾" : "▸"}</button>
           <button type="button" class="cs-tree-partner-btn ${partnerActive ? "active" : ""}" data-partner-id="${escapeHtml(partner.id)}">
+            ${renderAvatar(partner.name, partner.logo_url)}
             <span class="cs-tree-partner-name">${escapeHtml(partner.name)}</span>
           </button>
           <span class="cs-tree-count">${providerCount}</span>
@@ -99,6 +116,7 @@ function renderTree(partners, selectedPartnerId, selectedProviderId) {
             .map(
               (fp) => `<button type="button" class="cs-tree-provider-btn ${selectedProviderId === String(fp.external_provider_id) ? "active" : ""}"
                 data-partner-id="${escapeHtml(partner.id)}" data-provider-id="${escapeHtml(fp.external_provider_id)}">
+                ${renderAvatar(fp.name, fp.logo_url, "cs-avatar--sm")}
                 <span>${escapeHtml(fp.name)}</span>
               </button>`
             )
@@ -107,6 +125,42 @@ function renderTree(partners, selectedPartnerId, selectedProviderId) {
       </div>`;
     })
     .join("");
+}
+
+function renderCollapsedRail(partners, selectedPartnerId, selectedProviderId) {
+  const openSet = getPartnersOpenSet();
+  return partners
+    .map((partner) => {
+      const isOpen = openSet.has(partner.id);
+      const partnerActive = partner.id === selectedPartnerId && !selectedProviderId;
+      const providers = partner.providers || [];
+      return `<div class="cs-rail-partner-group">
+        <button type="button" class="cs-rail-partner-btn ${partnerActive ? "active" : ""}"
+          data-partner-id="${escapeHtml(partner.id)}"
+          title="${escapeHtml(partner.name)}" aria-label="${escapeHtml(partner.name)}">
+          ${renderAvatar(partner.name, partner.logo_url)}
+        </button>
+        ${
+          isOpen && providers.length
+            ? `<div class="cs-rail-providers">${providers
+                .map(
+                  (fp) => `<button type="button" class="cs-rail-provider-btn ${selectedProviderId === String(fp.external_provider_id) ? "active" : ""}"
+                    data-partner-id="${escapeHtml(partner.id)}" data-provider-id="${escapeHtml(fp.external_provider_id)}"
+                    title="${escapeHtml(fp.name)}" aria-label="${escapeHtml(fp.name)}">
+                    ${renderAvatar(fp.name, fp.logo_url, "cs-avatar--sm")}
+                  </button>`
+                )
+                .join("")}</div>`
+            : ""
+        }
+      </div>`;
+    })
+    .join("");
+}
+
+function renderTree(partners, selectedPartnerId, selectedProviderId) {
+  return `<div class="cs-tree-expanded">${renderExpandedTree(partners, selectedPartnerId, selectedProviderId)}</div>
+    <div class="cs-tree-collapsed-rail">${renderCollapsedRail(partners, selectedPartnerId, selectedProviderId)}</div>`;
 }
 
 function renderProductsTable(items, filter) {
@@ -156,7 +210,7 @@ function bindTreeEvents(root, onSelect) {
     });
   });
 
-  root.querySelectorAll(".cs-tree-partner-btn").forEach((btn) => {
+  root.querySelectorAll(".cs-tree-partner-btn[data-partner-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setPartnerId(btn.dataset.partnerId);
       setProviderId("");
@@ -164,7 +218,17 @@ function bindTreeEvents(root, onSelect) {
     });
   });
 
-  root.querySelectorAll(".cs-tree-provider-btn").forEach((btn) => {
+  root.querySelectorAll(".cs-rail-partner-btn[data-partner-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pid = btn.dataset.partnerId;
+      togglePartnerOpen(pid);
+      setPartnerId(pid);
+      setProviderId("");
+      onSelect();
+    });
+  });
+
+  root.querySelectorAll(".cs-tree-provider-btn, .cs-rail-provider-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       setPartnerId(btn.dataset.partnerId);
       setProviderId(btn.dataset.providerId);
