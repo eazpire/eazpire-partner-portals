@@ -534,7 +534,7 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-catalog-studio-products" && request.method === "GET") {
       const filter = url.searchParams.get("filter") || "available";
-      const result = await catalogStudio.getCatalogStudioProducts(db, {
+      const result = await catalogStudio.getCatalogStudioProducts(db, env, {
         manufacturerId: url.searchParams.get("manufacturer_id") || url.searchParams.get("partner_id"),
         providerExternalId: url.searchParams.get("provider_id") || url.searchParams.get("print_provider_id"),
         filter,

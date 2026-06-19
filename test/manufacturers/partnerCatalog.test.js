@@ -373,6 +373,235 @@ describe("catalog studio service", () => {
     );
     expect(formatPrintAreaLabel("sleeve_left")).toBe("Sleeve Left");
   });
+
+  it("returns category_tree for product list", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => {
+            if (sql.includes("FROM manufacturers WHERE")) return { country: "US" };
+            if (sql.includes("getPartnerByIdOrSlug") || sql.includes("manufacturers WHERE id")) {
+              return { id: "m1", slug: "other-partner" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products")) {
+              return {
+                results: [
+                  {
+                    product_key: "tee-1",
+                    title: "Classic Tee",
+                    catalog_status: "online",
+                    catalog_category_leaf: "T-Shirt",
+                    catalog_category_group: "Kleidung",
+                    version_count: 1,
+                    manufacturer_name: "Test",
+                    blueprint_title: "Tee",
+                    blueprint_category: null,
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("eazpire_product_mockup")) return { results: [] };
+            if (sql.includes("manufacturer_eazpire_blueprints")) return { results: [] };
+            return { results: [] };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(
+      mfgDb,
+      {},
+      { manufacturerId: "m1", filter: "online" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.category_tree).toBeDefined();
+    expect(Array.isArray(result.category_tree)).toBe(true);
+    expect(result.items[0].category).toBe("T-Shirt");
+    expect(result.items[0].parent_group).toBe("Kleidung");
+  });
+
+  it("extracts mock images and print areas from blueprint json", async () => {
+    const {
+      imagesFromBlueprintData,
+      printAreasFromBlueprintData,
+      blueprintSupportsProvider,
+      mergeEnrichment,
+    } = await import("../../src/features/manufacturers/partnerCatalog/catalogStudioService.js");
+
+    const normalized = JSON.stringify({
+      print_areas: [{ area_key: "front" }, { area_key: "back" }],
+      mockup_views: [{ url: "https://example.com/mock-front.png" }],
+    });
+    const raw = JSON.stringify({
+      images: ["https://example.com/catalog.png"],
+      print_areas: [{ name: "neck" }],
+    });
+
+    expect(imagesFromBlueprintData(normalized, raw)).toEqual([
+      "https://example.com/mock-front.png",
+      "https://example.com/catalog.png",
+    ]);
+    expect(printAreasFromBlueprintData(normalized, null)).toEqual(["front", "back"]);
+    expect(printAreasFromBlueprintData(null, raw)).toEqual(["neck"]);
+    expect(blueprintSupportsProvider(JSON.stringify([{ id: 26 }, { id: 30 }]), "30")).toBe(true);
+    expect(blueprintSupportsProvider(JSON.stringify([{ id: 26 }]), "30")).toBe(false);
+    expect(blueprintSupportsProvider(JSON.stringify([{ id: 26 }]), null)).toBe(true);
+
+    const merged = mergeEnrichment(
+      { mock_images: ["https://a"], print_areas: ["front"] },
+      { mock_images: ["https://b", "https://a"], print_areas: ["back", "front"] }
+    );
+    expect(merged.mock_images).toEqual(["https://a", "https://b"]);
+    expect(merged.print_areas).toEqual(["back", "front"]);
+  });
+
+  it("enriches available printify products from cached blueprint rows", async () => {
+    const catalogRows = [
+      {
+        id: 145,
+        title: "Unisex Tee",
+        category: "T-Shirts",
+        audience: "Unisex",
+        shipping_countries: "US",
+        images_json: '["https://catalog/mock.png"]',
+        print_providers_json: '[{"id":26},{"id":30}]',
+        print_provider_count: 2,
+      },
+    ];
+    const catalogDb = {
+      prepare: (sql) => ({
+        all: async () => {
+          if (sql.includes("FROM product_publish_profiles")) return { results: [] };
+          if (sql.includes("FROM printify_blueprints")) return { results: catalogRows };
+          return { results: [] };
+        },
+      }),
+    };
+    const mfgDb = {
+      prepare: (sql) => ({
+        bind: (...args) => ({
+          first: async () => {
+            if (sql.includes("FROM manufacturers WHERE id = ? OR slug = ?")) {
+              return { id: "mfg_printify", slug: "printify", country: "US" };
+            }
+            if (sql.includes("SELECT country FROM manufacturers WHERE id = ?")) {
+              return { country: "US" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products ep")) return { results: [] };
+            if (sql.includes("FROM manufacturer_provider_blueprints pb")) {
+              return {
+                results: [
+                  {
+                    external_blueprint_id: "145",
+                    raw_json: JSON.stringify({
+                      images: ["https://raw/mock.png"],
+                      print_areas: [{ name: "front" }, { name: "back" }],
+                    }),
+                    normalized_json: JSON.stringify({
+                      print_areas: [{ area_key: "front" }, { area_key: "back" }],
+                    }),
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+        }),
+      }),
+    };
+
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const result = await getCatalogStudioProducts(mfgDb, { CATALOG_DB: catalogDb }, {
+      manufacturerId: "mfg_printify",
+      providerExternalId: "30",
+      filter: "available",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].mock_images).toContain("https://catalog/mock.png");
+    expect(result.items[0].mock_images).toContain("https://raw/mock.png");
+    expect(result.items[0].print_areas).toEqual(["back", "front"]);
+  });
+
+  it("filters available printify products by provider id", async () => {
+    const catalogRows = [
+      {
+        id: 1,
+        title: "Provider 26 only",
+        category: "T-Shirts",
+        audience: "Unisex",
+        images_json: "[]",
+        print_providers_json: '[{"id":26}]',
+        print_provider_count: 1,
+      },
+      {
+        id: 2,
+        title: "Provider 30 only",
+        category: "T-Shirts",
+        audience: "Unisex",
+        images_json: "[]",
+        print_providers_json: '[{"id":30}]',
+        print_provider_count: 1,
+      },
+    ];
+    const catalogDb = {
+      prepare: () => ({
+        all: async () => ({ results: catalogRows }),
+      }),
+    };
+    const mfgDb = {
+      prepare: (sql) => ({
+        bind: () => ({
+          first: async () => {
+            if (sql.includes("FROM manufacturers WHERE id = ? OR slug = ?")) {
+              return { id: "mfg_printify", slug: "printify", country: "US" };
+            }
+            if (sql.includes("SELECT country FROM manufacturers WHERE id = ?")) {
+              return { country: "US" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products ep")) return { results: [] };
+            if (sql.includes("FROM manufacturer_provider_blueprints pb")) return { results: [] };
+            return { results: [] };
+          },
+        }),
+      }),
+    };
+
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const result = await getCatalogStudioProducts(mfgDb, { CATALOG_DB: catalogDb }, {
+      manufacturerId: "mfg_printify",
+      providerExternalId: "30",
+      filter: "available",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.items.map((i) => i.printify_blueprint_id)).toEqual([2]);
+  });
 });
 
 describe("mirror drift status shape", () => {

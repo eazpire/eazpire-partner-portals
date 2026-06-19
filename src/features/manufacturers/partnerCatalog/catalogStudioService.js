@@ -2,11 +2,17 @@
  * Catalog Studio — partner / provider tree + product list for admin UI
  */
 
-import { listPartnersForAdmin } from "./printifyPartnerSeed.js";
+import { buildCategoryTree, CAT_REVERSE } from "../../admin/catalogConstants.js";
+import { listPartnersForAdmin, getPartnerByIdOrSlug } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
 import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductService.js";
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
+import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
+import { fetchBlueprint } from "../adapters/printify/printifyCatalogClient.js";
+
+const BLUEPRINT_API_CONCURRENCY = 5;
+const BLUEPRINT_ID_CHUNK = 100;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
@@ -97,6 +103,63 @@ function printAreasFromNormalized(normalizedJson) {
   return [...keys];
 }
 
+function printAreasFromBlueprintData(normalizedJson, rawJson) {
+  const fromNormalized = printAreasFromNormalized(normalizedJson);
+  if (fromNormalized.length) return fromNormalized;
+
+  const normalized = parseJson(normalizedJson, {}) || {};
+  const raw = parseJson(rawJson, {}) || {};
+  const printifyRaw = normalized._printify_raw || raw;
+  const areas = printifyRaw?.print_areas || printifyRaw?.printAreas || [];
+  if (!Array.isArray(areas)) return [];
+
+  const keys = new Set();
+  for (const area of areas) {
+    const key = area?.area_key || area?.key || area?.name;
+    if (key) keys.add(String(key));
+    for (const ph of area?.placeholders || []) {
+      if (ph?.position) keys.add(String(ph.position));
+    }
+  }
+  return [...keys].sort();
+}
+
+function enrichmentFromBlueprintJson(normalizedJson, rawJson) {
+  return {
+    mock_images: imagesFromBlueprintData(normalizedJson, rawJson),
+    print_areas: printAreasFromBlueprintData(normalizedJson, rawJson),
+  };
+}
+
+function parseCatalogImagesJson(imagesJson) {
+  try {
+    return JSON.parse(imagesJson || "[]").filter((i) => typeof i === "string");
+  } catch {
+    return [];
+  }
+}
+
+function blueprintSupportsProvider(printProvidersJson, providerExternalId) {
+  if (providerExternalId == null || providerExternalId === "") return true;
+  const providerId = String(providerExternalId);
+  const providers = parseJson(printProvidersJson, []);
+  if (!Array.isArray(providers)) return false;
+  return providers.some((p) => String(p?.id) === providerId);
+}
+
+function mergeEnrichment(existing, enrichment) {
+  const mock_images = [...(existing.mock_images || [])];
+  for (const url of enrichment?.mock_images || []) pushImageUrl(mock_images, url);
+
+  const printAreaSet = new Set(existing.print_areas || []);
+  for (const key of enrichment?.print_areas || []) printAreaSet.add(String(key));
+
+  return {
+    mock_images,
+    print_areas: [...printAreaSet].sort(),
+  };
+}
+
 function printAreasFromConfigJson(configJson) {
   const config = parseJson(configJson, {}) || {};
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
@@ -107,6 +170,27 @@ function formatPrintAreaLabel(key) {
   return String(key || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function itemCategoryFields(item) {
+  const category = item.category || item.catalog_category_leaf || item.blueprint_category || "Sonstiges";
+  const parent_group = item.parent_group || item.catalog_category_group || CAT_REVERSE[category] || "Sonstiges";
+  return { category, parent_group };
+}
+
+function enrichItemsWithCategory(items) {
+  return items.map((row) => ({ ...row, ...itemCategoryFields(row) }));
+}
+
+function buildProductsResponse(filter, items) {
+  const enriched = enrichItemsWithCategory(items);
+  return {
+    ok: true,
+    filter,
+    items: enriched,
+    total: enriched.length,
+    category_tree: buildCategoryTree(enriched),
+  };
 }
 
 async function resolveManufacturerCountry(db, manufacturerId, providerExternalId) {
@@ -218,26 +302,33 @@ export async function getCatalogStudioTree(db) {
 }
 
 /**
+ * @param {object} db — MANUFACTURER_DB
+ * @param {object} env — worker env (CATALOG_DB for Printify available list)
  * @param {object} opts
  * @param {string} opts.manufacturerId
  * @param {string} [opts.providerExternalId] — Printify print_provider_id
  * @param {'available'|'online'|'preview'|'offline'} opts.filter
  */
-export async function getCatalogStudioProducts(db, { manufacturerId, providerExternalId, filter }) {
+export async function getCatalogStudioProducts(db, env, { manufacturerId, providerExternalId, filter }) {
   if (!manufacturerId) return { ok: false, error: "manufacturer_id_required" };
 
   const providerId = providerExternalId != null && providerExternalId !== "" ? String(providerExternalId) : null;
   const manufacturerCountry = await resolveManufacturerCountry(db, manufacturerId, providerId);
 
   if (filter === "available") {
-    const rows = await listAvailableBlueprints(db, manufacturerId);
+    const partner = await getPartnerByIdOrSlug(db, manufacturerId);
+    const isPrintify = String(partner?.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
+    const rows =
+      isPrintify && env?.CATALOG_DB
+        ? await listAvailablePrintifyBlueprints(env, db, manufacturerId, providerId)
+        : await listAvailableBlueprints(db, manufacturerId);
     const items = rows.map((row) => ({
       ...row,
       manufacturer_country: manufacturerCountry,
       print_areas: row.print_areas || [],
       mock_images: row.mock_images || [],
     }));
-    return { ok: true, filter, items, total: items.length };
+    return buildProductsResponse(filter, items);
   }
 
   const status = filter === "online" || filter === "preview" || filter === "offline" ? filter : "online";
@@ -252,21 +343,40 @@ export async function getCatalogStudioProducts(db, { manufacturerId, providerExt
   const productKeys = products.map((p) => p.product_key);
   const mockImagesMap = await loadMockImagesByProductKey(db, productKeys);
   const printAreasMap = await loadPrintAreasByProductKey(db, productKeys);
+  const blueprintFallbackMap = await loadBlueprintFallbackForEazpireProducts(
+    env,
+    db,
+    products,
+    mockImagesMap,
+    printAreasMap
+  );
 
-  const items = products.map((p) => ({
-    kind: "eazpire_product",
-    product_key: p.product_key,
-    title: p.title,
-    catalog_status: p.catalog_status,
-    version_count: p.version_count ?? 0,
-    blueprint_title: p.blueprint_title,
-    updated_at: p.updated_at,
-    mock_images: mockImagesMap.get(p.product_key) || [],
-    manufacturer_country: manufacturerCountry,
-    print_areas: printAreasMap.get(p.product_key) || [],
-  }));
+  const items = products.map((p) => {
+    const fallback = blueprintFallbackMap.get(p.product_key) || {};
+    const mockFromDb = mockImagesMap.get(p.product_key) || [];
+    const areasFromDb = printAreasMap.get(p.product_key) || [];
+    const merged = mergeEnrichment(
+      { mock_images: mockFromDb, print_areas: areasFromDb },
+      fallback
+    );
+    return {
+      kind: "eazpire_product",
+      product_key: p.product_key,
+      title: p.title,
+      catalog_status: p.catalog_status,
+      catalog_category_leaf: p.catalog_category_leaf,
+      catalog_category_group: p.catalog_category_group,
+      blueprint_category: p.blueprint_category,
+      version_count: p.version_count ?? 0,
+      blueprint_title: p.blueprint_title,
+      updated_at: p.updated_at,
+      mock_images: merged.mock_images,
+      manufacturer_country: manufacturerCountry,
+      print_areas: merged.print_areas,
+    };
+  });
 
-  return { ok: true, filter: status, items, total: items.length };
+  return buildProductsResponse(status, items);
 }
 
 export async function setCatalogStudioProductStatus(env, { productKey, catalogStatus }) {
@@ -355,6 +465,138 @@ async function productKeysForProvider(db, manufacturerId, providerExternalId) {
   return rows.map((r) => r.product_key);
 }
 
+async function loadCachedBlueprintEnrichmentByExternalIds(mfgDb, manufacturerId, externalIds) {
+  const map = new Map();
+  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))];
+  if (!ids.length || !mfgDb) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = ids.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await queryAll(
+      mfgDb,
+      `SELECT pb.external_blueprint_id, pb.raw_json, eb.normalized_json
+       FROM manufacturer_provider_blueprints pb
+       LEFT JOIN manufacturer_eazpire_blueprints eb ON eb.provider_blueprint_id = pb.id
+       WHERE pb.manufacturer_id = ? AND pb.external_blueprint_id IN (${placeholders})`,
+      manufacturerId,
+      ...chunk
+    );
+    for (const row of rows) {
+      map.set(String(row.external_blueprint_id), enrichmentFromBlueprintJson(row.normalized_json, row.raw_json));
+    }
+  }
+  return map;
+}
+
+async function loadCachedBlueprintEnrichmentByEazpireIds(mfgDb, eazpireBlueprintIds) {
+  const map = new Map();
+  const ids = [...new Set(eazpireBlueprintIds.map((id) => String(id)).filter(Boolean))];
+  if (!ids.length || !mfgDb) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = ids.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await queryAll(
+      mfgDb,
+      `SELECT eb.id, eb.normalized_json, pb.raw_json, pb.external_blueprint_id
+       FROM manufacturer_eazpire_blueprints eb
+       LEFT JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
+       WHERE eb.id IN (${placeholders})`,
+      ...chunk
+    );
+    for (const row of rows) {
+      map.set(String(row.id), {
+        external_blueprint_id: row.external_blueprint_id != null ? String(row.external_blueprint_id) : null,
+        ...enrichmentFromBlueprintJson(row.normalized_json, row.raw_json),
+      });
+    }
+  }
+  return map;
+}
+
+async function fetchBlueprintEnrichmentByExternalIds(env, externalIds) {
+  const map = new Map();
+  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))];
+  if (!ids.length || !env) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_API_CONCURRENCY) {
+    const batch = ids.slice(i, i + BLUEPRINT_API_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (externalId) => {
+        const result = await fetchBlueprint(env, externalId);
+        if (!result.ok || !result.blueprint) return;
+        const rawJson = JSON.stringify(result.blueprint);
+        map.set(externalId, enrichmentFromBlueprintJson(null, rawJson));
+      })
+    );
+  }
+  return map;
+}
+
+async function enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items) {
+  if (!items.length) return items;
+
+  const externalIds = items.map((item) => String(item.printify_blueprint_id || item.blueprint_key || "")).filter(Boolean);
+  const cached = await loadCachedBlueprintEnrichmentByExternalIds(mfgDb, manufacturerId, externalIds);
+
+  const missingPrintAreas = externalIds.filter((id) => {
+    const cachedEntry = cached.get(id);
+    const item = items.find((row) => String(row.printify_blueprint_id || row.blueprint_key) === id);
+    const hasAreas = (cachedEntry?.print_areas?.length || item?.print_areas?.length) > 0;
+    return !hasAreas;
+  });
+  const apiFetched = missingPrintAreas.length ? await fetchBlueprintEnrichmentByExternalIds(env, missingPrintAreas) : new Map();
+
+  return items.map((item) => {
+    const externalId = String(item.printify_blueprint_id || item.blueprint_key || "");
+    const enrichment = mergeEnrichment(
+      { mock_images: item.mock_images || [], print_areas: item.print_areas || [] },
+      cached.get(externalId) || apiFetched.get(externalId) || {}
+    );
+    return { ...item, ...enrichment };
+  });
+}
+
+async function loadBlueprintFallbackForEazpireProducts(env, mfgDb, products, mockImagesMap, printAreasMap) {
+  const out = new Map();
+  const needingFallback = products.filter((p) => {
+    if (!p.source_blueprint_id) return false;
+    const mocks = mockImagesMap.get(p.product_key) || [];
+    const areas = printAreasMap.get(p.product_key) || [];
+    return !mocks.length || !areas.length;
+  });
+  if (!needingFallback.length) return out;
+
+  const blueprintIds = [...new Set(needingFallback.map((p) => String(p.source_blueprint_id)))];
+  const cachedByBlueprintId = await loadCachedBlueprintEnrichmentByEazpireIds(mfgDb, blueprintIds);
+
+  const missingExternalIds = [];
+  for (const product of needingFallback) {
+    const cached = cachedByBlueprintId.get(String(product.source_blueprint_id));
+    if (!cached) continue;
+    const mocks = mockImagesMap.get(product.product_key) || [];
+    const areas = printAreasMap.get(product.product_key) || [];
+    const needsMocks = !mocks.length && !(cached.mock_images || []).length;
+    const needsAreas = !areas.length && !(cached.print_areas || []).length;
+    if ((needsMocks || needsAreas) && cached.external_blueprint_id) {
+      missingExternalIds.push(cached.external_blueprint_id);
+    }
+  }
+
+  const apiFetched = missingExternalIds.length
+    ? await fetchBlueprintEnrichmentByExternalIds(env, missingExternalIds)
+    : new Map();
+
+  for (const product of needingFallback) {
+    const cached = cachedByBlueprintId.get(String(product.source_blueprint_id));
+    if (!cached) continue;
+    const apiExtra = cached.external_blueprint_id ? apiFetched.get(String(cached.external_blueprint_id)) : null;
+    out.set(product.product_key, mergeEnrichment(cached, apiExtra || {}));
+  }
+  return out;
+}
+
 async function listAvailableBlueprints(db, manufacturerId) {
   const blueprintRows = await queryAll(
     db,
@@ -375,7 +617,7 @@ async function listAvailableBlueprints(db, manufacturerId) {
     blueprint_id: b.id,
     blueprint_key: b.blueprint_key,
     title: b.title,
-    category: b.normalized_category,
+    category: b.normalized_category || "Sonstiges",
     catalog_status: "available",
     updated_at: b.updated_at,
     mock_images: imagesFromBlueprintData(b.normalized_json, b.raw_json),
@@ -383,4 +625,67 @@ async function listAvailableBlueprints(db, manufacturerId) {
   }));
 }
 
-export { formatPrintAreaLabel };
+/** Printify Available — full CATALOG_DB catalog minus legacy usage and active eazpire products. */
+async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, providerExternalId = null) {
+  const catalogDb = env.CATALOG_DB;
+  if (!catalogDb) return listAvailableBlueprints(mfgDb, manufacturerId);
+
+  const linkedRows = await queryAll(
+    mfgDb,
+    `SELECT DISTINCT pb.external_blueprint_id
+     FROM eazpire_products ep
+     INNER JOIN manufacturer_eazpire_blueprints eb ON eb.id = ep.source_blueprint_id
+     INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
+     WHERE ep.manufacturer_id = ?`,
+    manufacturerId
+  );
+  const linkedExternalIds = new Set(linkedRows.map((r) => String(r.external_blueprint_id)));
+
+  const usedInCatalog = await catalogDb
+    .prepare(
+      `SELECT DISTINCT blueprint_id FROM product_publish_profiles
+       WHERE blueprint_id IS NOT NULL AND source_system = 'printify'`
+    )
+    .all();
+  const usedCatalogIds = new Set((usedInCatalog?.results || []).map((r) => r.blueprint_id));
+
+  const all = await catalogDb
+    .prepare(
+      `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
+       FROM printify_blueprints
+       ORDER BY category, title`
+    )
+    .all();
+
+  const items = [];
+  for (const bp of all?.results || []) {
+    if (usedCatalogIds.has(bp.id)) continue;
+    if (linkedExternalIds.has(String(bp.id))) continue;
+    if (!blueprintSupportsProvider(bp.print_providers_json, providerExternalId)) continue;
+
+    items.push({
+      kind: "blueprint",
+      blueprint_id: `printify-${bp.id}`,
+      printify_blueprint_id: bp.id,
+      blueprint_key: String(bp.id),
+      title: bp.title,
+      category: bp.category || "Sonstiges",
+      audience: bp.audience,
+      catalog_status: "available",
+      mock_images: parseCatalogImagesJson(bp.images_json),
+      print_areas: [],
+      provider_count: bp.print_provider_count || 0,
+    });
+  }
+
+  return enrichPrintifyAvailableItems(env, mfgDb, manufacturerId, items);
+}
+
+export {
+  formatPrintAreaLabel,
+  imagesFromBlueprintData,
+  printAreasFromBlueprintData,
+  printAreasFromNormalized,
+  blueprintSupportsProvider,
+  mergeEnrichment,
+};

@@ -25,12 +25,14 @@ function rowToEazpireProduct(row) {
     updated_at: row.updated_at,
     manufacturer_name: row.manufacturer_name,
     blueprint_title: row.blueprint_title,
+    blueprint_category: row.blueprint_category,
     version_count: row.version_count != null ? Number(row.version_count) : undefined,
   };
 }
 
 export async function listEazpireProducts(db, { manufacturerId, catalogStatus } = {}) {
   let sql = `SELECT ep.*, m.name AS manufacturer_name, eb.title AS blueprint_title,
+    eb.normalized_category AS blueprint_category,
     (SELECT COUNT(*) FROM eazpire_product_versions v WHERE v.product_key = ep.product_key) AS version_count
     FROM eazpire_products ep
     LEFT JOIN manufacturers m ON m.id = ep.manufacturer_id

@@ -79,6 +79,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain("openMockViewer");
     expect(studioSrc).toContain("openStatusPicker");
     expect(studioSrc).toContain("openProductEditor");
+    expect(studioSrc).toContain("renderCategorySidebar");
+    expect(studioSrc).toContain("catalog-studio-filter-sidebar");
   });
 
   it("migration 0015 defines shadow tables", () => {

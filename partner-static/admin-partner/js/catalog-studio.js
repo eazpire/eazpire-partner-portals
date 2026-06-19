@@ -15,6 +15,9 @@ const STORAGE = {
   filter: "admin_catalog_status_filter",
   partnersOpen: "admin_catalog_partners_open",
   studioSidebar: "admin_catalog_studio_sidebar_collapsed",
+  catFilter: "admin_catalog_cat_filter",
+  catOpenGroup: "admin_catalog_cat_open_group",
+  filterSidebar: "admin_catalog_filter_sidebar_collapsed",
 };
 
 function getFilter() {
@@ -24,6 +27,7 @@ function getFilter() {
 
 function setFilter(key) {
   sessionStorage.setItem(STORAGE.filter, key);
+  sessionStorage.removeItem(STORAGE.catFilter);
 }
 
 function getPartnerId() {
@@ -33,6 +37,7 @@ function getPartnerId() {
 function setPartnerId(id) {
   sessionStorage.setItem(STORAGE.partnerId, id || "");
   sessionStorage.removeItem(STORAGE.providerId);
+  sessionStorage.removeItem(STORAGE.catFilter);
 }
 
 function getProviderId() {
@@ -66,6 +71,125 @@ function isStudioSidebarCollapsed() {
 
 function setStudioSidebarCollapsed(collapsed) {
   sessionStorage.setItem(STORAGE.studioSidebar, collapsed ? "1" : "0");
+}
+
+function isFilterSidebarCollapsed() {
+  return sessionStorage.getItem(STORAGE.filterSidebar) === "1";
+}
+
+function setFilterSidebarCollapsed(collapsed) {
+  sessionStorage.setItem(STORAGE.filterSidebar, collapsed ? "1" : "0");
+}
+
+function getCatFilter() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE.catFilter);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setCatFilter(filter) {
+  if (filter) sessionStorage.setItem(STORAGE.catFilter, JSON.stringify(filter));
+  else sessionStorage.removeItem(STORAGE.catFilter);
+}
+
+function getCatOpenGroup() {
+  return sessionStorage.getItem(STORAGE.catOpenGroup) || null;
+}
+
+function setCatOpenGroup(group) {
+  if (group) sessionStorage.setItem(STORAGE.catOpenGroup, group);
+  else sessionStorage.removeItem(STORAGE.catOpenGroup);
+}
+
+function chevronSvg() {
+  return `<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"/></svg>`;
+}
+
+function filterByCategory(items, catFilter, categoryTree) {
+  if (!catFilter) return items;
+  if (catFilter.sub) return items.filter((p) => p.category === catFilter.sub);
+  if (catFilter.group) {
+    const grp = categoryTree.find((g) => g.name === catFilter.group);
+    if (!grp) return items;
+    const subs = (grp.children || []).map((c) => c.name);
+    return items.filter((p) => subs.includes(p.category));
+  }
+  return items;
+}
+
+function renderCategorySidebar(sidebar, categoryTree, items, catFilter, openGroup, onUpdate) {
+  if (!sidebar) return;
+  const total = items.length;
+  let html =
+    `<div class="cs-cat-all${!catFilter ? " cs-cat-all--active" : ""}" data-cat="all">` +
+    `All<span class="cs-cat-all__count">${total}</span></div>`;
+
+  (categoryTree || []).forEach((g) => {
+    const active = catFilter?.group === g.name && !catFilter?.sub;
+    const open = openGroup === g.name;
+    html += `<div class="cs-cat-item${active ? " cs-cat-item--active" : ""}${open ? " cs-cat-item--open" : ""}" data-group="${escapeHtml(g.name)}">`;
+    html += `<div class="cs-cat-item__header"><button type="button" class="cs-cat-arrow" aria-label="Toggle ${escapeHtml(g.name)}">${chevronSvg()}</button>`;
+    html += `<button type="button" class="cs-cat-label">${escapeHtml(g.name)}<span class="cs-cat-label__count">${g.count}</span></button></div>`;
+    html += `<div class="cs-cat-children">`;
+    (g.children || []).forEach((ch) => {
+      const chActive = catFilter?.sub === ch.name;
+      html += `<button type="button" class="cs-cat-child${chActive ? " cs-cat-child--active" : ""}" data-group="${escapeHtml(g.name)}" data-sub="${escapeHtml(ch.name)}">${escapeHtml(ch.name)}<span class="cs-cat-child__count">${ch.count}</span></button>`;
+    });
+    html += `</div></div>`;
+  });
+
+  sidebar.innerHTML = html;
+
+  sidebar.querySelector(".cs-cat-all")?.addEventListener("click", () => {
+    setCatFilter(null);
+    onUpdate();
+  });
+
+  sidebar.querySelectorAll(".cs-cat-arrow").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const item = btn.closest(".cs-cat-item");
+      if (!item) return;
+      const gn = item.dataset.group;
+      setCatOpenGroup(getCatOpenGroup() === gn ? null : gn);
+      onUpdate();
+    });
+  });
+
+  sidebar.querySelectorAll(".cs-cat-label").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = btn.closest(".cs-cat-item");
+      if (!item) return;
+      setCatFilter({ group: item.dataset.group });
+      setCatOpenGroup(item.dataset.group);
+      onUpdate();
+    });
+  });
+
+  sidebar.querySelectorAll(".cs-cat-child").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setCatFilter({ group: btn.dataset.group, sub: btn.dataset.sub });
+      setCatOpenGroup(btn.dataset.group);
+      onUpdate();
+    });
+  });
+}
+
+function refreshProductsPanel(container, allItems, categoryTree, filter, reload) {
+  const catFilter = getCatFilter();
+  const filtered = filterByCategory(allItems, catFilter, categoryTree);
+  const productsEl = container.querySelector("#catalog-studio-products");
+  if (productsEl) {
+    productsEl.innerHTML = renderProductsTable(filtered, filter);
+    wireProductsTable(container, reload);
+  }
+  const catTreeEl = container.querySelector("#catalog-studio-category-tree");
+  renderCategorySidebar(catTreeEl, categoryTree, allItems, catFilter, getCatOpenGroup(), () =>
+    refreshProductsPanel(container, allItems, categoryTree, filter, reload)
+  );
 }
 
 function statusBadge(status, { clickable = false, productKey = "" } = {}) {
@@ -528,8 +652,9 @@ function bindTreeEvents(root, onSelect) {
 
 export async function mountCatalogStudio(container) {
   const collapsed = isStudioSidebarCollapsed();
+  const filterCollapsed = isFilterSidebarCollapsed();
   container.innerHTML = `
-    <div class="catalog-studio ${collapsed ? "catalog-studio--sidebar-collapsed" : ""}">
+    <div class="catalog-studio ${collapsed ? "catalog-studio--sidebar-collapsed" : ""} ${filterCollapsed ? "catalog-studio--filter-collapsed" : ""}">
       <div class="catalog-studio-sidebar-wrap">
         <aside class="catalog-studio-sidebar" id="catalog-studio-sidebar">
           <div class="catalog-studio-sidebar-head">
@@ -540,6 +665,18 @@ export async function mountCatalogStudio(container) {
         <button type="button" class="catalog-studio-rail" id="catalog-studio-sidebar-toggle" aria-label="Collapse partner sidebar" title="Collapse">
           <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
           <span class="catalog-studio-rail__label">${collapsed ? "Expand" : "Collapse"}</span>
+        </button>
+      </div>
+      <div class="catalog-studio-filter-wrap">
+        <aside class="catalog-studio-filter-sidebar" id="catalog-studio-filter-sidebar">
+          <div class="catalog-studio-sidebar-head">
+            <span class="catalog-studio-sidebar-label">Categories</span>
+          </div>
+          <div class="cs-category-tree" id="catalog-studio-category-tree"><p class="catalog-studio-loading">Loading…</p></div>
+        </aside>
+        <button type="button" class="catalog-studio-rail catalog-studio-filter-rail" id="catalog-studio-filter-toggle" aria-label="Collapse category sidebar" title="Collapse">
+          <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
+          <span class="catalog-studio-rail__label">${filterCollapsed ? "Expand" : "Collapse"}</span>
         </button>
       </div>
       <div class="catalog-studio-main">
@@ -577,11 +714,24 @@ export async function mountCatalogStudio(container) {
     const next = !isStudioSidebarCollapsed();
     setStudioSidebarCollapsed(next);
     studioEl.classList.toggle("catalog-studio--sidebar-collapsed", next);
-    const label = container.querySelector(".catalog-studio-rail__label");
+    const label = container.querySelector(".catalog-studio-sidebar-wrap .catalog-studio-rail__label");
     const toggle = container.querySelector("#catalog-studio-sidebar-toggle");
     if (label) label.textContent = next ? "Expand" : "Collapse";
     if (toggle) {
       toggle.setAttribute("aria-label", next ? "Expand partner sidebar" : "Collapse partner sidebar");
+      toggle.title = next ? "Expand" : "Collapse";
+    }
+  };
+
+  container.querySelector("#catalog-studio-filter-toggle").onclick = () => {
+    const next = !isFilterSidebarCollapsed();
+    setFilterSidebarCollapsed(next);
+    studioEl.classList.toggle("catalog-studio--filter-collapsed", next);
+    const label = container.querySelector(".catalog-studio-filter-rail .catalog-studio-rail__label");
+    const toggle = container.querySelector("#catalog-studio-filter-toggle");
+    if (label) label.textContent = next ? "Expand" : "Collapse";
+    if (toggle) {
+      toggle.setAttribute("aria-label", next ? "Expand category sidebar" : "Collapse category sidebar");
       toggle.title = next ? "Expand" : "Collapse";
     }
   };
@@ -653,6 +803,8 @@ export async function mountCatalogStudio(container) {
     },
   });
 
-  productsEl.innerHTML = renderProductsTable(productData.items || [], filter);
-  wireProductsTable(container, () => mountCatalogStudio(container));
+  const allItems = productData.items || [];
+  const categoryTree = productData.category_tree || [];
+  const reload = () => mountCatalogStudio(container);
+  refreshProductsPanel(container, allItems, categoryTree, filter, reload);
 }
