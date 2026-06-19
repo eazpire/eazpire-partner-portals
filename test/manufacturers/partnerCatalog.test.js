@@ -27,6 +27,26 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-catalog-import",
     "admin-eazpire-catalog-mirror-status",
     "admin-eazpire-catalog-mirror-run",
+    "admin-eazpire-catalog-mirror-status-v2",
+    "admin-eazpire-product-editor-bundle",
+    "admin-eazpire-product-meta-save",
+    "admin-eazpire-product-providers-bundle",
+    "admin-eazpire-product-providers-save",
+    "admin-eazpire-product-version-create",
+    "admin-eazpire-product-version-delete",
+    "admin-eazpire-product-version-config-save",
+    "admin-eazpire-print-area-bundle",
+    "admin-eazpire-print-area-snapshot-save",
+    "admin-eazpire-variants-bundle",
+    "admin-eazpire-variants-save",
+    "admin-eazpire-template-bundle",
+    "admin-eazpire-template-save",
+    "admin-eazpire-mockups-bundle",
+    "admin-eazpire-mockups-save",
+    "admin-eazpire-automations-save",
+    "admin-eazpire-published-bundle",
+    "admin-eazpire-published-update",
+    "admin-eazpire-published-delete",
   ];
 
   for (const op of ops) {
@@ -250,6 +270,17 @@ describe("shadow import counts shape", () => {
       mockup_defaults: 0,
       variant_config: 0,
     });
+  });
+});
+
+describe("product editor service exports", () => {
+  it("exports bundle and save handlers", async () => {
+    const svc = await import("../../src/features/manufacturers/partnerCatalog/editor/productEditorService.js");
+    expect(typeof svc.getProductEditorBundle).toBe("function");
+    expect(typeof svc.saveProductMeta).toBe("function");
+    expect(typeof svc.getPublishedBundle).toBe("function");
+    expect(typeof svc.createProductVersion).toBe("function");
+    expect(typeof svc.deleteProductVersion).toBe("function");
   });
 });
 

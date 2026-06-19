@@ -246,7 +246,7 @@ async function applyPartnerCatalogSchemaPatches(db) {
 }
 
 async function applyEazpireShadowSchemaPatches(db) {
-  const migrationPath = new URL("../../../../migrations-manufacturer/0015_eazpire_catalog_shadow_tables.sql", import.meta.url);
+  const migrationPath = new URL("../../../migrations-manufacturer/0015_eazpire_catalog_shadow_tables.sql", import.meta.url);
   try {
     const { readFileSync } = await import("node:fs");
     const sql = readFileSync(migrationPath, "utf8");

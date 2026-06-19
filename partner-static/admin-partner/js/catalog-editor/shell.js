@@ -31,20 +31,25 @@ function ensureOverlay() {
   overlayEl.className = "catalog-editor-overlay";
   overlayEl.hidden = true;
   overlayEl.innerHTML = `
-    <div class="catalog-editor-shell" role="dialog" aria-modal="true">
-      <header class="catalog-editor-head">
-        <div>
-          <p class="catalog-editor-kicker">Product editor</p>
-          <h2 id="ce-title">Product</h2>
-          <p id="ce-drift" class="catalog-editor-drift"></p>
+    <div class="catalog-editor" role="dialog" aria-modal="true">
+      <header class="catalog-editor-header">
+        <div class="catalog-editor-title">
+          <div>
+            <p class="catalog-editor-sub">Product editor</p>
+            <h1 id="ce-title">Product</h1>
+            <p id="ce-drift" class="catalog-editor-sub"></p>
+          </div>
         </div>
-        <button type="button" class="icon-btn" id="ce-close" aria-label="Close editor">×</button>
+        <div class="catalog-editor-actions">
+          <button type="button" class="icon-btn" id="ce-close" aria-label="Close editor">×</button>
+        </div>
       </header>
       <nav class="catalog-editor-tabs" id="ce-tabs"></nav>
-      <nav class="catalog-editor-subnav" id="ce-subnav" hidden></nav>
+      <nav class="catalog-editor-subnav" id="ce-subnav" hidden>
+        <div class="ce-provider-pills" id="ce-subnav-pills"></div>
+      </nav>
       <main class="catalog-editor-body" id="ce-body"></main>
       <footer class="catalog-editor-foot">
-        <span id="ce-dirty" class="catalog-editor-dirty" hidden>Unsaved changes</span>
         <div class="catalog-editor-foot-actions">
           <button type="button" class="btn btn-secondary" id="ce-mirror">Mirror to publish index</button>
           <button type="button" class="btn btn-primary" id="ce-save">Save tab</button>
@@ -70,7 +75,8 @@ function renderSubnav(ctx) {
   const subnav = overlayEl.querySelector("#ce-subnav");
   if (!tab?.needsProvider) {
     subnav.hidden = true;
-    subnav.innerHTML = "";
+    const pills = subnav.querySelector("#ce-subnav-pills");
+    if (pills) pills.innerHTML = "";
     return;
   }
   const ids = activeProviderIds(ctx);
@@ -83,6 +89,7 @@ function renderSubnav(ctx) {
   }
   subnav.hidden = false;
   const pills = subnav.querySelector("#ce-subnav-pills");
+  if (!pills) return;
   pills.innerHTML = ids
     .map((pid) => {
       const fp = (ctx.bundle.providers || []).find((p) => String(p.external_provider_id) === pid);

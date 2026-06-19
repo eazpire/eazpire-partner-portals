@@ -1,5 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { saveMeta } from "./api.js";
+import { saveMeta } from "../api.js";
 
 export function renderMetaTab(ctx) {
   const p = ctx.bundle.product;

@@ -1468,6 +1468,34 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   padding: 48px;
   text-align: center;
 }
+.catalog-editor-foot {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.catalog-editor-foot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ce-hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.ce-section-title {
+  margin: 20px 0 8px;
+  font-size: 1rem;
+}
+.ce-error {
+  color: var(--danger);
+  padding: 16px;
+}
+#ce-drift.is-sync { color: var(--success); }
+#ce-drift.is-drift { color: var(--warning); }
+body.catalog-editor-open { overflow: hidden; }
 .btn-sm {
   padding: 6px 10px;
   font-size: 0.8rem;
