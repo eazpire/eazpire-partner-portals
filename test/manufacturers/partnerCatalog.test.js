@@ -455,7 +455,7 @@ describe("catalog studio service", () => {
       "https://example.com/mock-front.png",
       "https://example.com/catalog.png",
     ]);
-    expect(printAreasFromBlueprintData(normalized, null)).toEqual(["front", "back"]);
+    expect(printAreasFromBlueprintData(normalized, null)).toEqual(["back", "front"]);
     expect(printAreasFromBlueprintData(null, raw)).toEqual(["neck"]);
     expect(blueprintSupportsProvider(JSON.stringify([{ id: 26 }, { id: 30 }]), "30")).toBe(true);
     expect(blueprintSupportsProvider(JSON.stringify([{ id: 26 }]), "30")).toBe(false);
@@ -476,7 +476,7 @@ describe("catalog studio service", () => {
         title: "Unisex Tee",
         category: "T-Shirts",
         audience: "Unisex",
-        shipping_countries: "US",
+        shipping_countries: "US,CA",
         images_json: '["https://catalog/mock.png"]',
         print_providers_json: '[{"id":26},{"id":30}]',
         print_provider_count: 2,
@@ -496,10 +496,7 @@ describe("catalog studio service", () => {
         bind: (...args) => ({
           first: async () => {
             if (sql.includes("FROM manufacturers WHERE id = ? OR slug = ?")) {
-              return { id: "mfg_printify", slug: "printify", country: "US" };
-            }
-            if (sql.includes("SELECT country FROM manufacturers WHERE id = ?")) {
-              return { country: "US" };
+              return { id: "mfg_printify", slug: "printify", country: "CH" };
             }
             return null;
           },
@@ -512,7 +509,11 @@ describe("catalog studio service", () => {
                     external_blueprint_id: "145",
                     raw_json: JSON.stringify({
                       images: ["https://raw/mock.png"],
-                      print_areas: [{ name: "front" }, { name: "back" }],
+                      print_areas: [
+                        { name: "front" },
+                        { name: "back" },
+                        { name: "sleeve_left", placeholders: [{ position: "sleeve_left" }] },
+                      ],
                     }),
                     normalized_json: JSON.stringify({
                       print_areas: [{ area_key: "front" }, { area_key: "back" }],
@@ -538,9 +539,30 @@ describe("catalog studio service", () => {
 
     expect(result.ok).toBe(true);
     expect(result.items).toHaveLength(1);
+    expect(result.items[0].category).toBe("T-Shirt");
+    expect(result.items[0].parent_group).toBe("Kleidung");
+    expect(result.items[0].shipping_countries).toBe("CA, US");
     expect(result.items[0].mock_images).toContain("https://catalog/mock.png");
     expect(result.items[0].mock_images).toContain("https://raw/mock.png");
-    expect(result.items[0].print_areas).toEqual(["back", "front"]);
+    expect(result.items[0].print_areas).toEqual(["back", "front", "sleeve_left"]);
+  });
+
+  it("normalizes technical catalog_category_leaf for category tree", async () => {
+    const { resolveStudioCategory } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    expect(resolveStudioCategory({ catalog_category_leaf: "apparel.hoodie" })).toEqual({
+      category: "Hoodie",
+      parent_group: "Kleidung",
+    });
+    expect(resolveStudioCategory({ catalog_category_leaf: "home.mug" })).toEqual({
+      category: "Mug",
+      parent_group: "Drinkware",
+    });
+    expect(resolveStudioCategory({ category: "T-Shirts" })).toEqual({
+      category: "T-Shirt",
+      parent_group: "Kleidung",
+    });
   });
 
   it("filters available printify products by provider id", async () => {

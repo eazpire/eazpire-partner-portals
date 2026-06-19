@@ -171,6 +171,8 @@ function updateSidebarRailUi(shell, collapsed) {
   const expanded = collapsed && isDesktopSidebar();
   btn.setAttribute("aria-label", expanded ? "Expand sidebar" : "Collapse sidebar");
   btn.title = expanded ? "Expand sidebar" : "Collapse sidebar";
+  const action = btn.querySelector(".sidebar-rail__action");
+  if (action) action.textContent = expanded ? "Expand" : "Collapse";
   const label = btn.querySelector(".sidebar-rail__label");
   if (label) label.textContent = expanded ? "Expand" : "Collapse";
 }

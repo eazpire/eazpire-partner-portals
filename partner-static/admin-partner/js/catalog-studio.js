@@ -557,7 +557,7 @@ function renderProductsTable(items, filter) {
         <td>${escapeHtml(row.title)}</td>
         <td><code>${escapeHtml(row.blueprint_key || "—")}</code></td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${escapeHtml(row.manufacturer_country || "—")}</td>
+        <td>${escapeHtml(row.shipping_countries || "—")}</td>
         <td>${renderPrintAreaBadges(row.print_areas)}</td>
         <td>${statusBadge("available")}</td>
       </tr>`;
@@ -574,7 +574,7 @@ function renderProductsTable(items, filter) {
         return `<tr data-product-key="${escapeHtml(row.product_key)}">
       <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
       <td><strong>${escapeHtml(row.title)}</strong><br><code class="text-muted">${escapeHtml(row.product_key)}</code></td>
-      <td>${escapeHtml(row.manufacturer_country || "—")}</td>
+      <td>${escapeHtml(row.shipping_countries || "—")}</td>
       <td>${renderPrintAreaBadges(row.print_areas)}</td>
       <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
       <td>${escapeHtml(row.version_count ?? 0)}</td>
@@ -658,13 +658,16 @@ export async function mountCatalogStudio(container) {
       <div class="catalog-studio-sidebar-wrap">
         <aside class="catalog-studio-sidebar" id="catalog-studio-sidebar">
           <div class="catalog-studio-sidebar-head">
-            <span class="catalog-studio-sidebar-label">Partners</span>
+            <span class="catalog-studio-sidebar-label">Partner</span>
           </div>
           <div class="catalog-studio-tree" id="catalog-studio-tree"><p class="catalog-studio-loading">Loading…</p></div>
         </aside>
         <button type="button" class="catalog-studio-rail" id="catalog-studio-sidebar-toggle" aria-label="Collapse partner sidebar" title="Collapse">
           <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
-          <span class="catalog-studio-rail__label">${collapsed ? "Expand" : "Collapse"}</span>
+          <span class="catalog-studio-rail__labels">
+            <span class="catalog-studio-rail__section">Partner</span>
+            <span class="catalog-studio-rail__action">${collapsed ? "Expand" : "Collapse"}</span>
+          </span>
         </button>
       </div>
       <div class="catalog-studio-filter-wrap">
@@ -676,7 +679,10 @@ export async function mountCatalogStudio(container) {
         </aside>
         <button type="button" class="catalog-studio-rail catalog-studio-filter-rail" id="catalog-studio-filter-toggle" aria-label="Collapse category sidebar" title="Collapse">
           <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
-          <span class="catalog-studio-rail__label">${filterCollapsed ? "Expand" : "Collapse"}</span>
+          <span class="catalog-studio-rail__labels">
+            <span class="catalog-studio-rail__section">Filter</span>
+            <span class="catalog-studio-rail__action">${filterCollapsed ? "Expand" : "Collapse"}</span>
+          </span>
         </button>
       </div>
       <div class="catalog-studio-main">
@@ -714,7 +720,7 @@ export async function mountCatalogStudio(container) {
     const next = !isStudioSidebarCollapsed();
     setStudioSidebarCollapsed(next);
     studioEl.classList.toggle("catalog-studio--sidebar-collapsed", next);
-    const label = container.querySelector(".catalog-studio-sidebar-wrap .catalog-studio-rail__label");
+    const label = container.querySelector(".catalog-studio-sidebar-wrap .catalog-studio-rail__action");
     const toggle = container.querySelector("#catalog-studio-sidebar-toggle");
     if (label) label.textContent = next ? "Expand" : "Collapse";
     if (toggle) {
@@ -727,7 +733,7 @@ export async function mountCatalogStudio(container) {
     const next = !isFilterSidebarCollapsed();
     setFilterSidebarCollapsed(next);
     studioEl.classList.toggle("catalog-studio--filter-collapsed", next);
-    const label = container.querySelector(".catalog-studio-filter-rail .catalog-studio-rail__label");
+    const label = container.querySelector(".catalog-studio-filter-rail .catalog-studio-rail__action");
     const toggle = container.querySelector("#catalog-studio-filter-toggle");
     if (label) label.textContent = next ? "Expand" : "Collapse";
     if (toggle) {
