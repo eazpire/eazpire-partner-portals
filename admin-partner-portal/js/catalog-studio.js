@@ -263,15 +263,69 @@ function renderShippingCountryFlags(row) {
     .join("")}</div>`;
 }
 
-function renderPrintifyChoiceBadge(choice) {
-  if (!choice) return "";
+function renderPrintifyChoiceBadge(choice, blueprintId) {
+  if (!choice || !blueprintId) return "";
   const labels = {
-    us: "Printify Choice US",
-    world: "Printify Choice World",
+    us: "US Only",
+    world: "World",
   };
   const label = labels[choice] || "Printify Choice";
   const cls = choice === "world" ? "cs-pc-badge--world" : "cs-pc-badge--us";
-  return `<span class="badge cs-pc-badge ${cls}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  return `<button type="button" class="badge cs-pc-badge cs-pc-badge-btn ${cls}" data-printify-blueprint-id="${escapeHtml(String(blueprintId))}" data-printify-choice="${escapeHtml(choice)}" title="Printify Choice — click to change">${escapeHtml(label)}</button>`;
+}
+
+function openPrintifyChoicePicker(blueprintId, currentChoice, onChanged) {
+  const options = [
+    {
+      value: "us",
+      label: "US Only",
+      description: "Orders optimized based on customer location (for US orders only)",
+      badge: "cs-pc-badge--us",
+    },
+    {
+      value: "world",
+      label: "World",
+      description: "Printify Choice World — global fulfillment network",
+      badge: "cs-pc-badge--world",
+    },
+  ];
+
+  const bodyHtml = `<p class="confirm-modal-message">Printify Choice tier for blueprint <code>${escapeHtml(String(blueprintId))}</code>.</p>
+    <div class="cs-status-options cs-pc-choice-options">${options
+      .map(
+        (opt) => `<button type="button" class="cs-status-option cs-pc-choice-option ${opt.value === currentChoice ? "is-current" : ""}" data-pc-choice="${escapeHtml(opt.value)}">
+          <span class="badge cs-pc-badge ${opt.badge}">${escapeHtml(opt.label)}</span>
+          <span class="cs-status-option__desc">${escapeHtml(opt.description)}</span>
+        </button>`
+      )
+      .join("")}</div>`;
+
+  openModal({ title: "Printify Choice", bodyHtml, onSave: null });
+  const backdrop = document.getElementById("modal-backdrop");
+  const modal = backdrop?.querySelector(".modal");
+  modal?.classList.add("confirm-modal", "cs-pc-choice-modal");
+  const saveBtn = document.getElementById("modal-save");
+  const cancelBtn = document.getElementById("modal-cancel");
+  if (saveBtn) saveBtn.style.display = "none";
+  if (cancelBtn) cancelBtn.textContent = "Close";
+
+  backdrop?.querySelectorAll("[data-pc-choice]").forEach((btn) => {
+    btn.onclick = async () => {
+      const choice = btn.dataset.pcChoice;
+      closeModal();
+      if (choice === currentChoice) return;
+      try {
+        await partnerFetch("admin-catalog-studio-set-printify-choice", {
+          method: "POST",
+          body: { blueprint_id: Number(blueprintId), printify_choice: choice },
+        });
+        showToast("Printify Choice saved", choice === "world" ? "World" : "US Only");
+        await onChanged();
+      } catch (e) {
+        showToast("Save failed", e.message || String(e));
+      }
+    };
+  });
 }
 
 function renderTitleCell(row) {
@@ -281,7 +335,8 @@ function renderTitleCell(row) {
     ? `<a href="${escapeHtml(url)}" class="cs-title-cell__link" target="_blank" rel="noopener noreferrer">${title}</a>`
     : title;
   const titleHtml = `<strong class="cs-title-cell__text">${titleInner}</strong>`;
-  const badge = renderPrintifyChoiceBadge(row.printify_choice);
+  const blueprintId = row.printify_blueprint_id ?? row.blueprint_key;
+  const badge = renderPrintifyChoiceBadge(row.printify_choice, blueprintId);
   if (!badge) return titleHtml;
   return `<div class="cs-title-cell">${titleHtml}${badge}</div>`;
 }
@@ -738,6 +793,13 @@ function wireProductsTable(container, reload) {
         areas = [];
       }
       openPrintAreasModal(btn.dataset.title || "Print areas", areas);
+    };
+  });
+
+  productsEl.querySelectorAll(".cs-pc-badge-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openPrintifyChoicePicker(btn.dataset.printifyBlueprintId, btn.dataset.printifyChoice, reload);
     };
   });
 }

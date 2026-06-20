@@ -31,6 +31,7 @@ describe("partner catalog ops registration", () => {
     "admin-catalog-studio-tree",
     "admin-catalog-studio-products",
     "admin-catalog-studio-set-status",
+    "admin-catalog-studio-set-printify-choice",
     "admin-catalog-studio-remove-product",
     "admin-eazpire-product-editor-bundle",
     "admin-eazpire-product-meta-save",
@@ -570,7 +571,7 @@ describe("catalog studio service", () => {
     expect(result.items[0].print_areas).toEqual(["back", "front", "neck"]);
   });
 
-  it("resolves Printify Choice US vs World from shipping profiles", async () => {
+  it("resolves Printify Choice US vs World with US default when provider 99 present", async () => {
     const { resolvePrintifyChoiceTypeFromShippingData, resolvePrintifyChoiceType } = await import(
       "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
     );
@@ -590,8 +591,48 @@ describe("catalog studio service", () => {
       resolvePrintifyChoiceType(
         JSON.stringify([{ id: 99, title: "Printify Choice", location: { country: "US" } }])
       )
-    ).toBeNull();
+    ).toBe("us");
+    expect(
+      resolvePrintifyChoiceType(
+        JSON.stringify([{ id: 99, title: "Printify Choice", location: { country: "US" } }]),
+        null
+      )
+    ).toBe("us");
     expect(resolvePrintifyChoiceType(JSON.stringify([{ id: 26 }]))).toBeNull();
+  });
+
+  it("persists manual Printify Choice override on printify_blueprints", async () => {
+    const { setCatalogStudioPrintifyChoice } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const runs = [];
+    const env = {
+      CATALOG_DB: {
+        prepare(sql) {
+          return {
+            bind(...args) {
+              return {
+                async first() {
+                  if (sql.includes("SELECT id FROM")) return { id: args[0] };
+                  return null;
+                },
+                async run() {
+                  runs.push({ sql, args });
+                  return { meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+    const world = await setCatalogStudioPrintifyChoice(env, { blueprintId: 145, choiceType: "world" });
+    expect(world.ok).toBe(true);
+    expect(world.printify_choice).toBe("world");
+    expect(runs.some((r) => r.args[0] === "world" && r.args[2] === 145)).toBe(true);
+
+    const bad = await setCatalogStudioPrintifyChoice(env, { blueprintId: 145, choiceType: "global" });
+    expect(bad.ok).toBe(false);
   });
 
   it("builds Printify catalog product URLs from blueprint id, brand, and title", async () => {

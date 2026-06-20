@@ -9,7 +9,7 @@ import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductServi
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
-import { fetchBlueprint, fetchPrintifyChoiceShipping, buildPrintifyCatalogProductUrl } from "../adapters/printify/printifyCatalogClient.js";
+import { fetchBlueprint, buildPrintifyCatalogProductUrl } from "../adapters/printify/printifyCatalogClient.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -20,8 +20,6 @@ const AVAILABLE_BULK_ENRICHMENT_MAX = 0;
 const PRINTIFY_CHOICE_PROVIDER_ID = 99;
 /** Max Printify blueprint API lookups per list request (online / small sets). */
 const PRINT_AREAS_API_FETCH_MAX = 30;
-/** Max Printify Choice shipping lookups per list request (online / small sets). */
-const PRINTIFY_CHOICE_API_FETCH_MAX = 30;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
@@ -459,9 +457,8 @@ function extractPrintAreaNamesFromPrintifyBlueprint(blueprint) {
 }
 
 /**
- * Printify Choice US vs World from provider 99 shipping profiles.
- * World = ships beyond US (REST_OF_THE_WORLD or other country codes).
- * @returns {null|'us'|'world'}
+ * @deprecated Shipping profiles indicate delivery regions, not Printify Choice US vs World tier.
+ * Kept for reference/tests only — do not use for Catalog Studio badges.
  */
 export function resolvePrintifyChoiceTypeFromShippingData(shippingData) {
   const countries = new Set();
@@ -479,6 +476,9 @@ export function resolvePrintifyChoiceTypeFromShippingData(shippingData) {
 }
 
 /**
+ * Printify Choice US vs World for Catalog Studio.
+ * - Explicit DB value (`us`|`world`) wins (manual override from UI).
+ * - When provider 99 is available but unset → default **US Only** (matches Printify dashboard).
  * @param {string|null|undefined} cachedType - us|world from catalog DB
  * @returns {null|'us'|'world'}
  */
@@ -487,7 +487,7 @@ export function resolvePrintifyChoiceType(printProvidersJson, cachedType = null)
   const providers = parseJson(printProvidersJson, []);
   if (!Array.isArray(providers)) return null;
   if (!providers.some((p) => Number(p?.id) === PRINTIFY_CHOICE_PROVIDER_ID)) return null;
-  return null;
+  return "us";
 }
 
 async function loadBlueprintShippingByExternalIds(catalogDb, externalIds) {
@@ -812,25 +812,6 @@ async function loadPrintifyCatalogUrlsByExternalIds(catalogDb, externalIds) {
   return map;
 }
 
-async function fetchPrintifyChoiceTypesByExternalIds(env, externalIds, maxCount = PRINTIFY_CHOICE_API_FETCH_MAX) {
-  const map = new Map();
-  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))].slice(0, maxCount);
-  if (!ids.length || !env) return map;
-
-  for (let i = 0; i < ids.length; i += BLUEPRINT_API_CONCURRENCY) {
-    const batch = ids.slice(i, i + BLUEPRINT_API_CONCURRENCY);
-    await Promise.all(
-      batch.map(async (externalId) => {
-        const result = await fetchPrintifyChoiceShipping(env, externalId);
-        if (!result.ok || !result.shipping) return;
-        const type = resolvePrintifyChoiceTypeFromShippingData(result.shipping);
-        if (type) map.set(externalId, type);
-      })
-    );
-  }
-  return map;
-}
-
 async function loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds) {
   const map = new Map();
   if (!productKeys.length) return map;
@@ -843,21 +824,6 @@ async function loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintEx
       const type = typeByExternal.get(String(extId));
       if (type) map.set(productKey, type);
     }
-  }
-
-  const needApiIds = [];
-  for (const key of productKeys) {
-    if (!map.has(key) && blueprintExternalIds?.has(key)) {
-      needApiIds.push(blueprintExternalIds.get(key));
-    }
-  }
-  const apiTypes = await fetchPrintifyChoiceTypesByExternalIds(env, needApiIds);
-  for (const key of productKeys) {
-    if (map.has(key)) continue;
-    const extId = blueprintExternalIds?.get(key);
-    if (!extId) continue;
-    const type = apiTypes.get(String(extId));
-    if (type) map.set(key, type);
   }
 
   return map;
@@ -1001,6 +967,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       print_areas: merged.print_areas,
       printify_choice: choiceMap.get(p.product_key) || null,
       printify_url: extId ? printifyUrlMap.get(String(extId)) || null : null,
+      printify_blueprint_id: extId ? Number(extId) || null : null,
       is_aop: isAllOverPrintFromTitle(p.title),
     };
   });
@@ -1027,6 +994,47 @@ export async function setCatalogStudioProductStatus(env, { productKey, catalogSt
   if (!mirror.ok) return { ok: false, error: mirror.error || "mirror_failed", product: updated };
 
   return { ok: true, product_key: key, catalog_status: status, product: updated };
+}
+
+/**
+ * Persist manual Printify Choice US / World override on printify_blueprints (CATALOG_DB).
+ */
+export async function setCatalogStudioPrintifyChoice(env, { blueprintId, choiceType }) {
+  const catalogDb = env?.CATALOG_DB;
+  if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
+
+  const id = Number(blueprintId);
+  if (!Number.isFinite(id) || id <= 0) return { ok: false, error: "blueprint_id_required" };
+
+  const choice = String(choiceType || "")
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+  const normalized =
+    choice === "us" || choice === "us_only" || choice === "printify_choice_us"
+      ? "us"
+      : choice === "world" || choice === "printify_choice_world"
+        ? "world"
+        : null;
+  if (!normalized) return { ok: false, error: "invalid_choice_type" };
+
+  try {
+    const existing = await catalogDb.prepare("SELECT id FROM printify_blueprints WHERE id = ?").bind(id).first();
+    if (!existing) return { ok: false, error: "blueprint_not_found" };
+
+    await catalogDb
+      .prepare("UPDATE printify_blueprints SET printify_choice_type = ?, updated_at = ? WHERE id = ?")
+      .bind(normalized, Date.now(), id)
+      .run();
+
+    return { ok: true, blueprint_id: id, printify_choice: normalized };
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (msg.includes("no such column")) {
+      return { ok: false, error: "printify_choice_type_column_missing" };
+    }
+    return { ok: false, error: "update_failed", detail: msg };
+  }
 }
 
 async function runCatalogCleanup(catalogDb, productKey) {

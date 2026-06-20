@@ -1255,6 +1255,14 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   white-space: nowrap;
   border: 1px solid transparent;
 }
+.cs-pc-badge-btn {
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 8px;
+}
+.cs-pc-badge-btn:hover {
+  filter: brightness(0.96);
+}
 .cs-pc-badge--us {
   background: #dbeafe;
   color: #1d4ed8;

@@ -179,6 +179,7 @@ const ADMIN_OPS = new Set([
   "admin-catalog-studio-tree",
   "admin-catalog-studio-products",
   "admin-catalog-studio-set-status",
+  "admin-catalog-studio-set-printify-choice",
   "admin-catalog-studio-remove-product",
   "admin-eazpire-product-list",
   "admin-eazpire-product-get",
@@ -559,6 +560,23 @@ export async function handleManufacturerRouter(request, env) {
       });
       if (!result.ok) {
         const status = result.error === "product_not_found" ? 404 : 400;
+        return json(result, status, cors);
+      }
+      return json(result, 200, cors);
+    }
+    if (op === "admin-catalog-studio-set-printify-choice" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await catalogStudio.setCatalogStudioPrintifyChoice(env, {
+        blueprintId: body.blueprint_id ?? body.printify_blueprint_id,
+        choiceType: body.printify_choice ?? body.choice_type ?? body.choice,
+      });
+      if (!result.ok) {
+        const status =
+          result.error === "blueprint_not_found"
+            ? 404
+            : result.error === "catalog_db_unavailable"
+              ? 503
+              : 400;
         return json(result, status, cors);
       }
       return json(result, 200, cors);
