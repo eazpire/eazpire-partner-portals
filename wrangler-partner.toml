@@ -29,6 +29,9 @@ ADMIN_PARTNER_URL = "https://admin.eazpire.com/partner"
 ADMIN_OWNER_IDS = "9415375946010"
 ADMIN_OWNER_EMAILS = "tobi.muss@hotmail.com"
 ACCOUNT_DELETION_FROM_EMAIL = "Eazpire <noreply@eazpire.com>"
+# Phase 2+3: catalog-db as ops master (read + write)
+CATALOG_OPS_MASTER_READ = "1"
+CATALOG_OPS_MASTER_WRITE = "1"
 
 [[kv_namespaces]]
 binding = "JOBS"

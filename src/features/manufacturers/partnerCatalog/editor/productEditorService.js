@@ -2,7 +2,7 @@
  * Partner Admin product editor — bundle loaders and save handlers (master DB)
  */
 
-import { isCatalogOpsMasterRead } from "../catalogOpsConfig.js";
+import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
 import {
   getCatalogOpsEditorBundle,
   getCatalogOpsVariantsBundle,
@@ -10,6 +10,18 @@ import {
   getCatalogOpsProduct,
   listCatalogOpsProductVersions,
 } from "../catalogOpsReadService.js";
+import {
+  updateCatalogProductMeta,
+  saveCatalogProviders,
+  createCatalogPatVersion,
+  deleteCatalogPatVersion,
+  saveCatalogVersionConfig,
+  saveCatalogPrintAreaSnapshot,
+  saveCatalogVariants,
+  saveCatalogTemplate,
+  saveCatalogMockups,
+  saveCatalogAutomations,
+} from "../catalogOpsWriteService.js";
 import { parseJson, newId } from "../../db.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
 import {
@@ -43,7 +55,7 @@ async function queryFirst(db, sql, ...binds) {
 }
 
 export async function getProductEditorBundle(env, productKey) {
-  if (isCatalogOpsMasterRead(env)) {
+  if (shouldUseCatalogOps(env)) {
     return getCatalogOpsEditorBundle(env, productKey);
   }
   const db = env.MANUFACTURER_DB;
@@ -113,6 +125,9 @@ function rowToPublishProfile(row) {
 }
 
 export async function saveProductMeta(env, productKey, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return updateCatalogProductMeta(env, productKey, body);
+  }
   const db = env.MANUFACTURER_DB;
   const product = await updateEazpireProduct(db, productKey, {
     title: body.title,
@@ -246,14 +261,14 @@ export async function getProvidersBundle(env, productKey) {
 
 export async function getProviderCatalogDetail(env, productKey, printProviderId) {
   const db = env.MANUFACTURER_DB;
-  if (!db && !isCatalogOpsMasterRead(env)) return { ok: false, error: "manufacturer_db_unavailable" };
+  if (!db && !shouldUseCatalogOps(env)) return { ok: false, error: "manufacturer_db_unavailable" };
 
   const pid = Number(printProviderId);
   if (!Number.isFinite(pid)) return { ok: false, error: "print_provider_id_required" };
 
   let product;
   let printifyBlueprintId;
-  if (isCatalogOpsMasterRead(env)) {
+  if (shouldUseCatalogOps(env)) {
     const ops = await getCatalogOpsProduct(env, productKey);
     if (!ops.ok) return ops;
     product = ops.product;
@@ -275,7 +290,7 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
     }
   }
 
-  const variantPrintAreas = isCatalogOpsMasterRead(env)
+  const variantPrintAreas = shouldUseCatalogOps(env)
     ? await queryAll(
         env.CATALOG_DB,
         `SELECT * FROM product_variant_print_areas WHERE product_key = ? ORDER BY print_area_key, variant_title`,
@@ -287,7 +302,7 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
         productKey
       );
 
-  const allVersions = isCatalogOpsMasterRead(env)
+  const allVersions = shouldUseCatalogOps(env)
     ? await listCatalogOpsProductVersions(env, productKey)
     : await listProductVersions(db, productKey);
   const versions = allVersions
@@ -399,6 +414,9 @@ async function upsertVariantPrintAreaDimensions(db, productKey, update, now) {
 }
 
 export async function saveProviders(env, productKey, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogProviders(env, productKey, body);
+  }
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
   const activeIds = Array.isArray(body.active_print_provider_ids)
@@ -506,6 +524,9 @@ export async function saveProviders(env, productKey, body) {
 }
 
 export async function createProductVersion(env, productKey, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return createCatalogPatVersion(env, productKey, body);
+  }
   const db = env.MANUFACTURER_DB;
   const fp = await queryFirst(
     db,
@@ -525,6 +546,9 @@ export async function createProductVersion(env, productKey, body) {
 }
 
 export async function deleteProductVersion(env, versionId) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return deleteCatalogPatVersion(env, versionId);
+  }
   const db = env.MANUFACTURER_DB;
   const v = await getProductVersion(db, versionId);
   if (!v) return { ok: false, error: "not_found" };
@@ -534,6 +558,9 @@ export async function deleteProductVersion(env, versionId) {
 }
 
 export async function saveVersionConfig(env, versionId, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogVersionConfig(env, versionId, body);
+  }
   const db = env.MANUFACTURER_DB;
   const version = await updateProductVersion(db, versionId, {
     display_name: body.display_name,
@@ -547,7 +574,7 @@ export async function saveVersionConfig(env, versionId, body) {
 }
 
 export async function getPrintAreaBundle(env, productKey, { printProviderId, versionId } = {}) {
-  if (isCatalogOpsMasterRead(env)) {
+  if (shouldUseCatalogOps(env)) {
     return getCatalogOpsPrintAreaBundle(env, productKey, { printProviderId, versionId });
   }
   const db = env.MANUFACTURER_DB;
@@ -570,6 +597,9 @@ export async function getPrintAreaBundle(env, productKey, { printProviderId, ver
 }
 
 export async function savePrintAreaSnapshot(env, versionId, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogPrintAreaSnapshot(env, versionId, body);
+  }
   const db = env.MANUFACTURER_DB;
   const existing = await getProductVersion(db, versionId);
   if (!existing) return { ok: false, error: "not_found" };
@@ -614,7 +644,7 @@ export async function savePrintAreaSnapshot(env, versionId, body) {
 }
 
 export async function getVariantsBundle(env, productKey, printProviderId) {
-  if (isCatalogOpsMasterRead(env)) {
+  if (shouldUseCatalogOps(env)) {
     return getCatalogOpsVariantsBundle(env, productKey, printProviderId);
   }
   const db = env.MANUFACTURER_DB;
@@ -654,6 +684,9 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
 }
 
 export async function saveVariants(env, productKey, printProviderId, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogVariants(env, productKey, printProviderId, body);
+  }
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
   if (body.config != null) {
@@ -720,6 +753,9 @@ export async function getTemplateBundle(env, productKey, printProviderId) {
 }
 
 export async function saveTemplate(env, productKey, printProviderId, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogTemplate(env, productKey, printProviderId, body);
+  }
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
   const existing = await queryFirst(
@@ -782,6 +818,9 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
 }
 
 export async function saveMockups(env, productKey, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogMockups(env, productKey, body);
+  }
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
   if (body.print_area_edit_use_mocks !== undefined) {
@@ -826,6 +865,9 @@ export async function saveMockups(env, productKey, body) {
 }
 
 export async function saveAutomations(env, versionId, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogAutomations(env, versionId, body);
+  }
   const db = env.MANUFACTURER_DB;
   const auto = {
     auto_publish_enabled: !!body.auto_publish_enabled,

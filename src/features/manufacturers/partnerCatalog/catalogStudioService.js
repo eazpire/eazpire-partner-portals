@@ -6,7 +6,8 @@ import { buildCategoryTree, CAT_REVERSE, CATEGORY_GROUPS } from "../../admin/cat
 import { listPartnersForAdmin, getPartnerByIdOrSlug } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
 import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductService.js";
-import { isCatalogOpsMasterRead } from "./catalogOpsConfig.js";
+import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "./catalogOpsConfig.js";
+import { setCatalogProductStatus } from "./catalogOpsWriteService.js";
 import {
   listCatalogOpsStudioProductsAsEazpire,
   productKeysForProviderFromCatalog,
@@ -1003,13 +1004,13 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   const status = filter === "online" || filter === "preview" || filter === "offline" ? filter : "online";
   let products =
-    isCatalogOpsMasterRead(env) && env?.CATALOG_DB
+    shouldUseCatalogOps(env) && env?.CATALOG_DB
       ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
       : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
 
   if (providerId) {
     const keysForProvider =
-      isCatalogOpsMasterRead(env) && env?.CATALOG_DB
+      shouldUseCatalogOps(env) && env?.CATALOG_DB
         ? await productKeysForProviderFromCatalog(env.CATALOG_DB, providerId)
         : await productKeysForProvider(db, manufacturerId, providerId);
     const keySet = new Set(keysForProvider);
@@ -1097,11 +1098,15 @@ export async function setCatalogStudioProductStatus(env, { productKey, catalogSt
     return { ok: false, error: "invalid_catalog_status" };
   }
 
-  const mfgDb = env.MANUFACTURER_DB;
-  if (!mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
-
   const key = String(productKey || "").trim();
   if (!key) return { ok: false, error: "product_key_required" };
+
+  if (isCatalogOpsMasterWrite(env)) {
+    return setCatalogProductStatus(env, key, status);
+  }
+
+  const mfgDb = env.MANUFACTURER_DB;
+  if (!mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
 
   const updated = await updateEazpireProduct(mfgDb, key, { catalog_status: status });
   if (!updated) return { ok: false, error: "product_not_found" };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCatalogOpsMasterRead } from "../../src/features/manufacturers/partnerCatalog/catalogOpsConfig.js";
+import { isCatalogOpsMasterRead, isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../../src/features/manufacturers/partnerCatalog/catalogOpsConfig.js";
 import {
   getCatalogOpsProduct,
   getCatalogOpsEditorBundle,
@@ -139,6 +139,11 @@ describe("catalogOpsConfig", () => {
     expect(isCatalogOpsMasterRead({ CATALOG_OPS_MASTER_READ: 1 })).toBe(true);
     expect(isCatalogOpsMasterRead({})).toBe(false);
     expect(isCatalogOpsMasterRead({ CATALOG_OPS_MASTER_READ: "0" })).toBe(false);
+  });
+
+  it("shouldUseCatalogOps is true when write flag alone is set", () => {
+    expect(shouldUseCatalogOps({ CATALOG_OPS_MASTER_WRITE: "1" })).toBe(true);
+    expect(isCatalogOpsMasterWrite({ CATALOG_OPS_MASTER_WRITE: "yes" })).toBe(true);
   });
 });
 

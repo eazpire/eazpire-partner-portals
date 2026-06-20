@@ -4,28 +4,7 @@
 
 import { catalogStatusToIsActive } from "./constants.js";
 import { parseJson } from "../db.js";
-
-function studioConfigToPatFields(studioConfig) {
-  const sc = studioConfig || {};
-  return {
-    print_areas_snapshot_json:
-      sc.print_areas_snapshot != null ? JSON.stringify(sc.print_areas_snapshot) : null,
-    printify_print_area_groups_json:
-      sc.printify_print_area_groups != null ? JSON.stringify(sc.printify_print_area_groups) : null,
-    shopify_design_placement: sc.shopify_design_placement || null,
-    print_provider_id: sc.print_provider_id,
-  };
-}
-
-function autoPublishConfigToPatFields(autoConfig) {
-  const ac = autoConfig || {};
-  return {
-    auto_publish_enabled: ac.auto_publish_enabled ? 1 : 0,
-    automation_shopify_sync_enabled: ac.automation_shopify_sync_enabled ? 1 : 0,
-    automation_amazon_publish_enabled: ac.automation_amazon_publish_enabled ? 1 : 0,
-    automation_social_json: ac.automation_social != null ? JSON.stringify(ac.automation_social) : null,
-  };
-}
+import { studioConfigToPatFields, autoPublishConfigToPatFields } from "./catalogOpsPatFields.js";
 
 export async function mirrorEazpireProductToCatalogDb(env, productKey) {
   const mfgDb = env.MANUFACTURER_DB;

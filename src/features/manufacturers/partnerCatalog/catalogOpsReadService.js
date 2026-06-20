@@ -210,7 +210,7 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
     ? {
         ok: true,
         legacy_master_may_differ: true,
-        message: "Reads from catalog-db; saves still use MANUFACTURER_DB until Phase 3",
+        message: "Reads from catalog-db; writes use catalog-db when CATALOG_OPS_MASTER_WRITE=1",
       }
     : null;
 
