@@ -3476,6 +3476,48 @@ body.catalog-editor-open #partner-toast {
   justify-content: space-between;
   gap: 10px;
 }
+.ce-tpl-draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.ce-tpl-draft-head__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.ce-tpl-draft-head__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ce-tpl-draft-head__id {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+  word-break: break-all;
+}
+a.ce-tpl-draft-head__id {
+  text-decoration: none;
+}
+a.ce-tpl-draft-head__id:hover {
+  text-decoration: underline;
+}
+.ce-tpl-draft-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .ce-tpl-sections {
   display: flex;
   flex-direction: column;

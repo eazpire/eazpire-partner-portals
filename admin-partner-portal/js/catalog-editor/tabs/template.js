@@ -1,6 +1,6 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
-import { fetchTemplateBundle, createTemplateDraft, syncTemplateSection } from "../api.js";
+import { fetchTemplateBundle, createTemplateDraft, removeTemplateDraft, syncTemplateSection } from "../api.js";
 
 const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
 
@@ -22,14 +22,49 @@ const SECTIONS = [
   },
 ];
 
-function defaultPrintifyId(data) {
-  return String(data?.template?.printify_product_id || data?.version?.external_template_product_id || "").trim();
+function syncPrintifyId(data) {
+  return String(data?.template?.printify_product_id || "").trim();
+}
+
+function draftPrintifyId(data) {
+  return String(data?.draft_product_id || data?.template?.printify_draft_product_id || "").trim();
 }
 
 function printifyProductUrl(printifyId) {
   const key = String(printifyId || "").trim();
   if (!key) return null;
   return PRINTIFY_PRODUCT_URL_BASE + encodeURIComponent(key);
+}
+
+function partnerFetchErrorMessage(err) {
+  return err?.data?.message || err?.data?.detail || err?.message || "Unknown error";
+}
+
+function renderPanelHead(draftId) {
+  if (draftId) {
+    const url = printifyProductUrl(draftId);
+    return `
+      <div class="ce-tpl-panel__head ce-tpl-draft-head">
+        <div class="ce-tpl-draft-head__main">
+          <span class="ce-tpl-draft-head__label">Printify draft</span>
+          ${
+            url
+              ? `<a class="ce-tpl-draft-head__id" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(draftId)}</a>`
+              : `<span class="ce-tpl-draft-head__id">${escapeHtml(draftId)}</span>`
+          }
+        </div>
+        <div class="ce-tpl-draft-head__actions">
+          <button type="button" class="btn btn-secondary btn-sm ce-tpl-open-draft"${url ? "" : " disabled"}>Open</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="ce-tpl-remove-draft">Remove</button>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="ce-tpl-panel__head">
+      <h3 class="ce-section-title">Templates</h3>
+      <button type="button" class="btn btn-secondary btn-sm" id="ce-tpl-create-draft">Create draft</button>
+    </div>`;
 }
 
 function renderSection(section, printifyId) {
@@ -72,17 +107,24 @@ export async function loadTemplateTab(ctx) {
 
   const data = await fetchTemplateBundle(ctx.productKey, pid);
   ctx.templateData = data;
-  const printifyId = defaultPrintifyId(data);
+
+  if (data.draft_stale_removed) {
+    const removed = data.removed_draft_id ? ` (${data.removed_draft_id})` : "";
+    showToast(
+      "Draft removed",
+      `The saved Printify draft${removed} no longer exists and was cleared from the database.`
+    );
+  }
+
+  const draftId = draftPrintifyId(data);
+  const syncPrintifyIdValue = syncPrintifyId(data);
 
   return `
     <div class="ce-tab-panel ce-tpl-panel">
-      <div class="ce-tpl-panel__head">
-        <h3 class="ce-section-title">Templates · provider ${escapeHtml(pid)}</h3>
-        <button type="button" class="btn btn-secondary btn-sm" id="ce-tpl-create-draft">Create draft</button>
-      </div>
-      <p class="ce-hint">Link a Printify template product ID per section, then sync to import data into the catalog.</p>
+      ${renderPanelHead(draftId)}
+      <p class="ce-hint">Create a Printify draft once per provider, then link a separate Printify product ID per section to sync data into the catalog.</p>
       <div class="ce-tpl-sections">
-        ${SECTIONS.map((s) => renderSection(s, printifyId)).join("")}
+        ${SECTIONS.map((s) => renderSection(s, syncPrintifyIdValue)).join("")}
       </div>
     </div>`;
 }
@@ -152,8 +194,8 @@ async function runSectionSync(sectionId, ctx) {
   } catch (err) {
     setSectionState(sectionEl, "error");
     const status = sectionEl?.querySelector(".ce-tpl-section__status");
-    if (status) status.textContent = err.message || "Sync failed";
-    showToast("Sync failed", err.message || "Unknown error");
+    if (status) status.textContent = partnerFetchErrorMessage(err);
+    showToast("Sync failed", partnerFetchErrorMessage(err));
   } finally {
     if (syncBtn) syncBtn.disabled = false;
     sectionEl?.classList.remove("ce-tpl-section--loading");
@@ -172,8 +214,10 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("click", async (ev) => {
   const syncBtn = ev.target.closest(".ce-tpl-sync");
   const openBtn = ev.target.closest(".ce-tpl-open");
+  const draftOpenBtn = ev.target.closest(".ce-tpl-open-draft");
   const draftBtn = ev.target.closest("#ce-tpl-create-draft");
-  if (!syncBtn && !openBtn && !draftBtn) return;
+  const removeBtn = ev.target.closest("#ce-tpl-remove-draft");
+  if (!syncBtn && !openBtn && !draftBtn && !removeBtn && !draftOpenBtn) return;
 
   if (openBtn) {
     const sectionId = openBtn.dataset.section;
@@ -181,6 +225,17 @@ document.addEventListener("click", async (ev) => {
     const url = printifyProductUrl(input?.value);
     if (!url) {
       showToast("Open failed", "Printify product ID required.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  if (draftOpenBtn) {
+    const draftLink = document.querySelector(".ce-tpl-draft-head__id[href]");
+    const url = draftLink?.href;
+    if (!url) {
+      showToast("Open failed", "Printify draft ID required.");
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
@@ -198,18 +253,31 @@ document.addEventListener("click", async (ev) => {
         print_provider_id: ctx.selectedPrintProviderId,
         auto_mirror: false,
       });
-      const id = res?.printify_product_id ? String(res.printify_product_id) : "";
-      if (id) {
-        document.querySelectorAll("[data-section-input]").forEach((inp) => {
-          if (!inp.value?.trim()) inp.value = id;
-        });
-      }
+      const id = res?.printify_draft_product_id ? String(res.printify_draft_product_id) : "";
       await ctx.reloadTab?.();
-      showToast("Draft created", id ? `Printify product ${id}` : "Template draft ready.");
+      showToast("Draft created", id ? `Printify draft ${id}` : "Printify draft ready.");
     } catch (err) {
-      showToast("Draft failed", err.message || "Unknown error");
+      showToast("Draft failed", partnerFetchErrorMessage(err));
     } finally {
       draftBtn.disabled = false;
+    }
+    return;
+  }
+
+  if (removeBtn) {
+    removeBtn.disabled = true;
+    try {
+      const res = await removeTemplateDraft({
+        product_key: ctx.productKey,
+        print_provider_id: ctx.selectedPrintProviderId,
+      });
+      await ctx.reloadTab?.();
+      const id = res?.removed_draft_id ? String(res.removed_draft_id) : "";
+      showToast("Draft removed", id ? `Removed Printify draft ${id}` : "Draft link cleared.");
+    } catch (err) {
+      showToast("Remove failed", partnerFetchErrorMessage(err));
+    } finally {
+      removeBtn.disabled = false;
     }
     return;
   }

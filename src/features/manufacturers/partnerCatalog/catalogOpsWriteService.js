@@ -691,6 +691,63 @@ export async function saveCatalogVariants(env, productKey, printProviderId, body
   return { ok: true, _ops_source: "catalog-db" };
 }
 
+export async function saveCatalogDraftProductId(env, productKey, printProviderId, draftProductId) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const draftId = String(draftProductId || "").trim();
+  if (!draftId) return { ok: false, error: "draft_product_id_required" };
+
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    pid
+  );
+
+  if (existing?.id) {
+    await db
+      .prepare(`UPDATE template_products SET printify_draft_product_id = ?, updated_at = ? WHERE id = ?`)
+      .bind(draftId, now, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO template_products
+          (product_key, print_provider_id, printify_product_id, printify_draft_product_id, created_at, updated_at)
+         VALUES (?, ?, '', ?, ?, ?)`
+      )
+      .bind(productKey, pid, draftId, now, now)
+      .run();
+  }
+
+  return { ok: true, printify_draft_product_id: draftId, _ops_source: "catalog-db" };
+}
+
+export async function clearCatalogDraftProductId(env, productKey, printProviderId) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    pid
+  );
+  if (!existing?.id) return { ok: true, cleared: false, _ops_source: "catalog-db" };
+
+  await db
+    .prepare(`UPDATE template_products SET printify_draft_product_id = NULL, updated_at = ? WHERE id = ?`)
+    .bind(now, existing.id)
+    .run();
+
+  return { ok: true, cleared: true, _ops_source: "catalog-db" };
+}
+
 export async function saveCatalogTemplate(env, productKey, printProviderId, body) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };

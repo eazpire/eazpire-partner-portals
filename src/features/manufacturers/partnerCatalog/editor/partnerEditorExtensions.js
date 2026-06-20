@@ -5,7 +5,7 @@
 import { parseJson, newId } from "../../db.js";
 import { getEazpireProduct } from "../eazpireProductService.js";
 import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
-import { getCatalogOpsProvidersData, getCatalogOpsProduct, listCatalogOpsProductVersions } from "../catalogOpsReadService.js";
+import { getCatalogOpsProduct, getCatalogOpsTemplateRow, listCatalogOpsProductVersions } from "../catalogOpsReadService.js";
 import {
   upsertCatalogPublishProfile,
   upsertCatalogMockupDefault,
@@ -13,6 +13,8 @@ import {
   upsertCatalogTemplateFromPrintify,
   replaceCatalogMockupImages,
   updateCatalogPatPrintifyProductId,
+  saveCatalogDraftProductId,
+  clearCatalogDraftProductId,
 } from "../catalogOpsWriteService.js";
 import { listProductVersions, updateProductVersion } from "../eazpireProductVersionService.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
@@ -20,6 +22,7 @@ import { fetchPrintifyProductById } from "../../../admin/adminProducts.js";
 import { buildProductPublishReadiness } from "../../../admin/adminPublishReadiness.js";
 import { fetchBlueprint, fetchBlueprintProviderVariants, fetchAllPrintProviders } from "../../adapters/printify/printifyCatalogClient.js";
 import { createPrintifyProduct, getPrintifyProduct } from "../../../../utils/printify.js";
+import { getPrintifyApiKey } from "../../../../utils/printifyEnv.js";
 import {
   mergeProviders,
   buildPrintProviderCatalogMap,
@@ -550,71 +553,214 @@ export async function refreshVariantsFromTemplate(
   return { ok: true, printify_product: product, variants_count: variants_json.length };
 }
 
+export async function printifyShopProductExists(env, printifyProductId) {
+  const id = String(printifyProductId || "").trim();
+  if (!id) return false;
+  try {
+    await fetchPrintifyProductById(env, id);
+    return true;
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (msg.includes(":404:") || msg.includes("404")) return false;
+    return true;
+  }
+}
+
+async function resolvePrintifyBlueprintForProduct(env, productKey) {
+  if (shouldUseCatalogOps(env)) {
+    const ops = await getCatalogOpsProduct(env, productKey);
+    if (!ops.ok) return ops;
+    const blueprintId = ops.printify_blueprint_id;
+    if (!blueprintId) return { ok: false, error: "source_blueprint_missing" };
+    return { ok: true, blueprint_id: Number(blueprintId), product_title: ops.product?.title };
+  }
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  const productRow = await getEazpireProduct(db, productKey);
+  if (!productRow) return { ok: false, error: "not_found" };
+  const blueprintId = await resolvePrintifyBlueprintId(db, productRow.source_blueprint_id);
+  if (!blueprintId) return { ok: false, error: "source_blueprint_missing" };
+  return { ok: true, blueprint_id: Number(blueprintId), product_title: productRow.title };
+}
+
+async function getLatestPrintifyUploadId(env) {
+  const apiKey = getPrintifyApiKey(env);
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch("https://api.printify.com/v1/uploads.json?limit=1", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(() => ({}));
+    const uploads = data?.data || data;
+    if (!Array.isArray(uploads) || !uploads.length) return null;
+    return uploads[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function placeholderPositionsFromCatalogVariants(variants) {
+  const positions = new Set();
+  for (const v of variants || []) {
+    for (const ph of v?.placeholders || []) {
+      const p = String(ph?.position || "").trim();
+      if (p) positions.add(p);
+    }
+  }
+  return positions.size ? [...positions] : ["front"];
+}
+
+async function saveDraftProductId(env, productKey, printProviderId, draftId) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogDraftProductId(env, productKey, printProviderId, draftId);
+  }
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    pid
+  );
+  if (existing?.id) {
+    await db
+      .prepare(`UPDATE eazpire_template_products SET printify_draft_product_id = ?, updated_at = ? WHERE id = ?`)
+      .bind(String(draftId), now, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO eazpire_template_products
+          (id, product_key, print_provider_id, printify_product_id, printify_draft_product_id, created_at, updated_at)
+         VALUES (?, ?, ?, '', ?, ?, ?)`
+      )
+      .bind(newId(), productKey, pid, String(draftId), now, now)
+      .run();
+  }
+  return { ok: true, printify_draft_product_id: String(draftId) };
+}
+
+async function clearDraftProductId(env, productKey, printProviderId) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return clearCatalogDraftProductId(env, productKey, printProviderId);
+  }
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  const now = Date.now();
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    Number(printProviderId)
+  );
+  if (!existing?.id) return { ok: true, cleared: false };
+  await db
+    .prepare(`UPDATE eazpire_template_products SET printify_draft_product_id = NULL, updated_at = ? WHERE id = ?`)
+    .bind(now, existing.id)
+    .run();
+  return { ok: true, cleared: true };
+}
+
+async function readDraftProductId(env, productKey, printProviderId) {
+  const pid = Number(printProviderId);
+  if (shouldUseCatalogOps(env)) {
+    const row = await getCatalogOpsTemplateRow(env, productKey, pid);
+    return String(row?.printify_draft_product_id || "").trim() || null;
+  }
+  const row = await queryFirst(
+    env.MANUFACTURER_DB,
+    `SELECT printify_draft_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    pid
+  );
+  return String(row?.printify_draft_product_id || "").trim() || null;
+}
+
+export async function validateTemplateDraftProductId(env, productKey, printProviderId) {
+  const draftId = await readDraftProductId(env, productKey, printProviderId);
+  if (!draftId) return { ok: true, draft_product_id: null, draft_stale_removed: false };
+  const exists = await printifyShopProductExists(env, draftId);
+  if (exists) return { ok: true, draft_product_id: draftId, draft_stale_removed: false };
+  await clearDraftProductId(env, productKey, printProviderId);
+  return { ok: true, draft_product_id: null, draft_stale_removed: true, removed_draft_id: draftId };
+}
+
 export async function createPrintifyTemplateDraft(env, productKey, printProviderId, autoMirror = false) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
-  let sourceBlueprintId;
-  let productTitle;
-
-  if (isCatalogOpsMasterWrite(env)) {
-    const ops = await getCatalogOpsProduct(env, productKey);
-    if (!ops.ok) return ops;
-    sourceBlueprintId = ops.link?.source_blueprint_id || ops.printify_blueprint_id;
-    productTitle = ops.product?.title;
-    if (!sourceBlueprintId) {
-      const profile = await queryFirst(
-        env.CATALOG_DB,
-        `SELECT blueprint_id FROM product_publish_profiles WHERE product_key = ? AND blueprint_id IS NOT NULL LIMIT 1`,
-        productKey
-      );
-      sourceBlueprintId = profile?.blueprint_id;
-    }
-  } else {
-    const db = env.MANUFACTURER_DB;
-    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
-    const productRow = await getEazpireProduct(db, productKey);
-    sourceBlueprintId = productRow?.source_blueprint_id;
-    productTitle = productRow?.title;
+  const existingDraft = await readDraftProductId(env, productKey, printProviderId);
+  if (existingDraft) {
+    return { ok: false, error: "draft_already_exists", printify_draft_product_id: existingDraft };
   }
 
-  if (!sourceBlueprintId) return { ok: false, error: "source_blueprint_missing" };
+  const bpRes = await resolvePrintifyBlueprintForProduct(env, productKey);
+  if (!bpRes.ok) return bpRes;
 
-  const blueprintRes = await fetchBlueprint(env, sourceBlueprintId);
-  if (!blueprintRes.ok) return blueprintRes;
-  const variantsRes = await fetchBlueprintProviderVariants(env, sourceBlueprintId, Number(printProviderId));
+  const variantsRes = await fetchBlueprintProviderVariants(env, bpRes.blueprint_id, Number(printProviderId));
   if (!variantsRes.ok) return variantsRes;
 
-  const variants = (Array.isArray(variantsRes.variants) ? variantsRes.variants : []).filter(
-    (v) => v?.is_enabled !== false
-  );
+  const catalogVariants = Array.isArray(variantsRes.variants) ? variantsRes.variants : [];
+  if (!catalogVariants.length) return { ok: false, error: "no_variants_found" };
+
+  const placeholderImageId = await getLatestPrintifyUploadId(env);
+  if (!placeholderImageId) {
+    return {
+      ok: false,
+      error: "no_placeholder_image",
+      message: "No uploaded images in Printify account (required to create a draft product).",
+    };
+  }
+
+  const positions = placeholderPositionsFromCatalogVariants(catalogVariants);
+  const TEMP_PRICE = 1000;
+  const enabledVariants = catalogVariants.filter((v) => v?.is_enabled !== false);
+  const variants = (enabledVariants.length ? enabledVariants : catalogVariants).map((v) => ({
+    id: v.id,
+    price: TEMP_PRICE,
+    is_enabled: true,
+  }));
+  const variantIds = variants.map((v) => v.id);
+  const placeholders = positions.map((pos) => ({
+    position: pos,
+    images: [{ id: placeholderImageId, x: -0.5, y: -0.5, scale: 0.01, angle: 0 }],
+  }));
+
   const payload = {
-    title: `${productTitle || productKey} Draft`,
-    description: productTitle || "Eazpire draft product",
-    blueprint_id: Number(sourceBlueprintId),
+    title: `${bpRes.product_title || productKey} Draft`,
+    description: bpRes.product_title || "Eazpire draft product",
+    blueprint_id: bpRes.blueprint_id,
     print_provider_id: Number(printProviderId),
-    variants: variants.map((v) => ({ id: v.id, price: String(variantCost(v)) / 100, is_enabled: true })),
-    print_areas: [],
+    variants,
+    print_areas: [{ variant_ids: variantIds, placeholders }],
   };
-  const created = await createPrintifyProduct(env, payload);
+
+  let created;
+  try {
+    created = await createPrintifyProduct(env, payload);
+  } catch (err) {
+    return { ok: false, error: "printify_draft_create_failed", detail: String(err?.message || err) };
+  }
+
   const pid = String(created?.id || "");
   if (!pid) return { ok: false, error: "printify_draft_create_failed" };
 
-  await refreshVariantsFromTemplate(env, productKey, Number(printProviderId), pid, false);
-
-  if (isCatalogOpsMasterWrite(env)) {
-    await updateCatalogPatPrintifyProductId(env, productKey, Number(printProviderId), pid);
-    return { ok: true, printify_product_id: pid, draft: created };
-  }
-
-  const db = env.MANUFACTURER_DB;
-  const versions = await listProductVersions(db, productKey);
-  const version = versions.find((v) => String(v.external_provider_id) === String(printProviderId));
-  if (version?.id) {
-    await updateProductVersion(db, version.id, { external_template_product_id: pid });
-  }
+  const saved = await saveDraftProductId(env, productKey, printProviderId, pid);
+  if (!saved.ok) return saved;
 
   if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  return { ok: true, printify_product_id: pid, draft: created };
+  return { ok: true, printify_draft_product_id: pid, draft: created };
+}
+
+export async function removePrintifyTemplateDraft(env, productKey, printProviderId) {
+  if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
+  const draftId = await readDraftProductId(env, productKey, printProviderId);
+  if (!draftId) return { ok: false, error: "draft_not_found" };
+  const cleared = await clearDraftProductId(env, productKey, printProviderId);
+  if (!cleared.ok) return cleared;
+  return { ok: true, removed_draft_id: draftId };
 }
 
 function extractMockupEntries(product) {

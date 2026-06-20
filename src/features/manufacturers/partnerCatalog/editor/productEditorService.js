@@ -10,6 +10,7 @@ import {
   getCatalogOpsProduct,
   listCatalogOpsProductVersions,
   getCatalogOpsMockupsBundle,
+  getCatalogOpsTemplateRow,
 } from "../catalogOpsReadService.js";
 import {
   updateCatalogProductMeta,
@@ -34,7 +35,7 @@ import {
 import { listFulfillmentProviders } from "../fulfillmentProviderService.js";
 import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
-import { enhanceProvidersBundle, resolvePrintifyBlueprintId } from "./partnerEditorExtensions.js";
+import { enhanceProvidersBundle, resolvePrintifyBlueprintId, validateTemplateDraftProductId } from "./partnerEditorExtensions.js";
 import { fetchBlueprintProviderVariants } from "../../adapters/printify/printifyCatalogClient.js";
 
 async function queryAll(db, sql, ...binds) {
@@ -741,16 +742,31 @@ export async function saveVariants(env, productKey, printProviderId, body) {
 }
 
 export async function getTemplateBundle(env, productKey, printProviderId) {
+  const pid = Number(printProviderId);
+  const draftCheck = await validateTemplateDraftProductId(env, productKey, pid);
+  const draftMeta = {
+    draft_product_id: draftCheck.draft_product_id || null,
+    draft_stale_removed: !!draftCheck.draft_stale_removed,
+    removed_draft_id: draftCheck.removed_draft_id || null,
+  };
+
+  if (shouldUseCatalogOps(env)) {
+    const template = await getCatalogOpsTemplateRow(env, productKey, pid);
+    const versions = await listCatalogOpsProductVersions(env, productKey);
+    const version = versions.find((v) => String(v.external_provider_id) === String(pid));
+    return { ok: true, template, version, ...draftMeta };
+  }
+
   const db = env.MANUFACTURER_DB;
   const template = await queryFirst(
     db,
     `SELECT * FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
     productKey,
-    Number(printProviderId)
+    pid
   );
   const versions = await listProductVersions(db, productKey);
-  const version = versions.find((v) => String(v.external_provider_id) === String(printProviderId));
-  return { ok: true, template, version };
+  const version = versions.find((v) => String(v.external_provider_id) === String(pid));
+  return { ok: true, template, version, ...draftMeta };
 }
 
 export async function saveTemplate(env, productKey, printProviderId, body) {

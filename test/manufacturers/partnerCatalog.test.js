@@ -61,6 +61,7 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-print-areas-config-save",
     "admin-eazpire-variants-refresh-from-template",
     "admin-eazpire-template-create-draft",
+    "admin-eazpire-template-remove-draft",
     "admin-eazpire-fetch-printify-mockups",
     "admin-eazpire-published-update-all",
   ];

@@ -168,6 +168,10 @@ export async function createTemplateDraft(body) {
   return partnerFetch("admin-eazpire-template-create-draft", { method: "POST", body });
 }
 
+export async function removeTemplateDraft(body) {
+  return partnerFetch("admin-eazpire-template-remove-draft", { method: "POST", body });
+}
+
 export async function fetchPrintifyMockups(body) {
   return partnerFetch("admin-eazpire-fetch-printify-mockups", { method: "POST", body });
 }

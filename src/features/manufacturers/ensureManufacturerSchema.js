@@ -539,6 +539,7 @@ async function applyEazpireShadowSchemaPatches(db) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_eaztp_unique
       ON eazpire_template_products (product_key, print_provider_id)`
   );
+  await ensureColumn(db, "eazpire_template_products", "printify_draft_product_id", "TEXT");
 }
 
 export async function ensureManufacturerSchema(env) {

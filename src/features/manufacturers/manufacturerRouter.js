@@ -218,6 +218,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-print-areas-config-save",
   "admin-eazpire-variants-refresh-from-template",
   "admin-eazpire-template-create-draft",
+  "admin-eazpire-template-remove-draft",
   "admin-eazpire-fetch-printify-mockups",
   "admin-eazpire-published-update-all",
 ]);
@@ -866,6 +867,12 @@ export async function handleManufacturerRouter(request, env) {
         body.print_provider_id,
         body.auto_mirror !== false
       );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-template-remove-draft" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.removePrintifyTemplateDraft(env, body.product_key, body.print_provider_id);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }
