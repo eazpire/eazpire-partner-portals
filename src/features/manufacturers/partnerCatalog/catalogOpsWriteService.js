@@ -37,6 +37,22 @@ function catalogDb(env) {
   return env?.CATALOG_DB || null;
 }
 
+let catalogDraftColumnReady = false;
+
+async function ensureCatalogDraftProductIdColumn(db) {
+  if (!db || catalogDraftColumnReady) return;
+  try {
+    const res = await db.prepare(`PRAGMA table_info(template_products)`).all();
+    const cols = new Set((res?.results || []).map((row) => row.name));
+    if (!cols.has("printify_draft_product_id")) {
+      await db.prepare(`ALTER TABLE template_products ADD COLUMN printify_draft_product_id TEXT`).run();
+    }
+    catalogDraftColumnReady = true;
+  } catch (err) {
+    console.warn("[catalogOpsWriteService] ensureCatalogDraftProductIdColumn:", err?.message || err);
+  }
+}
+
 function creatorDb(env) {
   return env?.CREATOR_DB || null;
 }
@@ -695,32 +711,38 @@ export async function saveCatalogDraftProductId(env, productKey, printProviderId
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
+  await ensureCatalogDraftProductIdColumn(db);
+
   const now = Date.now();
   const pid = Number(printProviderId);
   const draftId = String(draftProductId || "").trim();
   if (!draftId) return { ok: false, error: "draft_product_id_required" };
 
-  const existing = await queryFirst(
-    db,
-    `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
-    productKey,
-    pid
-  );
+  try {
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      pid
+    );
 
-  if (existing?.id) {
-    await db
-      .prepare(`UPDATE template_products SET printify_draft_product_id = ?, updated_at = ? WHERE id = ?`)
-      .bind(draftId, now, existing.id)
-      .run();
-  } else {
-    await db
-      .prepare(
-        `INSERT INTO template_products
-          (product_key, print_provider_id, printify_product_id, printify_draft_product_id, created_at, updated_at)
-         VALUES (?, ?, '', ?, ?, ?)`
-      )
-      .bind(productKey, pid, draftId, now, now)
-      .run();
+    if (existing?.id) {
+      await db
+        .prepare(`UPDATE template_products SET printify_draft_product_id = ?, updated_at = ? WHERE id = ?`)
+        .bind(draftId, now, existing.id)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO template_products
+            (product_key, print_provider_id, printify_product_id, printify_draft_product_id, created_at, updated_at)
+           VALUES (?, ?, '', ?, ?, ?)`
+        )
+        .bind(productKey, pid, draftId, now, now)
+        .run();
+    }
+  } catch (err) {
+    return { ok: false, error: "catalog_db_save_failed", detail: String(err?.message || err) };
   }
 
   return { ok: true, printify_draft_product_id: draftId, _ops_source: "catalog-db" };
@@ -729,6 +751,8 @@ export async function saveCatalogDraftProductId(env, productKey, printProviderId
 export async function clearCatalogDraftProductId(env, productKey, printProviderId) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  await ensureCatalogDraftProductIdColumn(db);
 
   const now = Date.now();
   const pid = Number(printProviderId);

@@ -16,7 +16,7 @@ export async function partnerFetch(op, { method = "GET", body, query = {} } = {}
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    const err = new Error(data.error || `http_${res.status}`);
+    const err = new Error(data.message || data.detail || data.error || `http_${res.status}`);
     err.data = data;
     err.status = res.status;
     throw err;

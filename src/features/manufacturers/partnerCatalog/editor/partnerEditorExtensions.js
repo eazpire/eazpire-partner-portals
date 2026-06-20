@@ -24,6 +24,7 @@ import {
 import { listProductVersions, updateProductVersion } from "../eazpireProductVersionService.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { fetchPrintifyProductById } from "../../../admin/adminProducts.js";
+import { pickEnabledVariantIdsOnePerColor } from "../../../admin/adminTemplateProducts.js";
 import { buildProductPublishReadiness } from "../../../admin/adminPublishReadiness.js";
 import { fetchBlueprint, fetchBlueprintProviderVariants, fetchAllPrintProviders } from "../../adapters/printify/printifyCatalogClient.js";
 import { createPrintifyProduct, getPrintifyProduct } from "../../../../utils/printify.js";
@@ -696,6 +697,10 @@ export async function validateTemplateDraftProductId(env, productKey, printProvi
 export async function createPrintifyTemplateDraft(env, productKey, printProviderId, autoMirror = false) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
+  if (!getPrintifyApiKey(env)) {
+    return { ok: false, error: "printify_api_key_not_configured" };
+  }
+
   const existingDraft = await readDraftProductId(env, productKey, printProviderId);
   if (existingDraft) {
     return { ok: false, error: "draft_already_exists", printify_draft_product_id: existingDraft };
@@ -721,13 +726,13 @@ export async function createPrintifyTemplateDraft(env, productKey, printProvider
 
   const positions = placeholderPositionsFromCatalogVariants(catalogVariants);
   const TEMP_PRICE = 1000;
-  const enabledVariants = catalogVariants.filter((v) => v?.is_enabled !== false);
-  const variants = (enabledVariants.length ? enabledVariants : catalogVariants).map((v) => ({
+  const enabledVariantIds = pickEnabledVariantIdsOnePerColor(catalogVariants);
+  const variants = catalogVariants.map((v) => ({
     id: v.id,
     price: TEMP_PRICE,
-    is_enabled: true,
+    is_enabled: enabledVariantIds.has(v.id),
   }));
-  const variantIds = variants.map((v) => v.id);
+  const variantIds = catalogVariants.map((v) => v.id);
   const placeholders = positions.map((pos) => ({
     position: pos,
     images: [{ id: placeholderImageId, x: -0.5, y: -0.5, scale: 0.01, angle: 0 }],
@@ -735,7 +740,6 @@ export async function createPrintifyTemplateDraft(env, productKey, printProvider
 
   const payload = {
     title: `${bpRes.product_title || productKey} Draft`,
-    description: bpRes.product_title || "Eazpire draft product",
     blueprint_id: bpRes.blueprint_id,
     print_provider_id: Number(printProviderId),
     variants,
