@@ -87,6 +87,8 @@
     "deploy:proxy": "wrangler deploy -c wrangler-proxy.toml",
     "dev:partner": "wrangler dev -c wrangler-partner.toml",
     "deploy:partner": "npm run sync:partner-static && node scripts/utils/wrangler-with-local-env.cjs deploy -c wrangler-partner.toml",
+    "dev:community": "wrangler dev -c wrangler-community.toml",
+    "deploy:community": "node scripts/utils/wrangler-with-local-env.cjs deploy -c wrangler-community.toml",
     "partner:secrets": "node scripts/partner/ensure-partner-worker-secrets.cjs",
     "partner:create-repo": "node scripts/partner/create-partner-repo.js",
     "partner:sync": "node scripts/partner/sync-to-partner-repo.js",

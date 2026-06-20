@@ -9,7 +9,7 @@ import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductServi
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
-import { fetchBlueprint, fetchPrintifyChoiceShipping } from "../adapters/printify/printifyCatalogClient.js";
+import { fetchBlueprint, fetchPrintifyChoiceShipping, buildPrintifyCatalogProductUrl } from "../adapters/printify/printifyCatalogClient.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -336,6 +336,7 @@ function slimAvailableListItem(row) {
     print_areas: row.print_areas || [],
     provider_count: row.provider_count ?? 0,
     printify_choice: row.printify_choice || null,
+    printify_url: row.printify_url || null,
     shipping_country_codes: codes,
     shipping_countries: formatShippingCountriesDisplay(codes),
   };
@@ -767,6 +768,32 @@ async function loadPrintifyChoiceTypeByExternalIds(catalogDb, externalIds) {
   return map;
 }
 
+async function loadPrintifyCatalogUrlsByExternalIds(catalogDb, externalIds) {
+  const map = new Map();
+  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))];
+  if (!ids.length || !catalogDb) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = ids.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    try {
+      const rows = await queryAll(
+        catalogDb,
+        `SELECT id, brand, title FROM printify_blueprints WHERE id IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of rows) {
+        const url = buildPrintifyCatalogProductUrl(row.id, row.brand, row.title);
+        if (url) map.set(String(row.id), url);
+      }
+    } catch (e) {
+      if (!String(e?.message || e).includes("no such column")) throw e;
+      break;
+    }
+  }
+  return map;
+}
+
 async function fetchPrintifyChoiceTypesByExternalIds(env, externalIds, maxCount = PRINTIFY_CHOICE_API_FETCH_MAX) {
   const map = new Map();
   const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))].slice(0, maxCount);
@@ -897,6 +924,10 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   const blueprintEnrichmentMap = await loadBlueprintEnrichmentForEazpireProducts(db, products);
   const blueprintExternalIds = await loadPrintifyBlueprintExternalIdsForProducts(db, env, products);
   const choiceMap = await loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds);
+  const printifyUrlMap =
+    env?.CATALOG_DB && blueprintExternalIds.size
+      ? await loadPrintifyCatalogUrlsByExternalIds(env.CATALOG_DB, [...blueprintExternalIds.values()])
+      : new Map();
 
   const catalogAreasMap =
     env?.CATALOG_DB && blueprintExternalIds.size
@@ -951,6 +982,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       shipping_countries: formatShippingCountriesDisplay(codes),
       print_areas: merged.print_areas,
       printify_choice: choiceMap.get(p.product_key) || null,
+      printify_url: extId ? printifyUrlMap.get(String(extId)) || null : null,
     };
   });
 
@@ -1188,9 +1220,9 @@ async function listAvailableBlueprints(db, manufacturerId) {
 /** Printify Available — full CATALOG_DB catalog minus legacy usage and active eazpire products. */
 async function loadPrintifyBlueprintCatalogRows(catalogDb) {
   const queries = [
-    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json, printify_choice_type
+    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json, printify_choice_type, brand
      FROM printify_blueprints ORDER BY category, title`,
-    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json
+    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json, brand
      FROM printify_blueprints ORDER BY category, title`,
     `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
      FROM printify_blueprints ORDER BY category, title`,
@@ -1213,6 +1245,7 @@ async function loadPrintifyBlueprintCatalogRows(catalogDb) {
         print_providers_json: row.print_providers_json ?? null,
         print_areas_json: null,
         printify_choice_type: null,
+        brand: row.brand ?? null,
       }));
     } catch (queryErr) {
       const msg = String(queryErr?.message || queryErr);
@@ -1266,6 +1299,7 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
         mock_images: slimMockImagesForList(parseCatalogImagesJson(bp.images_json)),
         print_areas: printAreasFromStoredJson(bp.print_areas_json),
         printify_choice: resolvePrintifyChoiceType(bp.print_providers_json, bp.printify_choice_type),
+        printify_url: buildPrintifyCatalogProductUrl(bp.id, bp.brand, bp.title),
         provider_count: bp.print_provider_count || 0,
         shipping_countries_raw: bp.shipping_countries,
       });

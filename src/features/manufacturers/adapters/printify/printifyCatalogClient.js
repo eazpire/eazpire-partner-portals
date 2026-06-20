@@ -6,6 +6,7 @@ import {
   getPrintifyApiKey,
   httpStatusForPrintifyUpstreamError,
 } from "../../../../utils/printifyEnv.js";
+import { slugify } from "../../db.js";
 
 const PRINTIFY_API = "https://api.printify.com/v1";
 
@@ -111,6 +112,20 @@ export async function fetchBlueprintProviderVariants(env, blueprintId, printProv
   );
   if (!result.ok) return result;
   return { ok: true, variants: result.data };
+}
+
+/**
+ * Public Printify catalog product page, e.g.
+ * https://printify.com/app/products/145/gildan/unisex-softstyle-t-shirt
+ * @returns {string|null}
+ */
+export function buildPrintifyCatalogProductUrl(blueprintId, brand, title) {
+  const id = Number(blueprintId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const titleSlug = slugify(title);
+  if (!titleSlug) return null;
+  const brandSlug = slugify(brand) || "generic-brand";
+  return `https://printify.com/app/products/${id}/${brandSlug}/${titleSlug}`;
 }
 
 export { httpStatusForPrintifyUpstreamError };

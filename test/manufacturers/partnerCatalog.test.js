@@ -576,6 +576,19 @@ describe("catalog studio service", () => {
     expect(resolvePrintifyChoiceType(JSON.stringify([{ id: 26 }]))).toBeNull();
   });
 
+  it("builds Printify catalog product URLs from blueprint id, brand, and title", async () => {
+    const { buildPrintifyCatalogProductUrl } = await import(
+      "../../src/features/manufacturers/adapters/printify/printifyCatalogClient.js"
+    );
+    expect(buildPrintifyCatalogProductUrl(145, "Gildan", "Unisex Softstyle T-Shirt")).toBe(
+      "https://printify.com/app/products/145/gildan/unisex-softstyle-t-shirt"
+    );
+    expect(buildPrintifyCatalogProductUrl(896, "Generic brand", "Heart-Shaped Mug")).toBe(
+      "https://printify.com/app/products/896/generic-brand/heart-shaped-mug"
+    );
+    expect(buildPrintifyCatalogProductUrl(null, "Gildan", "Shirt")).toBeNull();
+  });
+
   it("normalizes technical catalog_category_leaf for category tree", async () => {
     const { resolveStudioCategory } = await import(
       "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"

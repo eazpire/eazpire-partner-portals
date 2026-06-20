@@ -276,8 +276,12 @@ function renderPrintifyChoiceBadge(choice) {
 
 function renderTitleCell(row) {
   const title = escapeHtml(row.title || "—");
+  const url = String(row.printify_url || "").trim();
+  const titleInner = url
+    ? `<a href="${escapeHtml(url)}" class="cs-title-cell__link" target="_blank" rel="noopener noreferrer">${title}</a>`
+    : title;
+  const titleHtml = `<strong class="cs-title-cell__text">${titleInner}</strong>`;
   const badge = renderPrintifyChoiceBadge(row.printify_choice);
-  const titleHtml = `<strong class="cs-title-cell__text">${title}</strong>`;
   if (!badge) return titleHtml;
   return `<div class="cs-title-cell">${titleHtml}${badge}</div>`;
 }
