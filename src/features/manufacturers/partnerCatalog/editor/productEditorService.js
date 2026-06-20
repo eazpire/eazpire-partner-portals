@@ -249,8 +249,9 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
   if (printifyBlueprintId) {
     const variantsRes = await fetchBlueprintProviderVariants(env, printifyBlueprintId, pid);
     if (variantsRes.ok) {
-      variants = Array.isArray(variantsRes.variants) ? variantsRes.variants : [];
-      variants_available = true;
+      const raw = variantsRes.variants;
+      variants = Array.isArray(raw) ? raw : Array.isArray(raw?.variants) ? raw.variants : [];
+      variants_available = variants.length > 0;
     }
   }
 

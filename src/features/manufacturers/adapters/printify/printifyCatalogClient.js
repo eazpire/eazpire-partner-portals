@@ -111,7 +111,9 @@ export async function fetchBlueprintProviderVariants(env, blueprintId, printProv
     `/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/variants.json`
   );
   if (!result.ok) return result;
-  return { ok: true, variants: result.data };
+  const raw = result.data;
+  const variants = Array.isArray(raw) ? raw : Array.isArray(raw?.variants) ? raw.variants : [];
+  return { ok: true, variants };
 }
 
 /**

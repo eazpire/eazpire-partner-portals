@@ -187,7 +187,12 @@ function renderInactiveDetail(state, catalogDetail) {
   const pid = state.selectedPid;
   const fp = state.merged.find((p) => providerId(p) === pid) || {};
   const variants = catalogDetail?.variants || [];
-  const printAreas = renderInactivePrintAreasHtml(variants);
+  const printAreas =
+    catalogDetail && catalogDetail.ok === false
+      ? `<p class="ce-hint">Could not load provider details${catalogDetail.error ? `: ${escapeHtml(String(catalogDetail.error))}` : "."}</p>`
+      : renderInactivePrintAreasHtml(variants, {
+          variantPrintAreas: catalogDetail?.variant_print_areas || [],
+        });
 
   return `
     <div class="ce-prov-detail-inactive">
@@ -258,6 +263,8 @@ async function ensureCatalogDetail(ctx, pid) {
         detail.versions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
       );
     }
+  } else {
+    state.catalogCache.set(key, { ok: false, error: detail?.error || "load_failed", variants: [] });
   }
   return detail;
 }

@@ -19,8 +19,16 @@ const PAT_DT_KEYS = { classic: 1, pattern: 1, "all-over": 1, "full-coverage": 1,
 
 export function placeholdersFromFirstVariant(variants) {
   if (!variants?.length) return [];
-  const phs = variants[0].placeholders;
-  return Array.isArray(phs) ? phs.slice() : [];
+  for (const v of variants) {
+    if (v?.is_enabled === false) continue;
+    const phs = v?.placeholders;
+    if (Array.isArray(phs) && phs.length) return phs.slice();
+  }
+  for (const v of variants) {
+    const phs = v?.placeholders;
+    if (Array.isArray(phs) && phs.length) return phs.slice();
+  }
+  return [];
 }
 
 export function mergeCatalogAndDbPrintDimensions(ph, variantPrintAreas, position) {
@@ -178,28 +186,38 @@ export function catalogVariantIds(variants) {
     .filter((x) => Number.isFinite(x) && x > 0);
 }
 
-/** Read-only print areas for inactive providers. */
-export function renderInactivePrintAreasHtml(variants, { title = "Print area positions" } = {}) {
+/** Read-only print areas for inactive providers (matches old admin placeholder cards). */
+export function renderInactivePrintAreasHtml(
+  variants,
+  { variantPrintAreas = [], title = "Print area positions" } = {}
+) {
   const list = placeholdersFromFirstVariant(variants);
   if (!list.length) {
+    if (!variants?.length) {
+      return `<p class="ce-hint">Could not load print area data from Printify catalog for this provider.</p>`;
+    }
     return `<p class="ce-hint">No print area positions in catalog response.</p>`;
   }
   const cards = list
     .map((ph) => {
       const pos = ph.position || "";
+      const dim = mergeCatalogAndDbPrintDimensions(ph, variantPrintAreas, pos);
+      const hVal = dim.h != null && Number.isFinite(dim.h) ? String(dim.h) : ph.height != null ? String(ph.height) : "?";
+      const wVal = dim.w != null && Number.isFinite(dim.w) ? String(dim.w) : ph.width != null ? String(ph.width) : "?";
       const deco = ph.decoration_method || "—";
-      const h = ph.height != null ? ph.height : "?";
-      const w = ph.width != null ? ph.width : "?";
       return `<div class="ce-prov-pos-card ce-prov-pos-card--readonly">
         <code class="ce-prov-pos-code">${escapeHtml(String(pos))}</code>
         <div class="ce-prov-pos-deco">${escapeHtml(String(deco))}</div>
-        <div class="ce-prov-pos-dim-read">${escapeHtml(String(h))} × ${escapeHtml(String(w))}</div>
+        <div class="ce-prov-pos-dim-read">
+          <span class="ce-prov-pos-dim-lab">Height</span> ${escapeHtml(hVal)}
+          <span class="ce-prov-pos-dim-mul">×</span>
+          <span class="ce-prov-pos-dim-lab">Width</span> ${escapeHtml(wVal)}
+        </div>
       </div>`;
     })
     .join("");
-  return `
-    <section class="ce-prov-section">
-      <h4 class="ce-prov-section-title">${escapeHtml(title)}</h4>
-      <div class="ce-prov-pos-grid">${cards}</div>
-    </section>`;
+  return `<section class="ce-prov-section">
+    <h4 class="ce-prov-section-title">${escapeHtml(title)}</h4>
+    <div class="ce-prov-pos-grid">${cards}</div>
+  </section>`;
 }

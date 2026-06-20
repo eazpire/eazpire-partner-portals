@@ -102,15 +102,8 @@ function ensureOverlay() {
   overlayEl.hidden = true;
   overlayEl.innerHTML = `
     <div class="catalog-editor" role="dialog" aria-modal="true" aria-labelledby="ce-title">
-      <header class="catalog-editor-header">
-        <div class="catalog-editor-brand">
-          <div class="catalog-editor-mark" aria-hidden="true">EZ</div>
-          <div class="catalog-editor-title">
-            <p class="catalog-editor-sub">Product editor</p>
-            <h1 id="ce-title">Product</h1>
-            <p id="ce-drift" class="catalog-editor-sub"></p>
-          </div>
-        </div>
+      <header class="catalog-editor-header catalog-editor-header--slim">
+        <h1 id="ce-title" class="catalog-editor-header-title">Product</h1>
         <button type="button" class="catalog-editor-close" id="ce-close" aria-label="Close editor">×</button>
       </header>
       <div class="catalog-editor-layout">
@@ -345,16 +338,8 @@ async function runMirror(silent = false) {
   }
 }
 
-function updateDriftBadge(ctx) {
-  const el = overlayEl.querySelector("#ce-drift");
-  const drift = ctx.bundle.drift;
-  if (!drift) {
-    el.textContent = "";
-    return;
-  }
-  el.textContent = drift.in_sync ? "In sync with publish index" : "Drift detected — save or mirror to reconcile";
-  el.classList.toggle("is-sync", !!drift.in_sync);
-  el.classList.toggle("is-drift", !drift.in_sync);
+function updateDriftBadge() {
+  /* drift badge removed from slim header — mirror status via footer action */
 }
 
 export async function openProductEditor(productKey) {

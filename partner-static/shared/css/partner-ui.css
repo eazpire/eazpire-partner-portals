@@ -2162,15 +2162,42 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   padding: 18px 22px;
   background: linear-gradient(120deg, rgba(17, 24, 39, 0.98) 0%, rgba(49, 46, 129, 0.94) 52%, rgba(15, 23, 42, 0.98) 100%);
   color: #fff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   position: relative;
   z-index: 3;
+  flex-shrink: 0;
 }
-.catalog-editor-header::after {
+.catalog-editor-header--slim {
+  padding: 10px 16px;
+  min-height: 0;
+}
+.catalog-editor-header--slim::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2), transparent 85%);
+  opacity: 0.65;
+}
+.catalog-editor-header-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.catalog-editor-header:not(.catalog-editor-header--slim)::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2219,13 +2246,13 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 #ce-drift.is-sync { color: #6ee7b7; }
 #ce-drift.is-drift { color: #fcd34d; }
 .catalog-editor-close {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
@@ -2478,15 +2505,22 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
-  padding: 14px 22px;
+  padding: 8px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(120deg, rgba(17, 24, 39, 0.98) 0%, rgba(30, 27, 75, 0.95) 55%, rgba(15, 23, 42, 0.98) 100%);
-  box-shadow: 0 -4px 24px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 -2px 16px rgba(15, 23, 42, 0.1);
 }
 .catalog-editor-foot-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+.catalog-editor-foot .btn {
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 10px;
+  min-height: 0;
 }
 .catalog-editor-foot .btn-secondary {
   background: rgba(255, 255, 255, 0.1);
@@ -2630,6 +2664,8 @@ body.catalog-editor-open {
   display: flex;
   flex-direction: column;
   padding: 0;
+  flex: 1;
+  min-height: 0;
 }
 .catalog-editor-body .ce-tab-panel.ce-prov-tab {
   padding: 0 !important;
@@ -2652,6 +2688,7 @@ body.catalog-editor-open {
   border-right: 1px solid var(--line);
   background: var(--surface-2);
   min-height: 100%;
+  height: 100%;
 }
 .ce-prov-sidebar {
   width: 280px;
@@ -2865,9 +2902,21 @@ body.catalog-editor-open {
   margin-top: 4px;
 }
 .ce-prov-pos-dim-read {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   margin-top: 6px;
   font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.ce-prov-pos-dim-read .ce-prov-pos-dim-lab {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 .ce-prov-pos-dim-row {
   display: flex;
