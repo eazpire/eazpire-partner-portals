@@ -13,7 +13,7 @@ import {
 import { listFulfillmentProviders } from "../fulfillmentProviderService.js";
 import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
-import { enhanceProvidersBundle } from "./partnerEditorExtensions.js";
+import { enhanceProvidersBundle, resolvePrintifyBlueprintId } from "./partnerEditorExtensions.js";
 import { fetchBlueprintProviderVariants } from "../../adapters/printify/printifyCatalogClient.js";
 
 async function queryAll(db, sql, ...binds) {
@@ -245,8 +245,9 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
 
   let variants = [];
   let variants_available = false;
-  if (product.source_blueprint_id) {
-    const variantsRes = await fetchBlueprintProviderVariants(env, product.source_blueprint_id, pid);
+  const printifyBlueprintId = await resolvePrintifyBlueprintId(db, product.source_blueprint_id);
+  if (printifyBlueprintId) {
+    const variantsRes = await fetchBlueprintProviderVariants(env, printifyBlueprintId, pid);
     if (variantsRes.ok) {
       variants = Array.isArray(variantsRes.variants) ? variantsRes.variants : [];
       variants_available = true;
@@ -267,7 +268,7 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
     ok: true,
     product_key: productKey,
     print_provider_id: pid,
-    blueprint_id: product.source_blueprint_id,
+    blueprint_id: printifyBlueprintId || product.source_blueprint_id,
     variants,
     variants_available,
     variant_print_areas: variantPrintAreas,

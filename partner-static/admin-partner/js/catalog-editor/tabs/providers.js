@@ -11,21 +11,74 @@ function isProvSidebarCollapsed() {
 }
 
 function providerId(fp) {
-  return Number(fp.print_provider_id ?? fp.external_provider_id ?? fp.id);
+  const raw =
+    fp?.print_provider_id ??
+    fp?.external_provider_id ??
+    fp?.catalogData?.id ??
+    fp?.profile?.print_provider_id ??
+    fp?.id;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n;
+  const m = String(raw ?? "").match(/(?:^new_)?(\d+)$/);
+  return m ? Number(m[1]) : NaN;
+}
+
+function rowFromBlueprintProvider(cp) {
+  const pid = Number(cp?.id);
+  return {
+    type: "available",
+    print_provider_id: pid,
+    name: cp?.title || `Provider #${cp?.id}`,
+    region: cp?.location?.country || "Other",
+    locationLabel: cp?.location?.city ? `${cp.location.country} / ${cp.location.city}` : cp?.location?.country || "",
+    catalogData: cp,
+    is_enabled: false,
+  };
+}
+
+function rowFromFulfillmentProvider(fp) {
+  const pid = Number(fp.external_provider_id);
+  return {
+    type: "configured",
+    print_provider_id: pid,
+    external_provider_id: fp.external_provider_id,
+    name: fp.name || `Provider ${fp.external_provider_id}`,
+    region: "Other",
+    is_enabled: false,
+  };
+}
+
+function buildProviderList(data) {
+  const merged = Array.isArray(data.merged_providers) ? data.merged_providers : [];
+  if (merged.length) return merged.filter((p) => Number.isFinite(providerId(p)));
+
+  const fromBlueprint = (data.blueprint_providers || []).map(rowFromBlueprintProvider);
+  if (fromBlueprint.length) return fromBlueprint;
+
+  const fromFulfillment = (data.providers || []).map(rowFromFulfillmentProvider);
+  return fromFulfillment.filter((p) => Number.isFinite(providerId(p)));
 }
 
 function initProvidersState(ctx, data) {
+  const merged = buildProviderList(data);
   const activeFromDb = new Set(
     (data.active_providers || []).map((r) => Number(r.print_provider_id)).filter((n) => Number.isFinite(n))
   );
-  const merged = data.merged_providers || data.providers || [];
+
+  for (const p of merged) {
+    const pid = providerId(p);
+    if (Number.isFinite(pid) && p.is_enabled) activeFromDb.add(pid);
+  }
+
+  const availableCount = merged.filter((p) => !activeFromDb.has(providerId(p))).length;
+  const activeCount = merged.length - availableCount;
 
   ctx.providersTabState = {
     bundle: data,
     merged,
     activeIds: new Set(activeFromDb),
     selectedPid: null,
-    sidebarFilter: "available",
+    sidebarFilter: activeCount > 0 && availableCount === 0 ? "active" : "available",
     catalogCache: new Map(),
     localVersions: new Map(),
     deletedVersionIds: [],
@@ -34,8 +87,13 @@ function initProvidersState(ctx, data) {
     printAreaDimEdits: new Map(),
   };
 
-  if (!ctx.providersTabState.selectedPid && merged.length) {
-    const first = merged.find((p) => activeFromDb.has(providerId(p))) || merged[0];
+  if (merged.length) {
+    const first =
+      merged.find((p) => activeFromDb.has(providerId(p))) ||
+      merged.find((p) =>
+        ctx.providersTabState.sidebarFilter === "available" ? !activeFromDb.has(providerId(p)) : activeFromDb.has(providerId(p))
+      ) ||
+      merged[0];
     ctx.providersTabState.selectedPid = providerId(first);
   }
 }
@@ -392,6 +450,9 @@ export function bindProvidersTab(ctx, root) {
       const stillVisible = list.some((p) => providerId(p) === ctx.providersTabState.selectedPid);
       if (!stillVisible && list.length) {
         selectProvider(ctx, root, providerId(list[0]));
+      } else if (!stillVisible) {
+        ctx.providersTabState.selectedPid = null;
+        refreshDetail(ctx, root);
       }
     };
   });

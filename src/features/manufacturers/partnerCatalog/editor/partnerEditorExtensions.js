@@ -50,6 +50,23 @@ function extractVariantsAndPrices(product) {
   return { variants_json: enabled, prices_json: prices };
 }
 
+/** Resolve Printify catalog blueprint id from internal eazpire blueprint row id. */
+export async function resolvePrintifyBlueprintId(db, sourceBlueprintId) {
+  if (!sourceBlueprintId) return null;
+  const row = await queryFirst(
+    db,
+    `SELECT pb.external_blueprint_id
+     FROM manufacturer_eazpire_blueprints eb
+     INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
+     WHERE eb.id = ?`,
+    sourceBlueprintId
+  );
+  const ext = row?.external_blueprint_id;
+  if (ext != null && String(ext).trim() !== "") return String(ext).trim();
+  const raw = String(sourceBlueprintId).trim();
+  return /^\d+$/.test(raw) ? raw : null;
+}
+
 async function printifyGet(env, endpoint) {
   const apiKey = String(env?.PRINTIFY_API_KEY || "").trim();
   if (!apiKey) return { ok: false, error: "printify_api_key_not_configured" };
@@ -153,10 +170,11 @@ export async function enhanceProvidersBundle(env, productKey) {
   );
 
   let blueprintProviders = [];
-  if (product.source_blueprint_id) {
+  const printifyBlueprintId = await resolvePrintifyBlueprintId(db, product.source_blueprint_id);
+  if (printifyBlueprintId) {
     const p = await printifyGet(
       env,
-      `/catalog/blueprints/${encodeURIComponent(product.source_blueprint_id)}/print_providers.json`
+      `/catalog/blueprints/${encodeURIComponent(printifyBlueprintId)}/print_providers.json`
     );
     if (p.ok && Array.isArray(p.data)) blueprintProviders = p.data;
   }

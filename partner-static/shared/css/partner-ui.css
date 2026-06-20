@@ -2625,25 +2625,41 @@ body.catalog-editor-open {
 }
 
 /* Provider tab — collapsible sidebar + version tabs */
-.ce-prov-tab {
+.catalog-editor-body:has(.ce-prov-tab) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.catalog-editor-body .ce-tab-panel.ce-prov-tab {
   padding: 0 !important;
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .ce-prov-layout {
   display: flex;
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
   gap: 0;
+  align-items: stretch;
 }
 .ce-prov-sidebar-wrap {
   display: flex;
   flex-shrink: 0;
+  align-self: stretch;
   border-right: 1px solid var(--line);
   background: var(--surface-2);
+  min-height: 100%;
 }
 .ce-prov-sidebar {
   width: 280px;
   padding: 12px 10px 16px;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
   transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
 }
 .ce-prov-layout--collapsed .ce-prov-sidebar {
@@ -2662,6 +2678,7 @@ body.catalog-editor-open {
   align-items: center;
   justify-content: center;
   border-left: 1px solid var(--line);
+  align-self: stretch;
 }
 .ce-prov-rail:hover {
   color: var(--text);
@@ -2698,6 +2715,9 @@ body.catalog-editor-open {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .ce-prov-list-item {
   width: 100%;

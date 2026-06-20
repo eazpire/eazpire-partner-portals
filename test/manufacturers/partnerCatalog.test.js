@@ -843,3 +843,35 @@ describe("getProviderCatalogDetail", () => {
     expect(result.error).toBe("manufacturer_db_unavailable");
   });
 });
+
+describe("resolvePrintifyBlueprintId", () => {
+  it("maps internal blueprint row id to Printify external id", async () => {
+    const { resolvePrintifyBlueprintId } = await import(
+      "../../src/features/manufacturers/partnerCatalog/editor/partnerEditorExtensions.js"
+    );
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ external_blueprint_id: "145" }),
+        }),
+      }),
+    };
+    const id = await resolvePrintifyBlueprintId(db, "eb_internal_uuid");
+    expect(id).toBe("145");
+  });
+
+  it("falls back to numeric source id when already Printify blueprint id", async () => {
+    const { resolvePrintifyBlueprintId } = await import(
+      "../../src/features/manufacturers/partnerCatalog/editor/partnerEditorExtensions.js"
+    );
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => null,
+        }),
+      }),
+    };
+    const id = await resolvePrintifyBlueprintId(db, "145");
+    expect(id).toBe("145");
+  });
+});
