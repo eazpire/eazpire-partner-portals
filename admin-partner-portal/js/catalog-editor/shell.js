@@ -45,7 +45,15 @@ let dirtyUnsub = null;
 function updateSaveButtonState(dirty = false) {
   const saveBtn = overlayEl?.querySelector("#ce-save");
   if (!saveBtn) return;
-  const enabled = hasDirtySnapshot() ? dirty : true;
+  const tab = editorState?.activeTab;
+  let enabled = false;
+  if (tab === "template") {
+    enabled = false;
+  } else if (tab === "provider") {
+    enabled = hasDirtySnapshot() && dirty;
+  } else {
+    enabled = true;
+  }
   saveBtn.disabled = !enabled;
 }
 

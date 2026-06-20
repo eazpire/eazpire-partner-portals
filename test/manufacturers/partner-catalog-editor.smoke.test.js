@@ -60,7 +60,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-print-area-rect-save");
     expect(src).toContain("admin-eazpire-fetch-printify-mockups");
     expect(src).toContain("syncTemplateSection");
-    expect(src).toContain("removeTemplateDraft");
+    expect(src).toContain("saveTemplateSectionProductId");
+    expect(src).toContain("admin-eazpire-template-section-id-save");
   });
 
   it("mockups tab opens shared image viewer", () => {

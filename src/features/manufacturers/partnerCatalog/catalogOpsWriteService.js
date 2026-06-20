@@ -37,20 +37,38 @@ function catalogDb(env) {
   return env?.CATALOG_DB || null;
 }
 
-let catalogDraftColumnReady = false;
+let catalogTemplateColumnsReady = false;
 
-async function ensureCatalogDraftProductIdColumn(db) {
-  if (!db || catalogDraftColumnReady) return;
+/** Templates tab sync sections → template_products column */
+export const TEMPLATE_SECTION_PRINTIFY_COLUMNS = {
+  mockups: "printify_mockups_product_id",
+  variants: "printify_variants_product_id",
+  print_areas: "printify_print_areas_product_id",
+};
+
+async function ensureCatalogTemplateProductColumns(db) {
+  if (!db || catalogTemplateColumnsReady) return;
   try {
     const res = await db.prepare(`PRAGMA table_info(template_products)`).all();
     const cols = new Set((res?.results || []).map((row) => row.name));
-    if (!cols.has("printify_draft_product_id")) {
-      await db.prepare(`ALTER TABLE template_products ADD COLUMN printify_draft_product_id TEXT`).run();
-    }
-    catalogDraftColumnReady = true;
+    const add = async (name) => {
+      if (!cols.has(name)) {
+        await db.prepare(`ALTER TABLE template_products ADD COLUMN ${name} TEXT`).run();
+        cols.add(name);
+      }
+    };
+    await add("printify_draft_product_id");
+    await add("printify_mockups_product_id");
+    await add("printify_variants_product_id");
+    await add("printify_print_areas_product_id");
+    catalogTemplateColumnsReady = true;
   } catch (err) {
-    console.warn("[catalogOpsWriteService] ensureCatalogDraftProductIdColumn:", err?.message || err);
+    console.warn("[catalogOpsWriteService] ensureCatalogTemplateProductColumns:", err?.message || err);
   }
+}
+
+async function ensureCatalogDraftProductIdColumn(db) {
+  await ensureCatalogTemplateProductColumns(db);
 }
 
 function creatorDb(env) {
@@ -772,6 +790,79 @@ export async function clearCatalogDraftProductId(env, productKey, printProviderI
   return { ok: true, cleared: true, _ops_source: "catalog-db" };
 }
 
+async function mergeCatalogPublishProfileTemplateSources(catalogDbRef, productKey, printProviderId, section, printifyProductId) {
+  const pid = Number(printProviderId);
+  const productId = String(printifyProductId || "").trim();
+  if (!productId || !TEMPLATE_SECTION_PRINTIFY_COLUMNS[section]) return;
+
+  const row = await queryFirst(
+    catalogDbRef,
+    `SELECT print_areas_config_json FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+    productKey,
+    pid
+  );
+  const config = (() => {
+    try {
+      return row?.print_areas_config_json ? JSON.parse(row.print_areas_config_json) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const base = config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const templateProductIds = { ...(base.template_product_ids || {}), [section]: productId };
+  const mergedConfig = { ...base, template_product_ids: templateProductIds };
+
+  await upsertCatalogPublishProfile(catalogDbRef, productKey, pid, {
+    print_areas_config_json: mergedConfig,
+  });
+}
+
+export async function saveCatalogTemplateSectionProductId(env, productKey, printProviderId, section, printifyProductId) {
+  const column = TEMPLATE_SECTION_PRINTIFY_COLUMNS[section];
+  if (!column) return { ok: false, error: "invalid_template_section" };
+
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  await ensureCatalogTemplateProductColumns(db);
+
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const productId = String(printifyProductId || "").trim();
+  if (!productId) return { ok: false, error: "printify_product_id_required" };
+
+  try {
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      pid
+    );
+
+    if (existing?.id) {
+      await db
+        .prepare(`UPDATE template_products SET ${column} = ?, updated_at = ? WHERE id = ?`)
+        .bind(productId, now, existing.id)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO template_products
+            (product_key, print_provider_id, printify_product_id, ${column}, created_at, updated_at)
+           VALUES (?, ?, '', ?, ?, ?)`
+        )
+        .bind(productKey, pid, productId, now, now)
+        .run();
+    }
+
+    await mergeCatalogPublishProfileTemplateSources(db, productKey, pid, section, productId);
+  } catch (err) {
+    return { ok: false, error: "catalog_db_save_failed", detail: String(err?.message || err) };
+  }
+
+  return { ok: true, section, printify_product_id: productId, _ops_source: "catalog-db" };
+}
+
 export async function saveCatalogTemplate(env, productKey, printProviderId, body) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
@@ -1066,7 +1157,7 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
     await db
       .prepare(
         `UPDATE template_products SET
-          printify_product_id = ?, title = ?, blueprint_id = ?,
+          printify_variants_product_id = ?, title = ?, blueprint_id = ?,
           variants_json = ?, prices_json = ?, product_data_json = ?, updated_at = ?
          WHERE id = ?`
       )
@@ -1085,8 +1176,8 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
     await db
       .prepare(
         `INSERT INTO template_products
-          (product_key, print_provider_id, printify_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (product_key, print_provider_id, printify_product_id, printify_variants_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
+         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         productKey,
@@ -1102,6 +1193,8 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
       )
       .run();
   }
+
+  await mergeCatalogPublishProfileTemplateSources(db, productKey, pid, "variants", printifyProductId);
 
   await upsertCatalogPublishProfile(db, productKey, pid, {
     title: product?.title || null,

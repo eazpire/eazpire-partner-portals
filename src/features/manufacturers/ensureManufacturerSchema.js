@@ -540,6 +540,9 @@ async function applyEazpireShadowSchemaPatches(db) {
       ON eazpire_template_products (product_key, print_provider_id)`
   );
   await ensureColumn(db, "eazpire_template_products", "printify_draft_product_id", "TEXT");
+  await ensureColumn(db, "eazpire_template_products", "printify_mockups_product_id", "TEXT");
+  await ensureColumn(db, "eazpire_template_products", "printify_variants_product_id", "TEXT");
+  await ensureColumn(db, "eazpire_template_products", "printify_print_areas_product_id", "TEXT");
 }
 
 export async function ensureManufacturerSchema(env) {

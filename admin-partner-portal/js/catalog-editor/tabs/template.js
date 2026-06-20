@@ -1,8 +1,14 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
-import { fetchTemplateBundle, createTemplateDraft, removeTemplateDraft, syncTemplateSection } from "../api.js";
+import { fetchTemplateBundle, createTemplateDraft, removeTemplateDraft, saveTemplateSectionProductId, syncTemplateSection } from "../api.js";
 
 const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
+
+const SECTION_ID_FIELDS = {
+  mockups: "printify_mockups_product_id",
+  variants: "printify_variants_product_id",
+  print_areas: "printify_print_areas_product_id",
+};
 
 const SECTIONS = [
   {
@@ -22,8 +28,9 @@ const SECTIONS = [
   },
 ];
 
-function syncPrintifyId(data) {
-  return String(data?.template?.printify_product_id || "").trim();
+function sectionPrintifyId(data, sectionId) {
+  const field = SECTION_ID_FIELDS[sectionId];
+  return String(data?.template?.[field] || "").trim();
 }
 
 function draftPrintifyId(data) {
@@ -117,14 +124,13 @@ export async function loadTemplateTab(ctx) {
   }
 
   const draftId = draftPrintifyId(data);
-  const syncPrintifyIdValue = syncPrintifyId(data);
 
   return `
     <div class="ce-tab-panel ce-tpl-panel">
       ${renderPanelHead(draftId)}
-      <p class="ce-hint">Create a Printify draft once per provider, then link a separate Printify product ID per section to sync data into the catalog.</p>
+      <p class="ce-hint">Create a Printify draft once per provider. Each section below uses its own Printify product ID — sync pulls data into the publish profile independently.</p>
       <div class="ce-tpl-sections">
-        ${SECTIONS.map((s) => renderSection(s, syncPrintifyIdValue)).join("")}
+        ${SECTIONS.map((s) => renderSection(s, sectionPrintifyId(data, s.id))).join("")}
       </div>
     </div>`;
 }

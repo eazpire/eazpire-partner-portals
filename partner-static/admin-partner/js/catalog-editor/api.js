@@ -180,15 +180,25 @@ export async function updatePublishedAll(body) {
   return partnerFetch("admin-eazpire-published-update-all", { method: "POST", body });
 }
 
-/** Save Printify product ID, then run the section-specific sync API. */
+export async function saveTemplateSectionProductId(productKey, printProviderId, section, printifyProductId) {
+  return partnerFetch("admin-eazpire-template-section-id-save", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      print_provider_id: printProviderId,
+      section,
+      printify_product_id: printifyProductId,
+      auto_mirror: false,
+    },
+  });
+}
+
+/** Persist section Printify ID, then run the section-specific sync API. */
 export async function syncTemplateSection(productKey, printProviderId, section, printifyProductId, extra = {}) {
   const pid = String(printifyProductId || "").trim();
   if (!pid) throw new Error("Printify product ID required.");
 
-  await saveTemplate(productKey, printProviderId, {
-    printify_product_id: pid,
-    auto_mirror: false,
-  });
+  await saveTemplateSectionProductId(productKey, printProviderId, section, pid);
 
   const base = {
     product_key: productKey,

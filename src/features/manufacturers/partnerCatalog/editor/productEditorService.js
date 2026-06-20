@@ -21,6 +21,8 @@ import {
   saveCatalogPrintAreaSnapshot,
   saveCatalogVariants,
   saveCatalogTemplate,
+  saveCatalogTemplateSectionProductId,
+  TEMPLATE_SECTION_PRINTIFY_COLUMNS,
   saveCatalogMockups,
   saveCatalogAutomations,
 } from "../catalogOpsWriteService.js";
@@ -767,6 +769,94 @@ export async function getTemplateBundle(env, productKey, printProviderId) {
   const versions = await listProductVersions(db, productKey);
   const version = versions.find((v) => String(v.external_provider_id) === String(pid));
   return { ok: true, template, version, ...draftMeta };
+}
+
+export async function saveTemplateSectionProductId(env, productKey, printProviderId, section, printifyProductId) {
+  const column = TEMPLATE_SECTION_PRINTIFY_COLUMNS[section];
+  if (!column) return { ok: false, error: "invalid_template_section" };
+
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogTemplateSectionProductId(env, productKey, printProviderId, section, printifyProductId);
+  }
+
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const productId = String(printifyProductId || "").trim();
+  if (!productId) return { ok: false, error: "printify_product_id_required" };
+
+  const existing = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+    productKey,
+    pid
+  );
+
+  if (existing?.id) {
+    await db
+      .prepare(`UPDATE eazpire_template_products SET ${column} = ?, updated_at = ? WHERE id = ?`)
+      .bind(productId, now, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO eazpire_template_products
+          (id, product_key, print_provider_id, printify_product_id, ${column}, created_at, updated_at)
+         VALUES (?, ?, ?, '', ?, ?, ?)`
+      )
+      .bind(newId(), productKey, pid, productId, now, now)
+      .run();
+  }
+
+  const profileRow = await queryFirst(
+    db,
+    `SELECT print_areas_config_json FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+    productKey,
+    pid
+  );
+  let base = {};
+  try {
+    base = profileRow?.print_areas_config_json ? JSON.parse(profileRow.print_areas_config_json) : {};
+  } catch {
+    base = {};
+  }
+  if (!base || typeof base !== "object" || Array.isArray(base)) base = {};
+  const templateProductIds = { ...(base.template_product_ids || {}), [section]: productId };
+  await patchMfgPublishProfileConfig(db, productKey, pid, {
+    print_areas_config_json: { ...base, template_product_ids: templateProductIds },
+  });
+
+  return { ok: true, section, printify_product_id: productId };
+}
+
+async function patchMfgPublishProfileConfig(db, productKey, printProviderId, patch) {
+  const now = Date.now();
+  const row = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+    productKey,
+    Number(printProviderId)
+  );
+  if (row?.id) {
+    await db
+      .prepare(
+        `UPDATE eazpire_product_publish_profiles SET print_areas_config_json = COALESCE(?, print_areas_config_json), updated_at = ? WHERE id = ?`
+      )
+      .bind(patch.print_areas_config_json != null ? JSON.stringify(patch.print_areas_config_json) : null, now, row.id)
+      .run();
+    return row.id;
+  }
+  await db
+    .prepare(
+      `INSERT INTO eazpire_product_publish_profiles
+        (id, product_key, print_provider_id, print_areas_config_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(newId(), productKey, Number(printProviderId), JSON.stringify(patch.print_areas_config_json || {}), now, now)
+    .run();
+  return null;
 }
 
 export async function saveTemplate(env, productKey, printProviderId, body) {
