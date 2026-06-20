@@ -2,6 +2,8 @@ import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
 import { fetchTemplateBundle, createTemplateDraft, syncTemplateSection } from "../api.js";
 
+const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
+
 const SECTIONS = [
   {
     id: "mockups",
@@ -24,6 +26,12 @@ function defaultPrintifyId(data) {
   return String(data?.template?.printify_product_id || data?.version?.external_template_product_id || "").trim();
 }
 
+function printifyProductUrl(printifyId) {
+  const key = String(printifyId || "").trim();
+  if (!key) return null;
+  return PRINTIFY_PRODUCT_URL_BASE + encodeURIComponent(key);
+}
+
 function renderSection(section, printifyId) {
   return `
     <section class="ce-tpl-section" id="ce-tpl-section-${section.id}" data-section="${section.id}">
@@ -41,7 +49,10 @@ function renderSection(section, printifyId) {
           autocomplete="off"
           spellcheck="false"
         />
-        <button type="button" class="btn btn-secondary btn-sm ce-tpl-sync" data-section="${section.id}">Sync</button>
+        <div class="ce-tpl-section__actions">
+          <button type="button" class="btn btn-secondary btn-sm ce-tpl-sync" data-section="${section.id}">Sync</button>
+          <button type="button" class="btn btn-secondary btn-sm ce-tpl-open" data-section="${section.id}"${printifyId ? "" : " disabled"}>Open</button>
+        </div>
       </div>
       <div class="ce-tpl-section__status" aria-live="polite"></div>
       <div class="ce-tpl-section__overlay" hidden>
@@ -151,10 +162,30 @@ async function runSectionSync(sectionId, ctx) {
   }
 }
 
+document.addEventListener("input", (ev) => {
+  const input = ev.target.closest("[data-section-input]");
+  if (!input) return;
+  const openBtn = document.querySelector(`.ce-tpl-open[data-section="${input.dataset.sectionInput}"]`);
+  if (openBtn) openBtn.disabled = !input.value?.trim();
+});
+
 document.addEventListener("click", async (ev) => {
   const syncBtn = ev.target.closest(".ce-tpl-sync");
+  const openBtn = ev.target.closest(".ce-tpl-open");
   const draftBtn = ev.target.closest("#ce-tpl-create-draft");
-  if (!syncBtn && !draftBtn) return;
+  if (!syncBtn && !openBtn && !draftBtn) return;
+
+  if (openBtn) {
+    const sectionId = openBtn.dataset.section;
+    const input = document.getElementById(`ce-tpl-id-${sectionId}`);
+    const url = printifyProductUrl(input?.value);
+    if (!url) {
+      showToast("Open failed", "Printify product ID required.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
 
   const ctx = window.__catalogEditorState;
   if (!ctx?.productKey || !ctx?.selectedPrintProviderId) return;

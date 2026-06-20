@@ -3516,6 +3516,11 @@ body.catalog-editor-open #partner-toast {
   flex: 1;
   min-width: 180px;
 }
+.ce-tpl-section__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
 .ce-tpl-section__status {
   margin-top: 8px;
   font-size: 0.82rem;
