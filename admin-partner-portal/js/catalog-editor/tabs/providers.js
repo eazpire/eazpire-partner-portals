@@ -1,5 +1,13 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { fetchProvidersBundle, fetchProviderCatalogDetail, saveProviders } from "../api.js";
+import { showToast, confirmAction } from "/partner/shared/js/partner-shell.js";
+import {
+  fetchProvidersBundle,
+  fetchProviderCatalogDetail,
+  saveProviders,
+  createVersion,
+  deleteVersion,
+  saveVersionConfig,
+} from "../api.js";
 import { renderVersionConfigPanel, collectVersionConfigPanel, collectPrintAreaDimensionUpdates } from "../version-config-panel.js";
 import { renderInactivePrintAreasHtml } from "../provider-print-technical.js";
 import { markEditorDirty, checkDirty } from "../editor-dirty.js";
@@ -92,6 +100,7 @@ function initProvidersState(ctx, data) {
     selectedVersionIdx: 0,
     printAreaDimEdits: new Map(),
     expandedCountries: new Set(),
+    editingVersionId: null,
   };
 
   if (merged.length) {
@@ -188,7 +197,7 @@ function bindProviderListClicks(ctx, root, container) {
   });
 }
 
-function renderVersionTabs(versions, selectedIdx) {
+function renderVersionTabs(versions, selectedIdx, editingVersionId = null) {
   if (!versions.length) {
     return `<div class="ce-prov-version-tabs"><span class="ce-hint">No versions yet — activate provider to create Standard.</span></div>`;
   }
@@ -197,12 +206,21 @@ function renderVersionTabs(versions, selectedIdx) {
       const isStd = idx === 0;
       const vid = v.id || v._tempId;
       const name = v.display_name || (isStd ? "Standard" : `Version ${idx + 1}`);
+      const isEditing = String(editingVersionId) === String(vid);
+      const canDelete = !isStd;
       const badge = isStd ? `<span class="ce-prov-ver-badge">Standard</span>` : "";
-      const nameInput = isStd
-        ? `<input type="text" class="input input-sm ce-prov-ver-name ce-prov-ver-name--std" data-version-id="${escapeHtml(String(vid))}" value="${escapeHtml(name)}" placeholder="Product name" />`
-        : `<input type="text" class="input input-sm ce-prov-ver-name" data-version-id="${escapeHtml(String(vid))}" value="${escapeHtml(name)}" placeholder="Version name" />`;
+      const readonlyAttr = isEditing ? "" : " readonly";
+      const editBtnClass = isEditing ? "ce-prov-ver-save" : "ce-prov-ver-edit";
+      const editBtnLabel = isEditing ? "✓" : "✎";
+      const editBtnTitle = isEditing ? "Save name" : "Edit name";
+      const deleteBtn = canDelete
+        ? `<button type="button" class="ce-prov-ver-del" data-version-id="${escapeHtml(String(vid))}" title="Delete version" aria-label="Delete version">×</button>`
+        : "";
       return `<button type="button" class="ce-prov-ver-tab ${idx === selectedIdx ? "active" : ""}" data-ver-idx="${idx}" role="tab">
-        ${badge}${nameInput}
+        ${badge}
+        <input type="text" class="input input-sm ce-prov-ver-name${isStd ? " ce-prov-ver-name--std" : ""}" data-version-id="${escapeHtml(String(vid))}" value="${escapeHtml(name)}" placeholder="${isStd ? "Product name" : "Version name"}"${readonlyAttr} />
+        <button type="button" class="ce-prov-ver-action ${editBtnClass}" data-version-id="${escapeHtml(String(vid))}" title="${editBtnTitle}" aria-label="${editBtnTitle}">${editBtnLabel}</button>
+        ${deleteBtn}
       </button>`;
     })
     .join("");
@@ -228,7 +246,7 @@ function renderActiveDetail(state, catalogDetail) {
           <span>Active for this product</span>
         </label>
       </div>
-      ${renderVersionTabs(versions, idx)}
+      ${renderVersionTabs(versions, idx, state.editingVersionId)}
       <div class="ce-prov-version-pane">${versionBody}</div>
     </div>`;
 }
@@ -368,6 +386,115 @@ function onProvidersInput(ctx, root) {
   checkDirty(collectProvidersTabState(ctx));
 }
 
+function versionById(state, pid, versionId) {
+  const versions = versionsForProvider(state, pid);
+  return versions.find((v) => String(v.id || v._tempId) === String(versionId)) || null;
+}
+
+async function commitVersionName(ctx, root, versionId) {
+  const state = ctx.providersTabState;
+  const pid = state.selectedPid;
+  const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(versionId))}"]`);
+  const name = inp?.value?.trim();
+  if (!name) {
+    showToast("Name required", "Enter a version name.");
+    return;
+  }
+
+  const v = versionById(state, pid, versionId);
+  if (!v) return;
+
+  if (v._tempId && !v.id) {
+    v.display_name = name;
+    state.editingVersionId = null;
+    refreshDetail(ctx, root);
+    return;
+  }
+
+  try {
+    const res = await saveVersionConfig(versionId, { display_name: name, auto_mirror: false });
+    if (!res?.ok) throw new Error(res?.error || "save_failed");
+    v.display_name = name;
+    if (res.version) Object.assign(v, res.version);
+    state.editingVersionId = null;
+    state.localVersions.set(String(pid), versionsForProvider(state, pid));
+    refreshDetail(ctx, root);
+    onProvidersInput(ctx, root);
+    showToast("Name saved", name);
+  } catch (err) {
+    showToast("Save failed", err?.message || String(err));
+  }
+}
+
+async function deleteVersionConfirmed(ctx, root, versionId) {
+  const state = ctx.providersTabState;
+  const pid = state.selectedPid;
+  const versions = versionsForProvider(state, pid);
+  const idx = versions.findIndex((v) => String(v.id || v._tempId) === String(versionId));
+  if (idx <= 0) return;
+
+  const v = versions[idx];
+  const label = v.display_name || `Version ${idx + 1}`;
+
+  if (v._tempId && !v.id) {
+    versions.splice(idx, 1);
+    state.pendingNewVersions = state.pendingNewVersions.filter((x) => x._tempId !== v._tempId);
+    state.localVersions.set(String(pid), versions);
+    if (state.editingVersionId === versionId) state.editingVersionId = null;
+    if (state.selectedVersionIdx >= versions.length) state.selectedVersionIdx = Math.max(0, versions.length - 1);
+    refreshDetail(ctx, root);
+    onProvidersInput(ctx, root);
+    showToast("Version removed", label);
+    return;
+  }
+
+  try {
+    const res = await deleteVersion(versionId);
+    if (!res?.ok) throw new Error(res?.error || "delete_failed");
+    versions.splice(idx, 1);
+    state.localVersions.set(String(pid), versions);
+    if (state.editingVersionId === versionId) state.editingVersionId = null;
+    if (state.selectedVersionIdx >= versions.length) state.selectedVersionIdx = Math.max(0, versions.length - 1);
+    refreshDetail(ctx, root);
+    onProvidersInput(ctx, root);
+    showToast("Version deleted", label);
+  } catch (err) {
+    showToast("Delete failed", err?.message || String(err));
+  }
+}
+
+async function addVersionPersisted(ctx, root) {
+  const state = ctx.providersTabState;
+  const pid = state.selectedPid;
+  if (!pid) return;
+
+  const versions = versionsForProvider(state, pid);
+  const addBtn = root.querySelector("#ce-prov-add-version");
+  if (addBtn) addBtn.disabled = true;
+
+  try {
+    const res = await createVersion(ctx.productKey, {
+      print_provider_id: pid,
+      display_name: `Version ${versions.length + 1}`,
+      sort_order: versions.length,
+      auto_mirror: false,
+    });
+    if (!res?.ok || !res.version) throw new Error(res?.error || "create_failed");
+
+    versions.push(res.version);
+    state.localVersions.set(String(pid), versions);
+    state.selectedVersionIdx = versions.length - 1;
+    state.editingVersionId = null;
+    refreshDetail(ctx, root);
+    onProvidersInput(ctx, root);
+    showToast("Version added", res.version.display_name || "New version");
+  } catch (err) {
+    showToast("Could not add version", err?.message || String(err));
+  } finally {
+    if (addBtn) addBtn.disabled = false;
+  }
+}
+
 function bindDetailEvents(ctx, root) {
   root.querySelector(".ce-prov-active-toggle")?.addEventListener("change", (e) => {
     const pid = Number(e.target.dataset.pid);
@@ -383,26 +510,70 @@ function bindDetailEvents(ctx, root) {
 
   root.querySelectorAll(".ce-prov-ver-tab:not(.ce-prov-ver-tab--add)").forEach((tab) => {
     tab.addEventListener("click", (e) => {
-      if (e.target.closest(".ce-prov-ver-name")) return;
+      if (e.target.closest(".ce-prov-ver-name, .ce-prov-ver-action, .ce-prov-ver-del")) return;
       syncVersionsFromDom(ctx, root);
       const idx = Number(tab.dataset.verIdx);
       ctx.providersTabState.selectedVersionIdx = idx;
+      ctx.providersTabState.editingVersionId = null;
       refreshDetail(ctx, root);
       onProvidersInput(ctx, root);
     });
   });
 
-  root.querySelector("#ce-prov-add-version")?.addEventListener("click", () => {
-    addLocalVersion(ctx);
-    refreshDetail(ctx, root);
-    onProvidersInput(ctx, root);
+  root.querySelector("#ce-prov-add-version")?.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await addVersionPersisted(ctx, root);
+  });
+
+  root.querySelectorAll(".ce-prov-ver-edit").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const vid = btn.dataset.versionId;
+      ctx.providersTabState.editingVersionId = vid;
+      refreshDetail(ctx, root);
+      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(vid))}"]`);
+      inp?.focus();
+      inp?.select();
+    });
+  });
+
+  root.querySelectorAll(".ce-prov-ver-save").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await commitVersionName(ctx, root, btn.dataset.versionId);
+    });
+  });
+
+  root.querySelectorAll(".ce-prov-ver-del").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const vid = btn.dataset.versionId;
+      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(vid))}"]`);
+      const name = inp?.value?.trim() || "this version";
+      confirmAction({
+        title: "Delete version",
+        message: `Delete "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        confirmClass: "btn-danger",
+        onConfirm: () => deleteVersionConfirmed(ctx, root, vid),
+      });
+    });
   });
 
   root.querySelectorAll(".ce-prov-ver-name").forEach((inp) => {
     inp.addEventListener("click", (e) => e.stopPropagation());
+    inp.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const vid = inp.dataset.versionId;
+      if (ctx.providersTabState.editingVersionId === vid) {
+        await commitVersionName(ctx, root, vid);
+      }
+    });
   });
 
-  root.querySelectorAll(".ce-prov-ver-name, .ce-prov-ph-qty, .ce-prov-dt-cb, .ce-prov-dim-h, .ce-prov-dim-w").forEach((el) => {
+  root.querySelectorAll(".ce-prov-ph-qty, .ce-prov-dt-cb, .ce-prov-dim-h, .ce-prov-dim-w").forEach((el) => {
     el.addEventListener("input", () => onProvidersInput(ctx, root));
     el.addEventListener("change", () => onProvidersInput(ctx, root));
   });
@@ -436,31 +607,7 @@ function stateActivate(ctx, pid) {
 function stateDeactivate(ctx, pid) {
   const state = ctx.providersTabState;
   state.activeIds.delete(pid);
-}
-
-function addLocalVersion(ctx) {
-  const state = ctx.providersTabState;
-  const pid = state.selectedPid;
-  const key = String(pid);
-  const versions = versionsForProvider(state, pid);
-  const tempId = `new_ver_${pid}_${Date.now()}`;
-  const nv = {
-    _tempId: tempId,
-    display_name: `Version ${versions.length + 1}`,
-    sort_order: versions.length,
-    external_provider_id: String(pid),
-    product_version_config: { placeholders_by_position: {}, design_types: [] },
-  };
-  versions.push(nv);
-  state.localVersions.set(key, versions);
-  state.pendingNewVersions.push({
-    _tempId: tempId,
-    print_provider_id: pid,
-    display_name: nv.display_name,
-    sort_order: nv.sort_order,
-    product_version_config: nv.product_version_config,
-  });
-  state.selectedVersionIdx = versions.length - 1;
+  state.editingVersionId = null;
 }
 
 async function selectProvider(ctx, root, pid) {
@@ -472,6 +619,7 @@ async function selectProvider(ctx, root, pid) {
     state.expandedCountries.add(code);
   }
   state.selectedVersionIdx = 0;
+  state.editingVersionId = null;
   refreshProviderList(ctx, root);
   refreshDetail(ctx, root, { loading: true });
   try {
