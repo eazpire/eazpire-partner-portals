@@ -91,6 +91,17 @@ export async function fetchBlueprint(env, blueprintId) {
   return { ok: true, blueprint: result.data };
 }
 
+export async function fetchPrintifyChoiceShipping(env, blueprintId) {
+  const key = getPrintifyApiKey(env);
+  if (!key) return { ok: false, error: "printify_api_key_not_configured" };
+  const result = await printifyGet(
+    key,
+    `/catalog/blueprints/${blueprintId}/print_providers/99/shipping.json`
+  );
+  if (!result.ok) return result;
+  return { ok: true, shipping: result.data };
+}
+
 export async function fetchBlueprintProviderVariants(env, blueprintId, printProviderId) {
   const key = getPrintifyApiKey(env);
   if (!key) return { ok: false, error: "printify_api_key_not_configured" };

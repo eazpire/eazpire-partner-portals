@@ -1193,6 +1193,25 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   font-weight: 700;
   text-transform: capitalize;
 }
+.cs-print-area-count {
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  min-width: 2rem;
+  text-align: center;
+}
+.cs-print-area-count:hover {
+  border-color: var(--brand);
+  background: var(--surface-2);
+}
+.cs-print-area-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
 .cs-country-flags {
   display: flex;
   flex-wrap: wrap;

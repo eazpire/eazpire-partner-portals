@@ -552,20 +552,27 @@ describe("catalog studio service", () => {
     expect(result.items[0].print_areas).toEqual(["back", "front", "neck"]);
   });
 
-  it("resolves Printify Choice US vs World from print_providers_json", async () => {
-    const { resolvePrintifyChoiceType } = await import(
+  it("resolves Printify Choice US vs World from shipping profiles", async () => {
+    const { resolvePrintifyChoiceTypeFromShippingData, resolvePrintifyChoiceType } = await import(
       "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
     );
+    expect(resolvePrintifyChoiceTypeFromShippingData({ profiles: [{ countries: ["US"] }] })).toBe("us");
+    expect(
+      resolvePrintifyChoiceTypeFromShippingData({
+        profiles: [{ countries: ["US", "REST_OF_THE_WORLD", "CA"] }],
+      })
+    ).toBe("world");
     expect(
       resolvePrintifyChoiceType(
-        JSON.stringify([{ id: 26, title: "Standard" }, { id: 99, title: "Printify Choice", location: { country: "US" } }])
-      )
-    ).toBe("us");
-    expect(
-      resolvePrintifyChoiceType(
-        JSON.stringify([{ id: 99, title: "Printify Choice World", location: { country: "US" } }])
+        JSON.stringify([{ id: 26 }, { id: 99, title: "Printify Choice", location: { country: "US" } }]),
+        "world"
       )
     ).toBe("world");
+    expect(
+      resolvePrintifyChoiceType(
+        JSON.stringify([{ id: 99, title: "Printify Choice", location: { country: "US" } }])
+      )
+    ).toBeNull();
     expect(resolvePrintifyChoiceType(JSON.stringify([{ id: 26 }]))).toBeNull();
   });
 

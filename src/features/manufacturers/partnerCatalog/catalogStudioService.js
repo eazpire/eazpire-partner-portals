@@ -9,7 +9,7 @@ import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductServi
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
-import { fetchBlueprint } from "../adapters/printify/printifyCatalogClient.js";
+import { fetchBlueprint, fetchPrintifyChoiceShipping } from "../adapters/printify/printifyCatalogClient.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -20,6 +20,8 @@ const AVAILABLE_BULK_ENRICHMENT_MAX = 0;
 const PRINTIFY_CHOICE_PROVIDER_ID = 99;
 /** Max Printify blueprint API lookups per list request (online / small sets). */
 const PRINT_AREAS_API_FETCH_MAX = 30;
+/** Max Printify Choice shipping lookups per list request (online / small sets). */
+const PRINTIFY_CHOICE_API_FETCH_MAX = 30;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
@@ -438,28 +440,35 @@ function extractPrintAreaNamesFromPrintifyBlueprint(blueprint) {
 }
 
 /**
- * Printify Choice US vs World from cached print_providers_json (provider id 99).
+ * Printify Choice US vs World from provider 99 shipping profiles.
+ * World = ships beyond US (REST_OF_THE_WORLD or other country codes).
  * @returns {null|'us'|'world'}
  */
-export function resolvePrintifyChoiceType(printProvidersJson) {
-  const providers = parseJson(printProvidersJson, []);
-  if (!Array.isArray(providers)) return null;
-  const pc = providers.find((p) => Number(p?.id) === PRINTIFY_CHOICE_PROVIDER_ID);
-  if (!pc) return null;
-
-  const title = String(pc.title || "").toLowerCase();
-  const country = String(pc.location?.country || pc.location?.country_code || "").toUpperCase();
-  if (
-    title.includes("world") ||
-    title.includes("global") ||
-    title.includes("international") ||
-    title.includes("europe") ||
-    country === "GB" ||
-    country === "EU"
-  ) {
-    return "world";
+export function resolvePrintifyChoiceTypeFromShippingData(shippingData) {
+  const countries = new Set();
+  for (const profile of shippingData?.profiles || []) {
+    for (const c of profile.countries || []) {
+      countries.add(String(c).toUpperCase());
+    }
+  }
+  if (!countries.size) return null;
+  if (countries.has("REST_OF_THE_WORLD")) return "world";
+  for (const code of countries) {
+    if (code !== "US") return "world";
   }
   return "us";
+}
+
+/**
+ * @param {string|null|undefined} cachedType - us|world from catalog DB
+ * @returns {null|'us'|'world'}
+ */
+export function resolvePrintifyChoiceType(printProvidersJson, cachedType = null) {
+  if (cachedType === "us" || cachedType === "world") return cachedType;
+  const providers = parseJson(printProvidersJson, []);
+  if (!Array.isArray(providers)) return null;
+  if (!providers.some((p) => Number(p?.id) === PRINTIFY_CHOICE_PROVIDER_ID)) return null;
+  return null;
 }
 
 async function loadBlueprintShippingByExternalIds(catalogDb, externalIds) {
@@ -732,40 +741,80 @@ async function loadPrintifyBlueprintExternalIdsForProducts(db, env, products) {
   return map;
 }
 
-async function loadPrintifyChoiceByProductKeys(db, env, productKeys) {
+async function loadPrintifyChoiceTypeByExternalIds(catalogDb, externalIds) {
+  const map = new Map();
+  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))];
+  if (!ids.length || !catalogDb) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = ids.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    try {
+      const rows = await queryAll(
+        catalogDb,
+        `SELECT id, printify_choice_type, print_providers_json FROM printify_blueprints WHERE id IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of rows) {
+        const type = resolvePrintifyChoiceType(row.print_providers_json, row.printify_choice_type);
+        if (type) map.set(String(row.id), type);
+      }
+    } catch (e) {
+      if (!String(e?.message || e).includes("no such column")) throw e;
+      break;
+    }
+  }
+  return map;
+}
+
+async function fetchPrintifyChoiceTypesByExternalIds(env, externalIds, maxCount = PRINTIFY_CHOICE_API_FETCH_MAX) {
+  const map = new Map();
+  const ids = [...new Set(externalIds.map((id) => String(id)).filter(Boolean))].slice(0, maxCount);
+  if (!ids.length || !env) return map;
+
+  for (let i = 0; i < ids.length; i += BLUEPRINT_API_CONCURRENCY) {
+    const batch = ids.slice(i, i + BLUEPRINT_API_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (externalId) => {
+        const result = await fetchPrintifyChoiceShipping(env, externalId);
+        if (!result.ok || !result.shipping) return;
+        const type = resolvePrintifyChoiceTypeFromShippingData(result.shipping);
+        if (type) map.set(externalId, type);
+      })
+    );
+  }
+  return map;
+}
+
+async function loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds) {
   const map = new Map();
   if (!productKeys.length) return map;
 
-  const placeholders = productKeys.map(() => "?").join(",");
-  const versionRows = await queryAll(
-    db,
-    `SELECT DISTINCT v.product_key
-     FROM eazpire_product_versions v
-     INNER JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
-     WHERE v.product_key IN (${placeholders}) AND fp.external_provider_id = ?`,
-    ...productKeys,
-    String(PRINTIFY_CHOICE_PROVIDER_ID)
-  );
-  for (const row of versionRows) {
-    map.set(row.product_key, "us");
-  }
-
-  if (env?.CATALOG_DB) {
-    try {
-      const catalogRows = await queryAll(
-        env.CATALOG_DB,
-        `SELECT DISTINCT product_key FROM product_publish_profiles
-         WHERE product_key IN (${placeholders}) AND CAST(print_provider_id AS INTEGER) = ?`,
-        ...productKeys,
-        PRINTIFY_CHOICE_PROVIDER_ID
-      );
-      for (const row of catalogRows) {
-        if (!map.has(row.product_key)) map.set(row.product_key, "us");
-      }
-    } catch {
-      /* optional */
+  if (env?.CATALOG_DB && blueprintExternalIds?.size) {
+    const typeByExternal = await loadPrintifyChoiceTypeByExternalIds(env.CATALOG_DB, [
+      ...blueprintExternalIds.values(),
+    ]);
+    for (const [productKey, extId] of blueprintExternalIds) {
+      const type = typeByExternal.get(String(extId));
+      if (type) map.set(productKey, type);
     }
   }
+
+  const needApiIds = [];
+  for (const key of productKeys) {
+    if (!map.has(key) && blueprintExternalIds?.has(key)) {
+      needApiIds.push(blueprintExternalIds.get(key));
+    }
+  }
+  const apiTypes = await fetchPrintifyChoiceTypesByExternalIds(env, needApiIds);
+  for (const key of productKeys) {
+    if (map.has(key)) continue;
+    const extId = blueprintExternalIds?.get(key);
+    if (!extId) continue;
+    const type = apiTypes.get(String(extId));
+    if (type) map.set(key, type);
+  }
+
   return map;
 }
 
@@ -847,7 +896,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   const shippingCountryCodesMap = await loadShippingCountriesByProductKey(db, env, products);
   const blueprintEnrichmentMap = await loadBlueprintEnrichmentForEazpireProducts(db, products);
   const blueprintExternalIds = await loadPrintifyBlueprintExternalIdsForProducts(db, env, products);
-  const choiceMap = await loadPrintifyChoiceByProductKeys(db, env, productKeys);
+  const choiceMap = await loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds);
 
   const catalogAreasMap =
     env?.CATALOG_DB && blueprintExternalIds.size
@@ -1139,6 +1188,8 @@ async function listAvailableBlueprints(db, manufacturerId) {
 /** Printify Available — full CATALOG_DB catalog minus legacy usage and active eazpire products. */
 async function loadPrintifyBlueprintCatalogRows(catalogDb) {
   const queries = [
+    `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json, printify_choice_type
+     FROM printify_blueprints ORDER BY category, title`,
     `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count, print_areas_json
      FROM printify_blueprints ORDER BY category, title`,
     `SELECT id, title, category, audience, shipping_countries, images_json, print_providers_json, print_provider_count
@@ -1150,7 +1201,10 @@ async function loadPrintifyBlueprintCatalogRows(catalogDb) {
     try {
       const all = await catalogDb.prepare(sql).all();
       const rows = all?.results || [];
-      if (sql.includes("print_areas_json")) return rows;
+      if (sql.includes("printify_choice_type")) return rows;
+      if (sql.includes("print_areas_json")) {
+        return rows.map((row) => ({ ...row, printify_choice_type: null }));
+      }
       return rows.map((row) => ({
         ...row,
         category: row.category ?? null,
@@ -1158,6 +1212,7 @@ async function loadPrintifyBlueprintCatalogRows(catalogDb) {
         shipping_countries: row.shipping_countries ?? null,
         print_providers_json: row.print_providers_json ?? null,
         print_areas_json: null,
+        printify_choice_type: null,
       }));
     } catch (queryErr) {
       const msg = String(queryErr?.message || queryErr);
@@ -1210,7 +1265,7 @@ async function listAvailablePrintifyBlueprints(env, mfgDb, manufacturerId, provi
         catalog_status: "available",
         mock_images: slimMockImagesForList(parseCatalogImagesJson(bp.images_json)),
         print_areas: printAreasFromStoredJson(bp.print_areas_json),
-        printify_choice: resolvePrintifyChoiceType(bp.print_providers_json),
+        printify_choice: resolvePrintifyChoiceType(bp.print_providers_json, bp.printify_choice_type),
         provider_count: bp.print_provider_count || 0,
         shipping_countries_raw: bp.shipping_countries,
       });

@@ -277,15 +277,26 @@ function renderPrintifyChoiceBadge(choice) {
 function renderTitleCell(row) {
   const title = escapeHtml(row.title || "—");
   const badge = renderPrintifyChoiceBadge(row.printify_choice);
-  if (!badge) return title;
-  return `<div class="cs-title-cell"><span class="cs-title-cell__text">${title}</span>${badge}</div>`;
+  const titleHtml = `<strong class="cs-title-cell__text">${title}</strong>`;
+  if (!badge) return titleHtml;
+  return `<div class="cs-title-cell">${titleHtml}${badge}</div>`;
 }
 
-function renderPrintAreaBadges(areas) {
+function renderPrintAreaCountCell(areas, title) {
   if (!areas?.length) return `<span class="text-muted">—</span>`;
-  return `<div class="cs-print-areas">${areas
-    .map((key) => `<span class="badge badge-neutral cs-print-area-badge">${escapeHtml(formatPrintAreaLabel(key))}</span>`)
-    .join("")}</div>`;
+  const labels = areas.map((key) => formatPrintAreaLabel(key));
+  return `<button type="button" class="badge badge-neutral cs-print-area-count" data-areas="${escapeHtml(JSON.stringify(labels))}" data-title="${escapeHtml(title || "Print areas")}" aria-label="${labels.length} print areas">${labels.length}</button>`;
+}
+
+function openPrintAreasModal(title, areas) {
+  const list = (areas || [])
+    .map((label) => `<li>${escapeHtml(label)}</li>`)
+    .join("");
+  openModal({
+    title: title || "Print areas",
+    bodyHtml: `<ul class="cs-print-area-list">${list}</ul>`,
+    onSave: null,
+  });
 }
 
 function mockPlaceholderSvg() {
@@ -620,17 +631,16 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
 
   if (filter === "available") {
     return renderTable(
-      ["", "Title", "Blueprint key", "Category", "Country", "Print areas", "Status"],
+      ["", "Title", "Category", "Country", "Print areas", "Status"],
       items
         .map((row, i) => {
           const rowId = `bp-${row.blueprint_id || i}`;
           return `<tr>
         <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
         <td>${renderTitleCell(row)}</td>
-        <td><code>${escapeHtml(row.blueprint_key || "—")}</code></td>
         <td>${escapeHtml(row.category || "—")}</td>
         <td>${renderShippingCountryFlags(row)}</td>
-        <td>${renderPrintAreaBadges(row.print_areas)}</td>
+        <td>${renderPrintAreaCountCell(row.print_areas, row.title)}</td>
         <td>${statusBadge("available")}</td>
       </tr>`;
         })
@@ -645,9 +655,9 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
         const rowId = `pk-${row.product_key || i}`;
         return `<tr data-product-key="${escapeHtml(row.product_key)}">
       <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
-      <td><div class="cs-title-cell cs-title-cell--product"><strong class="cs-title-cell__text">${escapeHtml(row.title)}</strong>${renderPrintifyChoiceBadge(row.printify_choice)}<br><code class="text-muted">${escapeHtml(row.product_key)}</code></div></td>
+      <td><div class="cs-title-cell cs-title-cell--product">${renderTitleCell(row)}</div></td>
       <td>${renderShippingCountryFlags(row)}</td>
-      <td>${renderPrintAreaBadges(row.print_areas)}</td>
+      <td>${renderPrintAreaCountCell(row.print_areas, row.title)}</td>
       <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
       <td>${escapeHtml(row.version_count ?? 0)}</td>
       <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(row.product_key)}">Edit</button></td>
@@ -683,6 +693,18 @@ function wireProductsTable(container, reload) {
 
   productsEl.querySelectorAll(".cs-status-btn").forEach((btn) => {
     btn.onclick = () => openStatusPicker(btn.dataset.productKey, btn.dataset.status, reload);
+  });
+
+  productsEl.querySelectorAll(".cs-print-area-count").forEach((btn) => {
+    btn.onclick = () => {
+      let areas = [];
+      try {
+        areas = JSON.parse(btn.dataset.areas || "[]");
+      } catch {
+        areas = [];
+      }
+      openPrintAreasModal(btn.dataset.title || "Print areas", areas);
+    };
   });
 }
 
