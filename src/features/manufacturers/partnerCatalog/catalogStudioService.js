@@ -6,6 +6,11 @@ import { buildCategoryTree, CAT_REVERSE, CATEGORY_GROUPS } from "../../admin/cat
 import { listPartnersForAdmin, getPartnerByIdOrSlug } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
 import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductService.js";
+import { isCatalogOpsMasterRead } from "./catalogOpsConfig.js";
+import {
+  listCatalogOpsStudioProductsAsEazpire,
+  productKeysForProviderFromCatalog,
+} from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
@@ -997,10 +1002,16 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   }
 
   const status = filter === "online" || filter === "preview" || filter === "offline" ? filter : "online";
-  let products = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
+  let products =
+    isCatalogOpsMasterRead(env) && env?.CATALOG_DB
+      ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
+      : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
 
   if (providerId) {
-    const keysForProvider = await productKeysForProvider(db, manufacturerId, providerId);
+    const keysForProvider =
+      isCatalogOpsMasterRead(env) && env?.CATALOG_DB
+        ? await productKeysForProviderFromCatalog(env.CATALOG_DB, providerId)
+        : await productKeysForProvider(db, manufacturerId, providerId);
     const keySet = new Set(keysForProvider);
     products = products.filter((p) => keySet.has(p.product_key));
   }

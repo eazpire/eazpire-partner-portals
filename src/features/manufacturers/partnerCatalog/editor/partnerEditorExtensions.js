@@ -4,6 +4,8 @@
 
 import { parseJson, newId } from "../../db.js";
 import { getEazpireProduct } from "../eazpireProductService.js";
+import { isCatalogOpsMasterRead } from "../catalogOpsConfig.js";
+import { getCatalogOpsProvidersData } from "../catalogOpsReadService.js";
 import { listProductVersions, updateProductVersion } from "../eazpireProductVersionService.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { fetchPrintifyProductById } from "../../../admin/adminProducts.js";
@@ -153,6 +155,9 @@ async function upsertPublishProfile(db, productKey, printProviderId, patch) {
 }
 
 export async function enhanceProvidersBundle(env, productKey) {
+  if (isCatalogOpsMasterRead(env)) {
+    return enhanceProvidersBundleFromCatalog(env, productKey);
+  }
   const db = env.MANUFACTURER_DB;
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
   const product = await getEazpireProduct(db, productKey);
@@ -204,6 +209,47 @@ export async function enhanceProvidersBundle(env, productKey) {
     blueprint_providers: blueprintProviders,
     publish_plans: planWithProfile,
     active_providers: active,
+  };
+}
+
+async function enhanceProvidersBundleFromCatalog(env, productKey) {
+  const data = await getCatalogOpsProvidersData(env, productKey);
+  if (!data.ok) return data;
+
+  const { product, plans, profiles, active, printify_blueprint_id: printifyBlueprintId } = data;
+
+  let blueprintProviders = [];
+  if (printifyBlueprintId) {
+    const p = await printifyGet(
+      env,
+      `/catalog/blueprints/${encodeURIComponent(printifyBlueprintId)}/print_providers.json`
+    );
+    if (p.ok && Array.isArray(p.data)) blueprintProviders = p.data;
+  }
+
+  const catalogRes = await fetchAllPrintProviders(env);
+  const catalogById = catalogRes.ok ? buildPrintProviderCatalogMap(catalogRes.providers) : new Map();
+  blueprintProviders = blueprintProviders.map((bp) => enrichBlueprintProviderWithCatalog(bp, catalogById));
+
+  const profileById = new Map(profiles.map((p) => [p.id, p]));
+  const planWithProfile = plans.map((plan) => ({
+    ...plan,
+    profile: plan.publish_profile_id != null ? profileById.get(plan.publish_profile_id) || null : null,
+  }));
+
+  const activeIds = active.map((a) => Number(a.print_provider_id)).filter((n) => Number.isFinite(n));
+  const merged = mergeProviders(planWithProfile, blueprintProviders, activeIds).map((row) =>
+    enrichProviderRowWithCatalog(row, catalogById)
+  );
+
+  return {
+    ok: true,
+    product,
+    merged_providers: merged,
+    blueprint_providers: blueprintProviders,
+    publish_plans: planWithProfile,
+    active_providers: active,
+    ops_read_source: "catalog-db",
   };
 }
 

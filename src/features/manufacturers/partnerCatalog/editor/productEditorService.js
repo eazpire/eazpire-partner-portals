@@ -2,6 +2,14 @@
  * Partner Admin product editor — bundle loaders and save handlers (master DB)
  */
 
+import { isCatalogOpsMasterRead } from "../catalogOpsConfig.js";
+import {
+  getCatalogOpsEditorBundle,
+  getCatalogOpsVariantsBundle,
+  getCatalogOpsPrintAreaBundle,
+  getCatalogOpsProduct,
+  listCatalogOpsProductVersions,
+} from "../catalogOpsReadService.js";
 import { parseJson, newId } from "../../db.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
 import {
@@ -35,6 +43,9 @@ async function queryFirst(db, sql, ...binds) {
 }
 
 export async function getProductEditorBundle(env, productKey) {
+  if (isCatalogOpsMasterRead(env)) {
+    return getCatalogOpsEditorBundle(env, productKey);
+  }
   const db = env.MANUFACTURER_DB;
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
 
@@ -235,17 +246,26 @@ export async function getProvidersBundle(env, productKey) {
 
 export async function getProviderCatalogDetail(env, productKey, printProviderId) {
   const db = env.MANUFACTURER_DB;
-  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
-
-  const product = await getEazpireProduct(db, productKey);
-  if (!product) return { ok: false, error: "not_found" };
+  if (!db && !isCatalogOpsMasterRead(env)) return { ok: false, error: "manufacturer_db_unavailable" };
 
   const pid = Number(printProviderId);
   if (!Number.isFinite(pid)) return { ok: false, error: "print_provider_id_required" };
 
+  let product;
+  let printifyBlueprintId;
+  if (isCatalogOpsMasterRead(env)) {
+    const ops = await getCatalogOpsProduct(env, productKey);
+    if (!ops.ok) return ops;
+    product = ops.product;
+    printifyBlueprintId = ops.printify_blueprint_id;
+  } else {
+    product = await getEazpireProduct(db, productKey);
+    if (!product) return { ok: false, error: "not_found" };
+    printifyBlueprintId = await resolvePrintifyBlueprintId(db, product.source_blueprint_id);
+  }
+
   let variants = [];
   let variants_available = false;
-  const printifyBlueprintId = await resolvePrintifyBlueprintId(db, product.source_blueprint_id);
   if (printifyBlueprintId) {
     const variantsRes = await fetchBlueprintProviderVariants(env, printifyBlueprintId, pid);
     if (variantsRes.ok) {
@@ -255,12 +275,21 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
     }
   }
 
-  const variantPrintAreas = await queryAll(
-    db,
-    `SELECT * FROM eazpire_product_variant_print_areas WHERE product_key = ? ORDER BY print_area_key, variant_title`,
-    productKey
-  );
-  const allVersions = await listProductVersions(db, productKey);
+  const variantPrintAreas = isCatalogOpsMasterRead(env)
+    ? await queryAll(
+        env.CATALOG_DB,
+        `SELECT * FROM product_variant_print_areas WHERE product_key = ? ORDER BY print_area_key, variant_title`,
+        productKey
+      )
+    : await queryAll(
+        db,
+        `SELECT * FROM eazpire_product_variant_print_areas WHERE product_key = ? ORDER BY print_area_key, variant_title`,
+        productKey
+      );
+
+  const allVersions = isCatalogOpsMasterRead(env)
+    ? await listCatalogOpsProductVersions(env, productKey)
+    : await listProductVersions(db, productKey);
   const versions = allVersions
     .filter((v) => String(v.external_provider_id) === String(pid))
     .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
@@ -518,6 +547,9 @@ export async function saveVersionConfig(env, versionId, body) {
 }
 
 export async function getPrintAreaBundle(env, productKey, { printProviderId, versionId } = {}) {
+  if (isCatalogOpsMasterRead(env)) {
+    return getCatalogOpsPrintAreaBundle(env, productKey, { printProviderId, versionId });
+  }
   const db = env.MANUFACTURER_DB;
   const versions = await listProductVersions(db, productKey);
   let version = versionId ? versions.find((v) => v.id === versionId) : versions[0];
@@ -582,6 +614,9 @@ export async function savePrintAreaSnapshot(env, versionId, body) {
 }
 
 export async function getVariantsBundle(env, productKey, printProviderId) {
+  if (isCatalogOpsMasterRead(env)) {
+    return getCatalogOpsVariantsBundle(env, productKey, printProviderId);
+  }
   const db = env.MANUFACTURER_DB;
   const variantConfig = await queryFirst(
     db,

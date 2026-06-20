@@ -33,6 +33,7 @@ describe("partner catalog ops registration", () => {
     "admin-catalog-studio-set-status",
     "admin-catalog-studio-set-printify-choice",
     "admin-catalog-studio-remove-product",
+    "admin-catalog-ops-reconcile",
     "admin-eazpire-product-editor-bundle",
     "admin-eazpire-product-meta-save",
     "admin-eazpire-product-providers-bundle",

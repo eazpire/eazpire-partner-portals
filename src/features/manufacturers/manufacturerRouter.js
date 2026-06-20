@@ -181,6 +181,7 @@ const ADMIN_OPS = new Set([
   "admin-catalog-studio-set-status",
   "admin-catalog-studio-set-printify-choice",
   "admin-catalog-studio-remove-product",
+  "admin-catalog-ops-reconcile",
   "admin-eazpire-product-list",
   "admin-eazpire-product-get",
   "admin-eazpire-product-update",
@@ -592,6 +593,28 @@ export async function handleManufacturerRouter(request, env) {
         return json(result, status, cors);
       }
       return json(result, 200, cors);
+    }
+    if (op === "admin-catalog-ops-reconcile" && request.method === "GET") {
+      try {
+        const { runCatalogOpsReconcile } = await import("./partnerCatalog/catalogOpsReconcileService.js");
+        const isActive = url.searchParams.get("is_active");
+        const result = await runCatalogOpsReconcile(env, {
+          isActive: isActive != null && isActive !== "" ? Number(isActive) : 2,
+        });
+        if (!result.ok) {
+          const status =
+            result.error === "catalog_db_unavailable" || result.error === "manufacturer_db_unavailable" ? 503 : 400;
+          return json(result, status, cors);
+        }
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-catalog-ops-reconcile]", err);
+        return json(
+          { ok: false, error: "reconcile_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
     }
 
     if (op === "admin-eazpire-product-list" && request.method === "GET") {
