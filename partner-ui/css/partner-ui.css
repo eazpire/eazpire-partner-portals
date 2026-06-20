@@ -2735,6 +2735,12 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 body.catalog-editor-open {
   overflow: hidden;
 }
+body.catalog-editor-open .modal-backdrop {
+  z-index: 2100;
+}
+body.catalog-editor-open #partner-toast {
+  z-index: 2200;
+}
 .btn-sm {
   padding: 6px 10px;
   font-size: 0.8rem;
@@ -3021,6 +3027,11 @@ body.catalog-editor-open {
   background: var(--surface-2);
   cursor: pointer;
   font-size: 0.8rem;
+  user-select: none;
+}
+.ce-prov-ver-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .ce-prov-ver-tab.active {
   border-color: var(--accent);

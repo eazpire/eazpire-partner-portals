@@ -216,12 +216,12 @@ function renderVersionTabs(versions, selectedIdx, editingVersionId = null) {
       const deleteBtn = canDelete
         ? `<button type="button" class="ce-prov-ver-del" data-version-id="${escapeHtml(String(vid))}" title="Delete version" aria-label="Delete version">×</button>`
         : "";
-      return `<button type="button" class="ce-prov-ver-tab ${idx === selectedIdx ? "active" : ""}" data-ver-idx="${idx}" role="tab">
+      return `<div class="ce-prov-ver-tab ${idx === selectedIdx ? "active" : ""}" data-ver-idx="${idx}" role="tab" tabindex="0">
         ${badge}
         <input type="text" class="input input-sm ce-prov-ver-name${isStd ? " ce-prov-ver-name--std" : ""}" data-version-id="${escapeHtml(String(vid))}" value="${escapeHtml(name)}" placeholder="${isStd ? "Product name" : "Version name"}"${readonlyAttr} />
         <button type="button" class="ce-prov-ver-action ${editBtnClass}" data-version-id="${escapeHtml(String(vid))}" title="${editBtnTitle}" aria-label="${editBtnTitle}">${editBtnLabel}</button>
         ${deleteBtn}
-      </button>`;
+      </div>`;
     })
     .join("");
   return `<div class="ce-prov-version-tabs" role="tablist">${tabs}
@@ -394,7 +394,7 @@ function versionById(state, pid, versionId) {
 async function commitVersionName(ctx, root, versionId) {
   const state = ctx.providersTabState;
   const pid = state.selectedPid;
-  const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(versionId))}"]`);
+  const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${cssEscapeAttr(versionId)}"]`);
   const name = inp?.value?.trim();
   if (!name) {
     showToast("Name required", "Enter a version name.");
@@ -495,6 +495,91 @@ async function addVersionPersisted(ctx, root) {
   }
 }
 
+function bindVersionTabDelegation(ctx, root) {
+  if (ctx._versionTabDelegationBound) return;
+  ctx._versionTabDelegationBound = true;
+
+  root.addEventListener("click", (e) => {
+    if (!e.target.closest(".ce-prov-version-tabs")) return;
+
+    const delBtn = e.target.closest(".ce-prov-ver-del");
+    if (delBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const vid = delBtn.dataset.versionId;
+      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${cssEscapeAttr(vid)}"]`);
+      const name = inp?.value?.trim() || "this version";
+      confirmAction({
+        title: "Delete version",
+        message: `Delete "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        confirmClass: "btn-danger",
+        onConfirm: () => deleteVersionConfirmed(ctx, root, vid),
+      });
+      return;
+    }
+
+    const editBtn = e.target.closest(".ce-prov-ver-edit");
+    if (editBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const vid = editBtn.dataset.versionId;
+      ctx.providersTabState.editingVersionId = vid;
+      refreshDetail(ctx, root);
+      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${cssEscapeAttr(vid)}"]`);
+      inp?.focus();
+      inp?.select();
+      return;
+    }
+
+    const saveBtn = e.target.closest(".ce-prov-ver-save");
+    if (saveBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      void commitVersionName(ctx, root, saveBtn.dataset.versionId);
+      return;
+    }
+
+    const addBtn = e.target.closest("#ce-prov-add-version");
+    if (addBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      void addVersionPersisted(ctx, root);
+      return;
+    }
+
+    const tab = e.target.closest(".ce-prov-ver-tab");
+    if (!tab || e.target.closest(".ce-prov-ver-name, .ce-prov-ver-action, .ce-prov-ver-del")) return;
+
+    syncVersionsFromDom(ctx, root);
+    const idx = Number(tab.dataset.verIdx);
+    if (!Number.isFinite(idx)) return;
+    ctx.providersTabState.selectedVersionIdx = idx;
+    ctx.providersTabState.editingVersionId = null;
+    refreshDetail(ctx, root);
+    onProvidersInput(ctx, root);
+  });
+
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const inp = e.target.closest?.(".ce-prov-ver-name");
+    if (!inp) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const vid = inp.dataset.versionId;
+    if (ctx.providersTabState.editingVersionId === vid) {
+      void commitVersionName(ctx, root, vid);
+    }
+  });
+}
+
+function cssEscapeAttr(value) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(String(value));
+  }
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 function bindDetailEvents(ctx, root) {
   root.querySelector(".ce-prov-active-toggle")?.addEventListener("change", (e) => {
     const pid = Number(e.target.dataset.pid);
@@ -508,69 +593,8 @@ function bindDetailEvents(ctx, root) {
     onProvidersInput(ctx, root);
   });
 
-  root.querySelectorAll(".ce-prov-ver-tab:not(.ce-prov-ver-tab--add)").forEach((tab) => {
-    tab.addEventListener("click", (e) => {
-      if (e.target.closest(".ce-prov-ver-name, .ce-prov-ver-action, .ce-prov-ver-del")) return;
-      syncVersionsFromDom(ctx, root);
-      const idx = Number(tab.dataset.verIdx);
-      ctx.providersTabState.selectedVersionIdx = idx;
-      ctx.providersTabState.editingVersionId = null;
-      refreshDetail(ctx, root);
-      onProvidersInput(ctx, root);
-    });
-  });
-
-  root.querySelector("#ce-prov-add-version")?.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    await addVersionPersisted(ctx, root);
-  });
-
-  root.querySelectorAll(".ce-prov-ver-edit").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const vid = btn.dataset.versionId;
-      ctx.providersTabState.editingVersionId = vid;
-      refreshDetail(ctx, root);
-      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(vid))}"]`);
-      inp?.focus();
-      inp?.select();
-    });
-  });
-
-  root.querySelectorAll(".ce-prov-ver-save").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await commitVersionName(ctx, root, btn.dataset.versionId);
-    });
-  });
-
-  root.querySelectorAll(".ce-prov-ver-del").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const vid = btn.dataset.versionId;
-      const inp = root.querySelector(`.ce-prov-ver-name[data-version-id="${CSS.escape(String(vid))}"]`);
-      const name = inp?.value?.trim() || "this version";
-      confirmAction({
-        title: "Delete version",
-        message: `Delete "${name}"? This cannot be undone.`,
-        confirmLabel: "Delete",
-        confirmClass: "btn-danger",
-        onConfirm: () => deleteVersionConfirmed(ctx, root, vid),
-      });
-    });
-  });
-
   root.querySelectorAll(".ce-prov-ver-name").forEach((inp) => {
     inp.addEventListener("click", (e) => e.stopPropagation());
-    inp.addEventListener("keydown", async (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const vid = inp.dataset.versionId;
-      if (ctx.providersTabState.editingVersionId === vid) {
-        await commitVersionName(ctx, root, vid);
-      }
-    });
   });
 
   root.querySelectorAll(".ce-prov-ph-qty, .ce-prov-dt-cb, .ce-prov-dim-h, .ce-prov-dim-w").forEach((el) => {
@@ -647,6 +671,8 @@ export async function loadProvidersTab(ctx) {
 
 export function bindProvidersTab(ctx, root) {
   if (!ctx.providersTabState) return;
+
+  bindVersionTabDelegation(ctx, root);
 
   root.querySelectorAll(".ce-prov-filter-btn").forEach((btn) => {
     btn.onclick = () => {
