@@ -60,6 +60,12 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-print-area-rect-save");
     expect(src).toContain("admin-eazpire-fetch-printify-mockups");
     expect(src).toContain("syncTemplateSection");
+    expect(src).toContain("removeTemplateDraft");
+  });
+
+  it("mockups tab opens shared image viewer", () => {
+    const src = readFileSync(join(portal, "tabs/mockups.js"), "utf8");
+    expect(src).toContain("openMockViewer");
   });
 
   it("all tab modules exist", () => {

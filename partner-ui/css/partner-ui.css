@@ -1427,6 +1427,16 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   max-height: 70vh;
   object-fit: contain;
 }
+.cs-mock-viewer__caption {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  text-align: center;
+}
+body.catalog-editor-open .cs-mock-viewer {
+  z-index: 2200;
+}
 .cs-mock-viewer__close {
   position: absolute;
   top: -42px;
@@ -3753,7 +3763,7 @@ a.ce-tpl-draft-head__id:hover {
   border: 2px solid transparent;
   border-radius: 10px;
   background: transparent;
-  cursor: pointer;
+  cursor: zoom-in;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .ce-mock-carousel__slide:hover {

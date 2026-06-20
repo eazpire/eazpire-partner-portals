@@ -1,4 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
+import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
 import { fetchMockupsBundle, saveMockups } from "../api.js";
 
 function groupImagesByView(images) {
@@ -24,7 +25,7 @@ function renderCarousel(viewKey, slides, previewId) {
     .map((img) => {
       const isPreview = String(img.id) === String(previewId);
       return `
-        <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)}">
+        <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)} — click to enlarge" aria-label="View mockup ${escapeHtml(img.color_name || viewKey)}">
           <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
           <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
         </button>`;
@@ -98,17 +99,27 @@ function syncPreviewHiddenInput(viewKey, mockId) {
   if (hidden) hidden.value = mockId || "";
 }
 
+function collectCarouselViewerItems(carousel) {
+  return [...carousel.querySelectorAll(".ce-mock-carousel__slide")].map((slide) => {
+    const img = slide.querySelector("img");
+    const label = slide.querySelector(".ce-mock-carousel__color")?.textContent?.trim() || img?.alt || "";
+    return img?.src ? { url: img.src, label } : null;
+  }).filter(Boolean);
+}
+
 export function bindMockupsTab() {
   document.querySelectorAll(".ce-mock-carousel").forEach((carousel) => {
     const viewKey = carousel.dataset.view;
+    const slides = [...carousel.querySelectorAll(".ce-mock-carousel__slide")];
 
-    carousel.querySelectorAll(".ce-mock-carousel__slide").forEach((slide) => {
+    slides.forEach((slide, index) => {
       slide.addEventListener("click", () => {
         setActiveSlide(carousel, slide);
         const toggle = document.querySelector(`.ce-mock-preview-switch[data-view="${CSS.escape(viewKey)}"]`);
         if (toggle?.checked) {
           syncPreviewHiddenInput(viewKey, slide.getAttribute("data-id") || "");
         }
+        openMockViewer(collectCarouselViewerItems(carousel), index);
       });
     });
   });
