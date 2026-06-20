@@ -2136,28 +2136,27 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   z-index: 2000;
   display: flex;
   align-items: stretch;
-  justify-content: center;
-  padding: 14px;
+  justify-content: stretch;
+  padding: 0;
   background: rgba(15, 23, 42, 0.62);
   backdrop-filter: blur(10px);
-  overflow: auto;
+  overflow: hidden;
 }
 .catalog-editor {
   --ce-sidebar-w: 248px;
   --ce-sidebar-collapsed: 76px;
+  --ce-sidebar-bg: linear-gradient(180deg, rgba(17, 24, 39, 0.99), rgba(15, 23, 42, 0.98));
   flex: 1;
-  min-height: calc(100vh - 28px);
-  max-width: 1680px;
+  min-height: 100vh;
   width: 100%;
+  max-width: none;
   display: flex;
   flex-direction: column;
-  border-radius: 22px;
+  border-radius: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.38),
-    0 0 0 1px rgba(109, 93, 252, 0.12);
-  background: #eef2f8;
+  border: 0;
+  box-shadow: none;
+  background: #fff;
 }
 .catalog-editor-header {
   display: flex;
@@ -2245,6 +2244,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   display: flex;
   flex-shrink: 0;
   min-height: 0;
+  background: var(--ce-sidebar-bg);
 }
 .catalog-editor-sidebar {
   width: var(--ce-sidebar-w);
@@ -2252,9 +2252,9 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.99), rgba(15, 23, 42, 0.98));
+  background: transparent;
   color: #fff;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 0;
   transition: width 0.22s ease;
   overflow: hidden;
 }
@@ -2335,8 +2335,8 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   padding: 0;
   border: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.58);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -2345,7 +2345,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   transition: background 0.2s ease, color 0.2s ease;
 }
 .catalog-editor-rail:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 .catalog-editor-rail__arrow-zone {
@@ -2374,6 +2374,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 .catalog-editor-rail__arrow {
   font-size: 15px;
   line-height: 1;
+  color: inherit;
   transition: transform 0.22s ease;
 }
 .catalog-editor--sidebar-collapsed .catalog-editor-rail__arrow {
@@ -2388,7 +2389,11 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   text-transform: uppercase;
   margin-top: 12px;
   padding-bottom: 14px;
-  opacity: 0.72;
+  color: rgba(255, 255, 255, 0.78);
+  opacity: 1;
+}
+.catalog-editor-rail:hover .catalog-editor-rail__label {
+  color: #fff;
 }
 .catalog-editor-main {
   flex: 1;
@@ -2396,20 +2401,17 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(109, 93, 252, 0.1), transparent 42%),
-    radial-gradient(circle at 0% 100%, rgba(0, 183, 168, 0.08), transparent 38%),
-    linear-gradient(180deg, #f8fafc 0%, #eef2f8 100%);
+  background: #fff;
 }
 .catalog-editor-subnav {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 12px 22px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(12px);
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  flex-shrink: 0;
 }
 .catalog-editor-subnav-label {
   font-size: 11px;
@@ -2447,15 +2449,17 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 22px 26px 28px;
+  padding: 0;
+  background: #fff;
 }
 .catalog-editor-body .ce-tab-panel {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  border-radius: 20px;
-  padding: 24px 28px;
-  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
-  backdrop-filter: blur(10px);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 20px 22px 24px;
+  box-shadow: none;
+  backdrop-filter: none;
+  min-height: 100%;
 }
 .catalog-editor-body .ce-tab-panel h2 {
   margin: 0 0 6px;
@@ -2464,7 +2468,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   letter-spacing: -0.02em;
 }
 .catalog-editor-loading {
-  padding: 64px 24px;
+  padding: 48px 22px;
   text-align: center;
   color: var(--muted);
   font-weight: 600;
@@ -2474,19 +2478,28 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   display: flex;
   justify-content: flex-end;
   padding: 14px 22px;
-  border-top: 1px solid rgba(226, 232, 240, 0.95);
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(120deg, rgba(17, 24, 39, 0.98) 0%, rgba(30, 27, 75, 0.95) 55%, rgba(15, 23, 42, 0.98) 100%);
+  box-shadow: 0 -4px 24px rgba(15, 23, 42, 0.12);
 }
 .catalog-editor-foot-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
+.catalog-editor-foot .btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.catalog-editor-foot .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+}
 .catalog-editor-foot .btn-primary {
-  background: linear-gradient(135deg, var(--brand), #5b4de0);
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
   border: 0;
-  box-shadow: 0 8px 22px rgba(109, 93, 252, 0.35);
+  box-shadow: 0 6px 20px rgba(109, 93, 252, 0.4);
 }
 .ce-form-grid {
   display: grid;
@@ -2610,13 +2623,6 @@ body.catalog-editor-open {
   font-size: 0.85rem;
 }
 @media (max-width: 900px) {
-  .catalog-editor-overlay {
-    padding: 0;
-  }
-  .catalog-editor {
-    min-height: 100vh;
-    border-radius: 0;
-  }
   .catalog-editor--sidebar-collapsed .catalog-editor-sidebar {
     width: 0;
     padding: 0;
