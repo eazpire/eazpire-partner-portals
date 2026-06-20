@@ -1,6 +1,10 @@
 import { partnerFetch, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast, renderTable, openModal, closeModal, confirmAction } from "/partner/shared/js/partner-shell.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
+import {
+  groupProvidersByShipCountry,
+  countryCodeToFlag,
+} from "./catalog-editor/provider-country-groups.js";
 
 const STATUS_FILTERS = [
   { key: "available", label: "Available" },
@@ -14,6 +18,7 @@ const STORAGE = {
   providerId: "admin_catalog_provider_id",
   filter: "admin_catalog_status_filter",
   partnersOpen: "admin_catalog_partners_open",
+  countriesOpen: "admin_catalog_countries_open",
   studioSidebar: "admin_catalog_studio_sidebar_collapsed",
   catFilter: "admin_catalog_cat_filter",
   catOpenGroup: "admin_catalog_cat_open_group",
@@ -63,6 +68,29 @@ function togglePartnerOpen(partnerId) {
   if (set.has(partnerId)) set.delete(partnerId);
   else set.add(partnerId);
   sessionStorage.setItem(STORAGE.partnersOpen, JSON.stringify([...set]));
+}
+
+function getCountriesOpenMap() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE.countriesOpen);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function getCountriesOpenSet(partnerId) {
+  const map = getCountriesOpenMap();
+  return new Set(map[partnerId] || []);
+}
+
+function toggleCountryOpen(partnerId, countryCode) {
+  const map = getCountriesOpenMap();
+  const set = new Set(map[partnerId] || []);
+  if (set.has(countryCode)) set.delete(countryCode);
+  else set.add(countryCode);
+  map[partnerId] = [...set];
+  sessionStorage.setItem(STORAGE.countriesOpen, JSON.stringify(map));
 }
 
 function isStudioSidebarCollapsed() {
@@ -232,12 +260,6 @@ function getCountryDisplayName(code) {
   }
 }
 
-function countryCodeToFlag(code) {
-  const c = String(code || "").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(c)) return "";
-  const base = 0x1f1e6;
-  return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65);
-}
 
 function shippingCountryCodesFromRow(row) {
   if (Array.isArray(row?.shipping_country_codes) && row.shipping_country_codes.length) {
@@ -640,6 +662,45 @@ function renderAvatar(name, logoUrl, sizeClass = "") {
   return `<span class="${cls} cs-avatar--initials">${escapeHtml(initials(name))}</span>`;
 }
 
+function shapeProviderForCountryGroup(fp) {
+  return {
+    ...fp,
+    catalogData: fp.catalogData || (fp.location ? { location: fp.location } : undefined),
+    locationDetail: fp.locationDetail || fp.location,
+  };
+}
+
+function renderTreeProviderBtn(partnerId, fp, selectedProviderId) {
+  return `<button type="button" class="cs-tree-provider-btn ${selectedProviderId === String(fp.external_provider_id) ? "active" : ""}"
+    data-partner-id="${escapeHtml(partnerId)}" data-provider-id="${escapeHtml(fp.external_provider_id)}">
+    ${renderAvatar(fp.name, fp.logo_url, "cs-avatar--sm")}
+    <span>${escapeHtml(fp.name)}</span>
+  </button>`;
+}
+
+function renderPartnerCountryGroups(partnerId, providers, selectedProviderId) {
+  const shaped = providers.map(shapeProviderForCountryGroup);
+  const groups = groupProvidersByShipCountry(shaped, (fp) => fp.external_provider_id);
+  const expanded = getCountriesOpenSet(partnerId);
+
+  return groups
+    .map((group) => {
+      const isOpen = expanded.has(group.code);
+      const flag = countryCodeToFlag(group.code === "OTHER" ? "" : group.code);
+      return `<details class="cs-tree-country-group" data-partner-id="${escapeHtml(partnerId)}" data-country="${escapeHtml(group.code)}"${isOpen ? " open" : ""}>
+        <summary class="cs-tree-country-summary">
+          <span class="cs-tree-country-flag" aria-hidden="true">${flag}</span>
+          <span class="cs-tree-country-name">${escapeHtml(group.name)}</span>
+          <span class="cs-tree-country-count">${group.providers.length}</span>
+        </summary>
+        <div class="cs-tree-country-body">
+          ${group.providers.map((fp) => renderTreeProviderBtn(partnerId, fp, selectedProviderId)).join("")}
+        </div>
+      </details>`;
+    })
+    .join("");
+}
+
 function renderExpandedTree(partners, selectedPartnerId, selectedProviderId) {
   const openSet = getPartnersOpenSet();
   return partners
@@ -658,15 +719,7 @@ function renderExpandedTree(partners, selectedPartnerId, selectedProviderId) {
           <span class="cs-tree-count">${providerCount}</span>
         </div>
         <div class="cs-tree-providers" ${isOpen ? "" : "hidden"}>
-          ${providers
-            .map(
-              (fp) => `<button type="button" class="cs-tree-provider-btn ${selectedProviderId === String(fp.external_provider_id) ? "active" : ""}"
-                data-partner-id="${escapeHtml(partner.id)}" data-provider-id="${escapeHtml(fp.external_provider_id)}">
-                ${renderAvatar(fp.name, fp.logo_url, "cs-avatar--sm")}
-                <span>${escapeHtml(fp.name)}</span>
-              </button>`
-            )
-            .join("")}
+          ${renderPartnerCountryGroups(partner.id, providers, selectedProviderId)}
         </div>
       </div>`;
     })
@@ -836,6 +889,15 @@ function bindTreeEvents(root, onSelect) {
       setPartnerId(btn.dataset.partnerId);
       setProviderId(btn.dataset.providerId);
       onSelect();
+    });
+  });
+
+  root.querySelectorAll(".cs-tree-country-group").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const partnerId = details.dataset.partnerId;
+      const countryCode = details.dataset.country;
+      if (!partnerId || !countryCode) return;
+      toggleCountryOpen(partnerId, countryCode);
     });
   });
 }

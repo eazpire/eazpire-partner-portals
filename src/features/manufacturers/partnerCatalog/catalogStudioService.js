@@ -9,7 +9,12 @@ import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductServi
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
-import { fetchBlueprint, buildPrintifyCatalogProductUrl } from "../adapters/printify/printifyCatalogClient.js";
+import {
+  fetchBlueprint,
+  buildPrintifyCatalogProductUrl,
+  fetchAllPrintProviders,
+} from "../adapters/printify/printifyCatalogClient.js";
+import { normalizeCountryCode } from "../../catalog/resolveProviderOriginCountries.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -841,27 +846,127 @@ function applyPrintAreasToAvailableItems(items, ...areaMaps) {
   });
 }
 
-export async function getCatalogStudioTree(db) {
+const STUDIO_COUNTRY_DISPLAY = {
+  DE: "Germany",
+  FR: "France",
+  IT: "Italy",
+  ES: "Spain",
+  NL: "Netherlands",
+  BE: "Belgium",
+  AT: "Austria",
+  CH: "Switzerland",
+  PL: "Poland",
+  CZ: "Czech Republic",
+  SE: "Sweden",
+  DK: "Denmark",
+  FI: "Finland",
+  NO: "Norway",
+  IE: "Ireland",
+  PT: "Portugal",
+  GR: "Greece",
+  HU: "Hungary",
+  RO: "Romania",
+  SK: "Slovakia",
+  SI: "Slovenia",
+  LT: "Lithuania",
+  LV: "Latvia",
+  EE: "Estonia",
+  LU: "Luxembourg",
+  BG: "Bulgaria",
+  HR: "Croatia",
+  CY: "Cyprus",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  AU: "Australia",
+  NZ: "New Zealand",
+  MX: "Mexico",
+  CN: "China",
+  JP: "Japan",
+  IN: "India",
+  BR: "Brazil",
+  TR: "Turkey",
+  UA: "Ukraine",
+};
+
+function studioCountryDisplayName(code, fallbackLabel = "") {
+  const c = String(code || "").trim().toUpperCase();
+  if (c && STUDIO_COUNTRY_DISPLAY[c]) return STUDIO_COUNTRY_DISPLAY[c];
+  const fromLabel = normalizeCountryCode(fallbackLabel);
+  if (fromLabel && STUDIO_COUNTRY_DISPLAY[fromLabel]) return STUDIO_COUNTRY_DISPLAY[fromLabel];
+  const trimmed = String(fallbackLabel || "").trim();
+  if (trimmed) return trimmed;
+  return "Other";
+}
+
+function mapDbProviderToTreeNode(fp) {
+  const location = fp.location && typeof fp.location === "object" ? fp.location : {};
+  const countryRaw = location.country || null;
+  const shipCountryCode = normalizeCountryCode(countryRaw) || "OTHER";
+  return {
+    id: fp.id,
+    name: fp.name,
+    external_provider_id: fp.external_provider_id,
+    status: fp.status,
+    logo_url: fp.logo_url || null,
+    ship_country_code: shipCountryCode,
+    ship_country_name: studioCountryDisplayName(shipCountryCode, countryRaw),
+    location: Object.keys(location).length ? location : null,
+  };
+}
+
+function mapPrintifyCatalogProviderToTreeNode(pp, dbByExternalId) {
+  const externalId = String(pp.id);
+  const dbFp = dbByExternalId.get(externalId);
+  const location = pp.location && typeof pp.location === "object" ? pp.location : {};
+  const countryRaw = location.country || null;
+  const shipCountryCode = normalizeCountryCode(countryRaw) || "OTHER";
+  return {
+    id: dbFp?.id ?? null,
+    name: pp.title || dbFp?.name || `Provider ${externalId}`,
+    external_provider_id: externalId,
+    status: dbFp?.status ?? "catalog",
+    logo_url: dbFp?.logo_url || null,
+    ship_country_code: shipCountryCode,
+    ship_country_name: studioCountryDisplayName(shipCountryCode, countryRaw),
+    location: Object.keys(location).length ? location : null,
+  };
+}
+
+async function buildPrintifyTreeProviders(db, partnerId, env) {
+  const dbProviders = await listFulfillmentProviders(db, partnerId);
+  const dbByExternalId = new Map(dbProviders.map((fp) => [String(fp.external_provider_id), fp]));
+
+  const catalogRes = await fetchAllPrintProviders(env);
+  if (!catalogRes.ok || !catalogRes.providers?.length) {
+    return dbProviders.map(mapDbProviderToTreeNode);
+  }
+
+  return catalogRes.providers
+    .map((pp) => mapPrintifyCatalogProviderToTreeNode(pp, dbByExternalId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getCatalogStudioTree(db, env) {
   const partners = await listPartnersForAdmin(db);
   const out = [];
   for (const partner of partners) {
-    const providers = await listFulfillmentProviders(db, partner.id);
+    const isPrintify = String(partner.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
+    const providers = isPrintify && env
+      ? await buildPrintifyTreeProviders(db, partner.id, env)
+      : (await listFulfillmentProviders(db, partner.id)).map(mapDbProviderToTreeNode);
+
     out.push({
       id: partner.id,
       name: partner.name,
       slug: partner.slug,
       logo_url: resolvePartnerLogo(partner),
       integration_type: partner.integration_type,
-      provider_count: partner.fulfillment_provider_count,
+      provider_count: providers.length,
       live_blueprint_count: partner.live_blueprint_count,
       eazpire_product_count: partner.eazpire_product_count,
-      providers: providers.map((fp) => ({
-        id: fp.id,
-        name: fp.name,
-        external_provider_id: fp.external_provider_id,
-        status: fp.status,
-        logo_url: fp.logo_url || null,
-      })),
+      providers,
     });
   }
   return { ok: true, partners: out };

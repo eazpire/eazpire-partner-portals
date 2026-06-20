@@ -531,7 +531,7 @@ export async function handleManufacturerRouter(request, env) {
     const catalogStudio = await import("./partnerCatalog/catalogStudioService.js");
 
     if (op === "admin-catalog-studio-tree" && request.method === "GET") {
-      const result = await catalogStudio.getCatalogStudioTree(db);
+      const result = await catalogStudio.getCatalogStudioTree(db, env);
       return json(result, 200, cors);
     }
     if (op === "admin-catalog-studio-products" && request.method === "GET") {

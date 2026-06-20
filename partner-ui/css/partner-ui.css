@@ -876,6 +876,63 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   flex-shrink: 0;
 }
 .cs-tree-providers { padding: 2px 0 6px 30px; }
+.cs-tree-country-group {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  margin-bottom: 4px;
+  overflow: visible;
+}
+.cs-tree-country-group:last-child { margin-bottom: 0; }
+.cs-tree-country-body {
+  display: block;
+  border-top: 1px solid var(--line);
+  padding: 2px 4px 4px;
+}
+.cs-tree-country-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  list-style: none;
+  user-select: none;
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+.cs-tree-country-summary::-webkit-details-marker { display: none; }
+.cs-tree-country-summary::before {
+  content: "▸";
+  display: inline-block;
+  font-size: 0.65rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.cs-tree-country-group[open] > .cs-tree-country-summary::before { transform: rotate(90deg); }
+.cs-tree-country-flag {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.cs-tree-country-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-tree-country-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-3);
+  border-radius: 999px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
 .cs-tree-provider-btn {
   display: block;
   width: 100%;
@@ -2806,6 +2863,11 @@ body.catalog-editor-open {
 }
 .ce-prov-country-group[open] > .ce-prov-country-summary::before {
   transform: rotate(90deg);
+}
+.ce-prov-country-flag {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .ce-prov-country-name {
   flex: 1;

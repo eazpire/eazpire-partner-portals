@@ -123,6 +123,14 @@ export function normalizeCountryCode(value) {
   return COUNTRY_NAME_TO_ISO[token] || null;
 }
 
+/** ISO 3166-1 alpha-2 → regional indicator flag emoji (e.g. US → 🇺🇸). */
+export function countryCodeToFlag(code) {
+  const c = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return "";
+  const base = 0x1f1e6;
+  return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65);
+}
+
 export function countryDisplayName(code, fallbackLabel = "") {
   const c = String(code || "").trim().toUpperCase();
   if (c && COUNTRY_DISPLAY[c]) return COUNTRY_DISPLAY[c];

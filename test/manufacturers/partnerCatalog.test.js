@@ -138,6 +138,133 @@ describe("printify catalog client errors", () => {
   });
 });
 
+describe("getCatalogStudioTree", () => {
+  it("maps DB providers with ship country fields", async () => {
+    const { getCatalogStudioTree } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const db = {
+      prepare: (sql) => {
+        const handler = {
+          bind: () => handler,
+          all: async () => {
+            if (sql.includes("FROM manufacturers m")) {
+              return {
+                results: [
+                  {
+                    id: "mfg_other",
+                    name: "Other Partner",
+                    slug: "other",
+                    integration_type: "manual",
+                    fulfillment_provider_count: 1,
+                    live_blueprint_count: 0,
+                    eazpire_product_count: 0,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("manufacturer_fulfillment_providers")) {
+              return {
+                results: [
+                  {
+                    id: "fp_1",
+                    manufacturer_id: "mfg_other",
+                    external_provider_id: "42",
+                    name: "Test Provider",
+                    location_json: '{"country":"DE","city":"Berlin"}',
+                    ships_to_json: "[]",
+                    status: "active",
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          first: async () => null,
+          run: async () => ({}),
+        };
+        return handler;
+      },
+    };
+    const result = await getCatalogStudioTree(db, {});
+    expect(result.ok).toBe(true);
+    expect(result.partners).toHaveLength(1);
+    expect(result.partners[0].providers[0].ship_country_code).toBe("DE");
+    expect(result.partners[0].providers[0].ship_country_name).toBe("Germany");
+  });
+
+  it("returns all Printify catalog providers from API", async () => {
+    const { getCatalogStudioTree } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify([
+          { id: 30, title: "Provider A", location: { country: "US", city: "Charlotte" } },
+          { id: 31, title: "Provider B", location: { country: "Germany", city: "Berlin" } },
+        ]),
+        { status: 200 }
+      );
+    try {
+      const db = {
+        prepare: (sql) => {
+          const handler = {
+            bind: () => handler,
+            all: async () => {
+              if (sql.includes("FROM manufacturers m")) {
+                return {
+                  results: [
+                    {
+                      id: "mfg_printify",
+                      name: "Printify",
+                      slug: "printify",
+                      integration_type: "api",
+                      fulfillment_provider_count: 1,
+                      live_blueprint_count: 0,
+                      eazpire_product_count: 0,
+                    },
+                  ],
+                };
+              }
+              if (sql.includes("manufacturer_fulfillment_providers")) {
+                return {
+                  results: [
+                    {
+                      id: "fp_db",
+                      manufacturer_id: "mfg_printify",
+                      external_provider_id: "30",
+                      name: "DB Name",
+                      location_json: "{}",
+                      ships_to_json: "[]",
+                      status: "active",
+                    },
+                  ],
+                };
+              }
+              return { results: [] };
+            },
+            first: async () => null,
+            run: async () => ({}),
+          };
+          return handler;
+        },
+      };
+      const result = await getCatalogStudioTree(db, { PRINTIFY_API_KEY: "test-key" });
+      expect(result.ok).toBe(true);
+      expect(result.partners[0].provider_count).toBe(2);
+      expect(result.partners[0].providers).toHaveLength(2);
+      const ids = result.partners[0].providers.map((p) => p.external_provider_id).sort();
+      expect(ids).toEqual(["30", "31"]);
+      const merged = result.partners[0].providers.find((p) => p.external_provider_id === "30");
+      expect(merged.id).toBe("fp_db");
+      expect(merged.status).toBe("active");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 describe("runFullPrintifyPartnerSetup prechecks", () => {
   it("returns catalog_db_unavailable without CATALOG_DB", async () => {
     const result = await runFullPrintifyPartnerSetup({ MANUFACTURER_DB: { prepare: () => ({}) } });
