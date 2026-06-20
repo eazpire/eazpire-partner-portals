@@ -469,6 +469,24 @@ describe("catalog studio service", () => {
     expect(merged.print_areas).toEqual(["back", "front"]);
   });
 
+  it("detects All Over Print products from title", async () => {
+    const { isAllOverPrintFromTitle } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+
+    expect(isAllOverPrintFromTitle("Unisex All Over Print Hoodie")).toBe(true);
+    expect(isAllOverPrintFromTitle("All-Over Print Leggings")).toBe(true);
+    expect(isAllOverPrintFromTitle("Premium All Over Tee")).toBe(true);
+    expect(isAllOverPrintFromTitle("Sublimation Mug (AOP)")).toBe(true);
+    expect(isAllOverPrintFromTitle("Custom Tote — AOP")).toBe(true);
+    expect(isAllOverPrintFromTitle("AOP")).toBe(true);
+
+    expect(isAllOverPrintFromTitle("Unisex Tee")).toBe(false);
+    expect(isAllOverPrintFromTitle("Classic Hoodie")).toBe(false);
+    expect(isAllOverPrintFromTitle("Overall Fit Jacket")).toBe(false);
+    expect(isAllOverPrintFromTitle("")).toBe(false);
+  });
+
   it("loads available printify products from catalog without bulk raw_json enrichment", async () => {
     const catalogRows = [
       {

@@ -1205,6 +1205,14 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   border-color: var(--brand);
   background: var(--surface-2);
 }
+.cs-aop-badge {
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+}
 .cs-print-area-list {
   margin: 0;
   padding-left: 1.25rem;

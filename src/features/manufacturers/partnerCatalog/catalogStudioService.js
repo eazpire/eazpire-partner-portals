@@ -321,6 +321,23 @@ function enrichItemsWithCategory(items) {
   return items.map((row) => ({ ...row, ...itemCategoryFields(row) }));
 }
 
+/** Detect All Over Print products from catalog title (Printify naming conventions). */
+function isAllOverPrintFromTitle(title) {
+  const raw = String(title || "").trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+
+  if (/all[\s-]?over[\s-]?print/.test(lower)) return true;
+  if (/all[\s-]over\b/.test(lower)) return true;
+  if (/\(aop\)/.test(lower)) return true;
+  if (/\baop\b/.test(lower)) return true;
+
+  const stripped = lower.replace(/[^\w]+$/, "").trim();
+  if (stripped === "aop" || /[\s_-]aop$/.test(stripped)) return true;
+
+  return false;
+}
+
 function slimAvailableListItem(row) {
   const codes = shippingCodesForItem(row.shipping_country_codes, row.shipping_countries_raw);
   return {
@@ -339,6 +356,7 @@ function slimAvailableListItem(row) {
     printify_url: row.printify_url || null,
     shipping_country_codes: codes,
     shipping_countries: formatShippingCountriesDisplay(codes),
+    is_aop: isAllOverPrintFromTitle(row.title),
   };
 }
 
@@ -983,6 +1001,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       print_areas: merged.print_areas,
       printify_choice: choiceMap.get(p.product_key) || null,
       printify_url: extId ? printifyUrlMap.get(String(extId)) || null : null,
+      is_aop: isAllOverPrintFromTitle(p.title),
     };
   });
 
@@ -1326,6 +1345,7 @@ export {
   formatPrintAreaLabel,
   formatShippingCountriesDisplay,
   imagesFromBlueprintData,
+  isAllOverPrintFromTitle,
   parseShippingCountriesString,
   printAreasFromBlueprintData,
   printAreasFromNormalized,

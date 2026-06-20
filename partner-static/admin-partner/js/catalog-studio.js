@@ -286,10 +286,40 @@ function renderTitleCell(row) {
   return `<div class="cs-title-cell">${titleHtml}${badge}</div>`;
 }
 
-function renderPrintAreaCountCell(areas, title) {
-  if (!areas?.length) return `<span class="text-muted">—</span>`;
+function isAllOverPrintProduct(row) {
+  if (row && typeof row === "object") {
+    if (row.is_aop === true) return true;
+    if (row.is_aop === false) return false;
+    return isAllOverPrintProduct(row.title);
+  }
+  const raw = String(row || "").trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (/all[\s-]?over[\s-]?print/.test(lower)) return true;
+  if (/all[\s-]over\b/.test(lower)) return true;
+  if (/\(aop\)/.test(lower)) return true;
+  if (/\baop\b/.test(lower)) return true;
+  const stripped = lower.replace(/[^\w]+$/, "").trim();
+  if (stripped === "aop" || /[\s_-]aop$/.test(stripped)) return true;
+  return false;
+}
+
+function renderAopBadge() {
+  return `<span class="badge cs-aop-badge" title="All Over Print">AOP</span>`;
+}
+
+function renderPrintAreaCountCell(areas, row) {
+  const title = typeof row === "string" ? row : row?.title;
+  const showAop = isAllOverPrintProduct(row);
+  const aopBadge = showAop ? renderAopBadge() : "";
+  if (!areas?.length) {
+    if (!aopBadge) return `<span class="text-muted">—</span>`;
+    return `<div class="cs-print-areas">${aopBadge}</div>`;
+  }
   const labels = areas.map((key) => formatPrintAreaLabel(key));
-  return `<button type="button" class="badge badge-neutral cs-print-area-count" data-areas="${escapeHtml(JSON.stringify(labels))}" data-title="${escapeHtml(title || "Print areas")}" aria-label="${labels.length} print areas">${labels.length}</button>`;
+  const countBtn = `<button type="button" class="badge badge-neutral cs-print-area-count" data-areas="${escapeHtml(JSON.stringify(labels))}" data-title="${escapeHtml(title || "Print areas")}" aria-label="${labels.length} print areas">${labels.length}</button>`;
+  if (!aopBadge) return countBtn;
+  return `<div class="cs-print-areas">${countBtn}${aopBadge}</div>`;
 }
 
 function openPrintAreasModal(title, areas) {
@@ -644,7 +674,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
         <td>${renderTitleCell(row)}</td>
         <td>${escapeHtml(row.category || "—")}</td>
         <td>${renderShippingCountryFlags(row)}</td>
-        <td>${renderPrintAreaCountCell(row.print_areas, row.title)}</td>
+        <td>${renderPrintAreaCountCell(row.print_areas, row)}</td>
         <td>${statusBadge("available")}</td>
       </tr>`;
         })
@@ -661,7 +691,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
       <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
       <td><div class="cs-title-cell cs-title-cell--product">${renderTitleCell(row)}</div></td>
       <td>${renderShippingCountryFlags(row)}</td>
-      <td>${renderPrintAreaCountCell(row.print_areas, row.title)}</td>
+      <td>${renderPrintAreaCountCell(row.print_areas, row)}</td>
       <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
       <td>${escapeHtml(row.version_count ?? 0)}</td>
       <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(row.product_key)}">Edit</button></td>
