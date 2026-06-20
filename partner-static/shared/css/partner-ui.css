@@ -2232,6 +2232,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   --ce-sidebar-w: 248px;
   --ce-sidebar-collapsed: 76px;
   --ce-sidebar-bg: linear-gradient(180deg, rgba(17, 24, 39, 0.99), rgba(15, 23, 42, 0.98));
+  position: relative;
   flex: 1;
   min-height: 100vh;
   width: 100%;
@@ -2347,6 +2348,49 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 .catalog-editor-close:hover {
   background: rgba(255, 255, 255, 0.16);
   transform: scale(1.04);
+}
+.ce-unsaved-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.ce-unsaved-dialog[hidden] {
+  display: none !important;
+}
+.ce-unsaved-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+.ce-unsaved-dialog__card {
+  position: relative;
+  z-index: 1;
+  width: min(420px, 100%);
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.28);
+}
+.ce-unsaved-dialog__title {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+.ce-unsaved-dialog__text {
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.ce-unsaved-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 .catalog-editor-layout {
   flex: 1;

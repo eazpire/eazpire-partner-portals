@@ -380,6 +380,13 @@ function syncVersionsFromDom(ctx, root) {
   if (dimUpdates.length) state.printAreaDimEdits.set(String(pid), dimUpdates);
 }
 
+/** Sync in-memory provider tab state from DOM before save/close dirty check. */
+export function syncProvidersDomState(ctx) {
+  const root = document.getElementById("ce-body");
+  if (!root || !ctx?.providersTabState) return;
+  syncVersionsFromDom(ctx, root);
+}
+
 function onProvidersInput(ctx, root) {
   syncVersionsFromDom(ctx, root);
   markEditorDirty();

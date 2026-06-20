@@ -1,5 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { showToast, confirmAction } from "/partner/shared/js/partner-shell.js";
+import { showToast } from "/partner/shared/js/partner-shell.js";
 import { fetchEditorBundle, mirrorProduct } from "./api.js";
 import { renderMetaTab, saveMetaTab } from "./tabs/meta.js";
 import {
@@ -7,6 +7,7 @@ import {
   bindProvidersTab,
   saveProvidersTab,
   snapshotProvidersTab,
+  syncProvidersDomState,
 } from "./tabs/providers.js";
 import { loadTemplateTab, saveTemplateTab } from "./tabs/template.js";
 import { loadMockupsTab, saveMockupsTab } from "./tabs/mockups.js";
@@ -132,16 +133,41 @@ function ensureOverlay() {
           </footer>
         </div>
       </div>
+      <div id="ce-unsaved-dialog" class="ce-unsaved-dialog" hidden>
+        <div class="ce-unsaved-dialog__backdrop" data-ce-unsaved-dismiss></div>
+        <div class="ce-unsaved-dialog__card" role="alertdialog" aria-modal="true" aria-labelledby="ce-unsaved-title">
+          <h2 id="ce-unsaved-title" class="ce-unsaved-dialog__title">Unsaved changes</h2>
+          <p class="ce-unsaved-dialog__text">You have unsaved changes on this tab. Save before closing?</p>
+          <div class="ce-unsaved-dialog__actions">
+            <button type="button" class="btn btn-secondary" id="ce-unsaved-keep">Keep editing</button>
+            <button type="button" class="btn btn-secondary" id="ce-unsaved-discard">Discard</button>
+            <button type="button" class="btn btn-primary" id="ce-unsaved-save">Save</button>
+          </div>
+        </div>
+      </div>
     </div>`;
   document.body.appendChild(overlayEl);
-  overlayEl.querySelector("#ce-close").onclick = () => requestCloseProductEditor();
+  overlayEl.querySelector("#ce-close").onclick = () => void requestCloseProductEditor();
   overlayEl.querySelector("#ce-save").onclick = () => saveCurrentTab();
   overlayEl.querySelector("#ce-mirror").onclick = () => runMirror();
   overlayEl.querySelector("#ce-sidebar-toggle").onclick = toggleEditorSidebar;
   dirtyUnsub = registerDirtyListener((dirty) => updateSaveButtonState(dirty));
   overlayEl.addEventListener("click", (e) => {
-    if (e.target === overlayEl) requestCloseProductEditor();
+    if (e.target === overlayEl) void requestCloseProductEditor();
   });
+  if (!overlayEl.dataset.escapeBound) {
+    overlayEl.dataset.escapeBound = "1";
+    document.addEventListener("keydown", (e) => {
+      if (!editorState || overlayEl.hidden) return;
+      if (e.key !== "Escape") return;
+      const dialog = overlayEl.querySelector("#ce-unsaved-dialog");
+      if (dialog && !dialog.hidden) {
+        hideUnsavedCloseDialog();
+        return;
+      }
+      void requestCloseProductEditor();
+    });
+  }
   applyEditorSidebarState();
   return overlayEl;
 }
@@ -299,30 +325,72 @@ async function saveCurrentTab() {
   }
 }
 
-function requestCloseProductEditor() {
+function refreshDirtyBeforeClose(ctx) {
+  if (!ctx) return;
+  if (ctx.activeTab === "provider") syncProvidersDomState(ctx);
+  const state = getCurrentTabDirtyState(ctx);
+  if (state != null) checkDirty(state);
+}
+
+let unsavedCloseResolver = null;
+
+function hideUnsavedCloseDialog() {
+  const dialog = overlayEl?.querySelector("#ce-unsaved-dialog");
+  if (dialog) dialog.hidden = true;
+  unsavedCloseResolver = null;
+}
+
+function promptUnsavedCloseDialog() {
+  const dialog = overlayEl?.querySelector("#ce-unsaved-dialog");
+  if (!dialog) return Promise.resolve("discard");
+
+  hideUnsavedCloseDialog();
+  dialog.hidden = false;
+
+  return new Promise((resolve) => {
+    unsavedCloseResolver = resolve;
+
+    const finish = (choice) => {
+      hideUnsavedCloseDialog();
+      resolve(choice);
+    };
+
+    dialog.querySelector("#ce-unsaved-keep").onclick = () => finish("keep");
+    dialog.querySelector("#ce-unsaved-discard").onclick = () => finish("discard");
+    dialog.querySelector("#ce-unsaved-save").onclick = () => finish("save");
+    dialog.querySelectorAll("[data-ce-unsaved-dismiss]").forEach((el) => {
+      el.onclick = () => finish("keep");
+    });
+  });
+}
+
+async function requestCloseProductEditor() {
   if (!editorState) {
     closeProductEditor();
     return;
   }
+
+  refreshDirtyBeforeClose(editorState);
+
   if (hasDirtySnapshot() && isEditorDirty()) {
-    confirmAction({
-      title: "Unsaved changes",
-      message: "You have unsaved changes on this tab. Save before closing?",
-      confirmLabel: "Save",
-      cancelLabel: "Discard",
-      confirmClass: "btn-primary",
-      onConfirm: async () => {
-        try {
-          await saveCurrentTab();
-          if (!isEditorDirty()) closeProductEditor();
-        } catch {
-          /* saveCurrentTab shows toast */
-        }
-      },
-      onCancel: () => closeProductEditor(),
-    });
-    return;
+    const choice = await promptUnsavedCloseDialog();
+    if (choice === "keep") return;
+    if (choice === "discard") {
+      closeProductEditor();
+      return;
+    }
+    if (choice === "save") {
+      try {
+        await saveCurrentTab();
+        refreshDirtyBeforeClose(editorState);
+        if (!isEditorDirty()) closeProductEditor();
+      } catch {
+        /* saveCurrentTab shows toast */
+      }
+      return;
+    }
   }
+
   closeProductEditor();
 }
 
@@ -345,6 +413,7 @@ function updateDriftBadge() {
 export async function openProductEditor(productKey) {
   ensureOverlay();
   overlayEl.hidden = false;
+  overlayEl.querySelector("#ce-unsaved-dialog")?.setAttribute("hidden", "");
   applyEditorSidebarState();
   document.body.classList.add("catalog-editor-open");
 
@@ -378,6 +447,7 @@ export async function openProductEditor(productKey) {
 
 export function closeProductEditor() {
   if (!overlayEl) return;
+  hideUnsavedCloseDialog();
   overlayEl.hidden = true;
   document.body.classList.remove("catalog-editor-open");
   editorState = null;
