@@ -194,6 +194,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-product-meta-save",
   "admin-eazpire-product-providers-bundle",
   "admin-eazpire-product-providers-save",
+  "admin-eazpire-provider-catalog-detail",
   "admin-eazpire-product-version-create",
   "admin-eazpire-product-version-delete",
   "admin-eazpire-product-version-config-save",
@@ -668,6 +669,13 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-eazpire-product-providers-bundle" && request.method === "GET") {
       const productKey = url.searchParams.get("product_key");
       const result = await editor.getProvidersBundle(env, productKey);
+      if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-provider-catalog-detail" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const printProviderId = url.searchParams.get("print_provider_id");
+      const result = await editor.getProviderCatalogDetail(env, productKey, printProviderId);
       if (!result.ok) return json(result, 404, cors);
       return json(result, 200, cors);
     }

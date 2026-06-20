@@ -2402,6 +2402,7 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   display: flex;
   flex-direction: column;
   background: #fff;
+  position: relative;
 }
 .catalog-editor-subnav {
   display: flex;
@@ -2622,6 +2623,352 @@ body.catalog-editor-open {
   padding: 6px 8px;
   font-size: 0.85rem;
 }
+
+/* Provider tab — collapsible sidebar + version tabs */
+.ce-prov-tab {
+  padding: 0 !important;
+  min-height: 100%;
+}
+.ce-prov-layout {
+  display: flex;
+  min-height: 100%;
+  gap: 0;
+}
+.ce-prov-sidebar-wrap {
+  display: flex;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.ce-prov-sidebar {
+  width: 280px;
+  padding: 12px 10px 16px;
+  overflow-y: auto;
+  transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+}
+.ce-prov-layout--collapsed .ce-prov-sidebar {
+  width: 0;
+  padding: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.ce-prov-rail {
+  width: 28px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--line);
+}
+.ce-prov-rail:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+}
+.ce-prov-layout--collapsed .ce-prov-rail-arrow {
+  transform: rotate(180deg);
+}
+.ce-prov-filter-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ce-prov-filter-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--muted);
+}
+.ce-prov-filter-btn.active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text);
+}
+.ce-prov-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ce-prov-list-item {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ce-prov-list-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+.ce-prov-list-item.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.ce-prov-list-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.ce-prov-list-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.ce-prov-list-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.ce-prov-list-status.is-active {
+  color: var(--accent);
+}
+.ce-prov-detail {
+  flex: 1;
+  padding: 16px 18px 24px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.ce-prov-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.ce-prov-detail-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+.ce-prov-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ce-prov-version-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.ce-prov-ver-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.ce-prov-ver-tab.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+.ce-prov-ver-tab--add {
+  min-width: 36px;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.ce-prov-ver-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.ce-prov-ver-name {
+  min-width: 100px;
+  max-width: 160px;
+  border: none;
+  background: transparent;
+  font-weight: 700;
+  padding: 2px 4px;
+}
+.ce-prov-ver-name:focus {
+  outline: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+}
+.ce-prov-section {
+  margin-bottom: 20px;
+}
+.ce-prov-section-title {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.ce-prov-pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.ce-prov-pos-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--surface-2);
+}
+.ce-prov-pos-card--readonly {
+  opacity: 0.95;
+}
+.ce-prov-pos-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.ce-prov-pos-deco {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.ce-prov-pos-dim-read {
+  font-size: 0.8rem;
+  margin-top: 6px;
+  font-weight: 600;
+}
+.ce-prov-pos-dim-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ce-prov-pos-dim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.ce-prov-pos-dim-lab {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.ce-prov-pos-dim-mul {
+  color: var(--muted);
+  font-weight: 700;
+  margin-top: 14px;
+}
+.ce-prov-pv-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.ce-prov-pv-badge {
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+}
+.ce-prov-ph-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ce-prov-ph-pick-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.ce-prov-ph-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.ce-prov-dt-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ce-prov-dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.ce-save-flash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.ce-save-flash--show {
+  opacity: 1;
+}
+.ce-save-flash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 36px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
+  font-weight: 800;
+  font-size: 1rem;
+  animation: ce-save-pop 0.45s ease;
+}
+.ce-save-flash-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, #22c55e 18%, var(--surface));
+  color: #16a34a;
+  font-size: 1.4rem;
+}
+@keyframes ce-save-pop {
+  0% { transform: scale(0.85); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.catalog-editor-foot .btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
   .catalog-editor--sidebar-collapsed .catalog-editor-sidebar {
     width: 0;

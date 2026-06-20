@@ -26,6 +26,12 @@ export async function fetchProvidersBundle(productKey) {
   return partnerFetch("admin-eazpire-product-providers-bundle", { query: { product_key: productKey } });
 }
 
+export async function fetchProviderCatalogDetail(productKey, printProviderId) {
+  return partnerFetch("admin-eazpire-provider-catalog-detail", {
+    query: { product_key: productKey, print_provider_id: printProviderId },
+  });
+}
+
 export async function saveProviders(productKey, body) {
   return partnerFetch("admin-eazpire-product-providers-save", {
     method: "POST",

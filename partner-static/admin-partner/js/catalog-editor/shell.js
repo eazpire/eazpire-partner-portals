@@ -1,14 +1,28 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { showToast } from "/partner/shared/js/partner-shell.js";
+import { showToast, confirmAction } from "/partner/shared/js/partner-shell.js";
 import { fetchEditorBundle, mirrorProduct } from "./api.js";
 import { renderMetaTab, saveMetaTab } from "./tabs/meta.js";
-import { loadProvidersTab, bindProvidersTab, saveProvidersTab } from "./tabs/providers.js";
+import {
+  loadProvidersTab,
+  bindProvidersTab,
+  saveProvidersTab,
+  snapshotProvidersTab,
+} from "./tabs/providers.js";
 import { loadTemplateTab, saveTemplateTab } from "./tabs/template.js";
 import { loadMockupsTab, saveMockupsTab } from "./tabs/mockups.js";
 import { loadVariantsTab, saveVariantsTab } from "./tabs/variants.js";
 import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/print-area.js";
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
 import { renderAutomationsTab, bindAutomationsTab, saveAutomationsTab } from "./tabs/automations.js";
+import {
+  registerDirtyListener,
+  setDirtySnapshot,
+  clearDirtySnapshot,
+  resetDirtyAfterSave,
+  isEditorDirty,
+  hasDirtySnapshot,
+  checkDirty,
+} from "./editor-dirty.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
@@ -25,6 +39,45 @@ const TABS = [
 
 let overlayEl = null;
 let editorState = null;
+let dirtyUnsub = null;
+
+function updateSaveButtonState(dirty = false) {
+  const saveBtn = overlayEl?.querySelector("#ce-save");
+  if (!saveBtn) return;
+  const enabled = hasDirtySnapshot() ? dirty : true;
+  saveBtn.disabled = !enabled;
+}
+
+function showSaveFlash() {
+  const main = overlayEl?.querySelector(".catalog-editor-main");
+  if (!main) return;
+  let flash = main.querySelector(".ce-save-flash");
+  if (!flash) {
+    flash = document.createElement("div");
+    flash.className = "ce-save-flash";
+    flash.innerHTML = `<div class="ce-save-flash-inner"><span class="ce-save-flash-icon" aria-hidden="true">✓</span><span>Saved</span></div>`;
+    main.appendChild(flash);
+  }
+  flash.classList.remove("ce-save-flash--show");
+  void flash.offsetWidth;
+  flash.classList.add("ce-save-flash--show");
+  window.setTimeout(() => flash.classList.remove("ce-save-flash--show"), 1200);
+}
+
+function captureTabDirtySnapshot(ctx) {
+  if (ctx.activeTab === "provider" && ctx.providersTabState) {
+    setDirtySnapshot(snapshotProvidersTab(ctx));
+    return;
+  }
+  clearDirtySnapshot();
+}
+
+function getCurrentTabDirtyState(ctx) {
+  if (ctx.activeTab === "provider" && ctx.providersTabState) {
+    return snapshotProvidersTab(ctx);
+  }
+  return null;
+}
 
 function isEditorSidebarCollapsed() {
   return sessionStorage.getItem(CE_SIDEBAR_KEY) === "1";
@@ -88,12 +141,13 @@ function ensureOverlay() {
       </div>
     </div>`;
   document.body.appendChild(overlayEl);
-  overlayEl.querySelector("#ce-close").onclick = closeProductEditor;
+  overlayEl.querySelector("#ce-close").onclick = () => requestCloseProductEditor();
   overlayEl.querySelector("#ce-save").onclick = () => saveCurrentTab();
   overlayEl.querySelector("#ce-mirror").onclick = () => runMirror();
   overlayEl.querySelector("#ce-sidebar-toggle").onclick = toggleEditorSidebar;
+  dirtyUnsub = registerDirtyListener((dirty) => updateSaveButtonState(dirty));
   overlayEl.addEventListener("click", (e) => {
-    if (e.target === overlayEl) closeProductEditor();
+    if (e.target === overlayEl) requestCloseProductEditor();
   });
   applyEditorSidebarState();
   return overlayEl;
@@ -197,6 +251,8 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "print_area") bindPrintAreaTab(ctx, body);
     if (ctx.activeTab === "products") bindProductsTab(ctx, body);
     if (ctx.activeTab === "automations") bindAutomationsTab(ctx, body);
+    captureTabDirtySnapshot(ctx);
+    updateSaveButtonState(false);
   } catch (err) {
     body.innerHTML = `<div class="ce-error">${escapeHtml(err.message || "Load failed")}</div>`;
   }
@@ -239,13 +295,42 @@ async function saveCurrentTab() {
     await runMirror(true);
     ctx.bundle = await fetchEditorBundle(ctx.productKey);
     updateDriftBadge(ctx);
+    showSaveFlash();
     showToast("Saved", "Tab saved and mirrored to publish index");
+    resetDirtyAfterSave(getCurrentTabDirtyState(ctx) ?? {});
     await loadActiveTab(ctx);
   } catch (err) {
     showToast("Save failed", err.message || "Unknown error");
   } finally {
-    saveBtn.disabled = false;
+    updateSaveButtonState(isEditorDirty());
   }
+}
+
+function requestCloseProductEditor() {
+  if (!editorState) {
+    closeProductEditor();
+    return;
+  }
+  if (hasDirtySnapshot() && isEditorDirty()) {
+    confirmAction({
+      title: "Unsaved changes",
+      message: "You have unsaved changes on this tab. Save before closing?",
+      confirmLabel: "Save",
+      cancelLabel: "Discard",
+      confirmClass: "btn-primary",
+      onConfirm: async () => {
+        try {
+          await saveCurrentTab();
+          if (!isEditorDirty()) closeProductEditor();
+        } catch {
+          /* saveCurrentTab shows toast */
+        }
+      },
+      onCancel: () => closeProductEditor(),
+    });
+    return;
+  }
+  closeProductEditor();
 }
 
 async function runMirror(silent = false) {
@@ -312,4 +397,6 @@ export function closeProductEditor() {
   document.body.classList.remove("catalog-editor-open");
   editorState = null;
   window.__catalogEditorState = null;
+  clearDirtySnapshot();
+  updateSaveButtonState(false);
 }

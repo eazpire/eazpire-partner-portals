@@ -14,6 +14,7 @@ import { listFulfillmentProviders } from "../fulfillmentProviderService.js";
 import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { enhanceProvidersBundle } from "./partnerEditorExtensions.js";
+import { fetchBlueprintProviderVariants } from "../../adapters/printify/printifyCatalogClient.js";
 
 async function queryAll(db, sql, ...binds) {
   try {
@@ -232,10 +233,153 @@ export async function getProvidersBundle(env, productKey) {
   };
 }
 
+export async function getProviderCatalogDetail(env, productKey, printProviderId) {
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+
+  const product = await getEazpireProduct(db, productKey);
+  if (!product) return { ok: false, error: "not_found" };
+
+  const pid = Number(printProviderId);
+  if (!Number.isFinite(pid)) return { ok: false, error: "print_provider_id_required" };
+
+  let variants = [];
+  let variants_available = false;
+  if (product.source_blueprint_id) {
+    const variantsRes = await fetchBlueprintProviderVariants(env, product.source_blueprint_id, pid);
+    if (variantsRes.ok) {
+      variants = Array.isArray(variantsRes.variants) ? variantsRes.variants : [];
+      variants_available = true;
+    }
+  }
+
+  const variantPrintAreas = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_variant_print_areas WHERE product_key = ? ORDER BY print_area_key, variant_title`,
+    productKey
+  );
+  const allVersions = await listProductVersions(db, productKey);
+  const versions = allVersions
+    .filter((v) => String(v.external_provider_id) === String(pid))
+    .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+
+  return {
+    ok: true,
+    product_key: productKey,
+    print_provider_id: pid,
+    blueprint_id: product.source_blueprint_id,
+    variants,
+    variants_available,
+    variant_print_areas: variantPrintAreas,
+    versions,
+  };
+}
+
+async function fulfillmentProviderIdForPrintProvider(db, printProviderId) {
+  const fp = await queryFirst(
+    db,
+    `SELECT id FROM manufacturer_fulfillment_providers WHERE external_provider_id = ? LIMIT 1`,
+    String(printProviderId)
+  );
+  return fp?.id || null;
+}
+
+async function ensureStandardVersionForProvider(db, productKey, printProviderId, now) {
+  const fpId = await fulfillmentProviderIdForPrintProvider(db, printProviderId);
+  if (!fpId) return null;
+
+  const versions = await listProductVersions(db, productKey);
+  const forProvider = versions.filter((v) => String(v.external_provider_id) === String(printProviderId));
+  if (forProvider.length > 0) return forProvider.sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))[0];
+
+  return upsertProductVersion(db, {
+    product_key: productKey,
+    fulfillment_provider_id: fpId,
+    display_name: "Standard",
+    sort_order: 0,
+    external_template_product_id: "",
+    publish_enabled: true,
+    is_active: true,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+async function upsertVariantPrintAreaDimensions(db, productKey, update, now) {
+  const printAreaKey = String(update.print_area_key || "")
+    .trim()
+    .toLowerCase();
+  const width = Number(update.printify_print_area_width);
+  const height = Number(update.printify_print_area_height);
+  if (!printAreaKey || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return;
+  }
+
+  const variantIds = Array.isArray(update.catalog_variant_ids)
+    ? update.catalog_variant_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+
+  if (!variantIds.length && update.variant_id != null) {
+    const vid = Number(update.variant_id);
+    if (Number.isFinite(vid) && vid > 0) variantIds.push(vid);
+  }
+  if (!variantIds.length) return;
+
+  for (const variantId of variantIds) {
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_variant_print_areas
+       WHERE product_key = ? AND print_area_key = ? AND variant_id = ?`,
+      productKey,
+      printAreaKey,
+      variantId
+    );
+    if (existing?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_variant_print_areas
+           SET printify_print_area_width = ?, printify_print_area_height = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(Math.round(width), Math.round(height), now, existing.id)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_variant_print_areas
+            (id, product_key, print_area_key, variant_id, variant_title,
+             printify_print_area_width, printify_print_area_height, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          newId(),
+          productKey,
+          printAreaKey,
+          variantId,
+          update.variant_title != null ? String(update.variant_title) : null,
+          Math.round(width),
+          Math.round(height),
+          now,
+          now
+        )
+        .run();
+    }
+  }
+}
+
 export async function saveProviders(env, productKey, body) {
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
-  const activeIds = Array.isArray(body.active_print_provider_ids) ? body.active_print_provider_ids : [];
+  const activeIds = Array.isArray(body.active_print_provider_ids)
+    ? body.active_print_provider_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n))
+    : [];
+
+  const prevActive = await queryAll(
+    db,
+    `SELECT print_provider_id FROM eazpire_product_active_providers WHERE product_key = ?`,
+    productKey
+  );
+  const prevActiveSet = new Set(prevActive.map((r) => Number(r.print_provider_id)));
 
   await db.prepare(`DELETE FROM eazpire_product_active_providers WHERE product_key = ?`).bind(productKey).run();
   for (const pid of activeIds) {
@@ -244,8 +388,61 @@ export async function saveProviders(env, productKey, body) {
         `INSERT INTO eazpire_product_active_providers (id, product_key, print_provider_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .bind(newId(), productKey, Number(pid), now, now)
+      .bind(newId(), productKey, pid, now, now)
       .run();
+    if (!prevActiveSet.has(pid)) {
+      await ensureStandardVersionForProvider(db, productKey, pid, now);
+    }
+  }
+
+  if (Array.isArray(body.deleted_version_ids)) {
+    for (const versionId of body.deleted_version_ids) {
+      const id = String(versionId || "").trim();
+      if (!id) continue;
+      const v = await getProductVersion(db, id);
+      if (v && v.product_key === productKey) {
+        await db.prepare(`DELETE FROM eazpire_product_versions WHERE id = ?`).bind(id).run();
+      }
+    }
+  }
+
+  if (Array.isArray(body.new_versions)) {
+    for (const nv of body.new_versions) {
+      const ppId = Number(nv.print_provider_id);
+      if (!Number.isFinite(ppId)) continue;
+      const fpId = await fulfillmentProviderIdForPrintProvider(db, ppId);
+      if (!fpId) continue;
+      await upsertProductVersion(db, {
+        product_key: productKey,
+        fulfillment_provider_id: fpId,
+        display_name: nv.display_name || "New version",
+        sort_order: nv.sort_order ?? 99,
+        external_template_product_id: nv.external_template_product_id || "",
+        product_version_config: nv.product_version_config ?? null,
+        publish_enabled: nv.publish_enabled !== false,
+        is_active: nv.is_active !== false,
+      });
+    }
+  }
+
+  if (Array.isArray(body.version_updates)) {
+    for (const vu of body.version_updates) {
+      const id = String(vu.id || "").trim();
+      if (!id) continue;
+      const patch = {};
+      if (vu.display_name != null) patch.display_name = String(vu.display_name).trim() || "Version";
+      if (vu.product_version_config != null) patch.product_version_config = vu.product_version_config;
+      if (vu.sort_order != null) patch.sort_order = Number(vu.sort_order);
+      if (vu.publish_enabled != null) patch.publish_enabled = !!vu.publish_enabled;
+      if (vu.is_active != null) patch.is_active = !!vu.is_active;
+      if (Object.keys(patch).length) await updateProductVersion(db, id, patch);
+    }
+  }
+
+  if (Array.isArray(body.variant_print_area_updates)) {
+    for (const upd of body.variant_print_area_updates) {
+      await upsertVariantPrintAreaDimensions(db, productKey, upd, now);
+    }
   }
 
   if (Array.isArray(body.publish_plan_updates)) {

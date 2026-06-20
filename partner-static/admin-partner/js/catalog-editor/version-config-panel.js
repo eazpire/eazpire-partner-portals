@@ -1,62 +1,178 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
+import {
+  PH_TYPES,
+  DESIGN_TYPES_ALL,
+  normalizePatProductVersionConfig,
+  unionPatPlaceholderPositions,
+  mergeCatalogAndDbPrintDimensions,
+  applyPublishBrandingSemanticsToSlotsByPosition,
+  catalogVariantIds,
+} from "./provider-print-technical.js";
 
-const DESIGN_TYPES = ["classic", "backprint", "pattern", "photo"];
-
-function normalizePlaceholders(raw) {
-  const map = raw && typeof raw === "object" ? raw : {};
-  const out = {};
-  for (const type of DESIGN_TYPES) {
-    const row = map[type];
-    out[type] = {
-      qr: row?.qr ?? "front",
-      logo: row?.logo ?? "front",
-      creator_design: row?.creator_design ?? "front",
-    };
+function versionConfigForUi(version, positions) {
+  const raw = version?.product_version_config ?? version?.product_version_config_json ?? null;
+  const cfg = normalizePatProductVersionConfig(raw);
+  for (const ph of positions) {
+    const pos = String(ph.position || "")
+      .trim()
+      .toLowerCase();
+    if (!pos) continue;
+    if (!cfg.placeholders_by_position[pos]) cfg.placeholders_by_position[pos] = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
   }
-  return out;
+  applyPublishBrandingSemanticsToSlotsByPosition(cfg.placeholders_by_position);
+  return cfg;
 }
 
-export function renderVersionConfigPanel(version) {
-  const config = version?.product_version_config || {};
-  const placeholders = normalizePlaceholders(config.placeholders_by_design_type);
-  const rows = DESIGN_TYPES.map((type) => {
-    const row = placeholders[type];
-    return `<tr data-design-type="${escapeHtml(type)}">
-      <td>${escapeHtml(type)}</td>
-      <td><input class="input input-sm ce-vcfg-cell" data-field="qr" value="${escapeHtml(String(row.qr))}"></td>
-      <td><input class="input input-sm ce-vcfg-cell" data-field="logo" value="${escapeHtml(String(row.logo))}"></td>
-      <td><input class="input input-sm ce-vcfg-cell" data-field="creator_design" value="${escapeHtml(
-        String(row.creator_design)
-      )}"></td>
-    </tr>`;
+function placeholderBadgesHtml(slots) {
+  const parts = [];
+  for (const pt of PH_TYPES) {
+    const n = Number(slots?.[pt.key]) || 0;
+    if (n > 0) parts.push(`<span class="ce-prov-pv-badge">${escapeHtml(pt.label)}${n > 1 ? ` ×${n}` : ""}</span>`);
+  }
+  return parts.length ? `<div class="ce-prov-pv-badges">${parts.join("")}</div>` : "";
+}
+
+/**
+ * Active provider version body: print positions, placeholder counts, design types.
+ */
+export function renderVersionConfigPanel(version, catalogDetail = {}) {
+  const variants = catalogDetail.variants || [];
+  const vpa = catalogDetail.variant_print_areas || [];
+  const cfg = versionConfigForUi(version, placeholdersFromVariants(variants));
+  const positions = unionPatPlaceholderPositions(variants, cfg.placeholders_by_position);
+  const versionId = version?.id || version?._tempId || "";
+  const haveDt = cfg.design_types.length > 0;
+
+  const posCards = positions.length
+    ? positions
+        .map((ph) => {
+          const pos = String(ph.position || "")
+            .trim()
+            .toLowerCase();
+          if (!pos) return "";
+          const dim = mergeCatalogAndDbPrintDimensions(ph, vpa, ph.position);
+          const hVal = dim.h != null && Number.isFinite(dim.h) ? String(dim.h) : "";
+          const wVal = dim.w != null && Number.isFinite(dim.w) ? String(dim.w) : "";
+          const slots = cfg.placeholders_by_position[pos] || { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+          const pickRows = PH_TYPES.map((pt) => {
+            const cur = Number(slots[pt.key]) || 0;
+            const opts = Array.from({ length: 11 }, (_, q) => {
+              const sel = q === cur ? " selected" : "";
+              return `<option value="${q}"${sel}>${q}</option>`;
+            }).join("");
+            return `<span class="ce-prov-ph-row">
+              <span>${escapeHtml(pt.label)}</span>
+              <select class="input input-sm ce-prov-ph-qty" data-version-id="${escapeHtml(String(versionId))}" data-position="${escapeHtml(pos)}" data-ph-key="${escapeHtml(pt.key)}">${opts}</select>
+            </span>`;
+          }).join("");
+          return `<div class="ce-prov-pos-card" data-position="${escapeHtml(pos)}">
+            <code class="ce-prov-pos-code">${escapeHtml(ph.position || pos)}</code>
+            <div class="ce-prov-pos-deco">${escapeHtml(ph.decoration_method || "")}</div>
+            <div class="ce-prov-pos-dim" data-print-area-key="${escapeHtml(pos)}">
+              <div class="ce-prov-pos-dim-row">
+                <label class="ce-prov-pos-dim-field">
+                  <span class="ce-prov-pos-dim-lab">Height</span>
+                  <input type="number" min="1" step="1" class="input input-sm ce-prov-dim-h" inputmode="numeric" value="${escapeHtml(hVal)}" />
+                </label>
+                <span class="ce-prov-pos-dim-mul">×</span>
+                <label class="ce-prov-pos-dim-field">
+                  <span class="ce-prov-pos-dim-lab">Width</span>
+                  <input type="number" min="1" step="1" class="input input-sm ce-prov-dim-w" inputmode="numeric" value="${escapeHtml(wVal)}" />
+                </label>
+              </div>
+            </div>
+            ${placeholderBadgesHtml(slots)}
+            <div class="ce-prov-ph-pick">
+              <span class="ce-prov-ph-pick-label">Placeholders</span>
+              ${pickRows}
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<p class="ce-hint">No placeholder positions in catalog response.</p>`;
+
+  const dtGrid = DESIGN_TYPES_ALL.map((dt) => {
+    const on = haveDt ? cfg.design_types.includes(dt) : true;
+    const id = `ce-prov-dt-${String(versionId).replace(/[^a-z0-9_-]/gi, "")}-${dt.replace(/[^a-z0-9_-]/gi, "")}`;
+    return `<label class="ce-prov-dt" for="${id}">
+      <input type="checkbox" id="${id}" class="ce-prov-dt-cb" data-version-id="${escapeHtml(String(versionId))}" data-dt="${escapeHtml(dt)}"${on ? " checked" : ""} />
+      ${escapeHtml(dt)}
+    </label>`;
   }).join("");
 
   return `
-    <div class="ce-vcfg">
-      <p class="ce-hint">Placeholder x design-type mapping for this product version.</p>
-      <div class="table-scroll">
-        <table class="data-table ce-table">
-          <thead><tr><th>Design type</th><th>QR</th><th>Logo</th><th>Creator design</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
+    <div class="ce-prov-version-body" data-version-id="${escapeHtml(String(versionId))}">
+      <section class="ce-prov-section">
+        <h4 class="ce-prov-section-title">Print area positions</h4>
+        <div class="ce-prov-pos-grid">${posCards}</div>
+      </section>
+      <section class="ce-prov-section">
+        <h4 class="ce-prov-section-title">Design types</h4>
+        <p class="ce-hint">Which design types apply to this version. Leave all unchecked to use the product default (Meta).</p>
+        <div class="ce-prov-dt-grid">${dtGrid}</div>
+      </section>
     </div>`;
 }
 
-export function collectVersionConfigPanel(root, prevConfig = null) {
-  const wrap = root || document;
-  const byType = {};
-  wrap.querySelectorAll("tr[data-design-type]").forEach((row) => {
-    const type = row.getAttribute("data-design-type");
-    if (!type) return;
-    byType[type] = {
-      qr: row.querySelector('[data-field="qr"]')?.value?.trim() || "front",
-      logo: row.querySelector('[data-field="logo"]')?.value?.trim() || "front",
-      creator_design: row.querySelector('[data-field="creator_design"]')?.value?.trim() || "front",
-    };
+function placeholdersFromVariants(variants) {
+  if (!variants?.length) return [];
+  const phs = variants[0].placeholders;
+  return Array.isArray(phs) ? phs : [];
+}
+
+export function collectVersionConfigPanel(root, prevConfig = null, versionId = null) {
+  let wrap = root;
+  if (versionId != null && root?.querySelectorAll) {
+    for (const el of root.querySelectorAll("[data-version-id]")) {
+      if (String(el.getAttribute("data-version-id")) === String(versionId)) {
+        wrap = el;
+        break;
+      }
+    }
+  }
+  if (!wrap) return normalizePatProductVersionConfig(prevConfig);
+
+  const cfg = normalizePatProductVersionConfig(prevConfig);
+  const byPos = {};
+
+  wrap.querySelectorAll(".ce-prov-ph-qty").forEach((sel) => {
+    if (versionId != null && String(sel.dataset.versionId) !== String(versionId)) return;
+    const pos = sel.dataset.position;
+    const key = sel.dataset.phKey;
+    if (!pos || !key) return;
+    if (!byPos[pos]) byPos[pos] = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+    byPos[pos][key] = Math.min(99, Math.max(0, parseInt(sel.value, 10) || 0));
   });
-  return {
-    ...(prevConfig && typeof prevConfig === "object" ? prevConfig : {}),
-    placeholders_by_design_type: byType,
-  };
+
+  const designTypes = [];
+  wrap.querySelectorAll(".ce-prov-dt-cb").forEach((cb) => {
+    if (versionId != null && String(cb.dataset.versionId) !== String(versionId)) return;
+    if (cb.checked) designTypes.push(cb.dataset.dt);
+  });
+
+  cfg.placeholders_by_position = byPos;
+  cfg.design_types = designTypes;
+  applyPublishBrandingSemanticsToSlotsByPosition(cfg.placeholders_by_position);
+  return cfg;
+}
+
+export function collectPrintAreaDimensionUpdates(root, catalogDetail) {
+  const variants = catalogDetail?.variants || [];
+  const catIds = catalogVariantIds(variants);
+  const updates = [];
+  const wrap = root || document;
+
+  wrap.querySelectorAll(".ce-prov-pos-card[data-position]").forEach((card) => {
+    const printAreaKey = card.dataset.position;
+    const h = Number(card.querySelector(".ce-prov-dim-h")?.value);
+    const w = Number(card.querySelector(".ce-prov-dim-w")?.value);
+    if (!printAreaKey || !Number.isFinite(h) || !Number.isFinite(w) || h < 1 || w < 1) return;
+    updates.push({
+      print_area_key: printAreaKey,
+      printify_print_area_height: Math.round(h),
+      printify_print_area_width: Math.round(w),
+      catalog_variant_ids: catIds,
+    });
+  });
+  return updates;
 }

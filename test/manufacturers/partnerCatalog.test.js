@@ -37,6 +37,7 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-product-meta-save",
     "admin-eazpire-product-providers-bundle",
     "admin-eazpire-product-providers-save",
+    "admin-eazpire-provider-catalog-detail",
     "admin-eazpire-product-version-create",
     "admin-eazpire-product-version-delete",
     "admin-eazpire-product-version-config-save",
@@ -829,5 +830,16 @@ describe("mirror drift status shape", () => {
     expect(status.ok).toBe(true);
     expect(status.total).toBe(1);
     expect(status.in_sync).toBe(1);
+  });
+});
+
+describe("getProviderCatalogDetail", () => {
+  it("returns error without manufacturer db", async () => {
+    const { getProviderCatalogDetail } = await import(
+      "../../src/features/manufacturers/partnerCatalog/editor/productEditorService.js"
+    );
+    const result = await getProviderCatalogDetail({}, "test-product", 30);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("manufacturer_db_unavailable");
   });
 });
