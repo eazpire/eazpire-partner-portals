@@ -5,7 +5,12 @@
 import { parseJson, newId } from "../../db.js";
 import { getEazpireProduct } from "../eazpireProductService.js";
 import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
-import { getCatalogOpsProduct, getCatalogOpsTemplateRow, listCatalogOpsProductVersions } from "../catalogOpsReadService.js";
+import {
+  getCatalogOpsProduct,
+  getCatalogOpsProvidersData,
+  getCatalogOpsTemplateRow,
+  listCatalogOpsProductVersions,
+} from "../catalogOpsReadService.js";
 import {
   upsertCatalogPublishProfile,
   upsertCatalogMockupDefault,
