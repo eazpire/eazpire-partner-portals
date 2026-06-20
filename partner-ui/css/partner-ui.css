@@ -913,9 +913,23 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
 }
 .cs-tree-country-group[open] > .cs-tree-country-summary::before { transform: rotate(90deg); }
 .cs-tree-country-flag {
-  font-size: 1rem;
-  line-height: 1;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.cs-tree-country-flag--emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: var(--surface-3);
 }
 .cs-tree-country-name {
   flex: 1;
@@ -1284,10 +1298,25 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   max-width: 200px;
 }
 .cs-country-flag {
-  font-size: 18px;
-  line-height: 1;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
   cursor: default;
   user-select: none;
+}
+.cs-country-flag--emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  background: var(--surface-3);
 }
 .cs-title-cell {
   display: flex;
@@ -2865,9 +2894,23 @@ body.catalog-editor-open {
   transform: rotate(90deg);
 }
 .ce-prov-country-flag {
-  font-size: 1rem;
-  line-height: 1;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.ce-prov-country-flag--emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: var(--surface-3);
 }
 .ce-prov-country-name {
   flex: 1;

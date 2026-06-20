@@ -3,7 +3,11 @@ import { fetchProvidersBundle, fetchProviderCatalogDetail, saveProviders } from 
 import { renderVersionConfigPanel, collectVersionConfigPanel, collectPrintAreaDimensionUpdates } from "../version-config-panel.js";
 import { renderInactivePrintAreasHtml } from "../provider-print-technical.js";
 import { markEditorDirty, checkDirty } from "../editor-dirty.js";
-import { groupProvidersByShipCountry, resolveProviderShipCountry, countryCodeToFlag } from "../provider-country-groups.js";
+import {
+  groupProvidersByShipCountry,
+  resolveProviderShipCountry,
+  buildCountryFlagHtml,
+} from "../provider-country-groups.js";
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -151,10 +155,12 @@ function renderProviderCountryGroups(list, state) {
   return groups
     .map((group) => {
       const isOpen = expanded.has(group.code);
-      const flag = countryCodeToFlag(group.code === "OTHER" ? "" : group.code);
+      const flagHtml = buildCountryFlagHtml(group.code === "OTHER" ? "" : group.code, {
+        className: "ce-prov-country-flag",
+      });
       return `<details class="ce-prov-country-group" data-country="${escapeHtml(group.code)}"${isOpen ? " open" : ""}>
         <summary class="ce-prov-country-summary">
-          <span class="ce-prov-country-flag" aria-hidden="true">${flag}</span>
+          ${flagHtml}
           <span class="ce-prov-country-name">${escapeHtml(group.name)}</span>
           <span class="ce-prov-country-count">${group.providers.length}</span>
         </summary>

@@ -3,7 +3,7 @@ import { showToast, renderTable, openModal, closeModal, confirmAction } from "/p
 import { openProductEditor } from "./catalog-editor/shell.js";
 import {
   groupProvidersByShipCountry,
-  countryCodeToFlag,
+  buildCountryFlagHtml,
 } from "./catalog-editor/provider-country-groups.js";
 
 const STATUS_FILTERS = [
@@ -277,11 +277,13 @@ function renderShippingCountryFlags(row) {
   const codes = shippingCountryCodesFromRow(row);
   if (!codes.length) return `<span class="text-muted">—</span>`;
   return `<div class="cs-country-flags">${codes
-    .map((code) => {
-      const flag = countryCodeToFlag(code);
-      const name = escapeHtml(getCountryDisplayName(code));
-      return `<span class="cs-country-flag" title="${name}" aria-label="${name}">${flag}</span>`;
-    })
+    .map((code) =>
+      buildCountryFlagHtml(code, {
+        className: "cs-country-flag",
+        title: getCountryDisplayName(code),
+        ariaLabel: getCountryDisplayName(code),
+      })
+    )
     .join("")}</div>`;
 }
 
@@ -686,10 +688,11 @@ function renderPartnerCountryGroups(partnerId, providers, selectedProviderId) {
   return groups
     .map((group) => {
       const isOpen = expanded.has(group.code);
-      const flag = countryCodeToFlag(group.code === "OTHER" ? "" : group.code);
+      const flagCode = group.code === "OTHER" ? "" : group.code;
+      const flagHtml = buildCountryFlagHtml(flagCode, { className: "cs-tree-country-flag" });
       return `<details class="cs-tree-country-group" data-partner-id="${escapeHtml(partnerId)}" data-country="${escapeHtml(group.code)}"${isOpen ? " open" : ""}>
         <summary class="cs-tree-country-summary">
-          <span class="cs-tree-country-flag" aria-hidden="true">${flag}</span>
+          ${flagHtml}
           <span class="cs-tree-country-name">${escapeHtml(group.name)}</span>
           <span class="cs-tree-country-count">${group.providers.length}</span>
         </summary>

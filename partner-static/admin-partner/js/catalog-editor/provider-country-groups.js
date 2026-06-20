@@ -123,12 +123,43 @@ export function normalizeCountryCode(value) {
   return COUNTRY_NAME_TO_ISO[token] || null;
 }
 
-/** ISO 3166-1 alpha-2 → regional indicator flag emoji (e.g. US → 🇺🇸). */
+/** Normalize ISO code for flag rendering (UK → GB). */
+export function normalizeCountryFlagCode(code) {
+  let c = String(code || "").trim().toUpperCase();
+  if (c === "UK") c = "GB";
+  return /^[A-Z]{2}$/.test(c) ? c : "";
+}
+
+/** flagcdn PNG URL — same source as eaz-redesign-common / eaz-product-editor-modal. */
+export function getCountryFlagUrl(code) {
+  const c = normalizeCountryFlagCode(code);
+  return c ? `https://flagcdn.com/w80/${c.toLowerCase()}.png` : "";
+}
+
+/** ISO 3166-1 alpha-2 → regional indicator flag emoji (fallback when no PNG). */
 export function countryCodeToFlag(code) {
-  const c = String(code || "").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(c)) return "";
+  const c = normalizeCountryFlagCode(code);
+  if (!c) return "🏳️";
   const base = 0x1f1e6;
   return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65);
+}
+
+/**
+ * Circular flag markup via flagcdn PNG (Windows-safe); emoji fallback for unknown codes.
+ * @param {string} code — ISO country code
+ * @param {{ className?: string, title?: string, ariaLabel?: string }} [opts]
+ */
+export function buildCountryFlagHtml(code, { className = "partner-country-flag", title = "", ariaLabel = "" } = {}) {
+  const c = normalizeCountryFlagCode(code);
+  const url = getCountryFlagUrl(c);
+  const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
+  const aria = ariaLabel
+    ? ` aria-label="${ariaLabel.replace(/"/g, "&quot;")}"`
+    : ' aria-hidden="true"';
+  if (url) {
+    return `<span class="${className}" style="background-image:url(${url})"${titleAttr}${aria}></span>`;
+  }
+  return `<span class="${className} ${className}--emoji"${titleAttr}${aria}>${countryCodeToFlag(c)}</span>`;
 }
 
 export function countryDisplayName(code, fallbackLabel = "") {
