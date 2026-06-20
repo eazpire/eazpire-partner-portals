@@ -9,6 +9,7 @@ import {
   getCatalogOpsPrintAreaBundle,
   getCatalogOpsProduct,
   listCatalogOpsProductVersions,
+  getCatalogOpsMockupsBundle,
 } from "../catalogOpsReadService.js";
 import {
   updateCatalogProductMeta,
@@ -798,6 +799,9 @@ export async function saveTemplate(env, productKey, printProviderId, body) {
 }
 
 export async function getMockupsBundle(env, productKey, printProviderId) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return getCatalogOpsMockupsBundle(env, productKey, printProviderId);
+  }
   const db = env.MANUFACTURER_DB;
   const product = await getEazpireProduct(db, productKey);
   let images = await queryAll(db, `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ?`, productKey);
@@ -859,6 +863,19 @@ export async function saveMockups(env, productKey, body) {
           .run();
       }
     }
+  }
+  if (body.preview_mock_id && body.print_provider_id != null) {
+    const ppId = Number(body.print_provider_id);
+    await db
+      .prepare(
+        `UPDATE eazpire_product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ?`
+      )
+      .bind(productKey, ppId)
+      .run();
+    await db
+      .prepare(`UPDATE eazpire_product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
+      .bind(body.preview_mock_id, productKey)
+      .run();
   }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
   return { ok: true };

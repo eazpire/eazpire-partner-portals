@@ -330,6 +330,40 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
   };
 }
 
+export async function getCatalogOpsMockupsBundle(env, productKey, printProviderId) {
+  const catalogDb = env.CATALOG_DB;
+  if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
+
+  const product = await catalogDb
+    .prepare(`SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`)
+    .bind(productKey)
+    .first();
+
+  let images = await queryAll(catalogDb, `SELECT * FROM product_mockup_images WHERE product_key = ?`, productKey);
+  if (printProviderId != null) {
+    images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
+  }
+  const viewRandom = await queryAll(
+    catalogDb,
+    `SELECT * FROM product_mockup_view_random WHERE product_key = ?`,
+    productKey
+  );
+  const defaults = await queryAll(
+    catalogDb,
+    `SELECT * FROM product_mockup_defaults WHERE product_key = ?`,
+    productKey
+  );
+
+  return {
+    ok: true,
+    product,
+    images,
+    view_random: viewRandom,
+    mockup_defaults: defaults,
+    _ops_source: "catalog-db",
+  };
+}
+
 export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProviderId, versionId } = {}) {
   const catalogDb = env.CATALOG_DB;
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };

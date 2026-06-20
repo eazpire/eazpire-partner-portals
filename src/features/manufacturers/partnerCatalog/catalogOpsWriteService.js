@@ -794,6 +794,18 @@ export async function saveCatalogMockups(env, productKey, body) {
     }
   }
 
+  if (body.preview_mock_id && body.print_provider_id != null) {
+    const ppId = Number(body.print_provider_id);
+    await db
+      .prepare(`UPDATE product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ?`)
+      .bind(productKey, ppId)
+      .run();
+    await db
+      .prepare(`UPDATE product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
+      .bind(body.preview_mock_id, productKey)
+      .run();
+  }
+
   return { ok: true, _ops_source: "catalog-db" };
 }
 

@@ -650,30 +650,34 @@ function extractMockupEntries(product) {
   return out;
 }
 
-export async function fetchPrintifyMockups(env, productKey, printProviderId, autoMirror = false) {
+export async function fetchPrintifyMockups(env, productKey, printProviderId, autoMirror = false, printifyProductIdOverride = null) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
   const catalogDbRef = env.CATALOG_DB;
   const mfgDb = env.MANUFACTURER_DB;
 
-  const tpl = isCatalogOpsMasterWrite(env)
-    ? await queryFirst(
-        catalogDbRef,
-        `SELECT printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-        productKey,
-        Number(printProviderId)
-      )
-    : await queryFirst(
-        mfgDb,
-        `SELECT printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-        productKey,
-        Number(printProviderId)
-      );
+  const overrideId = String(printifyProductIdOverride || "").trim();
+  let printifyProductId = overrideId;
 
+  if (!printifyProductId) {
+    const tpl = isCatalogOpsMasterWrite(env)
+      ? await queryFirst(
+          catalogDbRef,
+          `SELECT printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+          productKey,
+          Number(printProviderId)
+        )
+      : await queryFirst(
+          mfgDb,
+          `SELECT printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+          productKey,
+          Number(printProviderId)
+        );
+    printifyProductId = String(tpl?.printify_product_id || "").trim();
+  }
   if (!isCatalogOpsMasterWrite(env) && !mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
   if (isCatalogOpsMasterWrite(env) && !catalogDbRef) return { ok: false, error: "catalog_db_unavailable" };
 
-  const printifyProductId = String(tpl?.printify_product_id || "").trim();
   if (!printifyProductId) return { ok: false, error: "template_printify_product_missing" };
 
   const product = await getPrintifyProduct(env, printifyProductId);

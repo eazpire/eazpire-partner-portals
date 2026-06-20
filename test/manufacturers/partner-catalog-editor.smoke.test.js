@@ -35,6 +35,7 @@ describe("partner catalog editor assets (smoke)", () => {
       "const TABS = [",
       "provider",
       "template",
+      "Templates",
       "mockups",
       "variants",
       "print_area",
@@ -58,6 +59,7 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-load-printify-settings");
     expect(src).toContain("admin-eazpire-print-area-rect-save");
     expect(src).toContain("admin-eazpire-fetch-printify-mockups");
+    expect(src).toContain("syncTemplateSection");
   });
 
   it("all tab modules exist", () => {

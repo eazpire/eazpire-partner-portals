@@ -10,8 +10,8 @@ import {
   syncProvidersDomState,
 } from "./tabs/providers.js";
 import { loadTemplateTab, saveTemplateTab } from "./tabs/template.js";
-import { loadMockupsTab, saveMockupsTab } from "./tabs/mockups.js";
-import { loadVariantsTab, saveVariantsTab } from "./tabs/variants.js";
+import { loadMockupsTab, saveMockupsTab, bindMockupsTab } from "./tabs/mockups.js";
+import { loadVariantsTab, saveVariantsTab, bindVariantsTab } from "./tabs/variants.js";
 import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/print-area.js";
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
 import { renderAutomationsTab, bindAutomationsTab, saveAutomationsTab } from "./tabs/automations.js";
@@ -29,7 +29,7 @@ const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
 const TABS = [
   { id: "provider", label: "Provider", icon: "◈", needsProvider: false },
-  { id: "template", label: "Template", icon: "⎘", needsProvider: true },
+  { id: "template", label: "Templates", icon: "⎘", needsProvider: true },
   { id: "mockups", label: "Mockups", icon: "▣", needsProvider: true },
   { id: "variants", label: "Variants", icon: "▦", needsProvider: true },
   { id: "print_area", label: "Print Area", icon: "⬚", needsProvider: true },
@@ -270,6 +270,8 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "print_area") bindPrintAreaTab(ctx, body);
     if (ctx.activeTab === "products") bindProductsTab(ctx, body);
     if (ctx.activeTab === "automations") bindAutomationsTab(ctx, body);
+    if (ctx.activeTab === "mockups") bindMockupsTab();
+    if (ctx.activeTab === "variants") bindVariantsTab();
     captureTabDirtySnapshot(ctx);
     updateSaveButtonState(false);
   } catch (err) {

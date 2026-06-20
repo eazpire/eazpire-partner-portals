@@ -175,3 +175,27 @@ export async function fetchPrintifyMockups(body) {
 export async function updatePublishedAll(body) {
   return partnerFetch("admin-eazpire-published-update-all", { method: "POST", body });
 }
+
+/** Save Printify product ID, then run the section-specific sync API. */
+export async function syncTemplateSection(productKey, printProviderId, section, printifyProductId, extra = {}) {
+  const pid = String(printifyProductId || "").trim();
+  if (!pid) throw new Error("Printify product ID required.");
+
+  await saveTemplate(productKey, printProviderId, {
+    printify_product_id: pid,
+    auto_mirror: false,
+  });
+
+  const base = {
+    product_key: productKey,
+    print_provider_id: printProviderId,
+    printify_product_id: pid,
+    auto_mirror: false,
+    ...extra,
+  };
+
+  if (section === "mockups") return fetchPrintifyMockups(base);
+  if (section === "variants") return refreshVariantsFromTemplate(base);
+  if (section === "print_areas") return loadPrintifySettings(base);
+  throw new Error(`Unknown template section: ${section}`);
+}
