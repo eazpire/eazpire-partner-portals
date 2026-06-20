@@ -325,11 +325,24 @@ async function ensureCatalogDetail(ctx, pid) {
   const detail = await fetchProviderCatalogDetail(ctx.productKey, pid);
   if (detail?.ok) {
     state.catalogCache.set(key, detail);
-    if (!state.localVersions.has(key) && detail.versions?.length) {
-      state.localVersions.set(
-        key,
-        detail.versions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
-      );
+    if (detail.versions?.length) {
+      const sorted = detail.versions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+      if (!state.localVersions.has(key)) {
+        state.localVersions.set(key, sorted);
+      } else {
+        const byId = new Map(sorted.map((v) => [String(v.id || v._tempId), v]));
+        const merged = state.localVersions.get(key).map((v) => {
+          const sv = byId.get(String(v.id || v._tempId));
+          if (!sv) return v;
+          return {
+            ...v,
+            ...sv,
+            product_version_config: sv.product_version_config ?? v.product_version_config,
+            studio_config: sv.studio_config ?? v.studio_config,
+          };
+        });
+        state.localVersions.set(key, merged);
+      }
     }
   } else {
     state.catalogCache.set(key, { ok: false, error: detail?.error || "load_failed", variants: [] });

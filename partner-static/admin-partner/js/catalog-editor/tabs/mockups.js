@@ -21,17 +21,15 @@ function renderCarousel(viewKey, slides, previewId) {
   const viewEsc = escapeHtml(viewKey);
   const isPreviewView = slides.some((s) => String(s.id) === String(previewId));
   const slideHtml = slides
-    .map((img, idx) => {
+    .map((img) => {
       const isPreview = String(img.id) === String(previewId);
       return `
-        <div class="ce-mock-carousel__slide" data-slide-index="${idx}" data-id="${escapeHtml(img.id)}">
+        <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)}">
           <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
           <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
-        </div>`;
+        </button>`;
     })
     .join("");
-
-  const single = slides.length <= 1;
 
   return `
     <article class="ce-mock-view" data-view-key="${viewEsc}">
@@ -51,13 +49,10 @@ function renderCarousel(viewKey, slides, previewId) {
           <span class="ce-mock-preview-toggle__track" aria-hidden="true"></span>
         </label>
       </header>
-      <div class="ce-mock-carousel ${single ? "ce-mock-carousel--single" : ""}" data-view="${viewEsc}">
-        ${single ? "" : '<button type="button" class="ce-mock-carousel__arrow ce-mock-carousel__arrow--prev" aria-label="Previous color">‹</button>'}
+      <div class="ce-mock-carousel" data-view="${viewEsc}">
         <div class="ce-mock-carousel__viewport">
           <div class="ce-mock-carousel__track">${slideHtml}</div>
         </div>
-        ${single ? "" : '<button type="button" class="ce-mock-carousel__arrow ce-mock-carousel__arrow--next" aria-label="Next color">›</button>'}
-        <span class="ce-mock-carousel__indicator">${slides.length ? "1" : "0"} / ${slides.length}</span>
       </div>
       <input type="hidden" class="ce-mock-preview-id" data-view="${viewEsc}" value="${isPreviewView ? escapeHtml(String(previewId)) : ""}" />
     </article>`;
@@ -87,22 +82,15 @@ export async function loadMockupsTab(ctx) {
 }
 
 function getActiveSlideId(carousel) {
-  const track = carousel?.querySelector(".ce-mock-carousel__track");
-  const idx = Number(carousel?.dataset.activeIndex || 0);
-  const slide = track?.children[idx];
-  return slide?.getAttribute("data-id") || "";
+  const active = carousel?.querySelector(".ce-mock-carousel__slide--active");
+  return active?.getAttribute("data-id") || carousel?.querySelector(".ce-mock-carousel__slide")?.getAttribute("data-id") || "";
 }
 
-function setCarouselIndex(carousel, nextIndex) {
-  const slides = carousel?.querySelectorAll(".ce-mock-carousel__slide") || [];
-  const count = slides.length;
-  if (!count) return;
-  const idx = ((nextIndex % count) + count) % count;
-  carousel.dataset.activeIndex = String(idx);
-  const track = carousel.querySelector(".ce-mock-carousel__track");
-  if (track) track.style.transform = `translateX(-${idx * 100}%)`;
-  const indicator = carousel.querySelector(".ce-mock-carousel__indicator");
-  if (indicator) indicator.textContent = `${idx + 1} / ${count}`;
+function setActiveSlide(carousel, slideEl) {
+  if (!carousel || !slideEl) return;
+  carousel.querySelectorAll(".ce-mock-carousel__slide").forEach((s) => {
+    s.classList.toggle("ce-mock-carousel__slide--active", s === slideEl);
+  });
 }
 
 function syncPreviewHiddenInput(viewKey, mockId) {
@@ -112,24 +100,16 @@ function syncPreviewHiddenInput(viewKey, mockId) {
 
 export function bindMockupsTab() {
   document.querySelectorAll(".ce-mock-carousel").forEach((carousel) => {
-    carousel.dataset.activeIndex = "0";
-    setCarouselIndex(carousel, 0);
+    const viewKey = carousel.dataset.view;
 
-    const updatePreviewIfActive = () => {
-      const viewKey = carousel.dataset.view;
-      const toggle = document.querySelector(`.ce-mock-preview-switch[data-view="${CSS.escape(viewKey)}"]`);
-      if (toggle?.checked) {
-        syncPreviewHiddenInput(viewKey, getActiveSlideId(carousel));
-      }
-    };
-
-    carousel.querySelector(".ce-mock-carousel__arrow--prev")?.addEventListener("click", () => {
-      setCarouselIndex(carousel, Number(carousel.dataset.activeIndex || 0) - 1);
-      updatePreviewIfActive();
-    });
-    carousel.querySelector(".ce-mock-carousel__arrow--next")?.addEventListener("click", () => {
-      setCarouselIndex(carousel, Number(carousel.dataset.activeIndex || 0) + 1);
-      updatePreviewIfActive();
+    carousel.querySelectorAll(".ce-mock-carousel__slide").forEach((slide) => {
+      slide.addEventListener("click", () => {
+        setActiveSlide(carousel, slide);
+        const toggle = document.querySelector(`.ce-mock-preview-switch[data-view="${CSS.escape(viewKey)}"]`);
+        if (toggle?.checked) {
+          syncPreviewHiddenInput(viewKey, slide.getAttribute("data-id") || "");
+        }
+      });
     });
   });
 

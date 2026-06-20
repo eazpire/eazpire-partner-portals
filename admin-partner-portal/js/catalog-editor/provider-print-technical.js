@@ -63,15 +63,36 @@ export function mergeCatalogAndDbPrintDimensions(ph, variantPrintAreas, position
 
 function readNumericPlaceholderSlot(slotMap, ph) {
   if (!slotMap || typeof slotMap !== "object") return NaN;
-  const n = Number(slotMap[ph]);
+  let n = Number(slotMap[ph]);
   if (Number.isFinite(n)) return n;
   for (const k of Object.keys(slotMap)) {
     if (String(k).trim().toLowerCase() === ph) {
-      const v = Number(slotMap[k]);
-      if (Number.isFinite(v)) return v;
+      n = Number(slotMap[k]);
+      if (Number.isFinite(n)) return n;
     }
   }
+  const up = ph.toUpperCase();
+  if (slotMap[up] != null) {
+    n = Number(slotMap[up]);
+    if (Number.isFinite(n)) return n;
+  }
   return NaN;
+}
+
+function mapPlaceholderNameToPatKey(nm) {
+  if (nm == null || nm === "") return null;
+  const s = String(nm)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+  if (s === "qr" || s === "qrcode") return "qr";
+  if (s === "logo") return "logo";
+  if (s === "creator_design" || s === "creator" || s === "schoepferdesign" || s === "schöpferdesign" || s === "schopferdesign") {
+    return "creator_design";
+  }
+  if (s.includes("additional") || s.includes("zusatz")) return "additional_design";
+  return null;
 }
 
 function normalizeDesignTypeToken(dt) {
@@ -104,6 +125,13 @@ export function normalizePatProductVersionConfig(raw) {
       return out;
     }
   }
+  if (typeof obj === "string") {
+    try {
+      obj = JSON.parse(obj);
+    } catch {
+      return out;
+    }
+  }
   if (!obj || typeof obj !== "object") return out;
 
   const byPos = obj.placeholders_by_position;
@@ -113,13 +141,23 @@ export function normalizePatProductVersionConfig(raw) {
         .trim()
         .toLowerCase();
       if (!pk) continue;
-      out.placeholders_by_position[pk] = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+      const slotOut = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
       const slotMap = byPos[pos];
+      if (Array.isArray(slotMap)) {
+        for (const p of slotMap) {
+          const nm = p && (p.name != null ? p.name : p.type != null ? p.type : p.placeholder_type != null ? p.placeholder_type : "");
+          const key = mapPlaceholderNameToPatKey(nm);
+          if (key) slotOut[key] = Math.min(99, slotOut[key] + 1);
+        }
+        out.placeholders_by_position[pk] = slotOut;
+        continue;
+      }
       if (!slotMap || typeof slotMap !== "object") continue;
       for (const ph of PAT_PH_KEYS) {
         const n = readNumericPlaceholderSlot(slotMap, ph);
-        out.placeholders_by_position[pk][ph] = Number.isFinite(n) ? Math.max(0, Math.min(99, Math.floor(n))) : 0;
+        slotOut[ph] = Number.isFinite(n) ? Math.max(0, Math.min(99, Math.floor(n))) : 0;
       }
+      out.placeholders_by_position[pk] = slotOut;
     }
   }
 
@@ -134,6 +172,214 @@ export function normalizePatProductVersionConfig(raw) {
 
 function emptyPatSlot() {
   return { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+}
+
+function maxPatSlot(a, b) {
+  return {
+    qr: Math.max(a.qr, b.qr),
+    logo: Math.max(a.logo, b.logo),
+    creator_design: Math.max(a.creator_design, b.creator_design),
+    additional_design: Math.max(a.additional_design, b.additional_design),
+  };
+}
+
+function patSlotHasAny(s) {
+  return !!(s && (s.qr > 0 || s.logo > 0 || s.creator_design > 0 || s.additional_design > 0));
+}
+
+function normalizePatPositionKey(k) {
+  const s = String(k || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+  if (s === "sleeve_left" || s === "left_sleeve" || s === "left-sleeve") return "left_sleeve";
+  if (s === "sleeve_right" || s === "right_sleeve" || s === "right-sleeve") return "right_sleeve";
+  return s;
+}
+
+function countPatAreasToSlot(areas) {
+  const c = emptyPatSlot();
+  if (!Array.isArray(areas)) return c;
+  let nonBrandIdx = 0;
+  for (const a of areas) {
+    const t = String(a?.type || "").toLowerCase();
+    if (t === "qr") c.qr++;
+    else if (t === "logo") c.logo++;
+    else if (t === "creator_design") {
+      c.creator_design++;
+      nonBrandIdx++;
+    } else if (t === "design") {
+      if (nonBrandIdx === 0) c.creator_design++;
+      else c.additional_design++;
+      nonBrandIdx++;
+    }
+  }
+  return c;
+}
+
+function countPatPlaceholderArrayToSlot(arr) {
+  const c = emptyPatSlot();
+  if (!Array.isArray(arr)) return c;
+  let nonBrandIdx = 0;
+  for (const p of arr) {
+    const raw = p && (p.name != null ? p.name : p.type != null ? p.type : p.placeholder_type != null ? p.placeholder_type : "");
+    const key = mapPlaceholderNameToPatKey(raw);
+    if (key) {
+      c[key]++;
+      if (key === "creator_design" || key === "additional_design") nonBrandIdx++;
+      continue;
+    }
+    const s = String(raw || "")
+      .trim()
+      .toLowerCase();
+    if (s === "design" || s === "") {
+      if (nonBrandIdx === 0) c.creator_design++;
+      else c.additional_design++;
+      nonBrandIdx++;
+    }
+  }
+  return c;
+}
+
+function mergePatPhMapIntoAcc(acc, phMap) {
+  if (!phMap || typeof phMap !== "object") return false;
+  let touched = false;
+  for (const pk of Object.keys(phMap)) {
+    const pos = normalizePatPositionKey(pk);
+    if (!pos) continue;
+    const slot = countPatPlaceholderArrayToSlot(phMap[pk]);
+    if (patSlotHasAny(slot)) touched = true;
+    if (!acc[pos]) acc[pos] = emptyPatSlot();
+    acc[pos] = maxPatSlot(acc[pos], slot);
+  }
+  return touched;
+}
+
+function parseJsonLoose(raw) {
+  let snap = raw;
+  if (snap == null || snap === "") return null;
+  if (typeof snap === "string") {
+    try {
+      snap = JSON.parse(snap);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof snap === "string") {
+    try {
+      snap = JSON.parse(snap);
+    } catch {
+      return null;
+    }
+  }
+  return snap && typeof snap === "object" ? snap : null;
+}
+
+/** Derive placeholders + design types from print_areas_snapshot_json (same as old admin). */
+export function derivePatProductVersionConfigFromSnapshot(raw) {
+  const outDt = [];
+  const acc = {};
+  const rememberDt = (dtRaw) => {
+    const nk = normalizeDesignTypeToken(dtRaw);
+    if (!nk || !PAT_DT_KEYS[nk]) return;
+    if (!outDt.includes(nk)) outDt.push(nk);
+  };
+  const snap = parseJsonLoose(raw);
+  if (!snap) return { placeholders_by_position: acc, design_types: outDt };
+
+  const bdt = snap.by_design_type;
+  if (bdt && typeof bdt === "object") {
+    for (const dk of Object.keys(bdt)) {
+      const slice = bdt[dk];
+      if (!slice || typeof slice !== "object") continue;
+      const nk = normalizeDesignTypeToken(dk);
+      if (!PAT_DT_KEYS[nk]) continue;
+      let any = false;
+      if (slice.eaz_editor?.placeholders_by_position) {
+        if (mergePatPhMapIntoAcc(acc, slice.eaz_editor.placeholders_by_position)) any = true;
+      }
+      for (const modeKey of ["mockup", "edit_mode"]) {
+        const mode = slice[modeKey];
+        if (!mode || typeof mode !== "object") continue;
+        for (const viewKey of Object.keys(mode)) {
+          const pos = normalizePatPositionKey(viewKey);
+          if (!pos) continue;
+          const node = mode[viewKey];
+          const areas = node && Array.isArray(node.areas) ? node.areas : [];
+          if (areas.length) any = true;
+          const slot = countPatAreasToSlot(areas);
+          if (!acc[pos]) acc[pos] = emptyPatSlot();
+          acc[pos] = maxPatSlot(acc[pos], slot);
+        }
+      }
+      if (any) rememberDt(dk);
+    }
+  }
+
+  const ea = snap.eaz_admin;
+  if (ea?.by_version && typeof ea.by_version === "object") {
+    for (const ver of Object.keys(ea.by_version)) {
+      const inner = ea.by_version[ver]?.by_design_type;
+      if (!inner || typeof inner !== "object") continue;
+      for (const dk of Object.keys(inner)) {
+        const ed = inner[dk];
+        const slot = ed?.eaz_editor;
+        if (!slot || typeof slot !== "object") continue;
+        rememberDt(dk);
+        if (slot.placeholders_by_position) mergePatPhMapIntoAcc(acc, slot.placeholders_by_position);
+      }
+    }
+  }
+  if (ea?.enabled_design_types != null) {
+    const edt = ea.enabled_design_types;
+    if (Array.isArray(edt)) edt.forEach(rememberDt);
+    else if (edt && typeof edt === "object") {
+      for (const k of Object.keys(edt)) {
+        if (edt[k]) rememberDt(k);
+      }
+    }
+  }
+
+  applyPublishBrandingSemanticsToSlotsByPosition(acc);
+  return { placeholders_by_position: acc, design_types: outDt };
+}
+
+/** Merge snapshot-derived PAT layout with product_version_config_json (DB row). */
+export function mergePatDisplayConfigFromTemplate(tpl) {
+  const fromSnap = derivePatProductVersionConfigFromSnapshot(tpl?.print_areas_snapshot_json);
+  const fromJson = normalizePatProductVersionConfig(tpl?.product_version_config_json);
+  const merged = { placeholders_by_position: {}, design_types: [] };
+  const seenPos = new Set();
+  for (const pk of Object.keys(fromJson.placeholders_by_position || {})) seenPos.add(pk);
+  for (const pk of Object.keys(fromSnap.placeholders_by_position || {})) seenPos.add(pk);
+  for (const pos of seenPos) {
+    const a = fromSnap.placeholders_by_position?.[pos] || emptyPatSlot();
+    const b = fromJson.placeholders_by_position?.[pos] || emptyPatSlot();
+    merged.placeholders_by_position[pos] = maxPatSlot(a, b);
+  }
+  const seenDt = new Set();
+  for (const d of [...(fromJson.design_types || []), ...(fromSnap.design_types || [])]) {
+    const k = normalizeDesignTypeToken(d);
+    if (k && PAT_DT_KEYS[k] && !seenDt.has(k)) {
+      seenDt.add(k);
+      merged.design_types.push(k);
+    }
+  }
+  applyPublishBrandingSemanticsToSlotsByPosition(merged.placeholders_by_position);
+  return merged;
+}
+
+/** Checkbox state: explicit saved design_types win over snapshot union. */
+export function patVersionDesignTypesForAdminUi(tpl, mergedDesignTypes) {
+  const merged = Array.isArray(mergedDesignTypes) ? mergedDesignTypes.slice() : [];
+  const raw = tpl?.product_version_config_json;
+  if (raw == null || raw === "") return merged;
+  const obj = parseJsonLoose(raw);
+  if (!obj || typeof obj !== "object") return merged;
+  if (!Object.prototype.hasOwnProperty.call(obj, "design_types")) return merged;
+  const norm = normalizePatProductVersionConfig(obj);
+  return Array.isArray(norm.design_types) ? norm.design_types.slice() : [];
 }
 
 function isBrandingOnlyPatPosition(pos) {

@@ -85,6 +85,14 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain("catalog-studio-filter-sidebar");
   });
 
+  it("provider-print-technical exports PAT merge helpers", () => {
+    const src = readFileSync(join(portal, "provider-print-technical.js"), "utf8");
+    expect(src).toContain("mergePatDisplayConfigFromTemplate");
+    expect(src).toContain("derivePatProductVersionConfigFromSnapshot");
+    expect(src).toContain("patVersionDesignTypesForAdminUi");
+    expect(src).toContain("mapPlaceholderNameToPatKey");
+  });
+
   it("migration 0015 defines shadow tables", () => {
     const sql = readFileSync(
       join(root, "migrations-manufacturer/0015_eazpire_catalog_shadow_tables.sql"),

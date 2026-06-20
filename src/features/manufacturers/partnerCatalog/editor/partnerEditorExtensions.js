@@ -45,16 +45,14 @@ async function queryFirst(db, sql, ...binds) {
   }
 }
 
-function toCents(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.round(n));
-}
-
 function variantCost(variant) {
   const c = variant?.cost;
-  if (typeof c === "string") return toCents(parseFloat(c) * 100);
-  if (typeof c === "number") return c > 999 ? toCents(c) : toCents(c * 100);
+  if (c == null || c === "") return 0;
+  if (typeof c === "string") {
+    const n = parseFloat(c);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n * 100)) : 0;
+  }
+  if (typeof c === "number") return Math.max(0, Math.round(c));
   return 0;
 }
 

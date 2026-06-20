@@ -965,8 +965,12 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
   const prices = variants.map((v) => {
     const c = v?.cost;
     let cents = 0;
-    if (typeof c === "string") cents = Math.max(0, Math.round(parseFloat(c) * 100));
-    else if (typeof c === "number") cents = c > 999 ? Math.round(c) : Math.max(0, Math.round(c * 100));
+    if (typeof c === "string") {
+      const n = parseFloat(c);
+      cents = Number.isFinite(n) ? Math.max(0, Math.round(n * 100)) : 0;
+    } else if (typeof c === "number") {
+      cents = Math.max(0, Math.round(c));
+    }
     return { variant_id: v.id, price: cents };
   });
 

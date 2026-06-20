@@ -6,10 +6,30 @@ function formatPrice(cents) {
   return `$${(n / 100).toFixed(2)}`;
 }
 
+/** Printify variant.cost is already USD cents (integer). */
 function variantCostCents(variant) {
-  const c = Number(variant?.cost);
-  if (Number.isFinite(c)) return c > 1000 ? Math.round(c) : Math.round(c * 100);
+  const c = variant?.cost;
+  if (c == null || c === "") return 0;
+  if (typeof c === "string") {
+    const n = parseFloat(c);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n * 100)) : 0;
+  }
+  if (typeof c === "number") return Math.max(0, Math.round(c));
   return 0;
+}
+
+function vkFromPublishOrCalc(prices, variantId, ek, isEnabled, profitMode, profitVal) {
+  if (!isEnabled) return 0;
+  const vidKey = variantId != null ? String(variantId) : "";
+  if (vidKey && prices.has(vidKey)) {
+    const p = Number(prices.get(vidKey));
+    if (Number.isFinite(p) && p > 0) {
+      // Legacy bug: cost was multiplied by 100 when already in cents.
+      if (ek > 0 && p >= ek * 50) return calcVk(ek, profitMode, profitVal);
+      return Math.round(p);
+    }
+  }
+  return calcVk(ek, profitMode, profitVal);
 }
 
 function calcVk(ek, marginMode, marginValue) {
@@ -152,7 +172,7 @@ function buildSizeRow(product, variant, hasColor, savedVariants, defaultProfitMo
   const profitVal =
     sv.profit_value != null && Number.isFinite(Number(sv.profit_value)) ? Number(sv.profit_value) : defaultProfitValue;
   const ek = variantCostCents(variant);
-  const vk = prices.has(vidKey) ? Number(prices.get(vidKey)) : calcVk(ek, profitMode, profitVal);
+  const vk = vkFromPublishOrCalc(prices, vidKey, ek, isEnabled, profitMode, profitVal);
   const profit = isEnabled ? vk - ek : 0;
   const label = getVariantDisplayLabel(product, variant, hasColor);
   const rowClass = isEnabled ? "" : " ce-vp__row-disabled";

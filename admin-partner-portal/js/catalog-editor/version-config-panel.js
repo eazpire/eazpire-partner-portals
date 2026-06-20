@@ -3,15 +3,33 @@ import {
   PH_TYPES,
   DESIGN_TYPES_ALL,
   normalizePatProductVersionConfig,
+  mergePatDisplayConfigFromTemplate,
+  patVersionDesignTypesForAdminUi,
   unionPatPlaceholderPositions,
   mergeCatalogAndDbPrintDimensions,
   applyPublishBrandingSemanticsToSlotsByPosition,
   catalogVariantIds,
 } from "./provider-print-technical.js";
 
+function versionTemplateRow(version) {
+  return {
+    product_version_config_json: version?.product_version_config ?? version?.product_version_config_json ?? null,
+    print_areas_snapshot_json:
+      version?.studio_config?.print_areas_snapshot ??
+      version?.print_areas_snapshot ??
+      version?.print_areas_snapshot_json ??
+      null,
+  };
+}
+
 function versionConfigForUi(version, positions) {
-  const raw = version?.product_version_config ?? version?.product_version_config_json ?? null;
-  const cfg = normalizePatProductVersionConfig(raw);
+  const tpl = versionTemplateRow(version);
+  const merged = mergePatDisplayConfigFromTemplate(tpl);
+  const designTypes = patVersionDesignTypesForAdminUi(tpl, merged.design_types);
+  const cfg = {
+    placeholders_by_position: { ...(merged.placeholders_by_position || {}) },
+    design_types: designTypes,
+  };
   for (const ph of positions) {
     const pos = String(ph.position || "")
       .trim()
