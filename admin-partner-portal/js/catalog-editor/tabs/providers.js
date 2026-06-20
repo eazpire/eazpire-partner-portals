@@ -3,6 +3,7 @@ import { fetchProvidersBundle, fetchProviderCatalogDetail, saveProviders } from 
 import { renderVersionConfigPanel, collectVersionConfigPanel, collectPrintAreaDimensionUpdates } from "../version-config-panel.js";
 import { renderInactivePrintAreasHtml } from "../provider-print-technical.js";
 import { markEditorDirty, checkDirty } from "../editor-dirty.js";
+import { groupProvidersByShipCountry, resolveProviderShipCountry } from "../provider-country-groups.js";
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -31,6 +32,7 @@ function rowFromBlueprintProvider(cp) {
     name: cp?.title || `Provider #${cp?.id}`,
     region: cp?.location?.country || "Other",
     locationLabel: cp?.location?.city ? `${cp.location.country} / ${cp.location.city}` : cp?.location?.country || "",
+    locationDetail: cp?.location || null,
     catalogData: cp,
     is_enabled: false,
   };
@@ -85,6 +87,7 @@ function initProvidersState(ctx, data) {
     pendingNewVersions: [],
     selectedVersionIdx: 0,
     printAreaDimEdits: new Map(),
+    expandedCountries: new Set(),
   };
 
   if (merged.length) {
@@ -127,15 +130,52 @@ function renderProviderListItem(fp, state) {
   const pid = providerId(fp);
   const active = isProviderActive(state, pid);
   const selected = state.selectedPid === pid;
-  const region = fp.region || "Other";
-  const loc = fp.locationLabel ? ` · ${fp.locationLabel}` : "";
+  const ship = resolveProviderShipCountry(fp);
+  const city = fp.locationDetail?.city || fp.catalogData?.location?.city;
+  const locExtra = city ? ` · ${city}` : "";
   return `<li>
     <button type="button" class="ce-prov-list-item ${selected ? "active" : ""}" data-pid="${pid}">
       <span class="ce-prov-list-name">${escapeHtml(providerLabel(fp))}</span>
-      <span class="ce-prov-list-meta">ID ${escapeHtml(String(pid))} · ${escapeHtml(String(region))}${escapeHtml(loc)}</span>
+      <span class="ce-prov-list-meta">ID ${escapeHtml(String(pid))} · ${escapeHtml(ship.name)}${escapeHtml(locExtra)}</span>
       <span class="ce-prov-list-status ${active ? "is-active" : ""}">${active ? "Active" : "Available"}</span>
     </button>
   </li>`;
+}
+
+function renderProviderCountryGroups(list, state) {
+  if (!list.length) {
+    return `<p class="ce-hint ce-prov-list-empty">No providers in this list.</p>`;
+  }
+  const groups = groupProvidersByShipCountry(list, providerId);
+  const expanded = state.expandedCountries || new Set();
+  return groups
+    .map((group) => {
+      const isOpen = expanded.has(group.code);
+      return `<details class="ce-prov-country-group" data-country="${escapeHtml(group.code)}"${isOpen ? " open" : ""}>
+        <summary class="ce-prov-country-summary">
+          <span class="ce-prov-country-name">${escapeHtml(group.name)}</span>
+          <span class="ce-prov-country-count">${group.providers.length}</span>
+        </summary>
+        <ul class="ce-prov-list ce-prov-list--nested">
+          ${group.providers.map((fp) => renderProviderListItem(fp, state)).join("")}
+        </ul>
+      </details>`;
+    })
+    .join("");
+}
+
+function bindProviderListClicks(ctx, root, container) {
+  container?.querySelectorAll(".ce-prov-list-item").forEach((btn) => {
+    btn.onclick = () => selectProvider(ctx, root, Number(btn.dataset.pid));
+  });
+  container?.querySelectorAll(".ce-prov-country-group").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const code = details.dataset.country;
+      if (!code || !ctx.providersTabState) return;
+      if (details.open) ctx.providersTabState.expandedCountries.add(code);
+      else ctx.providersTabState.expandedCountries.delete(code);
+    });
+  });
 }
 
 function renderVersionTabs(versions, selectedIdx) {
@@ -235,9 +275,9 @@ function renderProvidersTabHtml(ctx, state, { detailLoading = false } = {}) {
               <button type="button" class="ce-prov-filter-btn ${state.sidebarFilter === "available" ? "active" : ""}" data-filter="available">Available</button>
               <button type="button" class="ce-prov-filter-btn ${state.sidebarFilter === "active" ? "active" : ""}" data-filter="active">Active</button>
             </div>
-            <ul class="ce-prov-list">
-              ${list.map((fp) => renderProviderListItem(fp, state)).join("") || "<li class='ce-hint'>No providers in this list.</li>"}
-            </ul>
+            <div class="ce-prov-list-scroll">
+              ${renderProviderCountryGroups(list, state)}
+            </div>
           </div>
           <button type="button" class="ce-prov-rail" id="ce-prov-sidebar-toggle" aria-label="Toggle provider sidebar">
             <span class="ce-prov-rail-arrow" aria-hidden="true">‹</span>
@@ -280,14 +320,11 @@ function refreshDetail(ctx, root, { loading = false } = {}) {
 
 function refreshProviderList(ctx, root) {
   const state = ctx.providersTabState;
-  const listEl = root.querySelector(".ce-prov-list");
-  if (!listEl) return;
+  const scrollEl = root.querySelector(".ce-prov-list-scroll");
+  if (!scrollEl) return;
   const list = filteredProviders(state);
-  listEl.innerHTML =
-    list.map((fp) => renderProviderListItem(fp, state)).join("") || "<li class='ce-hint'>No providers in this list.</li>";
-  listEl.querySelectorAll(".ce-prov-list-item").forEach((btn) => {
-    btn.onclick = () => selectProvider(ctx, root, Number(btn.dataset.pid));
-  });
+  scrollEl.innerHTML = renderProviderCountryGroups(list, state);
+  bindProviderListClicks(ctx, root, scrollEl);
 }
 
 function syncVersionsFromDom(ctx, root) {
@@ -419,6 +456,11 @@ function addLocalVersion(ctx) {
 async function selectProvider(ctx, root, pid) {
   const state = ctx.providersTabState;
   state.selectedPid = pid;
+  const fp = state.merged.find((p) => providerId(p) === pid);
+  if (fp) {
+    const { code } = resolveProviderShipCountry(fp);
+    state.expandedCountries.add(code);
+  }
   state.selectedVersionIdx = 0;
   refreshProviderList(ctx, root);
   refreshDetail(ctx, root, { loading: true });
@@ -451,6 +493,7 @@ export function bindProvidersTab(ctx, root) {
   root.querySelectorAll(".ce-prov-filter-btn").forEach((btn) => {
     btn.onclick = () => {
       ctx.providersTabState.sidebarFilter = btn.dataset.filter;
+      ctx.providersTabState.expandedCountries = new Set();
       root.querySelectorAll(".ce-prov-filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
       refreshProviderList(ctx, root);
       const list = filteredProviders(ctx.providersTabState);
@@ -469,9 +512,7 @@ export function bindProvidersTab(ctx, root) {
     root.querySelector(".ce-prov-layout")?.classList.toggle("ce-prov-layout--collapsed", isProvSidebarCollapsed());
   });
 
-  root.querySelectorAll(".ce-prov-list-item").forEach((btn) => {
-    btn.onclick = () => selectProvider(ctx, root, Number(btn.dataset.pid));
-  });
+  bindProviderListClicks(ctx, root, root.querySelector(".ce-prov-list-scroll"));
 
   bindDetailEvents(ctx, root);
 }
