@@ -10,19 +10,36 @@ import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/pri
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
 import { renderAutomationsTab, bindAutomationsTab, saveAutomationsTab } from "./tabs/automations.js";
 
+const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
+
 const TABS = [
-  { id: "provider", label: "Provider", needsProvider: false },
-  { id: "template", label: "Template", needsProvider: true },
-  { id: "mockups", label: "Mockups", needsProvider: true },
-  { id: "variants", label: "Variants", needsProvider: true },
-  { id: "print_area", label: "Print Area", needsProvider: true },
-  { id: "meta_data", label: "Meta", needsProvider: false },
-  { id: "products", label: "Products", needsProvider: false },
-  { id: "automations", label: "Automations", needsProvider: true },
+  { id: "provider", label: "Provider", icon: "◈", needsProvider: false },
+  { id: "template", label: "Template", icon: "⎘", needsProvider: true },
+  { id: "mockups", label: "Mockups", icon: "▣", needsProvider: true },
+  { id: "variants", label: "Variants", icon: "▦", needsProvider: true },
+  { id: "print_area", label: "Print Area", icon: "⬚", needsProvider: true },
+  { id: "meta_data", label: "Meta", icon: "◎", needsProvider: false },
+  { id: "products", label: "Products", icon: "▤", needsProvider: false },
+  { id: "automations", label: "Automations", icon: "⚙", needsProvider: true },
 ];
 
 let overlayEl = null;
 let editorState = null;
+
+function isEditorSidebarCollapsed() {
+  return sessionStorage.getItem(CE_SIDEBAR_KEY) === "1";
+}
+
+function applyEditorSidebarState() {
+  const root = overlayEl?.querySelector(".catalog-editor");
+  if (!root) return;
+  root.classList.toggle("catalog-editor--sidebar-collapsed", isEditorSidebarCollapsed());
+}
+
+function toggleEditorSidebar() {
+  sessionStorage.setItem(CE_SIDEBAR_KEY, isEditorSidebarCollapsed() ? "0" : "1");
+  applyEditorSidebarState();
+}
 
 function ensureOverlay() {
   if (overlayEl) return overlayEl;
@@ -31,38 +48,54 @@ function ensureOverlay() {
   overlayEl.className = "catalog-editor-overlay";
   overlayEl.hidden = true;
   overlayEl.innerHTML = `
-    <div class="catalog-editor" role="dialog" aria-modal="true">
+    <div class="catalog-editor" role="dialog" aria-modal="true" aria-labelledby="ce-title">
       <header class="catalog-editor-header">
-        <div class="catalog-editor-title">
-          <div>
+        <div class="catalog-editor-brand">
+          <div class="catalog-editor-mark" aria-hidden="true">EZ</div>
+          <div class="catalog-editor-title">
             <p class="catalog-editor-sub">Product editor</p>
             <h1 id="ce-title">Product</h1>
             <p id="ce-drift" class="catalog-editor-sub"></p>
           </div>
         </div>
-        <div class="catalog-editor-actions">
-          <button type="button" class="icon-btn" id="ce-close" aria-label="Close editor">×</button>
-        </div>
+        <button type="button" class="catalog-editor-close" id="ce-close" aria-label="Close editor">×</button>
       </header>
-      <nav class="catalog-editor-tabs" id="ce-tabs"></nav>
-      <nav class="catalog-editor-subnav" id="ce-subnav" hidden>
-        <div class="ce-provider-pills" id="ce-subnav-pills"></div>
-      </nav>
-      <main class="catalog-editor-body" id="ce-body"></main>
-      <footer class="catalog-editor-foot">
-        <div class="catalog-editor-foot-actions">
-          <button type="button" class="btn btn-secondary" id="ce-mirror">Mirror to publish index</button>
-          <button type="button" class="btn btn-primary" id="ce-save">Save tab</button>
+      <div class="catalog-editor-layout">
+        <aside class="catalog-editor-sidebar-wrap">
+          <div class="catalog-editor-sidebar">
+            <nav class="ce-sidebar-nav" id="ce-tabs" aria-label="Editor sections"></nav>
+          </div>
+          <button type="button" class="catalog-editor-rail" id="ce-sidebar-toggle" aria-label="Toggle editor menu">
+            <span class="catalog-editor-rail__arrow-zone">
+              <span class="catalog-editor-rail__arrow" aria-hidden="true">‹</span>
+            </span>
+            <span class="catalog-editor-rail__label">Menu</span>
+          </button>
+        </aside>
+        <div class="catalog-editor-main">
+          <nav class="catalog-editor-subnav" id="ce-subnav" hidden aria-label="Print providers">
+            <span class="catalog-editor-subnav-label">Print provider</span>
+            <div class="ce-provider-pills" id="ce-subnav-pills"></div>
+          </nav>
+          <main class="catalog-editor-body" id="ce-body"></main>
+          <footer class="catalog-editor-foot">
+            <div class="catalog-editor-foot-actions">
+              <button type="button" class="btn btn-secondary" id="ce-mirror">Mirror to publish index</button>
+              <button type="button" class="btn btn-primary" id="ce-save">Save tab</button>
+            </div>
+          </footer>
         </div>
-      </footer>
+      </div>
     </div>`;
   document.body.appendChild(overlayEl);
   overlayEl.querySelector("#ce-close").onclick = closeProductEditor;
   overlayEl.querySelector("#ce-save").onclick = () => saveCurrentTab();
   overlayEl.querySelector("#ce-mirror").onclick = () => runMirror();
+  overlayEl.querySelector("#ce-sidebar-toggle").onclick = toggleEditorSidebar;
   overlayEl.addEventListener("click", (e) => {
     if (e.target === overlayEl) closeProductEditor();
   });
+  applyEditorSidebarState();
   return overlayEl;
 }
 
@@ -108,11 +141,14 @@ function renderSubnav(ctx) {
 
 function renderTabs(ctx) {
   const nav = overlayEl.querySelector("#ce-tabs");
-  nav.innerHTML = TABS.map(
+  nav.innerHTML = `<p class="ce-nav-section-title">Sections</p>${TABS.map(
     (t) =>
-      `<button type="button" class="ce-tab ${ctx.activeTab === t.id ? "active" : ""}" data-tab="${t.id}">${t.label}</button>`
-  ).join("");
-  nav.querySelectorAll(".ce-tab").forEach((btn) => {
+      `<button type="button" class="ce-nav-item ${ctx.activeTab === t.id ? "active" : ""}" data-tab="${t.id}" title="${escapeHtml(t.label)}">
+        <span class="ce-nav-icon" aria-hidden="true">${t.icon}</span>
+        <span class="ce-nav-label">${escapeHtml(t.label)}</span>
+      </button>`
+  ).join("")}`;
+  nav.querySelectorAll(".ce-nav-item").forEach((btn) => {
     btn.onclick = () => {
       ctx.activeTab = btn.dataset.tab;
       renderTabs(ctx);
@@ -239,6 +275,7 @@ function updateDriftBadge(ctx) {
 export async function openProductEditor(productKey) {
   ensureOverlay();
   overlayEl.hidden = false;
+  applyEditorSidebarState();
   document.body.classList.add("catalog-editor-open");
 
   editorState = {
