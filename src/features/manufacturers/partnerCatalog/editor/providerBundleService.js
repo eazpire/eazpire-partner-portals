@@ -194,3 +194,54 @@ export function mergeProviders(dbPlans = [], catalogProviders = [], activePrintP
 
   return merged;
 }
+
+/** Map Printify global catalog print_providers.json by numeric id. */
+export function buildPrintProviderCatalogMap(catalogProviders) {
+  const map = new Map();
+  for (const p of catalogProviders || []) {
+    const id = Number(p?.id);
+    if (Number.isFinite(id) && id > 0) map.set(id, p);
+  }
+  return map;
+}
+
+/** Attach location from global Printify catalog when blueprint list omits it. */
+export function enrichBlueprintProviderWithCatalog(bp, catalogById) {
+  if (!bp || !catalogById?.size) return bp;
+  const global = catalogById.get(Number(bp.id));
+  if (!global?.location) return bp;
+  return {
+    ...bp,
+    location: bp.location || global.location,
+    title: bp.title || global.title,
+  };
+}
+
+export function enrichProviderRowWithCatalog(row, catalogById) {
+  if (!row || !catalogById?.size) return row;
+  const pid = Number(row.print_provider_id);
+  if (!Number.isFinite(pid)) return row;
+  const global = catalogById.get(pid);
+  if (!global?.location) return row;
+
+  const location = global.location;
+  const locationLabel = resolveProviderLocationLabel(global) || row.locationLabel || "";
+  const region = resolveProviderRegion(global, row.dbPlan?.provider_location);
+
+  const catalogData = row.catalogData?.location
+    ? row.catalogData
+    : {
+        ...(row.catalogData || {}),
+        id: row.catalogData?.id ?? global.id,
+        title: row.catalogData?.title ?? global.title,
+        location,
+      };
+
+  return {
+    ...row,
+    region,
+    locationLabel,
+    locationDetail: location,
+    catalogData,
+  };
+}

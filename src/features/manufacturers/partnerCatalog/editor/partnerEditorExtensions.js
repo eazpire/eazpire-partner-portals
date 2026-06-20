@@ -8,9 +8,14 @@ import { listProductVersions, updateProductVersion } from "../eazpireProductVers
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { fetchPrintifyProductById } from "../../../admin/adminProducts.js";
 import { buildProductPublishReadiness } from "../../../admin/adminPublishReadiness.js";
-import { fetchBlueprint, fetchBlueprintProviderVariants } from "../../adapters/printify/printifyCatalogClient.js";
+import { fetchBlueprint, fetchBlueprintProviderVariants, fetchAllPrintProviders } from "../../adapters/printify/printifyCatalogClient.js";
 import { createPrintifyProduct, getPrintifyProduct } from "../../../../utils/printify.js";
-import { mergeProviders } from "./providerBundleService.js";
+import {
+  mergeProviders,
+  buildPrintProviderCatalogMap,
+  enrichBlueprintProviderWithCatalog,
+  enrichProviderRowWithCatalog,
+} from "./providerBundleService.js";
 
 async function queryAll(db, sql, ...binds) {
   try {
@@ -179,13 +184,19 @@ export async function enhanceProvidersBundle(env, productKey) {
     if (p.ok && Array.isArray(p.data)) blueprintProviders = p.data;
   }
 
+  const catalogRes = await fetchAllPrintProviders(env);
+  const catalogById = catalogRes.ok ? buildPrintProviderCatalogMap(catalogRes.providers) : new Map();
+  blueprintProviders = blueprintProviders.map((bp) => enrichBlueprintProviderWithCatalog(bp, catalogById));
+
   const planWithProfile = plans.map((plan) => {
     const profile = profiles.find((p) => p.id === plan.publish_profile_id) || null;
     return { ...plan, profile };
   });
 
   const activeIds = active.map((a) => Number(a.print_provider_id)).filter((n) => Number.isFinite(n));
-  const merged = mergeProviders(planWithProfile, blueprintProviders, activeIds);
+  const merged = mergeProviders(planWithProfile, blueprintProviders, activeIds).map((row) =>
+    enrichProviderRowWithCatalog(row, catalogById)
+  );
   return {
     ok: true,
     product,

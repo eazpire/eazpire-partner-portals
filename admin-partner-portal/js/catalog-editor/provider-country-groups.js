@@ -140,6 +140,12 @@ export function resolveProviderShipCountry(fp) {
     return { code, name: countryDisplayName(code, loc.country) };
   }
 
+  const shipsFrom = fp?.catalogData?.ships_from;
+  if (shipsFrom) {
+    const code = normalizeCountryCode(shipsFrom) || "OTHER";
+    return { code, name: countryDisplayName(code, shipsFrom) };
+  }
+
   if (fp?.locationLabel) {
     const label = String(fp.locationLabel).trim();
     const firstPart = label.split(/\s*\/\s*/)[0]?.trim() || label;

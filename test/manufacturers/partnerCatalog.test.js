@@ -875,3 +875,26 @@ describe("resolvePrintifyBlueprintId", () => {
     expect(id).toBe("145");
   });
 });
+
+describe("provider catalog location enrichment", () => {
+  it("enriches blueprint-only provider rows with global catalog location", async () => {
+    const { buildPrintProviderCatalogMap, enrichProviderRowWithCatalog } = await import(
+      "../../src/features/manufacturers/partnerCatalog/editor/providerBundleService.js"
+    );
+    const map = buildPrintProviderCatalogMap([
+      { id: 42, title: "Drive Fulfillment", location: { country: "US", city: "American Fork" } },
+    ]);
+    const row = enrichProviderRowWithCatalog(
+      {
+        type: "available",
+        print_provider_id: 42,
+        name: "Drive Fulfillment",
+        catalogData: { id: 42, title: "Drive Fulfillment" },
+      },
+      map
+    );
+    expect(row.locationDetail?.country).toBe("US");
+    expect(row.locationLabel).toContain("US");
+    expect(row.region).toBe("US");
+  });
+});
