@@ -3153,11 +3153,23 @@ body.catalog-editor-open {
   text-transform: uppercase;
 }
 .ce-prov-ph-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 3.25rem;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   font-size: 0.8rem;
+}
+.ce-prov-ph-label {
+  min-width: 0;
+  line-height: 1.25;
+}
+.ce-prov-ph-qty {
+  width: 3.25rem;
+  min-width: 3.25rem;
+  max-width: 3.25rem;
+  justify-self: end;
+  padding-left: 0.35rem;
+  padding-right: 1.35rem;
 }
 .ce-prov-dt-grid {
   display: flex;

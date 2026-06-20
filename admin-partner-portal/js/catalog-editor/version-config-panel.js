@@ -61,7 +61,7 @@ export function renderVersionConfigPanel(version, catalogDetail = {}) {
               return `<option value="${q}"${sel}>${q}</option>`;
             }).join("");
             return `<span class="ce-prov-ph-row">
-              <span>${escapeHtml(pt.label)}</span>
+              <span class="ce-prov-ph-label">${escapeHtml(pt.label)}</span>
               <select class="input input-sm ce-prov-ph-qty" data-version-id="${escapeHtml(String(versionId))}" data-position="${escapeHtml(pos)}" data-ph-key="${escapeHtml(pt.key)}">${opts}</select>
             </span>`;
           }).join("");
@@ -103,13 +103,13 @@ export function renderVersionConfigPanel(version, catalogDetail = {}) {
   return `
     <div class="ce-prov-version-body" data-version-id="${escapeHtml(String(versionId))}">
       <section class="ce-prov-section">
-        <h4 class="ce-prov-section-title">Print area positions</h4>
-        <div class="ce-prov-pos-grid">${posCards}</div>
-      </section>
-      <section class="ce-prov-section">
         <h4 class="ce-prov-section-title">Design types</h4>
         <p class="ce-hint">Which design types apply to this version. Leave all unchecked to use the product default (Meta).</p>
         <div class="ce-prov-dt-grid">${dtGrid}</div>
+      </section>
+      <section class="ce-prov-section">
+        <h4 class="ce-prov-section-title">Print area positions</h4>
+        <div class="ce-prov-pos-grid">${posCards}</div>
       </section>
     </div>`;
 }
