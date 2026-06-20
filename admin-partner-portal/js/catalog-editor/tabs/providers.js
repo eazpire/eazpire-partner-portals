@@ -156,9 +156,11 @@ function renderProviderCountryGroups(list, state) {
           <span class="ce-prov-country-name">${escapeHtml(group.name)}</span>
           <span class="ce-prov-country-count">${group.providers.length}</span>
         </summary>
-        <ul class="ce-prov-list ce-prov-list--nested">
-          ${group.providers.map((fp) => renderProviderListItem(fp, state)).join("")}
-        </ul>
+        <div class="ce-prov-country-body">
+          <ul class="ce-prov-list ce-prov-list--nested">
+            ${group.providers.map((fp) => renderProviderListItem(fp, state)).join("")}
+          </ul>
+        </div>
       </details>`;
     })
     .join("");

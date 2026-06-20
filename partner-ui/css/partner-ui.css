@@ -2678,17 +2678,19 @@ body.catalog-editor-open {
   display: flex;
   flex: 1;
   min-height: 0;
+  max-height: 100%;
   gap: 0;
   align-items: stretch;
+  overflow: hidden;
 }
 .ce-prov-sidebar-wrap {
   display: flex;
   flex-shrink: 0;
   align-self: stretch;
+  min-height: 0;
+  max-height: 100%;
   border-right: 1px solid var(--line);
   background: var(--surface-2);
-  min-height: 100%;
-  height: 100%;
 }
 .ce-prov-sidebar {
   width: 280px;
@@ -2696,7 +2698,9 @@ body.catalog-editor-open {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
   transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
 }
 .ce-prov-layout--collapsed .ce-prov-sidebar {
@@ -2728,6 +2732,7 @@ body.catalog-editor-open {
   display: flex;
   gap: 6px;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 .ce-prov-filter-btn {
   flex: 1;
@@ -2746,23 +2751,34 @@ body.catalog-editor-open {
   color: var(--text);
 }
 .ce-prov-list-scroll {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 2px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
 }
 .ce-prov-list-empty {
   padding: 8px 4px;
   margin: 0;
 }
 .ce-prov-country-group {
+  display: block;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
-  overflow: hidden;
+  margin-bottom: 6px;
+  overflow: visible;
+}
+.ce-prov-country-group:last-child {
+  margin-bottom: 0;
+}
+.ce-prov-country-body {
+  display: block;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
 .ce-prov-country-summary {
   display: flex;
