@@ -14,6 +14,9 @@ export const PH_TYPES = [
 
 export const DESIGN_TYPES_ALL = ["classic", "pattern", "all-over", "full-coverage", "panorama"];
 
+/** Per-category inherit toggles stored on non-main provider versions. */
+export const MAIN_SOURCE_CATEGORY_KEYS = ["design_types", "print_area_positions"];
+
 const PAT_PH_KEYS = ["qr", "logo", "creator_design", "additional_design"];
 const PAT_DT_KEYS = { classic: 1, pattern: 1, "all-over": 1, "full-coverage": 1, panorama: 1 };
 
@@ -109,8 +112,59 @@ function normalizeDesignTypeToken(dt) {
   return k;
 }
 
+export function defaultUseMainSourceCategories() {
+  return { design_types: false, print_area_positions: false };
+}
+
+export function normalizeUseMainSourceCategories(raw) {
+  const out = defaultUseMainSourceCategories();
+  if (!raw || typeof raw !== "object") return out;
+  for (const key of MAIN_SOURCE_CATEGORY_KEYS) {
+    out[key] = raw[key] === true;
+  }
+  return out;
+}
+
+export function findPrintSettingsMainSource(allVersions = []) {
+  for (const v of allVersions || []) {
+    const cfg = v?.product_version_config;
+    if (cfg && typeof cfg === "object" && cfg.is_print_settings_main_source === true) {
+      const pid = Number(v.external_provider_id ?? v.print_provider_id);
+      return {
+        print_provider_id: Number.isFinite(pid) ? pid : null,
+        version_id: v.id || v._tempId || null,
+        version: v,
+      };
+    }
+  }
+  return null;
+}
+
+export function resolveMainSourceVersion(allVersions = [], mainSourceRef = null) {
+  if (mainSourceRef?.version) return mainSourceRef.version;
+  const vid = mainSourceRef?.version_id;
+  const pid = mainSourceRef?.print_provider_id != null ? Number(mainSourceRef.print_provider_id) : null;
+  if (vid != null) {
+    const byId = (allVersions || []).find((v) => String(v.id || v._tempId) === String(vid));
+    if (byId) return byId;
+  }
+  if (Number.isFinite(pid)) {
+    const std = (allVersions || []).find(
+      (v) => Number(v.external_provider_id ?? v.print_provider_id) === pid && (v.sort_order ?? 0) === 0
+    );
+    if (std) return std;
+    return (allVersions || []).find((v) => Number(v.external_provider_id ?? v.print_provider_id) === pid) || null;
+  }
+  return findPrintSettingsMainSource(allVersions)?.version || null;
+}
+
 export function normalizePatProductVersionConfig(raw) {
-  const out = { placeholders_by_position: {}, design_types: [] };
+  const out = {
+    placeholders_by_position: {},
+    design_types: [],
+    use_main_source: defaultUseMainSourceCategories(),
+    is_print_settings_main_source: false,
+  };
   let obj = raw;
   if (obj == null || obj === "") return out;
   if (typeof obj === "string") {
@@ -162,6 +216,9 @@ export function normalizePatProductVersionConfig(raw) {
       if (k && PAT_DT_KEYS[k] && !out.design_types.includes(k)) out.design_types.push(k);
     }
   }
+
+  out.use_main_source = normalizeUseMainSourceCategories(obj.use_main_source);
+  out.is_print_settings_main_source = obj.is_print_settings_main_source === true;
   return out;
 }
 

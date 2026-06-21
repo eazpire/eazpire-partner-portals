@@ -11,7 +11,8 @@ describe("print area brand assets + view keys (smoke)", () => {
   it("helpers export brand asset and view key scoping", () => {
     const src = readFileSync(join(portal, "print-area/helpers.js"), "utf8");
     expect(src).toContain("export function listViewKeys");
-    expect(src).toContain("getVersionPlaceholderConfig");
+    expect(src).toContain("versionKeys.length");
+    expect(src).toContain("placeholderViewHasSlots");
     expect(src).toContain("export function aggregateBrandAssetSlots");
     expect(src).toContain("export function readBrandAssetsFromConfig");
     expect(src).toContain("export function resolveEffectiveBrandAssets");

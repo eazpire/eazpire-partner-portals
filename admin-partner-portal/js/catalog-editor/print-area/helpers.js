@@ -96,32 +96,40 @@ function placeholderViewHasSlots(slots) {
   return Object.values(slots).some((v) => Number(v) > 0);
 }
 
-/** Views available for this product/provider — mockup_defaults + version placeholder positions only. */
+/** Views available for this product/provider — version placeholder positions intersected with mockup_defaults. */
 export function listViewKeys(mockupDefaults, _configSlice, version = null, catalogDetail = null) {
-  const keys = new Set();
-  for (const row of mockupDefaults || []) {
-    const k = String(row.print_area_key || "").trim().toLowerCase();
-    if (k) keys.add(k);
-  }
   const byPos = getVersionPlaceholderConfig(version, catalogDetail);
+  const versionKeys = [];
   for (const [posKey, slots] of Object.entries(byPos)) {
     const k = String(posKey || "").trim().toLowerCase();
     if (!k || !placeholderViewHasSlots(slots)) continue;
-    if (keys.size && !keys.has(k)) {
-      const norm = normalizePatPositionKey(k);
-      const inMockups = [...keys].some((mk) => normalizePatPositionKey(mk) === norm);
-      if (!inMockups) continue;
-    }
-    keys.add(k);
+    versionKeys.push(k);
   }
-  if (!keys.size) {
-    for (const [posKey, slots] of Object.entries(byPos)) {
-      if (!placeholderViewHasSlots(slots)) continue;
-      keys.add(String(posKey || "").trim().toLowerCase());
-    }
+
+  const mockupKeys = [];
+  for (const row of mockupDefaults || []) {
+    const k = String(row.print_area_key || "").trim().toLowerCase();
+    if (k) mockupKeys.push(k);
   }
-  if (!keys.size) keys.add("front");
-  return [...keys].sort();
+
+  if (versionKeys.length) {
+    if (!mockupKeys.length) return [...new Set(versionKeys)].sort();
+    const resolved = [];
+    for (const vk of versionKeys) {
+      if (mockupKeys.includes(vk)) {
+        resolved.push(vk);
+        continue;
+      }
+      const norm = normalizePatPositionKey(vk);
+      const match = mockupKeys.find((mk) => normalizePatPositionKey(mk) === norm);
+      if (match) resolved.push(match);
+    }
+    if (resolved.length) return [...new Set(resolved)].sort();
+    return [...new Set(versionKeys)].sort();
+  }
+
+  if (mockupKeys.length) return [...new Set(mockupKeys)].sort();
+  return ["front"];
 }
 
 export function defaultProductBrandAssets() {
