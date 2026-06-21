@@ -8,6 +8,7 @@ import {
   setCatalogProductStatus,
   updateCatalogProductMeta,
   saveCatalogProviders,
+  saveCatalogMockups,
 } from "../../src/features/manufacturers/partnerCatalog/catalogOpsWriteService.js";
 import {
   saveProductMeta,
@@ -62,7 +63,10 @@ function makeWritableCatalogDb() {
         run: async () => {
           if (sql.includes("UPDATE product_catalog")) {
             state.updates.push({ sql, args: handler._args });
-            if (handler._args.length >= 3) {
+            if (sql.includes("print_area_edit_use_mocks")) {
+              state.product.print_area_edit_use_mocks = handler._args[0];
+              state.product.updated_at = handler._args[1];
+            } else if (handler._args.length >= 3) {
               state.product.is_active = handler._args[0];
               state.product.updated_at = handler._args[1];
             }
@@ -151,6 +155,19 @@ describe("catalogOpsWriteService", () => {
     expect(result.ok).toBe(true);
     expect(catalogDb._state.activeProviders.map((p) => p.print_provider_id)).toEqual([26, 99]);
     expect(catalogDb._state.patRows.some((p) => p.print_provider_id === 99)).toBe(true);
+  });
+
+  it("saveCatalogMockups persists print_area_edit_use_mocks on product_catalog", async () => {
+    const catalogDb = makeWritableCatalogDb();
+    const env = { CATALOG_DB: catalogDb, MANUFACTURER_DB: null };
+    const result = await saveCatalogMockups(env, "test-tee", { print_area_edit_use_mocks: false });
+    expect(result.ok).toBe(true);
+    expect(catalogDb._state.product.print_area_edit_use_mocks).toBe(0);
+    expect(
+      catalogDb._state.updates.some(
+        (u) => u.sql.includes("print_area_edit_use_mocks") && u.args[0] === 0
+      )
+    ).toBe(true);
   });
 });
 

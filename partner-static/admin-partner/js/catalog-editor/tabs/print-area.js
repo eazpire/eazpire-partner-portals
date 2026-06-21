@@ -19,6 +19,7 @@ import {
   pickMockUrlForView,
   loadRectsForVariantGroup,
   resolveRectsForView,
+  resolvePrintAreaUseMockups,
   getPublishProfileConfig,
 } from "../print-area/helpers.js";
 import {
@@ -59,6 +60,7 @@ function mergeTabData(printArea, mockups, variants) {
     (variants?.template?.product_data_json ? parseProductData(variants.template.product_data_json) : null);
   return {
     ...printArea,
+    product: mockups?.product || printArea?.product || null,
     mockup_images: mockups?.images || [],
     mockup_images_by_view: buildMockupImagesByView(mockups?.images || []),
     variants_json: variants?.variants_json || null,
@@ -201,6 +203,7 @@ export async function loadPrintAreaTab(ctx) {
   } else {
     const st = ctx.printAreaState;
     st.mockupImagesByView = data.mockup_images_by_view;
+    st.useMockups = resolvePrintAreaUseMockups(ctx, data);
     st.workingConfig = ensureByDesignTypeConfig(getPublishProfileConfig(ctx));
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     st.patternConfig = { ...(slice.pattern || {}) };
@@ -399,11 +402,12 @@ export async function savePrintAreaTab(ctx) {
     await saveVariantRectsForScope(ctx, st);
   }
 
-  if (st.useMockups !== !!ctx.bundle?.product?.print_area_edit_use_mocks) {
-    await saveMockups(ctx.productKey, {
-      print_area_edit_use_mocks: st.useMockups,
-      auto_mirror: false,
-    });
+  await saveMockups(ctx.productKey, {
+    print_area_edit_use_mocks: !!st.useMockups,
+    auto_mirror: false,
+  });
+  if (ctx.bundle?.product) {
+    ctx.bundle.product.print_area_edit_use_mocks = !!st.useMockups;
   }
 
   st.greenDirty = false;

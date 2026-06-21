@@ -11,6 +11,7 @@ import {
   mergeStudioIntoPatPatch,
 } from "./catalogOpsPatFields.js";
 import { getProductVersion, patRowToStudioConfig } from "./eazpireProductVersionService.js";
+import { updateEazpireProduct } from "./eazpireProductService.js";
 import { getCatalogOpsProduct, listCatalogOpsProductVersions } from "./catalogOpsReadService.js";
 
 async function queryAll(db, sql, ...binds) {
@@ -926,10 +927,16 @@ export async function saveCatalogMockups(env, productKey, body) {
   const now = Date.now();
 
   if (body.print_area_edit_use_mocks !== undefined) {
+    const useMocks = body.print_area_edit_use_mocks ? 1 : 0;
     await db
       .prepare(`UPDATE product_catalog SET print_area_edit_use_mocks = ?, updated_at = ? WHERE product_key = ?`)
-      .bind(body.print_area_edit_use_mocks ? 1 : 0, now, productKey)
+      .bind(useMocks, now, productKey)
       .run();
+    // Keep manufacturer master in sync so post-save mirror does not revert catalog-db.
+    const mfgDb = env.MANUFACTURER_DB;
+    if (mfgDb) {
+      await updateEazpireProduct(mfgDb, productKey, { print_area_edit_use_mocks: !!useMocks });
+    }
   }
 
   if (body.image_rules && Array.isArray(body.image_rules)) {

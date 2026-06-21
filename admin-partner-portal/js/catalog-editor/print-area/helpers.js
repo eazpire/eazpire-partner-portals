@@ -436,6 +436,15 @@ export function groupVariantsForPrintArea(product) {
   return buildVariantGroupList(product);
 }
 
+/** Print area image mode: mockup carousels vs upload grids (product_catalog.print_area_edit_use_mocks). */
+export function resolvePrintAreaUseMockups(ctx, data) {
+  const fromMockups = data?.product?.print_area_edit_use_mocks;
+  if (fromMockups !== undefined && fromMockups !== null) {
+    return !!fromMockups;
+  }
+  return !!ctx.bundle?.product?.print_area_edit_use_mocks;
+}
+
 export function createInitialPrintAreaState(ctx, data) {
   const designTypes = visibleDesignTypes(ctx);
   const rawConfig = getPublishProfileConfig(ctx);
@@ -457,7 +466,7 @@ export function createInitialPrintAreaState(ctx, data) {
     boundsLocked: true,
     boundsDirty: false,
     greenDirty,
-    useMockups: !!ctx.bundle?.product?.print_area_edit_use_mocks,
+    useMockups: resolvePrintAreaUseMockups(ctx, data),
     redRect: red,
     greenRect: green,
     activeLayer: "green",

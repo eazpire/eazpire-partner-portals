@@ -84,6 +84,15 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("openMockViewer");
   });
 
+  it("print-area tab persists useMockups on every save", () => {
+    const tabSrc = readFileSync(join(portal, "tabs/print-area.js"), "utf8");
+    expect(tabSrc).toContain("resolvePrintAreaUseMockups");
+    expect(tabSrc).toContain("print_area_edit_use_mocks: !!st.useMockups");
+    expect(tabSrc).not.toMatch(/if\s*\(\s*st\.useMockups\s*!==\s*!!ctx\.bundle/);
+    const helpersSrc = readFileSync(join(portal, "print-area/helpers.js"), "utf8");
+    expect(helpersSrc).toContain("export function resolvePrintAreaUseMockups");
+  });
+
   it("all tab modules exist", () => {
     for (const f of tabFiles) {
       expect(existsSync(join(portal, f)), `missing tab: ${f}`).toBe(true);
