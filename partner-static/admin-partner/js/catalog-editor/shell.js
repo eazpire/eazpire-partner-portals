@@ -1,7 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
 import { fetchEditorBundle, mirrorProduct } from "./api.js";
-import { renderMetaTab, saveMetaTab } from "./tabs/meta.js";
+import { renderMetaTab, saveMetaTab, bindMetaTab } from "./tabs/meta.js";
 import {
   loadProvidersTab,
   bindProvidersTab,

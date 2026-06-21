@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { saveMeta } from "../api.js";
 import { getSubnavVisibility, providerLabel, getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
+import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 
 const COMMON_COUNTRIES = ["DE", "FR", "IT", "ES", "NL", "BE", "AT", "PL", "CZ", "US", "CA", "GB", "UK"];
 
@@ -109,6 +110,52 @@ export function renderMetaTab(ctx) {
     </div>`;
 }
 
+export function snapshotMetaTab() {
+  const el = (id) => document.getElementById(id);
+  const regionsRaw = el("ce-meta-regions")?.value || "";
+  const regions = regionsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+  const visibleDesignTypes = (el("ce-meta-vdt")?.value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const catalogAudience = (el("ce-meta-audience")?.value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const countryCodes = (el("ce-meta-countries")?.value || "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+  return {
+    title: el("ce-meta-title")?.value ?? "",
+    catalog_status: el("ce-meta-status")?.value ?? "",
+    regions,
+    visible_design_types: visibleDesignTypes,
+    catalog_audience: catalogAudience,
+    catalog_category_group: el("ce-meta-cat-group")?.value || null,
+    catalog_category_leaf: el("ce-meta-cat-leaf")?.value || null,
+    catalog_production_type: el("ce-meta-prod-type")?.value || null,
+    print_area_edit_use_mocks: !!el("ce-meta-use-mocks")?.checked,
+    shopify_category_id: el("ce-meta-shopify-cat")?.value || null,
+    standard_product_display_name: el("ce-meta-std-name")?.value || null,
+    product_features: el("ce-meta-features")?.value || null,
+    care_instructions: el("ce-meta-care")?.value || null,
+    size_table_html: el("ce-meta-size")?.value || null,
+    gpsr_html: el("ce-meta-gpsr")?.value || null,
+    publish_plan: {
+      country_codes: countryCodes,
+      priority: Number(el("ce-meta-plan-priority")?.value || 100),
+      is_enabled: !!el("ce-meta-plan-enabled")?.checked,
+      country_of_origin: (el("ce-meta-origin")?.value || "").trim().toUpperCase() || null,
+    },
+  };
+}
+
+export function bindMetaTab(ctx, root) {
+  bindTabDirtyInputs(root, ctx);
+}
+
 export async function saveMetaTab(ctx) {
   const printProviderId =
     ctx.selectedPrintProviderId || ctx.bundle.active_providers?.[0]?.print_provider_id;
@@ -181,5 +228,7 @@ document.addEventListener("click", (ev) => {
     if (hidden) hidden.value = vals.join(",");
     if (preview) preview.textContent = vals.join(", ") || "No countries selected";
     modal.hidden = true;
+    const ctx = window.__catalogEditorState;
+    if (ctx?.activeTab === "meta_data") notifyActiveTabDirty(ctx);
   }
 });

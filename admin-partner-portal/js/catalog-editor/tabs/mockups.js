@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
 import { fetchMockupsBundle, saveMockups } from "../api.js";
+import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 
 function groupImagesByView(images) {
   const byView = new Map();
@@ -107,7 +108,23 @@ function collectCarouselViewerItems(carousel) {
   }).filter(Boolean);
 }
 
-export function bindMockupsTab() {
+export function snapshotMockupsTab() {
+  let previewMockId = null;
+  document.querySelectorAll(".ce-mock-preview-switch:checked").forEach((toggle) => {
+    const viewKey = toggle.dataset.view;
+    const hidden = document.querySelector(`.ce-mock-preview-id[data-view="${CSS.escape(viewKey)}"]`);
+    const carousel = document.querySelector(`.ce-mock-carousel[data-view="${CSS.escape(viewKey)}"]`);
+    previewMockId = hidden?.value?.trim() || getActiveSlideId(carousel) || null;
+  });
+  return {
+    print_area_edit_use_mocks: !!document.getElementById("ce-mock-use-mocks")?.checked,
+    preview_mock_id: previewMockId,
+  };
+}
+
+export function bindMockupsTab(ctx, root) {
+  bindTabDirtyInputs(root || document, ctx);
+
   document.querySelectorAll(".ce-mock-carousel").forEach((carousel) => {
     const viewKey = carousel.dataset.view;
     const slides = [...carousel.querySelectorAll(".ce-mock-carousel__slide")];
@@ -128,6 +145,7 @@ export function bindMockupsTab() {
     toggle.addEventListener("change", () => {
       if (!toggle.checked) {
         syncPreviewHiddenInput(toggle.dataset.view, "");
+        if (ctx) notifyActiveTabDirty(ctx);
         return;
       }
       document.querySelectorAll(".ce-mock-preview-switch").forEach((other) => {
@@ -136,6 +154,7 @@ export function bindMockupsTab() {
       const viewKey = toggle.dataset.view;
       const carousel = document.querySelector(`.ce-mock-carousel[data-view="${CSS.escape(viewKey)}"]`);
       syncPreviewHiddenInput(viewKey, getActiveSlideId(carousel));
+      if (ctx) notifyActiveTabDirty(ctx);
     });
   });
 }

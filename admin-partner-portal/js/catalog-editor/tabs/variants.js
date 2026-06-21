@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchVariantsBundle, saveVariants } from "../api.js";
 import { buildVariantMatrixHtml, collectVariantConfigFromDom, bindVariantMatrixEvents } from "../utils/variant-matrix.js";
+import { bindTabDirtyInputs } from "../editor-tab-dirty.js";
 
 export async function loadVariantsTab(ctx) {
   const pid = ctx.selectedPrintProviderId;
@@ -17,8 +18,13 @@ export async function loadVariantsTab(ctx) {
     </div>`;
 }
 
-export function bindVariantsTab() {
-  bindVariantMatrixEvents(document);
+export function snapshotVariantsTab() {
+  return collectVariantConfigFromDom(document);
+}
+
+export function bindVariantsTab(ctx, root) {
+  bindVariantMatrixEvents(root || document);
+  bindTabDirtyInputs(root || document, ctx);
 }
 
 export async function saveVariantsTab(ctx) {

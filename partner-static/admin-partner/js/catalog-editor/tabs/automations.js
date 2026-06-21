@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { saveAutomations } from "../api.js";
 import { getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
+import { bindTabDirtyInputs } from "../editor-tab-dirty.js";
 
 export function renderAutomationsTab(ctx) {
   const versions = getVersionsForProvider(ctx, ctx.selectedPrintProviderId);
@@ -38,8 +39,17 @@ export function renderAutomationsTab(ctx) {
     </div>`;
 }
 
-export function bindAutomationsTab() {
-  /* version selection lives in editor subnav */
+export function snapshotAutomationsTab() {
+  return {
+    auto_publish_enabled: !!document.getElementById("ce-auto-publish")?.checked,
+    automation_shopify_sync_enabled: !!document.getElementById("ce-auto-shopify")?.checked,
+    automation_amazon_publish_enabled: !!document.getElementById("ce-auto-amazon")?.checked,
+    automation_social_raw: document.getElementById("ce-auto-social")?.value?.trim() ?? "",
+  };
+}
+
+export function bindAutomationsTab(ctx, root) {
+  bindTabDirtyInputs(root || document, ctx);
 }
 
 export async function saveAutomationsTab(ctx) {

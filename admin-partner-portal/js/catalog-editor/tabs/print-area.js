@@ -37,6 +37,7 @@ import {
 import { mountDualViewer, applyGreenRectToSlice, isPlacementOverlayMode } from "../print-area/dual-viewer.js";
 import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
+import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
 
 export function teardownPrintAreaUi(ctx) {
   closePrintAreaFullscreen();
@@ -134,6 +135,21 @@ function buildConfigForSave(st, ctx, data) {
   }
 
   return cfg;
+}
+
+export function snapshotPrintAreaTab(ctx) {
+  const st = ctx.printAreaState;
+  const data = ctx.printAreaData;
+  if (!st || !data) return null;
+  return {
+    config: buildConfigForSave(st, ctx, data),
+    useMockups: !!st.useMockups,
+    variantsScope: [...st.variantsScope].sort(),
+  };
+}
+
+function notifyPrintAreaDirty(ctx) {
+  notifyActiveTabDirty(ctx);
 }
 
 function buildRedRectPlacement(redRect) {
@@ -279,6 +295,7 @@ export function bindPrintAreaTab(ctx, root) {
       refreshScopeActiveStates(root, st);
       persistStateToCtx(ctx, st);
       refreshPrintAreaViewer();
+      notifyPrintAreaDirty(ctx);
     },
   };
   ctx.printAreaImageGridCallbacks = imageGridCallbacks;
@@ -288,10 +305,14 @@ export function bindPrintAreaTab(ctx, root) {
     imageGridCallbacks,
     brandAssetsRef,
     onBrandAssetsChange: refreshOverlays,
-    onChange: () => persistStateToCtx(ctx, st),
+    onChange: () => {
+      persistStateToCtx(ctx, st);
+      notifyPrintAreaDirty(ctx);
+    },
     onPatternChange: () => {
       persistStateToCtx(ctx, st);
       ctx.printAreaViewerHandle?.refreshPattern?.();
+      notifyPrintAreaDirty(ctx);
     },
     onPrintAreaRefresh: refreshPrintAreaViewer,
     onDesignTypeChange: (dt) => {
@@ -329,6 +350,7 @@ export function bindPrintAreaTab(ctx, root) {
     persistStateToCtx(ctx, st);
     syncMainPrintAreaStage(false);
     syncFullscreenPrintAreaStage(false);
+    notifyPrintAreaDirty(ctx);
   };
 
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
@@ -356,6 +378,7 @@ export function bindPrintAreaTab(ctx, root) {
       sel.addEventListener("change", () => {
         st.publishLogicByPh[sel.dataset.ph] = sel.value;
         persistStateToCtx(ctx, st);
+        notifyPrintAreaDirty(ctx);
       });
     });
     refreshPrintAreaViewer();
