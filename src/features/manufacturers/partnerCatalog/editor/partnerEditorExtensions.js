@@ -488,91 +488,110 @@ export async function refreshVariantsFromTemplate(
 ) {
   if (!productKey || !printifyProductId) return { ok: false, error: "product_key_or_printify_product_id_required" };
 
-  const product = await fetchPrintifyProductById(env, printifyProductId);
-  const { variants_json, prices_json } = extractVariantsAndPrices(product);
+  try {
+    let product;
+    try {
+      product = await fetchPrintifyProductById(env, printifyProductId);
+    } catch (err) {
+      return { ok: false, error: "printify_product_fetch_failed", detail: String(err?.message || err) };
+    }
+    if (!product?.id) return { ok: false, error: "printify_product_not_found" };
 
-  if (isCatalogOpsMasterWrite(env)) {
-    await upsertCatalogTemplateFromPrintify(env, productKey, Number(printProviderId), product, printifyProductId);
-    return { ok: true, printify_product: product, variants_count: variants_json.length };
-  }
+    const { variants_json, prices_json } = extractVariantsAndPrices(product);
 
-  const db = env.MANUFACTURER_DB;
-  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
-  const now = Date.now();
-
-  const existingTpl = await queryFirst(
-    db,
-    `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-    productKey,
-    Number(printProviderId)
-  );
-  if (existingTpl?.id) {
-    await db
-      .prepare(
-        `UPDATE eazpire_template_products SET
-          printify_variants_product_id = ?, title = ?, blueprint_id = ?,
-          variants_json = ?, prices_json = ?, product_data_json = ?, updated_at = ?
-         WHERE id = ?`
-      )
-      .bind(
-        String(printifyProductId),
-        product?.title || null,
-        product?.blueprint_id ?? null,
-        JSON.stringify(variants_json),
-        JSON.stringify(prices_json),
-        JSON.stringify(product),
-        now,
-        existingTpl.id
-      )
-      .run();
-  } else {
-    await db
-      .prepare(
-        `INSERT INTO eazpire_template_products
-          (id, product_key, print_provider_id, printify_product_id, printify_variants_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
-         VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        newId(),
+    if (isCatalogOpsMasterWrite(env)) {
+      const saved = await upsertCatalogTemplateFromPrintify(
+        env,
         productKey,
         Number(printProviderId),
-        String(printifyProductId),
-        product?.blueprint_id ?? null,
-        product?.title || null,
-        JSON.stringify(variants_json),
-        JSON.stringify(prices_json),
-        JSON.stringify(product),
-        now,
-        now
-      )
-      .run();
-  }
+        product,
+        printifyProductId
+      );
+      if (!saved.ok) return saved;
+      return { ok: true, printify_product: product, variants_count: variants_json.length };
+    }
 
-  const profileRow = await queryFirst(
-    db,
-    `SELECT print_areas_config_json FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-    productKey,
-    Number(printProviderId)
-  );
-  const profileConfig = parseJson(profileRow?.print_areas_config_json, {}) || {};
-  await upsertPublishProfile(db, productKey, Number(printProviderId), {
-    title: product?.title || null,
-    source_product_id: printifyProductId,
-    blueprint_id: product?.blueprint_id ?? null,
-    variants_json,
-    prices_json,
-    product_data_json: product,
-    print_areas_config_json: {
-      ...profileConfig,
-      template_product_ids: {
-        ...(profileConfig.template_product_ids || {}),
-        variants: String(printifyProductId),
+    const db = env.MANUFACTURER_DB;
+    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+    const now = Date.now();
+
+    const existingTpl = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+      productKey,
+      Number(printProviderId)
+    );
+    if (existingTpl?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_template_products SET
+            printify_variants_product_id = ?, title = ?, blueprint_id = ?,
+            variants_json = ?, prices_json = ?, product_data_json = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          String(printifyProductId),
+          product?.title || null,
+          product?.blueprint_id ?? null,
+          JSON.stringify(variants_json),
+          JSON.stringify(prices_json),
+          JSON.stringify(product),
+          now,
+          existingTpl.id
+        )
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_template_products
+            (id, product_key, print_provider_id, printify_product_id, printify_variants_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
+           VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          newId(),
+          productKey,
+          Number(printProviderId),
+          String(printifyProductId),
+          product?.blueprint_id ?? null,
+          product?.title || null,
+          JSON.stringify(variants_json),
+          JSON.stringify(prices_json),
+          JSON.stringify(product),
+          now,
+          now
+        )
+        .run();
+    }
+
+    const profileRow = await queryFirst(
+      db,
+      `SELECT print_areas_config_json FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+      productKey,
+      Number(printProviderId)
+    );
+    const profileConfig = parseJson(profileRow?.print_areas_config_json, {}) || {};
+    await upsertPublishProfile(db, productKey, Number(printProviderId), {
+      title: product?.title || null,
+      source_product_id: printifyProductId,
+      blueprint_id: product?.blueprint_id ?? null,
+      variants_json,
+      prices_json,
+      product_data_json: product,
+      print_areas_config_json: {
+        ...profileConfig,
+        template_product_ids: {
+          ...(profileConfig.template_product_ids || {}),
+          variants: String(printifyProductId),
+        },
       },
-    },
-  });
+    });
 
-  if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  return { ok: true, printify_product: product, variants_count: variants_json.length };
+    if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+    return { ok: true, printify_product: product, variants_count: variants_json.length };
+  } catch (err) {
+    console.error("[refreshVariantsFromTemplate]", err?.message || err);
+    return { ok: false, error: "variants_refresh_failed", detail: String(err?.message || err) };
+  }
 }
 
 export async function printifyShopProductExists(env, printifyProductId) {

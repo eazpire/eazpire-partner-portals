@@ -1131,6 +1131,8 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
+  await ensureCatalogTemplateProductColumns(db);
+
   const now = Date.now();
   const pid = Number(printProviderId);
   const variants = Array.isArray(product?.variants) ? product.variants.filter((v) => v?.is_enabled !== false) : [];
@@ -1146,64 +1148,68 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
     return { variant_id: v.id, price: cents };
   });
 
-  const existing = await queryFirst(
-    db,
-    `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
-    productKey,
-    pid
-  );
+  try {
+    const existing = await queryFirst(
+      db,
+      `SELECT id FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      pid
+    );
 
-  if (existing?.id) {
-    await db
-      .prepare(
-        `UPDATE template_products SET
-          printify_variants_product_id = ?, title = ?, blueprint_id = ?,
-          variants_json = ?, prices_json = ?, product_data_json = ?, updated_at = ?
-         WHERE id = ?`
-      )
-      .bind(
-        String(printifyProductId),
-        product?.title || null,
-        product?.blueprint_id ?? null,
-        JSON.stringify(variants),
-        JSON.stringify(prices),
-        JSON.stringify(product),
-        now,
-        existing.id
-      )
-      .run();
-  } else {
-    await db
-      .prepare(
-        `INSERT INTO template_products
-          (product_key, print_provider_id, printify_product_id, printify_variants_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
-         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        productKey,
-        pid,
-        String(printifyProductId),
-        product?.blueprint_id ?? null,
-        product?.title || null,
-        JSON.stringify(variants),
-        JSON.stringify(prices),
-        JSON.stringify(product),
-        now,
-        now
-      )
-      .run();
+    if (existing?.id) {
+      await db
+        .prepare(
+          `UPDATE template_products SET
+            printify_variants_product_id = ?, title = ?, blueprint_id = ?,
+            variants_json = ?, prices_json = ?, product_data_json = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          String(printifyProductId),
+          product?.title || null,
+          product?.blueprint_id ?? null,
+          JSON.stringify(variants),
+          JSON.stringify(prices),
+          JSON.stringify(product),
+          now,
+          existing.id
+        )
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO template_products
+            (product_key, print_provider_id, printify_product_id, printify_variants_product_id, blueprint_id, title, variants_json, prices_json, product_data_json, created_at, updated_at)
+           VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          productKey,
+          pid,
+          String(printifyProductId),
+          product?.blueprint_id ?? null,
+          product?.title || null,
+          JSON.stringify(variants),
+          JSON.stringify(prices),
+          JSON.stringify(product),
+          now,
+          now
+        )
+        .run();
+    }
+
+    await mergeCatalogPublishProfileTemplateSources(db, productKey, pid, "variants", printifyProductId);
+
+    await upsertCatalogPublishProfile(db, productKey, pid, {
+      title: product?.title || null,
+      source_product_id: printifyProductId,
+      blueprint_id: product?.blueprint_id ?? null,
+      variants_json: variants,
+      prices_json: prices,
+      product_data_json: product,
+    });
+  } catch (err) {
+    return { ok: false, error: "catalog_db_save_failed", detail: String(err?.message || err) };
   }
-
-  await mergeCatalogPublishProfileTemplateSources(db, productKey, pid, "variants", printifyProductId);
-
-  await upsertCatalogPublishProfile(db, productKey, pid, {
-    title: product?.title || null,
-    source_product_id: printifyProductId,
-    blueprint_id: product?.blueprint_id ?? null,
-    variants_json: variants,
-    prices_json: prices,
-    product_data_json: product,
-  });
 
   return { ok: true, _ops_source: "catalog-db" };
 }

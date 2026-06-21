@@ -869,7 +869,11 @@ export async function handleManufacturerRouter(request, env) {
         body.printify_product_id,
         body.auto_mirror !== false
       );
-      if (!result.ok) return json(result, 400, cors);
+      if (!result.ok) {
+        const status =
+          result.error === "variants_refresh_failed" || result.error === "catalog_db_save_failed" ? 500 : 400;
+        return json(result, status, cors);
+      }
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-template-create-draft" && request.method === "POST") {
