@@ -3,7 +3,7 @@
  */
 
 import { parseJson, newId } from "../../db.js";
-import { buildMockupImagesByView, pickMockUrlForView } from "../mockupImagesByView.js";
+import { buildMockupImagesByView } from "../mockupImagesByView.js";
 import { getEazpireProduct } from "../eazpireProductService.js";
 import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
 import {

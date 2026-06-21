@@ -2,20 +2,21 @@ import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { savePrintAreaRect } from "../api.js";
 import {
   getMockupDefaultForView,
-  mockupImageUrl,
   aspectRatioFromDefault,
   clampRectToStage,
   fitRectWithAspect,
+  loadRectsForVariantGroup,
 } from "./helpers.js";
+import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
+import { renderPatternOverlayHtml } from "./pattern-preview.js";
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
 export function renderDualViewer(st, data) {
-  const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
-  const leftImg = mockupImageUrl(md);
-  const mockImg = st.printifyMockUrl || "";
+  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
+  const mockImg = resolvePrintifyMockUrl(st, st.activeView);
 
   const viewTabs = st.viewKeys
     .map(
@@ -34,6 +35,7 @@ export function renderDualViewer(st, data) {
             <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" id="ce-pa-rect-red" title="Print area bounds">
               <button type="button" class="ce-pa-lock-btn" id="ce-pa-bounds-lock" aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
             </div>
+            <div class="ce-pa-pattern-layer" id="ce-pa-pattern-layer">${renderPatternOverlayHtml(st)}</div>
             <div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" id="ce-pa-rect-green" title="Creator placement">
               <button type="button" class="ce-pa-snap-btn" id="ce-pa-snap-green" aria-label="Snap to print area" title="Snap to print area">⊞</button>
             </div>
@@ -55,6 +57,11 @@ export function renderDualViewer(st, data) {
       </div>
       <div class="ce-pa-view-bar">${viewTabs}</div>
     </div>`;
+}
+
+function refreshPatternLayer(main, st) {
+  const layer = main.querySelector("#ce-pa-pattern-layer");
+  if (layer) layer.innerHTML = renderPatternOverlayHtml(st);
 }
 
 export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
@@ -89,6 +96,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     rectRed?.classList.toggle("is-active", st.activeLayer === "red" && !st.boundsLocked);
     if (lockBtn) lockBtn.textContent = st.boundsLocked ? "🔒" : "🔓";
     stage?.setAttribute("data-layer", st.activeLayer);
+    refreshPatternLayer(main, st);
   };
 
   redraw();
@@ -122,7 +130,6 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     const target = layer === "red" ? st.redRect : st.greenRect;
     const sx = (ev.clientX - box.left) / box.width;
     const sy = (ev.clientY - box.top) / box.height;
-    const handle = ev.target.closest(".ce-pa-rect");
     const onEdge =
       sx <= target.x + 0.02 ||
       sx >= target.x + target.w - 0.02 ||
@@ -160,9 +167,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
       Object.assign(target, next);
     }
 
-    if (drag.layer === "red") {
-      st.boundsDirty = true;
-    } else {
+    if (drag.layer === "red") st.boundsDirty = true;
+    else {
       st.greenDirty = true;
       st.mockPreviewStale = true;
     }
@@ -230,13 +236,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   });
 
   return {
-    refresh() {
-      redraw();
-      const img = main.querySelector("#ce-pa-img-left");
-      const md2 = getMockupDefaultForView(data.mockup_defaults, st.activeView);
-      const url = mockupImageUrl(md2);
-      if (img && url) img.src = url;
-    },
+    refreshPattern: () => refreshPatternLayer(main, st),
     destroy() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -261,3 +261,5 @@ export function applyGreenRectToSlice(slice, viewKey, greenRect) {
   }
   return slice;
 }
+
+export { loadRectsForVariantGroup };

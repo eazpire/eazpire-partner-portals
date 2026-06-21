@@ -23,6 +23,11 @@ describe("partner catalog editor assets (smoke)", () => {
     "utils/variant-matrix.js",
     "version-config-panel.js",
     "print-area-canvas.js",
+    "print-area/helpers.js",
+    "print-area/settings-sidebar.js",
+    "print-area/dual-viewer.js",
+    "print-area/pattern-preview.js",
+    "print-area/image-grid.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {
@@ -59,6 +64,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-load-printify-settings");
     expect(src).toContain("admin-eazpire-print-area-rect-save");
     expect(src).toContain("admin-eazpire-fetch-printify-mockups");
+    expect(src).toContain("admin-eazpire-print-area-image-upload");
+    expect(src).toContain("admin-eazpire-variant-print-area-rect-save");
     expect(src).toContain("syncTemplateSection");
     expect(src).toContain("saveTemplateSectionProductId");
     expect(src).toContain("admin-eazpire-template-section-id-save");

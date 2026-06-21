@@ -64,6 +64,9 @@ describe("partner catalog ops registration", () => {
     "admin-eazpire-template-remove-draft",
     "admin-eazpire-template-section-id-save",
     "admin-eazpire-fetch-printify-mockups",
+    "admin-eazpire-print-area-image-upload",
+    "admin-eazpire-print-area-image-clear",
+    "admin-eazpire-variant-print-area-rect-save",
     "admin-eazpire-published-update-all",
   ];
 

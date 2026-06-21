@@ -170,7 +170,7 @@ function renderDesignTypePicker(st) {
     </div>`;
 }
 
-export function renderPrintAreaSidebar(st) {
+export function renderPrintAreaSidebar(st, data) {
   const collapsed = isPaSidebarCollapsed();
   return `
     <div class="ce-pa-layout ${collapsed ? "ce-pa-layout--collapsed" : ""}">
@@ -182,7 +182,7 @@ export function renderPrintAreaSidebar(st) {
             ${renderScopeSection(st)}
             ${renderPatternSection(st)}
             ${renderPlacementSection(st)}
-            ${renderImagesSection(st)}
+            ${renderImagesSection(st, data)}
           </div>
         </div>
         <button type="button" class="ce-pa-rail" id="ce-pa-sidebar-toggle" aria-label="Toggle print area sidebar">
@@ -193,8 +193,8 @@ export function renderPrintAreaSidebar(st) {
     </div>`;
 }
 
-export function bindPrintAreaSidebar(root, st, callbacks = {}) {
-  const { onChange, onDesignTypeChange } = callbacks;
+export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
+  const { onChange, onDesignTypeChange, onVariantGroupChange, onReload, ctx } = callbacks;
 
   root.querySelector("#ce-pa-sidebar-toggle")?.addEventListener("click", () => {
     setPaSidebarCollapsed(!isPaSidebarCollapsed());
@@ -292,5 +292,23 @@ export function bindPrintAreaSidebar(root, st, callbacks = {}) {
     st.useMockups = e.target.checked;
     root.querySelector("#ce-pa-img-grids")?.classList.toggle("ce-pa-img-grids--hidden", st.useMockups);
     onChange?.();
+    onReload?.();
+  });
+
+  root.querySelector("#ce-pa-active-variant-group")?.addEventListener("change", (e) => {
+    st.activeVariantGroupId = e.target.value;
+    if (data) loadRectsForVariantGroup(st, data, st.activeVariantGroupId);
+    onVariantGroupChange?.(st.activeVariantGroupId);
+  });
+
+  bindImageGrids(root, ctx, st, data, {
+    onUploaded: () => onReload?.(),
+    onUseMockPick: (viewKey, color) => {
+      st.useMockups = true;
+      st.activeVariantGroupId =
+        st.variantGroups.groups.find((g) => g.title === color)?.id || st.activeVariantGroupId;
+      onChange?.();
+      onReload?.();
+    },
   });
 }

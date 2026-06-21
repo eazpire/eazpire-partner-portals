@@ -1,10 +1,13 @@
 import {
   fetchPrintAreaBundle,
+  fetchMockupsBundle,
+  fetchVariantsBundle,
   savePrintAreasConfig,
   saveMockups,
   loadPrintifySettings,
   fetchTemplateBundle,
   fetchPrintifyMockups,
+  saveVariantPrintAreaRect,
 } from "../api.js";
 import {
   createInitialPrintAreaState,
@@ -14,6 +17,9 @@ import {
   parseRect,
   normalizeDesignTypeKey,
   ensureByDesignTypeConfig,
+  buildMockupImagesByView,
+  pickMockUrlForView,
+  loadRectsForVariantGroup,
 } from "../print-area/helpers.js";
 import { renderPrintAreaSidebar, bindPrintAreaSidebar } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
@@ -22,6 +28,16 @@ function persistStateToCtx(ctx, st) {
   ctx.printAreaState = st;
   ctx.selectedDesignType = st.activeDesignType;
   ctx.printAreaActiveView = st.activeView;
+}
+
+function mergeTabData(printArea, mockups, variants) {
+  return {
+    ...printArea,
+    mockup_images: mockups?.images || [],
+    mockup_images_by_view: buildMockupImagesByView(mockups?.images || []),
+    variants_json: variants?.variants_json || null,
+    product_data: variants?.product_data || variants?.product_data_json || null,
+  };
 }
 
 function loadDesignTypeIntoState(st, designType) {
@@ -41,8 +57,16 @@ function loadViewIntoState(st, data, viewKey) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   st.greenRect =
     getGreenRectFromSlice(slice, st.activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...st.redRect };
+  if (st.perVariantProduct && st.activeVariantGroupId) {
+    loadRectsForVariantGroup(st, data, st.activeVariantGroupId);
+  }
   st.boundsLocked = true;
   st.boundsDirty = false;
+  st.mockUrlsByView[st.activeView] = pickMockUrlForView(st.mockupImagesByView, st.activeView, getActiveColorTitle(st));
+}
+
+function getActiveColorTitle(st) {
+  return st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId)?.title || null;
 }
 
 function buildConfigForSave(st) {
@@ -65,6 +89,31 @@ function buildConfigForSave(st) {
   return cfg;
 }
 
+async function saveVariantRectsForScope(ctx, st) {
+  const view = st.activeView;
+  for (const group of st.variantGroups.groups) {
+    if (!st.variantsScope.has(group.id)) continue;
+    for (const variantId of group.variantIds) {
+      await saveVariantPrintAreaRect({
+        product_key: ctx.productKey,
+        print_area_key: view,
+        variant_id: variantId,
+        print_area_rect: st.redRect,
+        rect_type: "print_area",
+        auto_mirror: false,
+      });
+      await saveVariantPrintAreaRect({
+        product_key: ctx.productKey,
+        print_area_key: view,
+        variant_id: variantId,
+        print_area_rect: st.greenRect,
+        rect_type: "mockup",
+        auto_mirror: false,
+      });
+    }
+  }
+}
+
 async function resolvePrintifyProductId(ctx) {
   if (!ctx.templateData) {
     try {
@@ -78,6 +127,7 @@ async function resolvePrintifyProductId(ctx) {
   return (
     tpl?.printify_print_areas_product_id ||
     tpl?.print_areas_product_id ||
+    tpl?.printify_mockups_product_id ||
     version?.external_template_product_id ||
     tpl?.printify_product_id ||
     null
@@ -85,18 +135,30 @@ async function resolvePrintifyProductId(ctx) {
 }
 
 export async function loadPrintAreaTab(ctx) {
-  const data = await fetchPrintAreaBundle(ctx.productKey, ctx.selectedPrintProviderId, ctx.selectedVersionId);
+  const pid = ctx.selectedPrintProviderId;
+  const [printArea, mockups, variants] = await Promise.all([
+    fetchPrintAreaBundle(ctx.productKey, pid, ctx.selectedVersionId),
+    fetchMockupsBundle(ctx.productKey, pid).catch(() => ({ images: [] })),
+    fetchVariantsBundle(ctx.productKey, pid).catch(() => ({})),
+  ]);
+  const data = mergeTabData(printArea, mockups, variants);
   ctx.printAreaData = data;
 
-  if (!ctx.printAreaState || ctx.printAreaState._key !== `${ctx.selectedPrintProviderId}:${ctx.selectedVersionId}`) {
+  const stateKey = `${pid}:${ctx.selectedVersionId}`;
+  if (!ctx.printAreaState || ctx.printAreaState._key !== stateKey) {
     const st = createInitialPrintAreaState(ctx, data);
-    st._key = `${ctx.selectedPrintProviderId}:${ctx.selectedVersionId}`;
+    st._key = stateKey;
+    for (const vk of st.viewKeys) {
+      st.mockUrlsByView[vk] = pickMockUrlForView(st.mockupImagesByView, vk, getActiveColorTitle(st));
+    }
     persistStateToCtx(ctx, st);
+  } else {
+    ctx.printAreaState.mockupImagesByView = data.mockup_images_by_view;
   }
 
   return `
     <div class="ce-tab-panel ce-tab-panel--print-area">
-      ${renderPrintAreaSidebar(ctx.printAreaState)}
+      ${renderPrintAreaSidebar(ctx.printAreaState, data)}
     </div>`;
 }
 
@@ -107,12 +169,20 @@ export function bindPrintAreaTab(ctx, root) {
 
   ctx.printAreaViewerHandle?.destroy?.();
 
-  bindPrintAreaSidebar(root, st, {
-    onChange: () => persistStateToCtx(ctx, st),
+  bindPrintAreaSidebar(root, st, data, {
+    ctx,
+    onChange: () => {
+      persistStateToCtx(ctx, st);
+      ctx.printAreaViewerHandle?.refreshPattern?.();
+    },
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, dt);
       ctx.reloadTab();
     },
+    onVariantGroupChange: () => {
+      ctx.reloadTab();
+    },
+    onReload: () => ctx.reloadTab(),
   });
 
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
@@ -144,21 +214,28 @@ async function refreshPrintifyMock(ctx) {
       auto_mirror: false,
     });
     const st = ctx.printAreaState;
-    const view = st?.activeView || "front";
-    const images = mockRes?.mockups || mockRes?.images || mockRes?.data || [];
-    const match =
-      images.find((m) => String(m.position || m.print_area_key || m.view || "").toLowerCase() === view) ||
-      images[0];
-    if (match?.src || match?.url || match?.image_url) {
-      st.printifyMockUrl = match.src || match.url || match.image_url;
-      st.mockPreviewStale = false;
+    if (mockRes?.by_view) {
+      st.mockupImagesByView = mockRes.by_view;
+      for (const vk of st.viewKeys) {
+        st.mockUrlsByView[vk] = pickMockUrlForView(st.mockupImagesByView, vk, getActiveColorTitle(st));
+      }
     }
-    const data = await fetchPrintAreaBundle(ctx.productKey, ctx.selectedPrintProviderId, ctx.selectedVersionId);
+    const data = await loadPrintAreaTabData(ctx);
     ctx.printAreaData = data;
     ctx.reloadTab();
   } catch (err) {
     console.error("Printify mock refresh failed", err);
   }
+}
+
+async function loadPrintAreaTabData(ctx) {
+  const pid = ctx.selectedPrintProviderId;
+  const [printArea, mockups, variants] = await Promise.all([
+    fetchPrintAreaBundle(ctx.productKey, pid, ctx.selectedVersionId),
+    fetchMockupsBundle(ctx.productKey, pid).catch(() => ({ images: [] })),
+    fetchVariantsBundle(ctx.productKey, pid).catch(() => ({})),
+  ]);
+  return mergeTabData(printArea, mockups, variants);
 }
 
 export async function savePrintAreaTab(ctx) {
@@ -172,6 +249,10 @@ export async function savePrintAreaTab(ctx) {
     config,
     auto_mirror: false,
   });
+
+  if (st.variantsScope.size && st.variantGroups.groups.length) {
+    await saveVariantRectsForScope(ctx, st);
+  }
 
   if (st.useMockups !== !!ctx.bundle?.product?.print_area_edit_use_mocks) {
     await saveMockups(ctx.productKey, {
