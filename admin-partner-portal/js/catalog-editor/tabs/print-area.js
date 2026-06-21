@@ -12,17 +12,24 @@ import {
 import {
   createInitialPrintAreaState,
   getDesignTypeSlice,
-  getMockupDefaultForView,
-  getGreenRectFromSlice,
-  parseRect,
   normalizeDesignTypeKey,
   ensureByDesignTypeConfig,
   buildMockupImagesByView,
   pickMockUrlForView,
   loadRectsForVariantGroup,
+  resolveRectsForView,
 } from "../print-area/helpers.js";
 import { renderPrintAreaSidebar, bindPrintAreaSidebar } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
+import { mountViewDock, removeViewDock } from "../print-area/view-dock.js";
+
+export function teardownPrintAreaUi(ctx) {
+  ctx.printAreaViewerHandle?.destroy?.();
+  ctx.printAreaViewDockHandle?.destroy?.();
+  removeViewDock();
+  ctx.printAreaViewerHandle = null;
+  ctx.printAreaViewDockHandle = null;
+}
 
 function persistStateToCtx(ctx, st) {
   ctx.printAreaState = st;
@@ -31,32 +38,49 @@ function persistStateToCtx(ctx, st) {
 }
 
 function mergeTabData(printArea, mockups, variants) {
+  const productData =
+    variants?.product_data ||
+    variants?.product_data_json ||
+    (variants?.template?.product_data_json ? parseProductData(variants.template.product_data_json) : null);
   return {
     ...printArea,
     mockup_images: mockups?.images || [],
     mockup_images_by_view: buildMockupImagesByView(mockups?.images || []),
     variants_json: variants?.variants_json || null,
-    product_data: variants?.product_data || variants?.product_data_json || null,
+    product_data: productData,
   };
 }
 
-function loadDesignTypeIntoState(st, designType) {
+function parseProductData(raw) {
+  if (raw && typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function loadDesignTypeIntoState(st, data, designType) {
   const { full, slice } = getDesignTypeSlice(st.workingConfig, designType);
   st.workingConfig = full;
   st.activeDesignType = normalizeDesignTypeKey(designType);
   st.patternConfig = { ...(slice.pattern || {}) };
   st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
-  const green = getGreenRectFromSlice(slice, st.activeView);
-  if (green) st.greenRect = green;
+  const { green, greenDirty } = resolveRectsForView(data, slice, st.activeView);
+  st.greenRect = green;
+  st.greenDirty = greenDirty;
 }
 
 function loadViewIntoState(st, data, viewKey) {
   st.activeView = String(viewKey || "front").toLowerCase();
-  const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
-  st.redRect = parseRect(md?.print_area_rect_json);
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
-  st.greenRect =
-    getGreenRectFromSlice(slice, st.activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...st.redRect };
+  const { red, green, greenDirty } = resolveRectsForView(data, slice, st.activeView);
+  st.redRect = red;
+  st.greenRect = green;
+  st.greenDirty = greenDirty;
   if (st.perVariantProduct && st.activeVariantGroupId) {
     loadRectsForVariantGroup(st, data, st.activeVariantGroupId);
   }
@@ -167,7 +191,9 @@ export function bindPrintAreaTab(ctx, root) {
   const data = ctx.printAreaData;
   if (!st || !data) return;
 
-  ctx.printAreaViewerHandle?.destroy?.();
+  teardownPrintAreaUi(ctx);
+
+  const editorMain = root.closest(".catalog-editor")?.querySelector(".catalog-editor-main");
 
   bindPrintAreaSidebar(root, st, data, {
     ctx,
@@ -176,7 +202,7 @@ export function bindPrintAreaTab(ctx, root) {
       ctx.printAreaViewerHandle?.refreshPattern?.();
     },
     onDesignTypeChange: (dt) => {
-      loadDesignTypeIntoState(st, dt);
+      loadDesignTypeIntoState(st, data, dt);
       ctx.reloadTab();
     },
     onVariantGroupChange: () => {
@@ -187,12 +213,15 @@ export function bindPrintAreaTab(ctx, root) {
 
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: () => persistStateToCtx(ctx, st),
-    onViewChange: (viewKey) => {
-      loadViewIntoState(st, data, viewKey);
-      ctx.reloadTab();
-    },
     onMockRefresh: () => refreshPrintifyMock(ctx),
   });
+
+  ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, (viewKey) => {
+    loadViewIntoState(st, data, viewKey);
+    ctx.reloadTab();
+  });
+
+  ctx.printAreaUiCleanup = () => teardownPrintAreaUi(ctx);
 }
 
 async function refreshPrintifyMock(ctx) {

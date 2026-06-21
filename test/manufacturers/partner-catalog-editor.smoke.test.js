@@ -28,6 +28,7 @@ describe("partner catalog editor assets (smoke)", () => {
     "print-area/dual-viewer.js",
     "print-area/pattern-preview.js",
     "print-area/image-grid.js",
+    "print-area/view-dock.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {

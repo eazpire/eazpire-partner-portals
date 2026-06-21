@@ -164,6 +164,28 @@ function groupVariants(product) {
   return { hasColor, availableColors, variantsByColor, totalVariants: (product?.variants || []).length };
 }
 
+function normalizeHex(hex) {
+  const h = String(hex || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(h)) return h;
+  if (/^[0-9a-fA-F]{6}$/.test(h)) return `#${h}`;
+  return "#888888";
+}
+
+/** Shared color/size groups for Print Area scope UI. */
+export function buildVariantGroupList(product) {
+  const { hasColor, availableColors, variantsByColor } = groupVariants(product);
+  const groups = availableColors.map((color) => ({
+    id: String(color.id),
+    title: String(color.title || "Unknown").trim() || "Unknown",
+    hex: normalizeHex(color.colors?.[0]),
+    variantIds: (variantsByColor[color.id] || [])
+      .map((v) => Number(v.id ?? v.variant_id))
+      .filter((n) => Number.isFinite(n) && n > 0),
+  }));
+  const mode = hasColor ? "color" : groups.length > 1 ? "size" : "all";
+  return { mode, groups };
+}
+
 function buildSizeRow(product, variant, hasColor, savedVariants, defaultProfitMode, defaultProfitValue, prices) {
   const vidKey = String(variant.id ?? variant.variant_id ?? "");
   const sv = savedVariants[vidKey] || {};

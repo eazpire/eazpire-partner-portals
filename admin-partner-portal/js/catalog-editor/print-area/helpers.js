@@ -1,4 +1,5 @@
 import { DESIGN_TYPES_ALL, PH_TYPES } from "../provider-print-technical.js";
+import { buildVariantGroupList } from "../utils/variant-matrix.js";
 
 export { DESIGN_TYPES_ALL, PH_TYPES };
 
@@ -171,8 +172,19 @@ export function loadRectsForVariantGroup(st, data, groupId) {
   if (!group?.variantIds?.length) return;
   const vid = group.variantIds[0];
   const vpa = findVariantPrintAreaRow(data.variant_print_areas, st.activeView, vid);
-  if (vpa?.print_area_rect_json) st.redRect = parseRect(vpa.print_area_rect_json);
-  if (vpa?.mockup_print_area_rect_json) st.greenRect = parseRect(vpa.mockup_print_area_rect_json);
+  const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
+  const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+
+  if (vpa?.print_area_rect_json) {
+    st.redRect = normalizeRectToPrintAspect(vpa.print_area_rect_json, md);
+  }
+  if (vpa?.mockup_print_area_rect_json) {
+    st.greenRect = normalizeRectToPrintAspect(vpa.mockup_print_area_rect_json, md);
+    st.greenDirty = true;
+  } else if (!hasSavedGreenRect(slice, st.activeView)) {
+    st.greenRect = { ...st.redRect };
+    st.greenDirty = false;
+  }
 }
 
 export function parseRect(raw) {
@@ -242,45 +254,73 @@ export function getGreenRectFromSlice(slice, viewKey) {
   return null;
 }
 
-export function groupVariantsForPrintArea(product) {
-  const colorOption = (product?.options || []).find((opt) => {
-    const n = String(opt?.name || "").toLowerCase();
-    return opt?.type === "color" || n === "color" || n === "colors";
+export function rectsNearlyEqual(a, b, eps = 0.003) {
+  if (!a || !b) return false;
+  return (
+    Math.abs(a.x - b.x) < eps &&
+    Math.abs(a.y - b.y) < eps &&
+    Math.abs(a.w - b.w) < eps &&
+    Math.abs(a.h - b.h) < eps
+  );
+}
+
+export function hasSavedGreenRect(slice, viewKey) {
+  const vk = String(viewKey || "front").toLowerCase();
+  const block = slice?.edit_mode?.[vk];
+  if (!block?.areas?.length) return false;
+  return block.areas.some((a) => {
+    const r = rectFromConfigArea(a);
+    return r && r.w > 0;
   });
-  const groups = [];
-  if (colorOption) {
-    let colorIdx = 0;
-    (product.options || []).forEach((opt, i) => {
-      if (opt === colorOption) colorIdx = i;
-    });
-    const byColor = new Map();
-    for (const v of product?.variants || []) {
-      const opts = Array.isArray(v.options) ? v.options : [];
-      const cVal = opts[colorIdx];
-      const cId = cVal?.id != null ? String(cVal.id) : String(cVal || "default");
-      const cTitle = cVal?.title || cVal?.name || cId;
-      const hex = cVal?.colors?.[0] || "#888";
-      if (!byColor.has(cId)) byColor.set(cId, { id: cId, title: cTitle, hex, variantIds: [] });
-      const vid = v.id ?? v.variant_id;
-      if (vid != null) byColor.get(cId).variantIds.push(Number(vid));
-    }
-    byColor.forEach((g) => groups.push(g));
-    return { mode: "color", groups };
+}
+
+export function normalizeRectToPrintAspect(rect, md) {
+  const parsed = parseRect(rect);
+  const aspect = aspectRatioFromDefault(md);
+  if (!(aspect > 0)) return clampRectToStage(parsed);
+  return fitRectWithAspect(parsed, aspect);
+}
+
+/** Red = print bounds; green overlaps red unless explicitly saved in DB/config. */
+export function resolveRectsForView(data, slice, viewKey) {
+  const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
+  const red = normalizeRectToPrintAspect(md?.print_area_rect_json, md);
+
+  if (hasSavedGreenRect(slice, viewKey)) {
+    const green = normalizeRectToPrintAspect(getGreenRectFromSlice(slice, viewKey), md);
+    return { red, green, greenDirty: true, md };
   }
-  if (productKeyExpectsPerVariantDimensions(product?.product_key || product?.key)) {
-    const bySize = new Map();
-    for (const v of product?.variants || []) {
-      const title = v.title || v.variant_title || `Variant ${v.id}`;
-      const key = title.split("/")[0].trim() || title;
-      if (!bySize.has(key)) bySize.set(key, { id: key, title: key, hex: "#888", variantIds: [] });
-      const vid = v.id ?? v.variant_id;
-      if (vid != null) bySize.get(key).variantIds.push(Number(vid));
+
+  const mockupSaved = md?.mockup_print_area_rect_json;
+  if (mockupSaved) {
+    const mockGreen = normalizeRectToPrintAspect(mockupSaved, md);
+    if (!rectsNearlyEqual(mockGreen, red)) {
+      return { red, green: mockGreen, greenDirty: true, md };
     }
-    bySize.forEach((g) => groups.push(g));
-    return { mode: "size", groups };
   }
-  const allIds = (product?.variants || []).map((v) => Number(v.id ?? v.variant_id)).filter(Boolean);
-  return { mode: "all", groups: [{ id: "_all", title: "All variants", hex: "#888", variantIds: allIds }] };
+
+  return { red, green: { ...red }, greenDirty: false, md };
+}
+
+export function buildVariantProduct(data, ctx) {
+  const variants = Array.isArray(data?.variants_json)
+    ? data.variants_json
+    : Array.isArray(data?.variants)
+      ? data.variants
+      : [];
+  const options =
+    data?.product_data?.options ||
+    data?.product_data_json?.options ||
+    ctx?.variantsBundle?.product_data?.options ||
+    [];
+  return { variants, options, product_key: ctx?.productKey || data?.product_key };
+}
+
+export function groupVariantsForPrintArea(product) {
+  if (!product?.variants?.length) {
+    return { mode: "all", groups: [] };
+  }
+  return buildVariantGroupList(product);
 }
 
 export function createInitialPrintAreaState(ctx, data) {
@@ -289,16 +329,9 @@ export function createInitialPrintAreaState(ctx, data) {
   const { full, slice } = getDesignTypeSlice(rawConfig, ctx.selectedDesignType || designTypes[0]);
   const viewKeys = listViewKeys(data.mockup_defaults, slice);
   const activeView = viewKeys.includes(ctx.printAreaActiveView) ? ctx.printAreaActiveView : viewKeys[0];
-  const md = getMockupDefaultForView(data.mockup_defaults, activeView);
-  const red = parseRect(md?.print_area_rect_json);
-  const green = getGreenRectFromSlice(slice, activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...red };
+  const { red, green, greenDirty } = resolveRectsForView(data, slice, activeView);
 
-  const productForVariants = {
-    variants: data.variants || data.variants_json || ctx.variantsBundle?.variants_json || [],
-    options: data.variant_options || data.product_data?.options || ctx.variantsBundle?.product_data?.options,
-    product_key: ctx.productKey,
-  };
-  const variantGroups = groupVariantsForPrintArea(productForVariants);
+  const variantGroups = groupVariantsForPrintArea(buildVariantProduct(data, ctx));
   const mockupImagesByView = data.mockup_images_by_view || buildMockupImagesByView(data.mockup_images || []);
   const activeVariantGroupId = variantGroups.groups[0]?.id || null;
 
@@ -310,7 +343,7 @@ export function createInitialPrintAreaState(ctx, data) {
     activeView,
     boundsLocked: true,
     boundsDirty: false,
-    greenDirty: false,
+    greenDirty,
     useMockups: !!ctx.bundle?.product?.print_area_edit_use_mocks,
     redRect: red,
     greenRect: green,

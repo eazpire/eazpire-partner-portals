@@ -302,6 +302,8 @@ function renderTabs(ctx) {
 
 async function loadActiveTab(ctx) {
   window.__catalogEditorState = ctx;
+  editorState?.printAreaUiCleanup?.();
+  if (editorState) editorState.printAreaUiCleanup = null;
   ensureEditorSelections(ctx);
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;

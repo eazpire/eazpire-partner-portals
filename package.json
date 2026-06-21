@@ -152,6 +152,8 @@
     "migrate:prizes-fused-status": "node scripts/run-d1-migration-file.cjs prizes-db migrations-prizes/0009_card_instance_fused.sql",
     "migrate:prizes-loot-cards-only": "node scripts/run-d1-migration-file.cjs prizes-db migrations-prizes/0010_loot_cards_only.sql",
     "migrate:prizes-catalog-links": "node scripts/run-d1-migration-file.cjs prizes-db migrations-prizes/0011_card_catalog_links.sql",
+    "migrate:prizes-loot-catalog": "node scripts/run-d1-migration-file.cjs prizes-db migrations-prizes/0012_loot_card_catalog_complete.sql",
+    "migrate:prizes-card-status": "node scripts/run-d1-migration-file.cjs prizes-db migrations-prizes/0013_card_status_extended.sql",
     "migrate:artifacts-core": "node scripts/run-d1-migration-file.cjs artifacts-db migrations-artifacts/0001_core_schema.sql",
     "migrate:artifacts-stats": "node scripts/run-d1-migration-file.cjs artifacts-db migrations-artifacts/0002_character_stats_catalog.sql",
     "migrate:artifacts-seed": "node scripts/run-d1-migration-file.cjs artifacts-db migrations-artifacts/0003_seed_archetypes.sql",

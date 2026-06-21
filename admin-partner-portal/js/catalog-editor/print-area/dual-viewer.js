@@ -5,7 +5,6 @@ import {
   aspectRatioFromDefault,
   clampRectToStage,
   fitRectWithAspect,
-  loadRectsForVariantGroup,
 } from "./helpers.js";
 import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
 import { renderPatternOverlayHtml } from "./pattern-preview.js";
@@ -14,30 +13,22 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-export function renderDualViewer(st, data) {
-  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
-  const mockImg = resolvePrintifyMockUrl(st, st.activeView);
-
-  const viewTabs = st.viewKeys
-    .map(
-      (vk) =>
-        `<button type="button" class="ce-pa-view-tab ${vk === st.activeView ? "active" : ""}" data-view="${escapeHtml(vk)}">${escapeHtml(vk)}</button>`
-    )
-    .join("");
-
+function stageInnerHtml(st, leftImg, mockImg) {
   return `
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
         <div class="ce-pa-viewer ce-pa-viewer--print">
           <div class="ce-pa-viewer-head">Print Area</div>
           <div class="ce-pa-stage" id="ce-pa-stage-left" data-layer="${escapeHtml(st.activeLayer)}">
-            <img class="ce-pa-stage-img" id="ce-pa-img-left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : ""} />
-            <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" id="ce-pa-rect-red" title="Print area bounds">
-              <button type="button" class="ce-pa-lock-btn" id="ce-pa-bounds-lock" aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
-            </div>
-            <div class="ce-pa-pattern-layer" id="ce-pa-pattern-layer">${renderPatternOverlayHtml(st)}</div>
-            <div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" id="ce-pa-rect-green" title="Creator placement">
-              <button type="button" class="ce-pa-snap-btn" id="ce-pa-snap-green" aria-label="Snap to print area" title="Snap to print area">⊞</button>
+            <div class="ce-pa-stage-inner" id="ce-pa-stage-inner-left">
+              <img class="ce-pa-stage-img" id="ce-pa-img-left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : ""} />
+              <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" id="ce-pa-rect-red" title="Print area bounds">
+                <button type="button" class="ce-pa-lock-btn" id="ce-pa-bounds-lock" aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
+              </div>
+              <div class="ce-pa-pattern-layer" id="ce-pa-pattern-layer">${renderPatternOverlayHtml(st)}</div>
+              <div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" id="ce-pa-rect-green" title="Creator placement">
+                <button type="button" class="ce-pa-snap-btn" id="ce-pa-snap-green" aria-label="Snap to print area" title="Snap to print area">⊞</button>
+              </div>
             </div>
           </div>
         </div>
@@ -47,16 +38,23 @@ export function renderDualViewer(st, data) {
             <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-mock-refresh" title="Refresh Printify mock">↻</button>
           </div>
           <div class="ce-pa-stage" id="ce-pa-stage-mock">
-            ${
-              mockImg
-                ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
-                : `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">Click refresh to load Printify mock</div>`
-            }
+            <div class="ce-pa-stage-inner">
+              ${
+                mockImg
+                  ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
+                  : `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">Click refresh to load Printify mock</div>`
+              }
+            </div>
           </div>
         </div>
       </div>
-      <div class="ce-pa-view-bar">${viewTabs}</div>
     </div>`;
+}
+
+export function renderDualViewer(st, data) {
+  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
+  const mockImg = resolvePrintifyMockUrl(st, st.activeView);
+  return stageInnerHtml(st, leftImg, mockImg);
 }
 
 function refreshPatternLayer(main, st) {
@@ -65,7 +63,7 @@ function refreshPatternLayer(main, st) {
 }
 
 export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange, onViewChange, onMockRefresh } = callbacks;
+  const { onStateChange, onMockRefresh } = callbacks;
   const main = root.querySelector("#ce-pa-main");
   if (!main) return { destroy() {} };
 
@@ -73,7 +71,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
 
   const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
   const aspect = aspectRatioFromDefault(md);
-  const stage = main.querySelector("#ce-pa-stage-left");
+  const stageInner = main.querySelector("#ce-pa-stage-inner-left");
   const rectRed = main.querySelector("#ce-pa-rect-red");
   const rectGreen = main.querySelector("#ce-pa-rect-green");
   const lockBtn = main.querySelector("#ce-pa-bounds-lock");
@@ -95,7 +93,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     rectGreen?.classList.toggle("is-active", st.activeLayer === "green");
     rectRed?.classList.toggle("is-active", st.activeLayer === "red" && !st.boundsLocked);
     if (lockBtn) lockBtn.textContent = st.boundsLocked ? "🔒" : "🔓";
-    stage?.setAttribute("data-layer", st.activeLayer);
+    main.querySelector("#ce-pa-stage-left")?.setAttribute("data-layer", st.activeLayer);
     refreshPatternLayer(main, st);
   };
 
@@ -125,8 +123,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   });
 
   function startDrag(ev, layer) {
-    const box = stage.getBoundingClientRect();
-    if (!box.width || !box.height) return;
+    const box = stageInner?.getBoundingClientRect();
+    if (!box?.width || !box?.height) return;
     const target = layer === "red" ? st.redRect : st.greenRect;
     const sx = (ev.clientX - box.left) / box.width;
     const sy = (ev.clientY - box.top) / box.height;
@@ -147,8 +145,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
 
   const onMouseMove = (ev) => {
     if (!drag) return;
-    const box = stage.getBoundingClientRect();
-    if (!box.width || !box.height) return;
+    const box = stageInner?.getBoundingClientRect();
+    if (!box?.width || !box?.height) return;
     const x = clamp((ev.clientX - box.left) / box.width, 0, 1);
     const y = clamp((ev.clientY - box.top) / box.height, 0, 1);
     const target = drag.layer === "red" ? st.redRect : st.greenRect;
@@ -162,7 +160,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
       const x2 = Math.max(drag.sx, x);
       const y2 = Math.max(drag.sy, y);
       let next = { x: x1, y: y1, w: clamp(x2 - x1, 0.02, 1), h: clamp(y2 - y1, 0.02, 1) };
-      if (drag.layer === "red" && aspect > 0) next = fitRectWithAspect(next, aspect);
+      if (aspect > 0) next = fitRectWithAspect(next, aspect);
       else next = clampRectToStage(next);
       Object.assign(target, next);
     }
@@ -180,7 +178,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     drag = null;
   };
 
-  stage?.addEventListener("mousedown", (ev) => {
+  stageInner?.addEventListener("mousedown", (ev) => {
     if (ev.target.closest(".ce-pa-rect")) return;
     pickLayer("green");
   });
@@ -225,12 +223,6 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     onStateChange?.();
   });
 
-  main.querySelectorAll(".ce-pa-view-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      onViewChange?.(btn.dataset.view);
-    });
-  });
-
   main.querySelector("#ce-pa-mock-refresh")?.addEventListener("click", () => {
     onMockRefresh?.();
   });
@@ -261,5 +253,3 @@ export function applyGreenRectToSlice(slice, viewKey, greenRect) {
   }
   return slice;
 }
-
-export { loadRectsForVariantGroup };

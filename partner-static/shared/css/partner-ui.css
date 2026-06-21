@@ -3164,6 +3164,24 @@ body.catalog-editor-open #partner-toast {
 .ce-pa-ver-label {
   font-weight: 700;
 }
+/* Print Area tab — collapsible sidebar + compact viewers */
+.catalog-editor-body:has(.ce-tab-panel--print-area) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+}
+.catalog-editor-body .ce-tab-panel.ce-tab-panel--print-area {
+  padding: 0 !important;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 100%;
+}
 .ce-tab-panel--print-area {
   flex: 1;
   min-height: 0;
@@ -3171,12 +3189,14 @@ body.catalog-editor-open #partner-toast {
   flex-direction: column;
   padding: 0 !important;
   overflow: hidden;
+  height: 100%;
 }
 .ce-pa-layout {
   display: flex;
   flex: 1;
   min-height: 0;
   max-height: 100%;
+  height: 100%;
   overflow: hidden;
   align-items: stretch;
 }
@@ -3191,6 +3211,9 @@ body.catalog-editor-open #partner-toast {
   flex-shrink: 0;
   align-self: stretch;
   min-height: 0;
+  max-height: 100%;
+  height: 100%;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--surface-2);
 }
@@ -3202,6 +3225,8 @@ body.catalog-editor-open #partner-toast {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  max-height: 100%;
+  height: 100%;
   transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
 }
 .ce-pa-sidebar-title {
@@ -3240,7 +3265,11 @@ body.catalog-editor-open #partner-toast {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 8px 56px;
+  overscroll-behavior: contain;
 }
 .ce-pa-dt-picker {
   margin-bottom: 10px;
@@ -3350,51 +3379,59 @@ body.catalog-editor-open #partner-toast {
   display: none;
 }
 .ce-pa-viewers-wrap {
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  padding: 10px 12px 8px;
+  align-items: center;
+  max-width: 100%;
 }
 .ce-pa-viewers {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
 }
 .ce-pa-viewer {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  flex: 0 0 auto;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
 }
 .ce-pa-viewer-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  font-size: 0.82rem;
+  padding: 6px 8px;
+  font-size: 0.78rem;
   font-weight: 800;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 .ce-pa-stage {
   position: relative;
-  flex: 1;
-  min-height: 180px;
+  padding: 4px;
   background: color-mix(in srgb, var(--text) 4%, var(--surface-2));
-  overflow: hidden;
   user-select: none;
+  line-height: 0;
+}
+.ce-pa-stage-inner {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  max-width: min(320px, 38vw);
+  max-height: min(380px, calc(100vh - 260px));
 }
 .ce-pa-stage-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
   display: block;
+  max-width: min(320px, 38vw);
+  max-height: min(380px, calc(100vh - 260px));
+  width: auto;
+  height: auto;
   pointer-events: none;
 }
 .ce-pa-rect {
@@ -3448,20 +3485,35 @@ body.catalog-editor-open #partner-toast {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  padding: 16px;
+  min-width: 200px;
+  min-height: 160px;
+  max-width: min(320px, 38vw);
+  padding: 12px;
   text-align: center;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--muted);
+  line-height: 1.35;
 }
-.ce-pa-view-bar {
+.ce-pa-view-dock {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 54px;
+  z-index: 40;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
-  padding: 10px 0 4px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--line);
-  margin-top: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  pointer-events: auto;
+  max-width: calc(100% - 32px);
+}
+.ce-pa-view-bar {
+  display: none;
 }
 .ce-pa-view-tab {
   padding: 6px 12px;
