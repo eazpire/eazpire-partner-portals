@@ -7,9 +7,10 @@ import {
   defaultPatternConfig,
   normalizeDesignTypeKey,
   loadRectsForVariantGroup,
+  aggregateBrandAssetSlots,
 } from "./helpers.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
-import { renderBrandAssetsSection, bindBrandAssetsSection } from "./brand-assets.js";
+import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -158,8 +159,24 @@ function renderImagesSection(st, data) {
     </details>`;
 }
 
-export function renderPrintAreaSidebar(st, data, ctx, brandAssets) {
+function brandAssetsOptions(st, data, ctx, globalAssets) {
+  const version =
+    (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
+  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const slots = aggregateBrandAssetSlots(version, catalogDetail, st.viewKeys);
+  return {
+    mode: st.brandAssetsMode || "global",
+    globalAssets: globalAssets || {},
+    specificAssets: st.brandAssets || { qr: {}, logo: {} },
+    showQr: slots.showQr,
+    showLogo: slots.showLogo,
+    showSection: slots.showSection,
+  };
+}
+
+export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets) {
   const collapsed = isPaSidebarCollapsed();
+  const brandOpts = brandAssetsOptions(st, data, ctx, globalBrandAssets);
   return `
     <div class="ce-pa-layout ${collapsed ? "ce-pa-layout--collapsed" : ""}">
       <aside class="ce-pa-sidebar-wrap">
@@ -169,7 +186,7 @@ export function renderPrintAreaSidebar(st, data, ctx, brandAssets) {
             ${renderScopeSection(st)}
             ${renderPatternSection(st)}
             ${renderPlacementSection(st, data, ctx)}
-            ${renderBrandAssetsSection(brandAssets)}
+            ${renderBrandAssetsSection(brandOpts)}
             ${renderImagesSection(st, data)}
           </div>
         </div>
@@ -257,6 +274,23 @@ export function refreshPlacementValues(root, st) {
   });
 }
 
+export function refreshBrandAssetsSidebar(root, st, data, ctx, globalBrandAssets) {
+  const opts = brandAssetsOptions(st, data, ctx, globalBrandAssets);
+  const existing = root.querySelector(".ce-pa-acc--brand");
+  if (!opts.showSection) {
+    existing?.remove();
+    return opts;
+  }
+  if (!existing) {
+    const imagesAcc = root.querySelector(".ce-pa-acc:not(.ce-pa-acc--brand):not(.ce-pa-acc--pattern):not(.ce-pa-acc--placement)");
+    const html = renderBrandAssetsSection(opts);
+    if (html && imagesAcc) imagesAcc.insertAdjacentHTML("beforebegin", html);
+    return opts;
+  }
+  refreshBrandAssetsSection(root, opts);
+  return opts;
+}
+
 export function refreshImagesGrids(root, ctx, st, data, gridCallbacks) {
   const upload = root.querySelector("#ce-pa-upload-section");
   const mock = root.querySelector("#ce-pa-mock-section");
@@ -320,7 +354,9 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     onVariantGroupChange,
     imageGridCallbacks,
     ctx,
-    brandAssetsRef,
+    globalBrandAssetsRef,
+    brandAssetsModeRef,
+    specificBrandAssetsRef,
     onBrandAssetsChange,
   } = callbacks;
 
@@ -433,11 +469,27 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     });
   });
 
-  if (brandAssetsRef) {
-    bindBrandAssetsSection(root, brandAssetsRef, {
-      onUploaded: () => onBrandAssetsChange?.(),
-      onCleared: () => onBrandAssetsChange?.(),
-    });
+  if (globalBrandAssetsRef && brandAssetsModeRef && specificBrandAssetsRef) {
+    const brandOpts = brandAssetsOptions(st, data, ctx, globalBrandAssetsRef.current);
+    bindBrandAssetsSection(
+      root,
+      { global: globalBrandAssetsRef, specific: specificBrandAssetsRef, mode: brandAssetsModeRef },
+      {
+        globalAssetsRef: globalBrandAssetsRef,
+        specificAssetsRef: specificBrandAssetsRef,
+        modeRef: brandAssetsModeRef,
+        productKey: ctx?.productKey,
+        printProviderId: ctx?.selectedPrintProviderId,
+        showQr: brandOpts.showQr,
+        showLogo: brandOpts.showLogo,
+        onUploaded: () => onBrandAssetsChange?.(),
+        onCleared: () => onBrandAssetsChange?.(),
+        onModeChange: (mode) => {
+          st.brandAssetsMode = mode;
+          onBrandAssetsChange?.(mode);
+        },
+      }
+    );
   }
 
   root.querySelector("#ce-pa-use-mocks")?.addEventListener("change", (e) => {

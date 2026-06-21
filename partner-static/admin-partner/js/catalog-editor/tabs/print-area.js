@@ -22,6 +22,9 @@ import {
   resolveRectsForView,
   resolvePrintAreaUseMockups,
   getPublishProfileConfig,
+  listViewKeys,
+  readBrandAssetsFromConfig,
+  resolveEffectiveBrandAssets,
 } from "../print-area/helpers.js";
 import {
   renderPrintAreaSidebar,
@@ -112,6 +115,17 @@ function getActiveColorTitle(st) {
   return st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId)?.title || null;
 }
 
+function syncViewKeys(st, data, ctx) {
+  const version =
+    (data?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId)) || data?.version || null;
+  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+  st.viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
+  if (!st.viewKeys.includes(st.activeView)) {
+    st.activeView = st.viewKeys[0] || "front";
+  }
+}
+
 function buildConfigForSave(st, ctx, data) {
   const cfg = ensureByDesignTypeConfig(JSON.parse(JSON.stringify(st.workingConfig)));
   const sourceDt = st.activeDesignType;
@@ -134,6 +148,9 @@ function buildConfigForSave(st, ctx, data) {
     target.publish_logic = { ...st.publishLogicByPh };
   }
 
+  cfg.brand_assets_mode = st.brandAssetsMode || "global";
+  cfg.brand_assets = JSON.parse(JSON.stringify(st.brandAssets || { qr: {}, logo: {} }));
+
   return cfg;
 }
 
@@ -145,6 +162,8 @@ export function snapshotPrintAreaTab(ctx) {
     config: buildConfigForSave(st, ctx, data),
     useMockups: !!st.useMockups,
     variantsScope: [...st.variantsScope].sort(),
+    brandAssetsMode: st.brandAssetsMode || "global",
+    brandAssets: JSON.parse(JSON.stringify(st.brandAssets || { qr: {}, logo: {} })),
   };
 }
 
@@ -242,6 +261,10 @@ export async function loadPrintAreaTab(ctx) {
     st.mockupImagesByView = data.mockup_images_by_view;
     st.useMockups = resolvePrintAreaUseMockups(ctx, data);
     st.workingConfig = ensureByDesignTypeConfig(getPublishProfileConfig(ctx));
+    const brandFromConfig = readBrandAssetsFromConfig(st.workingConfig);
+    st.brandAssetsMode = brandFromConfig.mode;
+    st.brandAssets = JSON.parse(JSON.stringify(brandFromConfig.assets));
+    syncViewKeys(st, data, ctx);
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     st.patternConfig = { ...(slice.pattern || {}) };
     st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
@@ -270,7 +293,15 @@ export function bindPrintAreaTab(ctx, root) {
 
   const editorMain = root.closest(".catalog-editor")?.querySelector(".catalog-editor-main");
 
-  const brandAssetsRef = { current: ctx.brandAssetsBundle?.assets || { qr: {}, logo: {} } };
+  const globalBrandAssetsRef = { current: ctx.brandAssetsBundle?.assets || { qr: {}, logo: {} } };
+  const specificBrandAssetsRef = { current: JSON.parse(JSON.stringify(st.brandAssets || { qr: {}, logo: {} })) };
+  const brandAssetsModeRef = { current: st.brandAssetsMode || "global" };
+
+  const getEffectiveBrandAssets = () => {
+    st.brandAssetsMode = brandAssetsModeRef.current;
+    st.brandAssets = specificBrandAssetsRef.current;
+    return resolveEffectiveBrandAssets(st, globalBrandAssetsRef.current);
+  };
 
   const refreshOverlays = () => {
     ctx.printAreaViewerHandle?.refreshOverlays?.();
@@ -303,8 +334,18 @@ export function bindPrintAreaTab(ctx, root) {
   const sidebarCallbacks = {
     ctx,
     imageGridCallbacks,
-    brandAssetsRef,
-    onBrandAssetsChange: refreshOverlays,
+    globalBrandAssetsRef,
+    brandAssetsModeRef,
+    specificBrandAssetsRef,
+    onBrandAssetsChange: () => {
+      st.brandAssetsMode = brandAssetsModeRef.current;
+      st.brandAssets = specificBrandAssetsRef.current;
+      const effective = getEffectiveBrandAssets();
+      ctx.printAreaViewerHandle?.setBrandAssets?.(effective);
+      ctx.printAreaFullscreenHandle?.setBrandAssets?.(effective);
+      persistStateToCtx(ctx, st);
+      notifyPrintAreaDirty(ctx);
+    },
     onChange: () => {
       persistStateToCtx(ctx, st);
       notifyPrintAreaDirty(ctx);
@@ -356,7 +397,7 @@ export function bindPrintAreaTab(ctx, root) {
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: onPrintAreaStageChange,
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
-    brandAssets: brandAssetsRef.current,
+    brandAssets: getEffectiveBrandAssets(),
     onMagnify: () => {
       ctx.printAreaFullscreenHandle = openPrintAreaFullscreen(ctx, st, data, {
         onStateChange: onPrintAreaStageChange,
@@ -364,12 +405,12 @@ export function bindPrintAreaTab(ctx, root) {
           syncMainPrintAreaStage(true);
           ctx.printAreaFullscreenHandle = null;
         },
-        brandAssets: brandAssetsRef.current,
+        brandAssets: getEffectiveBrandAssets(),
       });
     },
   });
 
-  ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, (viewKey) => {
+  const onViewDockChange = (viewKey) => {
     loadViewIntoState(st, data, viewKey);
     updateViewDockActive(st);
     refreshPlacementSummary(root, st);
@@ -382,7 +423,9 @@ export function bindPrintAreaTab(ctx, root) {
       });
     });
     refreshPrintAreaViewer();
-  });
+  };
+
+  ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, onViewDockChange);
 
   ctx.printAreaUiCleanup = () => teardownPrintAreaUi(ctx);
 }

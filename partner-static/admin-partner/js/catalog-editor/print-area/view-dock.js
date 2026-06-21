@@ -1,7 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 
 export function renderViewDock(st) {
-  const tabs = st.viewKeys
+  const tabs = (st.viewKeys || [])
     .map(
       (vk) =>
         `<button type="button" class="ce-pa-view-tab ${vk === st.activeView ? "active" : ""}" data-view="${escapeHtml(vk)}">${escapeHtml(vk)}</button>`
@@ -12,7 +12,7 @@ export function renderViewDock(st) {
 
 export function mountViewDock(hostEl, st, onViewChange) {
   removeViewDock();
-  if (!hostEl) return { destroy() {} };
+  if (!hostEl || !st.viewKeys?.length) return { destroy() {} };
   hostEl.insertAdjacentHTML("beforeend", renderViewDock(st));
   const dock = hostEl.querySelector("#ce-pa-view-dock");
   dock?.querySelectorAll(".ce-pa-view-tab").forEach((btn) => {
@@ -23,6 +23,10 @@ export function mountViewDock(hostEl, st, onViewChange) {
       dock?.remove();
     },
   };
+}
+
+export function remountViewDock(hostEl, st, onViewChange) {
+  return mountViewDock(hostEl, st, onViewChange);
 }
 
 export function updateViewDockActive(st) {

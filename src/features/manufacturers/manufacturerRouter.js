@@ -227,6 +227,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-published-update-all",
   "admin-eazpire-brand-assets-bundle",
   "admin-eazpire-brand-asset-upload",
+  "admin-eazpire-product-brand-asset-upload",
 ]);
 
 export function isManufacturerOp(op) {
@@ -952,6 +953,11 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-eazpire-brand-asset-upload" && request.method === "POST") {
       const result = await editorExt.uploadBrandAsset(env, request);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-product-brand-asset-upload" && request.method === "POST") {
+      const result = await editorExt.uploadProductBrandAsset(env, request);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }

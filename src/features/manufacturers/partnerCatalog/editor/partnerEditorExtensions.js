@@ -1265,3 +1265,58 @@ export async function uploadBrandAsset(env, request) {
     asset_color: assetColor,
   };
 }
+
+export async function uploadProductBrandAsset(env, request) {
+  if (!env.R2) return { ok: false, error: "r2_not_configured" };
+
+  const formData = await request.formData().catch(() => null);
+  if (!formData) return { ok: false, error: "invalid_form_data" };
+
+  const imageFile = formData.get("image");
+  const assetType = String(formData.get("asset_type") || "").toLowerCase().trim();
+  const assetColor = String(formData.get("asset_color") || "").toLowerCase().trim();
+  const productKey = String(formData.get("product_key") || "").trim();
+  const printProviderId = formData.get("print_provider_id");
+
+  if (!productKey) return { ok: false, error: "product_key_required" };
+  if (printProviderId == null || printProviderId === "") return { ok: false, error: "print_provider_id_required" };
+  if (!imageFile || !(imageFile instanceof File)) return { ok: false, error: "missing_image" };
+  if (assetType !== "qr" && assetType !== "logo") return { ok: false, error: "invalid_asset_type" };
+  if (assetColor !== "black" && assetColor !== "white") return { ok: false, error: "invalid_asset_color" };
+
+  const fileType = imageFile.type || "";
+  if (!BRAND_ASSET_UPLOAD_TYPES.includes(fileType)) return { ok: false, error: "invalid_file_type" };
+  if (imageFile.size > BRAND_ASSET_MAX) return { ok: false, error: "file_too_large" };
+
+  const { publicFileURL } = await import("../../../../utils/helpers.js");
+
+  const buffer = new Uint8Array(await imageFile.arrayBuffer());
+  const ext = fileType.includes("png") ? "png" : fileType.includes("webp") ? "webp" : "jpg";
+  const timestamp = Date.now();
+  const filename = `${assetType}_${assetColor}_${timestamp}.${ext}`;
+  const safeKey = productKey.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  const r2Key = `Brand Assets/products/${safeKey}/${Number(printProviderId)}/${assetType}/${assetColor}/${filename}`;
+
+  await env.R2.put(r2Key, buffer, {
+    httpMetadata: { contentType: fileType || "image/png" },
+    customMetadata: {
+      asset_type: assetType,
+      asset_color: assetColor,
+      product_key: productKey,
+      print_provider_id: String(printProviderId),
+      uploaded_at: String(timestamp),
+    },
+  });
+
+  const imageUrl = publicFileURL(request, r2Key);
+
+  return {
+    ok: true,
+    image_url: imageUrl,
+    r2_key: r2Key,
+    asset_type: assetType,
+    asset_color: assetColor,
+    product_key: productKey,
+    print_provider_id: Number(printProviderId),
+  };
+}

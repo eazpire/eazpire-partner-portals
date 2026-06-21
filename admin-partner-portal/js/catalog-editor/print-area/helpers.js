@@ -1,4 +1,5 @@
 import { DESIGN_TYPES_ALL, PH_TYPES, normalizePatPositionKey } from "../provider-print-technical.js";
+import { getPlaceholderSlotsForView, getVersionPlaceholderConfig } from "../version-config-panel.js";
 import { buildVariantGroupList } from "../utils/variant-matrix.js";
 
 export { DESIGN_TYPES_ALL, PH_TYPES };
@@ -90,20 +91,78 @@ export function getDesignTypeSlice(config, designType) {
   return { full: cfg, slice, key };
 }
 
-export function listViewKeys(mockupDefaults, configSlice) {
+function placeholderViewHasSlots(slots) {
+  if (!slots || typeof slots !== "object") return false;
+  return Object.values(slots).some((v) => Number(v) > 0);
+}
+
+/** Views available for this product/provider — mockup_defaults + version placeholder positions only. */
+export function listViewKeys(mockupDefaults, _configSlice, version = null, catalogDetail = null) {
   const keys = new Set();
   for (const row of mockupDefaults || []) {
     const k = String(row.print_area_key || "").trim().toLowerCase();
     if (k) keys.add(k);
   }
-  for (const slot of ["mockup", "edit_mode"]) {
-    const sec = configSlice?.[slot];
-    if (sec && typeof sec === "object") {
-      Object.keys(sec).forEach((k) => keys.add(String(k).toLowerCase()));
+  const byPos = getVersionPlaceholderConfig(version, catalogDetail);
+  for (const [posKey, slots] of Object.entries(byPos)) {
+    const k = String(posKey || "").trim().toLowerCase();
+    if (!k || !placeholderViewHasSlots(slots)) continue;
+    if (keys.size && !keys.has(k)) {
+      const norm = normalizePatPositionKey(k);
+      const inMockups = [...keys].some((mk) => normalizePatPositionKey(mk) === norm);
+      if (!inMockups) continue;
+    }
+    keys.add(k);
+  }
+  if (!keys.size) {
+    for (const [posKey, slots] of Object.entries(byPos)) {
+      if (!placeholderViewHasSlots(slots)) continue;
+      keys.add(String(posKey || "").trim().toLowerCase());
     }
   }
   if (!keys.size) keys.add("front");
   return [...keys].sort();
+}
+
+export function defaultProductBrandAssets() {
+  return { qr: {}, logo: {} };
+}
+
+export function normalizeBrandAssetsMode(mode) {
+  return String(mode || "global").trim().toLowerCase() === "specific" ? "specific" : "global";
+}
+
+export function readBrandAssetsFromConfig(config) {
+  const cfg = config && typeof config === "object" ? config : {};
+  return {
+    mode: normalizeBrandAssetsMode(cfg.brand_assets_mode),
+    assets: cfg.brand_assets && typeof cfg.brand_assets === "object" ? cfg.brand_assets : defaultProductBrandAssets(),
+  };
+}
+
+export function resolveEffectiveBrandAssets(st, globalAssets) {
+  if (normalizeBrandAssetsMode(st?.brandAssetsMode) === "specific") {
+    return st?.brandAssets || defaultProductBrandAssets();
+  }
+  return globalAssets || defaultProductBrandAssets();
+}
+
+/** Sum QR/logo placeholder slots across product views (for brand assets sidebar visibility). */
+export function aggregateBrandAssetSlots(version, catalogDetail, viewKeys) {
+  let qrSlots = 0;
+  let logoSlots = 0;
+  for (const vk of viewKeys || []) {
+    const slots = getPlaceholderSlotsForView(version, catalogDetail, vk);
+    qrSlots += Math.max(0, Number(slots.qr) || 0);
+    logoSlots += Math.max(0, Number(slots.logo) || 0);
+  }
+  return {
+    qrSlots,
+    logoSlots,
+    showQr: qrSlots > 0,
+    showLogo: logoSlots > 0,
+    showSection: qrSlots > 0 || logoSlots > 0,
+  };
 }
 
 function printAreaKeyCandidates(viewKey) {
@@ -454,8 +513,12 @@ export function createInitialPrintAreaState(ctx, data) {
   const designTypes = visibleDesignTypes(ctx);
   const rawConfig = getPublishProfileConfig(ctx);
   const { full, slice } = getDesignTypeSlice(rawConfig, ctx.selectedDesignType || designTypes[0]);
-  const viewKeys = listViewKeys(data.mockup_defaults, slice);
+  const version =
+    (data?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId)) || data?.version || null;
+  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
   const activeView = viewKeys.includes(ctx.printAreaActiveView) ? ctx.printAreaActiveView : viewKeys[0];
+  const brandFromConfig = readBrandAssetsFromConfig(rawConfig);
   const { red, green, greenDirty } = resolveRectsForView(data, slice, activeView);
 
   const variantGroups = groupVariantsForPrintArea(buildVariantProduct(data, ctx));
@@ -486,6 +549,8 @@ export function createInitialPrintAreaState(ctx, data) {
     mockUrlsByView: {},
     mockPreviewStale: false,
     perVariantProduct: productKeyExpectsPerVariantDimensions(ctx.productKey),
+    brandAssetsMode: brandFromConfig.mode,
+    brandAssets: JSON.parse(JSON.stringify(brandFromConfig.assets)),
   };
 
   if (st.perVariantProduct && activeVariantGroupId) {

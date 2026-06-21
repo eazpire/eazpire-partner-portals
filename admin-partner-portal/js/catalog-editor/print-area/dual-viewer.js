@@ -176,7 +176,8 @@ export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
 }
 
 function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange, brandAssets } = callbacks;
+  const { onStateChange } = callbacks;
+  let brandAssets = callbacks.brandAssets;
 
   let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
   let aspect = aspectRatioFromDefault(md, data, st.activeView);
@@ -608,6 +609,10 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
     },
     refreshOverlays,
+    setBrandAssets(next) {
+      brandAssets = next;
+      refreshOverlays();
+    },
     destroy() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -658,6 +663,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     redraw: () => stageHandle.redraw?.(),
     redrawStageRects: () => stageHandle.redrawStageRects?.(),
     refreshOverlays: () => stageHandle.refreshOverlays?.(),
+    setBrandAssets: (next) => stageHandle.setBrandAssets?.(next),
     destroy() {
       stageHandle.destroy?.();
     },

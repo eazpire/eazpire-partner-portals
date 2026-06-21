@@ -225,6 +225,25 @@ export async function uploadBrandAsset(assetType, assetColor, file) {
   return data;
 }
 
+export async function uploadProductBrandAsset(productKey, printProviderId, assetType, assetColor, file) {
+  const url = new URL(partnerApiBase());
+  url.searchParams.set("op", "admin-eazpire-product-brand-asset-upload");
+  const form = new FormData();
+  form.append("image", file);
+  form.append("asset_type", assetType);
+  form.append("asset_color", assetColor);
+  form.append("product_key", productKey);
+  form.append("print_provider_id", String(printProviderId));
+  const res = await fetch(url.toString(), { method: "POST", credentials: "include", body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    const err = new Error(data.message || data.detail || data.error || `http_${res.status}`);
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 export async function updatePublishedAll(body) {
   return partnerFetch("admin-eazpire-published-update-all", { method: "POST", body });
 }

@@ -74,6 +74,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-brand-assets-bundle");
     expect(src).toContain("fetchBrandAssetsBundle");
     expect(src).toContain("uploadBrandAsset");
+    expect(src).toContain("uploadProductBrandAsset");
+    expect(src).toContain("admin-eazpire-product-brand-asset-upload");
     expect(src).toContain("syncTemplateSection");
     expect(src).toContain("saveTemplateSectionProductId");
     expect(src).toContain("admin-eazpire-template-section-id-save");
