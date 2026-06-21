@@ -8,15 +8,8 @@ import {
   deleteVersion,
   saveVersionConfig,
 } from "../api.js";
-import { renderVersionConfigPanel, collectVersionConfigPanel, collectPrintAreaDimensionUpdates, applyMainSourceInheritanceToConfig } from "../version-config-panel.js";
-import {
-  renderInactivePrintAreasHtml,
-  findPrintSettingsMainSource,
-  resolveMainSourceVersion,
-  normalizeUseMainSourceCategories,
-  defaultUseMainSourceCategories,
-  MAIN_SOURCE_CATEGORY_KEYS,
-} from "../provider-print-technical.js";
+import { renderVersionConfigPanel, collectVersionConfigPanel, collectPrintAreaDimensionUpdates } from "../version-config-panel.js";
+import { renderInactivePrintAreasHtml } from "../provider-print-technical.js";
 import { markEditorDirty, checkDirty } from "../editor-dirty.js";
 import {
   groupProvidersByShipCountry,
@@ -248,96 +241,14 @@ function allLocalVersions(state) {
   return out;
 }
 
-function mainSourceContext(state, pid) {
-  const allVersions = allLocalVersions(state);
-  const mainRef = findPrintSettingsMainSource(allVersions);
-  const mainVersion = resolveMainSourceVersion(allVersions, mainRef);
-  const mainPid = mainRef?.print_provider_id;
-  const mainFp = mainPid != null ? state.merged.find((p) => providerId(p) === mainPid) : null;
-  const mainSourceLabel = mainFp ? providerLabel(mainFp) : "main source provider";
-  const isMainSource = mainPid != null && Number(pid) === Number(mainPid);
-  const mainCatalogDetail = mainPid != null ? state.catalogCache.get(String(mainPid)) || { variants: [] } : null;
-  return {
-    mainRef,
-    mainVersion,
-    mainSourceLabel,
-    hasMainSource: !!mainVersion,
-    isMainSource,
-    mainCatalogDetail,
-  };
-}
-
-function renderMainSourceHeader(state, pid) {
-  const ctx = mainSourceContext(state, pid);
-  const { isMainSource, hasMainSource, mainSourceLabel } = ctx;
-
-  if (isMainSource) {
-    return `<label class="ce-prov-main-source-toggle">
-      <span class="ce-prov-main-source-label">Main source</span>
-      <input type="checkbox" class="ce-prov-main-source-cb" data-pid="${pid}" checked />
-    </label>`;
-  }
-
-  const versions = versionsForProvider(state, pid);
-  const idx = Math.min(state.selectedVersionIdx, Math.max(0, versions.length - 1));
-  const version = versions[idx];
-  const useMain = normalizeUseMainSourceCategories(version?.product_version_config?.use_main_source);
-  const allOn = MAIN_SOURCE_CATEGORY_KEYS.every((k) => useMain[k]);
-  const disabled = !hasMainSource ? " disabled" : "";
-
-  return `<label class="ce-prov-main-source-toggle">
-    <span class="ce-prov-main-source-label">Use main source</span>
-    <input type="checkbox" class="ce-prov-use-main-provider-cb" data-pid="${pid}"${allOn ? " checked" : ""}${disabled} />
-  </label>
-  <span class="ce-prov-main-source-hint">${hasMainSource ? `From ${escapeHtml(mainSourceLabel)}` : "No main source set"}</span>`;
-}
-
-function clearMainSourceFromOtherProviders(state, pid) {
-  for (const [key, versions] of state.localVersions.entries()) {
-    if (Number(key) === Number(pid)) continue;
-    for (let i = 0; i < versions.length; i++) {
-      const v = versions[i];
-      const cfg = v.product_version_config && typeof v.product_version_config === "object" ? { ...v.product_version_config } : {};
-      if (cfg.is_print_settings_main_source) {
-        cfg.is_print_settings_main_source = false;
-        versions[i] = { ...v, product_version_config: cfg };
-      }
-    }
-    state.localVersions.set(key, versions);
-  }
-}
-
-function setProviderUseMainAll(state, pid, enabled) {
-  const versions = versionsForProvider(state, pid);
-  const flags = defaultUseMainSourceCategories();
-  for (const k of MAIN_SOURCE_CATEGORY_KEYS) flags[k] = !!enabled;
-  for (let i = 0; i < versions.length; i++) {
-    const v = versions[i];
-    const cfg =
-      v.product_version_config && typeof v.product_version_config === "object"
-        ? { ...v.product_version_config }
-        : { placeholders_by_position: {}, design_types: [] };
-    cfg.use_main_source = { ...flags };
-    cfg.is_print_settings_main_source = false;
-    versions[i] = { ...v, product_version_config: cfg };
-  }
-  state.localVersions.set(String(pid), versions);
-}
-
 function renderActiveDetail(state, catalogDetail) {
   const pid = state.selectedPid;
   const versions = versionsForProvider(state, pid);
   const idx = Math.min(state.selectedVersionIdx, Math.max(0, versions.length - 1));
   state.selectedVersionIdx = idx;
   const version = versions[idx];
-  const inheritCtx = mainSourceContext(state, pid);
   const versionBody = version
-    ? renderVersionConfigPanel(version, catalogDetail, {
-        mainVersion: inheritCtx.mainVersion,
-        mainSourceLabel: inheritCtx.mainSourceLabel,
-        hasMainSource: inheritCtx.hasMainSource,
-        mainCatalogDetail: inheritCtx.mainCatalogDetail,
-      })
+    ? renderVersionConfigPanel(version, catalogDetail)
     : `<p class="ce-hint">Loading version…</p>`;
 
   return `
@@ -345,7 +256,6 @@ function renderActiveDetail(state, catalogDetail) {
       <div class="ce-prov-detail-head">
         <div class="ce-prov-detail-head-main">
           <h3 class="ce-prov-detail-title">${escapeHtml(providerLabel(state.merged.find((p) => providerId(p) === pid) || {}))}</h3>
-          ${renderMainSourceHeader(state, pid)}
         </div>
         <label class="ce-prov-toggle">
           <input type="checkbox" class="ce-prov-active-toggle" data-pid="${pid}" checked />
@@ -481,7 +391,6 @@ function syncVersionsFromDom(ctx, root) {
   const versions = versionsForProvider(state, pid);
   const pane = root.querySelector(".ce-prov-version-pane");
   if (!pane) return;
-  const inheritCtx = mainSourceContext(state, pid);
 
   for (let idx = 0; idx < versions.length; idx++) {
     const v = versions[idx];
@@ -490,10 +399,7 @@ function syncVersionsFromDom(ctx, root) {
     if (!activeBody) continue;
     const nameInput = root.querySelector(`.ce-prov-ver-name[data-version-id="${vid}"]`);
     if (nameInput) v.display_name = nameInput.value?.trim() || v.display_name;
-    v.product_version_config = collectVersionConfigPanel(pane, v.product_version_config, vid, {
-      mainVersion: inheritCtx.mainVersion,
-      mainCatalogDetail: inheritCtx.mainCatalogDetail,
-    });
+    v.product_version_config = collectVersionConfigPanel(pane, v.product_version_config, vid);
     versions[idx] = v;
   }
   state.localVersions.set(String(pid), versions);
@@ -723,55 +629,11 @@ function bindDetailEvents(ctx, root) {
     onProvidersInput(ctx, root);
   });
 
-  root.querySelector(".ce-prov-main-source-cb")?.addEventListener("change", (e) => {
-    const state = ctx.providersTabState;
-    const pid = Number(e.target.dataset.pid);
-    if (!e.target.checked) {
-      const versions = versionsForProvider(state, pid);
-      const idx = Math.min(state.selectedVersionIdx, Math.max(0, versions.length - 1));
-      const v = versions[idx];
-      if (v) {
-        const cfg =
-          v.product_version_config && typeof v.product_version_config === "object"
-            ? { ...v.product_version_config }
-            : { placeholders_by_position: {}, design_types: [] };
-        cfg.is_print_settings_main_source = false;
-        versions[idx] = { ...v, product_version_config: cfg };
-        state.localVersions.set(String(pid), versions);
-      }
-      refreshDetail(ctx, root);
-      onProvidersInput(ctx, root);
-      return;
-    }
-    clearMainSourceFromOtherProviders(state, pid);
-    const versions = versionsForProvider(state, pid);
-    const idx = Math.min(state.selectedVersionIdx, Math.max(0, versions.length - 1));
-    for (let i = 0; i < versions.length; i++) {
-      const v = versions[i];
-      const cfg =
-        v.product_version_config && typeof v.product_version_config === "object"
-          ? { ...v.product_version_config }
-          : { placeholders_by_position: {}, design_types: [] };
-      cfg.is_print_settings_main_source = i === idx;
-      versions[i] = { ...v, product_version_config: cfg };
-    }
-    state.localVersions.set(String(pid), versions);
-    refreshDetail(ctx, root);
-    onProvidersInput(ctx, root);
-  });
-
-  root.querySelector(".ce-prov-use-main-provider-cb")?.addEventListener("change", (e) => {
-    const pid = Number(e.target.dataset.pid);
-    setProviderUseMainAll(ctx.providersTabState, pid, e.target.checked);
-    refreshDetail(ctx, root);
-    onProvidersInput(ctx, root);
-  });
-
   root.querySelectorAll(".ce-prov-ver-name").forEach((inp) => {
     inp.addEventListener("click", (e) => e.stopPropagation());
   });
 
-  root.querySelectorAll(".ce-prov-ph-qty, .ce-prov-dt-cb, .ce-prov-dim-h, .ce-prov-dim-w, .ce-prov-use-main-cb").forEach((el) => {
+  root.querySelectorAll(".ce-prov-ph-qty, .ce-prov-dt-cb, .ce-prov-dim-h, .ce-prov-dim-w").forEach((el) => {
     el.addEventListener("input", () => onProvidersInput(ctx, root));
     el.addEventListener("change", () => onProvidersInput(ctx, root));
   });
@@ -888,27 +750,13 @@ export function collectProvidersTabState(ctx) {
   for (const pid of state.activeIds) {
     const key = String(pid);
     const versions = versionsForProvider(state, pid);
-    const inheritCtx = mainSourceContext(state, pid);
-
     for (let idx = 0; idx < versions.length; idx++) {
       const v = versions[idx];
       const vid = v.id || v._tempId;
       const displayName = v.display_name || (idx === 0 ? "Standard" : "Version");
       let product_version_config = v.product_version_config;
       if (state.selectedPid === pid && root) {
-        product_version_config = collectVersionConfigPanel(root, product_version_config, vid, {
-          mainVersion: inheritCtx.mainVersion,
-          mainCatalogDetail: inheritCtx.mainCatalogDetail,
-        });
-      } else if (product_version_config && inheritCtx.mainVersion) {
-        const norm = { ...product_version_config };
-        applyMainSourceInheritanceToConfig(
-          norm,
-          norm.use_main_source,
-          inheritCtx.mainVersion,
-          inheritCtx.mainCatalogDetail
-        );
-        product_version_config = norm;
+        product_version_config = collectVersionConfigPanel(root, product_version_config, vid);
       } else {
         product_version_config = product_version_config || collectVersionConfigPanel(root, null, vid);
       }

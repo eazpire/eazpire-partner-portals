@@ -14,8 +14,14 @@ export const PH_TYPES = [
 
 export const DESIGN_TYPES_ALL = ["classic", "pattern", "all-over", "full-coverage", "panorama"];
 
-/** Per-category inherit toggles stored on non-main provider versions. */
-export const MAIN_SOURCE_CATEGORY_KEYS = ["design_types", "print_area_positions"];
+/** Per-category inherit toggles for Print Area sidebar (non-main providers). */
+export const MAIN_SOURCE_CATEGORY_KEYS = [
+  "scope",
+  "pattern",
+  "brand_assets",
+  "print_area_images",
+  "placement",
+];
 
 const PAT_PH_KEYS = ["qr", "logo", "creator_design", "additional_design"];
 const PAT_DT_KEYS = { classic: 1, pattern: 1, "all-over": 1, "full-coverage": 1, panorama: 1 };
@@ -113,7 +119,13 @@ function normalizeDesignTypeToken(dt) {
 }
 
 export function defaultUseMainSourceCategories() {
-  return { design_types: false, print_area_positions: false };
+  return {
+    scope: false,
+    pattern: false,
+    brand_assets: false,
+    print_area_images: false,
+    placement: false,
+  };
 }
 
 export function normalizeUseMainSourceCategories(raw) {
@@ -163,6 +175,7 @@ export function normalizePatProductVersionConfig(raw) {
     placeholders_by_position: {},
     design_types: [],
     use_main_source: defaultUseMainSourceCategories(),
+    use_main_source_provider: false,
     is_print_settings_main_source: false,
   };
   let obj = raw;
@@ -218,6 +231,7 @@ export function normalizePatProductVersionConfig(raw) {
   }
 
   out.use_main_source = normalizeUseMainSourceCategories(obj.use_main_source);
+  out.use_main_source_provider = obj.use_main_source_provider === true;
   out.is_print_settings_main_source = obj.is_print_settings_main_source === true;
   return out;
 }

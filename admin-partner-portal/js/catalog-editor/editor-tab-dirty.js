@@ -1,6 +1,6 @@
 import { checkDirty } from "./editor-dirty.js";
 import { snapshotProvidersTab, syncProvidersDomState } from "./tabs/providers.js";
-import { snapshotPrintAreaTab } from "./tabs/print-area.js";
+import { snapshotPrintAreaTab, syncPrintAreaDomState } from "./tabs/print-area.js";
 import { snapshotMetaTab } from "./tabs/meta.js";
 import { snapshotMockupsTab } from "./tabs/mockups.js";
 import { snapshotVariantsTab } from "./tabs/variants.js";
@@ -15,6 +15,7 @@ export function tabSaveDisabled(tabId) {
 export function syncActiveTabDom(ctx) {
   if (!ctx) return;
   if (ctx.activeTab === "provider") syncProvidersDomState(ctx);
+  if (ctx.activeTab === "print_area") syncPrintAreaDomState(ctx);
 }
 
 export function snapshotActiveTab(ctx) {

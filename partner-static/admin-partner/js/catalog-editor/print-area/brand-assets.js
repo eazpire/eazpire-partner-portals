@@ -53,28 +53,33 @@ function brandBodyHtml(options = {}) {
     specificAssets = {},
     showQr = true,
     showLogo = true,
+    readonly = false,
   } = options;
   const isSpecific = normalizeBrandAssetsMode(mode) === "specific";
   const displayAssets = isSpecific ? specificAssets : globalAssets;
   const hint = isSpecific
     ? "Product-specific QR and Logo assets for this provider (saved with print area config)."
     : "Global QR and Logo assets from the shared library (upload updates all products using global mode).";
+  const ro = readonly ? " disabled" : "";
   return `
     <p class="ce-hint">${hint}</p>
     <label class="ce-pa-check ce-pa-brand-specific-toggle">
-      <input type="checkbox" id="ce-pa-brand-specific" ${isSpecific ? "checked" : ""} />
+      <input type="checkbox" id="ce-pa-brand-specific" ${isSpecific ? "checked" : ""}${ro} />
       <span>Specific assets</span>
     </label>
-    <div class="ce-pa-brand-grid">${brandGridHtml(displayAssets, { showQr, showLogo, readonly: !isSpecific })}</div>`;
+    <div class="ce-pa-brand-grid">${brandGridHtml(displayAssets, { showQr, showLogo, readonly: readonly || !isSpecific })}</div>`;
 }
 
-export function renderBrandAssetsSection(options = {}) {
+export function renderBrandAssetsSection(options = {}, meta = null) {
   const { showQr = true, showLogo = true, showSection = true } = options;
   if (!showSection || (!showQr && !showLogo)) return "";
+  const inheritedClass = meta?.inherited ? " ce-pa-acc--inherited" : "";
+  const toggle = meta?.toggle || "";
+  const readonly = meta?.inherited ? true : options.readonly;
   return `
-    <details class="ce-pa-acc ce-pa-acc--brand">
-      <summary>Brand Assets</summary>
-      <div class="ce-pa-acc-body">${brandBodyHtml(options)}</div>
+    <details class="ce-pa-acc ce-pa-acc--brand${inheritedClass}">
+      <summary class="ce-pa-acc-summary-row"><span>Brand Assets</span>${toggle}</summary>
+      <div class="ce-pa-acc-body">${brandBodyHtml({ ...options, readonly })}</div>
     </details>`;
 }
 

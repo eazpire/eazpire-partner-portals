@@ -10,6 +10,7 @@ import {
   saveVariantPrintAreaRect,
   savePrintAreaRect,
   fetchBrandAssetsBundle,
+  saveProviders,
 } from "../api.js";
 import {
   createInitialPrintAreaState,
@@ -41,6 +42,15 @@ import { mountDualViewer, applyGreenRectToSlice, isPlacementOverlayMode } from "
 import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
+import {
+  printAreaMainSourceContext,
+  applyPrintAreaInheritanceToState,
+  collectMainSourceVersionUpdates,
+  collectMainSourceSnapshot,
+  syncMainSourceFromSubnavDom,
+  syncCategoryInheritFromSidebarDom,
+  setCategoryUseMainSource,
+} from "../print-area/main-source.js";
 
 export function teardownPrintAreaUi(ctx) {
   closePrintAreaFullscreen();
@@ -158,13 +168,22 @@ export function snapshotPrintAreaTab(ctx) {
   const st = ctx.printAreaState;
   const data = ctx.printAreaData;
   if (!st || !data) return null;
+  syncPrintAreaDomState(ctx);
   return {
     config: buildConfigForSave(st, ctx, data),
     useMockups: !!st.useMockups,
     variantsScope: [...st.variantsScope].sort(),
     brandAssetsMode: st.brandAssetsMode || "global",
     brandAssets: JSON.parse(JSON.stringify(st.brandAssets || { qr: {}, logo: {} })),
+    mainSourceVersionEdits: collectMainSourceSnapshot(ctx),
   };
+}
+
+export function syncPrintAreaDomState(ctx) {
+  if (!ctx || ctx.activeTab !== "print_area") return;
+  syncMainSourceFromSubnavDom(ctx);
+  const root = ctx.printAreaRoot || document.getElementById("ce-body");
+  syncCategoryInheritFromSidebarDom(ctx, root);
 }
 
 function notifyPrintAreaDirty(ctx) {
@@ -279,7 +298,7 @@ export async function loadPrintAreaTab(ctx) {
 
   return `
     <div class="ce-tab-panel ce-tab-panel--print-area">
-      ${renderPrintAreaSidebar(ctx.printAreaState, data, ctx, ctx.brandAssetsBundle?.assets)}
+      ${renderPrintAreaSidebar(ctx.printAreaState, data, ctx, ctx.brandAssetsBundle?.assets, printAreaMainSourceContext(ctx))}
     </div>`;
 }
 
@@ -290,6 +309,9 @@ export function bindPrintAreaTab(ctx, root) {
 
   teardownPrintAreaUi(ctx);
   ctx.printAreaRoot = root;
+
+  const msCtx = printAreaMainSourceContext(ctx);
+  applyPrintAreaInheritanceToState(st, ctx, data, msCtx);
 
   const editorMain = root.closest(".catalog-editor")?.querySelector(".catalog-editor-main");
 
@@ -358,15 +380,26 @@ export function bindPrintAreaTab(ctx, root) {
     onPrintAreaRefresh: refreshPrintAreaViewer,
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, data, dt);
+      applyPrintAreaInheritanceToState(st, ctx, data, printAreaMainSourceContext(ctx));
       refreshScopeActiveStates(root, st);
       refreshPatternSummary(root, st);
-      refreshPatternSection(root, st, sidebarCallbacks.onPatternChange);
+      refreshPatternSection(root, st, sidebarCallbacks.onPatternChange, printAreaMainSourceContext(ctx));
       refreshPlacementSummary(root, st);
       refreshPlacementValues(root, st);
       refreshPrintAreaViewer();
     },
     onVariantGroupChange: () => {
       refreshScopeActiveStates(root, st);
+      refreshPrintAreaViewer();
+    },
+    onCategoryInheritChange: (categoryKey, enabled) => {
+      setCategoryUseMainSource(ctx, ctx.selectedPrintProviderId, categoryKey, enabled);
+      applyPrintAreaInheritanceToState(st, ctx, data, printAreaMainSourceContext(ctx));
+      refreshScopeActiveStates(root, st);
+      refreshPatternSection(root, st, sidebarCallbacks.onPatternChange, printAreaMainSourceContext(ctx));
+      refreshPlacementSection(root, st, data, ctx, printAreaMainSourceContext(ctx));
+      refreshImagesGrids(root, ctx, st, data, imageGridCallbacks);
+      notifyPrintAreaDirty(ctx);
       refreshPrintAreaViewer();
     },
   };
@@ -414,7 +447,7 @@ export function bindPrintAreaTab(ctx, root) {
     loadViewIntoState(st, data, viewKey);
     updateViewDockActive(st);
     refreshPlacementSummary(root, st);
-    refreshPlacementSection(root, st, data, ctx);
+    refreshPlacementSection(root, st, data, ctx, printAreaMainSourceContext(ctx));
     root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
       sel.addEventListener("change", () => {
         st.publishLogicByPh[sel.dataset.ph] = sel.value;
@@ -506,4 +539,10 @@ export async function savePrintAreaTab(ctx) {
   st.boundsDirty = false;
   st.workingConfig = config;
   persistStateToCtx(ctx, st);
+
+  const versionUpdates = collectMainSourceVersionUpdates(ctx);
+  if (versionUpdates.length) {
+    await saveProviders(ctx.productKey, { version_updates: versionUpdates, auto_mirror: false });
+    ctx.printAreaVersionConfigEdits?.clear?.();
+  }
 }

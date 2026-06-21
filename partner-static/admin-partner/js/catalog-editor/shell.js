@@ -36,6 +36,7 @@ import {
   isSubnavDrawerCollapsed,
   setSubnavDrawerCollapsed,
 } from "./editor-subnav.js";
+import { renderPrintAreaProviderPill, bindPrintAreaMainSourceSubnav } from "./print-area/main-source.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
@@ -271,14 +272,16 @@ function renderSubnav(ctx) {
   applySubnavDrawerState();
 
   if (showProviders && providerPills) {
-    providerPills.innerHTML = providerIds
-      .map((pid) => {
-        const label = providerLabel(ctx, pid);
-        return `<button type="button" class="ce-provider-pill ${
-          String(ctx.selectedPrintProviderId) === pid ? "active" : ""
-        }" data-pid="${escapeHtml(pid)}">${escapeHtml(label)}</button>`;
-      })
-      .join("");
+    const pillRenderer =
+      ctx.activeTab === "print_area"
+        ? (pid) => renderPrintAreaProviderPill(ctx, pid)
+        : (pid) => {
+            const label = providerLabel(ctx, pid);
+            return `<button type="button" class="ce-provider-pill ${
+              String(ctx.selectedPrintProviderId) === pid ? "active" : ""
+            }" data-pid="${escapeHtml(pid)}">${escapeHtml(label)}</button>`;
+          };
+    providerPills.innerHTML = providerIds.map(pillRenderer).join("");
     providerPills.querySelectorAll(".ce-provider-pill").forEach((btn) => {
       btn.onclick = () => {
         ctx.selectedPrintProviderId = btn.dataset.pid;
@@ -287,6 +290,12 @@ function renderSubnav(ctx) {
         loadActiveTab(ctx);
       };
     });
+    if (ctx.activeTab === "print_area") {
+      bindPrintAreaMainSourceSubnav(ctx, () => {
+        renderSubnav(ctx);
+        loadActiveTab(ctx);
+      });
+    }
   } else if (providerPills) {
     providerPills.innerHTML = "";
   }

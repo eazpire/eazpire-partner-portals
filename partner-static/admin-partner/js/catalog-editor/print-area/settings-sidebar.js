@@ -9,6 +9,11 @@ import {
   loadRectsForVariantGroup,
   aggregateBrandAssetSlots,
 } from "./helpers.js";
+import {
+  categoryInheritToggleHtml,
+  shouldShowCategoryInheritToggles,
+  isCategoryInherited,
+} from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
 
@@ -21,7 +26,20 @@ const PATTERN_SLIDERS = [
   { key: "rotV", label: "Rot V", min: -180, max: 180, step: 1 },
 ];
 
-function renderScopeSection(st) {
+function sectionSummary(label, categoryKey, msCtx) {
+  const showToggle = shouldShowCategoryInheritToggles(msCtx);
+  const inherited = isCategoryInherited(msCtx, categoryKey);
+  const toggle =
+    showToggle && categoryKey
+      ? categoryInheritToggleHtml(categoryKey, inherited, false)
+      : "";
+  const inheritedClass = inherited ? " ce-pa-acc--inherited" : "";
+  return { label, toggle, inheritedClass, inherited, showToggle };
+}
+
+function renderScopeSection(st, msCtx) {
+  const meta = sectionSummary("Scope", "scope", msCtx);
+  const dtDisabled = meta.inherited ? " disabled" : "";
   const dtChecks = st.designTypes
     .map(
       (dt) => `
@@ -29,9 +47,9 @@ function renderScopeSection(st) {
       <label class="ce-pa-check ce-pa-check--box-only">
         <input type="checkbox" class="ce-pa-scope-dt" data-dt="${escapeHtml(dt)}" ${
           st.designTypesScope.has(dt) ? "checked" : ""
-        } />
+        }${dtDisabled} />
       </label>
-      <button type="button" class="ce-pa-dt-name btn btn-ghost btn-xs" data-dt="${escapeHtml(dt)}">${escapeHtml(dt)}</button>
+      <button type="button" class="ce-pa-dt-name btn btn-ghost btn-xs" data-dt="${escapeHtml(dt)}"${meta.inherited ? " disabled" : ""}>${escapeHtml(dt)}</button>
     </div>`
     )
     .join("");
@@ -48,31 +66,31 @@ function renderScopeSection(st) {
       <label class="ce-pa-check ce-pa-check--box-only">
         <input type="checkbox" class="ce-pa-scope-variant" data-variant-id="${escapeHtml(g.id)}" ${
           st.variantsScope.has(g.id) ? "checked" : ""
-        } />
+        }${dtDisabled} />
       </label>
       ${dot}
-      <button type="button" class="ce-pa-variant-name btn btn-ghost btn-xs" data-variant-id="${escapeHtml(g.id)}">${escapeHtml(g.title)}</button>
+      <button type="button" class="ce-pa-variant-name btn btn-ghost btn-xs" data-variant-id="${escapeHtml(g.id)}"${meta.inherited ? " disabled" : ""}>${escapeHtml(g.title)}</button>
       <span class="ce-pa-variant-count">${g.variantIds.length}</span>
     </div>`;
     })
     .join("");
 
   return `
-    <details class="ce-pa-acc" open>
-      <summary>Scope</summary>
+    <details class="ce-pa-acc ce-pa-acc--scope${meta.inheritedClass}" open>
+      <summary class="ce-pa-acc-summary-row"><span>Scope</span>${meta.toggle}</summary>
       <div class="ce-pa-acc-body">
         <p class="ce-hint">Design types and variants that receive changes when you save this tab.</p>
         <div class="ce-pa-scope-block">
           <div class="ce-pa-scope-head">
             <strong>Design types</strong>
-            <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-dt-all">All</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-dt-all"${meta.inherited ? " disabled" : ""}>All</button>
           </div>
           <div class="ce-pa-check-grid">${dtChecks}</div>
         </div>
         <div class="ce-pa-scope-block">
           <div class="ce-pa-scope-head">
             <strong>Variants</strong>
-            <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-var-all">All</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-var-all"${meta.inherited ? " disabled" : ""}>All</button>
           </div>
           <div class="ce-pa-check-grid">${variantRows || '<p class="ce-hint">No variants loaded.</p>'}</div>
         </div>
@@ -80,39 +98,42 @@ function renderScopeSection(st) {
     </details>`;
 }
 
-function renderPatternSection(st) {
+function renderPatternSection(st, msCtx) {
   const pat = st.patternConfig || defaultPatternConfig();
+  const meta = sectionSummary(`Pattern — ${st.activeDesignType}`, "pattern", msCtx);
+  const ro = meta.inherited ? " disabled" : "";
   const sliders = PATTERN_SLIDERS.map(
     (s) => `
     <div class="ce-pa-slider-row">
       <label>${escapeHtml(s.label)}</label>
-      <input type="range" class="ce-pa-pattern-slider" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}" />
-      <input type="number" class="ce-pa-pattern-num input input-sm" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}" />
+      <input type="range" class="ce-pa-pattern-slider" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}"${ro} />
+      <input type="number" class="ce-pa-pattern-num input input-sm" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}"${ro} />
     </div>`
   ).join("");
 
   const patternBody = pat.enabled
     ? `
         <div class="ce-pa-pattern-styles">
-          <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "grid" ? "active" : ""}" data-style="grid">Grid</button>
-          <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "brick" ? "active" : ""}" data-style="brick">Brick</button>
+          <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "grid" ? "active" : ""}" data-style="grid"${ro}>Grid</button>
+          <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "brick" ? "active" : ""}" data-style="brick"${ro}>Brick</button>
         </div>
         ${sliders}`
     : "";
 
   return `
-    <details class="ce-pa-acc ce-pa-acc--pattern ${pat.enabled ? "" : "ce-pa-acc--pattern-off"}" open>
-      <summary class="ce-pa-pattern-summary">
+    <details class="ce-pa-acc ce-pa-acc--pattern ${pat.enabled ? "" : "ce-pa-acc--pattern-off"}${meta.inheritedClass}" open>
+      <summary class="ce-pa-pattern-summary ce-pa-acc-summary-row">
         <label class="ce-pa-check ce-pa-check--inline" id="ce-pa-pattern-enabled-wrap">
-          <input type="checkbox" id="ce-pa-pattern-enabled" ${pat.enabled ? "checked" : ""} />
+          <input type="checkbox" id="ce-pa-pattern-enabled" ${pat.enabled ? "checked" : ""}${ro} />
         </label>
         <span>Pattern — ${escapeHtml(st.activeDesignType)}</span>
+        ${meta.toggle}
       </summary>
       <div class="ce-pa-acc-body ce-pa-pattern-body">${patternBody}</div>
     </details>`;
 }
 
-function renderPlacementSection(st, data, ctx) {
+function renderPlacementSection(st, data, ctx, msCtx) {
   const version =
     (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
   const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
@@ -120,13 +141,15 @@ function renderPlacementSection(st, data, ctx) {
   const activePhTypes = PH_TYPES.filter((ph) => (Number(slots[ph.key]) || 0) > 0);
   if (!activePhTypes.length) return "";
 
+  const meta = sectionSummary(`Placement mode — ${st.activeView}`, "placement", msCtx);
+  const ro = meta.inherited ? " disabled" : "";
   const rows = activePhTypes
     .map((ph) => {
       const val = st.publishLogicByPh?.[ph.key] || "calculated";
       return `
     <div class="ce-pa-pl-row">
       <span class="ce-pa-pl-label">${escapeHtml(ph.label)}</span>
-      <select class="select select-sm ce-pa-pl-mode" data-ph="${ph.key}">
+      <select class="select select-sm ce-pa-pl-mode" data-ph="${ph.key}"${ro}>
         <option value="calculated" ${val === "calculated" ? "selected" : ""}>Calculated</option>
         <option value="template" ${val === "template" ? "selected" : ""}>Template</option>
       </select>
@@ -135,8 +158,8 @@ function renderPlacementSection(st, data, ctx) {
     .join("");
 
   return `
-    <details class="ce-pa-acc ce-pa-acc--placement">
-      <summary>Placement mode — ${escapeHtml(st.activeView)}</summary>
+    <details class="ce-pa-acc ce-pa-acc--placement${meta.inheritedClass}">
+      <summary class="ce-pa-acc-summary-row"><span>Placement mode — ${escapeHtml(st.activeView)}</span>${meta.toggle}</summary>
       <div class="ce-pa-acc-body">
         <p class="ce-hint">Per placeholder for the active view.</p>
         ${rows}
@@ -144,13 +167,15 @@ function renderPlacementSection(st, data, ctx) {
     </details>`;
 }
 
-function renderImagesSection(st, data) {
+function renderImagesSection(st, data, msCtx) {
+  const meta = sectionSummary("Print area images", "print_area_images", msCtx);
+  const ro = meta.inherited ? " disabled" : "";
   return `
-    <details class="ce-pa-acc">
-      <summary>Print area images</summary>
+    <details class="ce-pa-acc ce-pa-acc--images${meta.inheritedClass}">
+      <summary class="ce-pa-acc-summary-row"><span>Print area images</span>${meta.toggle}</summary>
       <div class="ce-pa-acc-body" id="ce-pa-images-body">
         <label class="ce-pa-check">
-          <input type="checkbox" id="ce-pa-use-mocks" ${st.useMockups ? "checked" : ""} />
+          <input type="checkbox" id="ce-pa-use-mocks" ${st.useMockups ? "checked" : ""}${ro} />
           <span>Use mockups (hide upload grids)</span>
         </label>
         <div class="ce-pa-img-upload-section ${st.useMockups ? "ce-pa-img-section--hidden" : ""}" id="ce-pa-upload-section">${renderUploadGrids(st, data)}</div>
@@ -174,20 +199,22 @@ function brandAssetsOptions(st, data, ctx, globalAssets) {
   };
 }
 
-export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets) {
+export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets, msCtx = null) {
   const collapsed = isPaSidebarCollapsed();
   const brandOpts = brandAssetsOptions(st, data, ctx, globalBrandAssets);
+  const brandMeta = sectionSummary("Brand Assets", "brand_assets", msCtx);
+  const brandSection = renderBrandAssetsSection(brandOpts, brandMeta);
   return `
     <div class="ce-pa-layout ${collapsed ? "ce-pa-layout--collapsed" : ""}">
       <aside class="ce-pa-sidebar-wrap">
         <div class="ce-pa-sidebar">
           <h3 class="ce-pa-sidebar-title">Print Area Settings</h3>
           <div class="ce-pa-sidebar-scroll">
-            ${renderScopeSection(st)}
-            ${renderPatternSection(st)}
-            ${renderPlacementSection(st, data, ctx)}
-            ${renderBrandAssetsSection(brandOpts)}
-            ${renderImagesSection(st, data)}
+            ${renderScopeSection(st, msCtx)}
+            ${renderPatternSection(st, msCtx)}
+            ${renderPlacementSection(st, data, ctx, msCtx)}
+            ${brandSection}
+            ${renderImagesSection(st, data, msCtx)}
           </div>
         </div>
         <button type="button" class="ce-pa-rail" id="ce-pa-sidebar-toggle" aria-label="Toggle print area sidebar">
@@ -198,11 +225,14 @@ export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets) {
     </div>`;
 }
 
-export function refreshPatternSection(root, st, onChange) {
+export function refreshPatternSection(root, st, onChange, msCtx = null) {
   const acc = root.querySelector(".ce-pa-acc--pattern");
   if (!acc) return;
   const pat = st.patternConfig || defaultPatternConfig();
+  const inherited = isCategoryInherited(msCtx, "pattern");
+  const ro = inherited ? " disabled" : "";
   acc.classList.toggle("ce-pa-acc--pattern-off", !pat.enabled);
+  acc.classList.toggle("ce-pa-acc--inherited", inherited);
   const body = acc.querySelector(".ce-pa-pattern-body");
   if (!body) return;
 
@@ -215,19 +245,19 @@ export function refreshPatternSection(root, st, onChange) {
     (s) => `
     <div class="ce-pa-slider-row">
       <label>${escapeHtml(s.label)}</label>
-      <input type="range" class="ce-pa-pattern-slider" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}" />
-      <input type="number" class="ce-pa-pattern-num input input-sm" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}" />
+      <input type="range" class="ce-pa-pattern-slider" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}"${ro} />
+      <input type="number" class="ce-pa-pattern-num input input-sm" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${Number(pat[s.key]) || 0}"${ro} />
     </div>`
   ).join("");
 
   body.innerHTML = `
     <div class="ce-pa-pattern-styles">
-      <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "grid" ? "active" : ""}" data-style="grid">Grid</button>
-      <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "brick" ? "active" : ""}" data-style="brick">Brick</button>
+      <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "grid" ? "active" : ""}" data-style="grid"${ro}>Grid</button>
+      <button type="button" class="btn btn-secondary btn-xs ce-pa-pattern-style ${pat.style === "brick" ? "active" : ""}" data-style="brick"${ro}>Brick</button>
     </div>
     ${sliders}`;
 
-  bindPatternControls(root, st, onChange);
+  bindPatternControls(root, st, onChange, inherited);
 }
 
 export function refreshScopeActiveStates(root, st) {
@@ -252,11 +282,11 @@ export function refreshPlacementSummary(root, st) {
   if (summary) summary.textContent = `Placement mode — ${st.activeView}`;
 }
 
-export function refreshPlacementSection(root, st, data, ctx) {
+export function refreshPlacementSection(root, st, data, ctx, msCtx = null) {
   const patternAcc = root.querySelector(".ce-pa-acc--pattern");
   const oldPl = root.querySelector(".ce-pa-acc--placement");
   if (oldPl) oldPl.remove();
-  const html = renderPlacementSection(st, data, ctx);
+  const html = renderPlacementSection(st, data, ctx, msCtx);
   if (html && patternAcc) {
     patternAcc.insertAdjacentHTML("afterend", html);
   }
@@ -310,7 +340,8 @@ function toggleImageSections(root, st) {
   root.querySelector("#ce-pa-mock-section")?.classList.toggle("ce-pa-img-section--hidden", !st.useMockups);
 }
 
-function bindPatternControls(root, st, onChange) {
+function bindPatternControls(root, st, onChange, disabled = false) {
+  if (disabled) return;
   const syncPattern = (key, val) => {
     st.patternConfig[key] = val;
     onChange?.();
@@ -505,4 +536,11 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
   });
 
   bindImageGrids(root, ctx, st, data, gridCallbacks);
+
+  root.querySelectorAll(".ce-pa-use-main-cb").forEach((cb) => {
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      callbacks.onCategoryInheritChange?.(cb.dataset.category, cb.checked);
+    });
+  });
 }
