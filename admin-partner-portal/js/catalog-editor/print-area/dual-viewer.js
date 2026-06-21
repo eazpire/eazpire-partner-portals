@@ -18,6 +18,7 @@ import {
   lockAspectForPhType,
   setOverlayAreaRect,
   updateResizeHandleCursors,
+  snapRotateAngle,
 } from "./rect-interaction.js";
 
 function clamp(v, min, max) {
@@ -444,9 +445,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
     if (dragState.type === "rotate") {
       const cur = angleDeg(dragState.cx, dragState.cy, ev.clientX, ev.clientY);
-      target.angle = dragState.startAngle + (cur - dragState.baseAngle);
-      while (target.angle > 180) target.angle -= 360;
-      while (target.angle < -180) target.angle += 360;
+      target.angle = snapRotateAngle(dragState.startAngle + (cur - dragState.baseAngle));
       return;
     }
 

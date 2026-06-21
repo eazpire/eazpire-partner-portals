@@ -144,6 +144,22 @@ export function angleDeg(cx, cy, x, y) {
   return (Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90;
 }
 
+export const ROTATE_SNAP_DEG = 5;
+
+export function normalizeAngleDeg(angle) {
+  let a = Number(angle) || 0;
+  while (a > 180) a -= 360;
+  while (a < -180) a += 360;
+  return a;
+}
+
+/** Snap rotation to fixed degree steps (default 5°) for easier alignment. */
+export function snapRotateAngle(angle, step = ROTATE_SNAP_DEG) {
+  const a = normalizeAngleDeg(angle);
+  if (!(step > 0)) return a;
+  return Math.round(a / step) * step;
+}
+
 /** Only the red print-bounds rect locks aspect; overlays resize freely. */
 export function lockAspectForPhType(_phType) {
   return false;
