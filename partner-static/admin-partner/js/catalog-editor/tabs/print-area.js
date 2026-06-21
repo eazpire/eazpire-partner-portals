@@ -24,6 +24,7 @@ import {
   resolvePrintAreaUseMockups,
   getPublishProfileConfig,
   listViewKeys,
+  resolvePrintAreaVersion,
   readBrandAssetsFromConfig,
   resolveEffectiveBrandAssets,
 } from "../print-area/helpers.js";
@@ -39,7 +40,7 @@ import {
   refreshImagesGrids,
 } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice, isPlacementOverlayMode } from "../print-area/dual-viewer.js";
-import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
+import { mountViewDock, removeViewDock, remountViewDock, updateViewDockActive } from "../print-area/view-dock.js";
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import {
@@ -126,8 +127,7 @@ function getActiveColorTitle(st) {
 }
 
 function syncViewKeys(st, data, ctx) {
-  const version =
-    (data?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId)) || data?.version || null;
+  const version = resolvePrintAreaVersion(ctx, data);
   const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   st.viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
@@ -284,6 +284,7 @@ export async function loadPrintAreaTab(ctx) {
     st.brandAssetsMode = brandFromConfig.mode;
     st.brandAssets = JSON.parse(JSON.stringify(brandFromConfig.assets));
     syncViewKeys(st, data, ctx);
+    ctx.printAreaRemountViewDock?.();
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     st.patternConfig = { ...(slice.pattern || {}) };
     st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
@@ -458,7 +459,17 @@ export function bindPrintAreaTab(ctx, root) {
     refreshPrintAreaViewer();
   };
 
-  ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, onViewDockChange);
+  const mountOrRefreshViewDock = () => {
+    if (ctx.activeTab !== "print_area" || !editorMain) {
+      removeViewDock();
+      ctx.printAreaViewDockHandle = null;
+      return;
+    }
+    ctx.printAreaViewDockHandle = remountViewDock(editorMain, st, onViewDockChange);
+  };
+
+  mountOrRefreshViewDock();
+  ctx.printAreaRemountViewDock = mountOrRefreshViewDock;
 
   ctx.printAreaUiCleanup = () => teardownPrintAreaUi(ctx);
 }

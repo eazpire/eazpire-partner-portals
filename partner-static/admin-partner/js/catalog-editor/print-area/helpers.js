@@ -1,4 +1,9 @@
-import { DESIGN_TYPES_ALL, PH_TYPES, normalizePatPositionKey } from "../provider-print-technical.js";
+import {
+  DESIGN_TYPES_ALL,
+  PH_TYPES,
+  normalizePatPositionKey,
+  unionPatPlaceholderPositions,
+} from "../provider-print-technical.js";
 import { getPlaceholderSlotsForView, getVersionPlaceholderConfig } from "../version-config-panel.js";
 import { buildVariantGroupList } from "../utils/variant-matrix.js";
 
@@ -91,44 +96,41 @@ export function getDesignTypeSlice(config, designType) {
   return { full: cfg, slice, key };
 }
 
-function placeholderViewHasSlots(slots) {
-  if (!slots || typeof slots !== "object") return false;
-  return Object.values(slots).some((v) => Number(v) > 0);
+/** Active provider version row for print-area (bundle fallback when tab payload omits versions). */
+export function resolvePrintAreaVersion(ctx, data) {
+  const fromData =
+    (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
+  if (fromData) return fromData;
+  return (ctx?.bundle?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || null;
 }
 
-/** Views available for this product/provider — version placeholder positions intersected with mockup_defaults. */
-export function listViewKeys(mockupDefaults, _configSlice, version = null, catalogDetail = null) {
-  const byPos = getVersionPlaceholderConfig(version, catalogDetail);
-  const versionKeys = [];
-  for (const [posKey, slots] of Object.entries(byPos)) {
-    const k = String(posKey || "").trim().toLowerCase();
-    if (!k || !placeholderViewHasSlots(slots)) continue;
-    versionKeys.push(k);
-  }
-
-  const mockupKeys = [];
+function mockupDefaultViewKeys(mockupDefaults) {
+  const keys = [];
   for (const row of mockupDefaults || []) {
     const k = String(row.print_area_key || "").trim().toLowerCase();
-    if (k) mockupKeys.push(k);
+    if (k) keys.push(k);
   }
+  return [...new Set(keys)].sort();
+}
 
-  if (versionKeys.length) {
-    if (!mockupKeys.length) return [...new Set(versionKeys)].sort();
-    const resolved = [];
-    for (const vk of versionKeys) {
-      if (mockupKeys.includes(vk)) {
-        resolved.push(vk);
-        continue;
-      }
-      const norm = normalizePatPositionKey(vk);
-      const match = mockupKeys.find((mk) => normalizePatPositionKey(mk) === norm);
-      if (match) resolved.push(match);
-    }
-    if (resolved.length) return [...new Set(resolved)].sort();
-    return [...new Set(versionKeys)].sort();
-  }
+/** Views for the active provider version — same position keys as Provider tab print area positions. */
+export function listViewKeys(mockupDefaults, _configSlice, version = null, catalogDetail = null) {
+  const variants = catalogDetail?.variants || catalogDetail?.variants_json || [];
+  const variantList = Array.isArray(variants) ? variants : [];
+  const byPos = getVersionPlaceholderConfig(version, catalogDetail);
+  const positions = unionPatPlaceholderPositions(variantList, byPos);
+  const versionKeys = positions
+    .map((ph) =>
+      String(ph?.position ?? "")
+        .trim()
+        .toLowerCase()
+    )
+    .filter(Boolean);
 
-  if (mockupKeys.length) return [...new Set(mockupKeys)].sort();
+  if (versionKeys.length) return [...new Set(versionKeys)].sort();
+
+  const mockupKeys = mockupDefaultViewKeys(mockupDefaults);
+  if (mockupKeys.length) return mockupKeys;
   return ["front"];
 }
 
@@ -521,8 +523,7 @@ export function createInitialPrintAreaState(ctx, data) {
   const designTypes = visibleDesignTypes(ctx);
   const rawConfig = getPublishProfileConfig(ctx);
   const { full, slice } = getDesignTypeSlice(rawConfig, ctx.selectedDesignType || designTypes[0]);
-  const version =
-    (data?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId)) || data?.version || null;
+  const version = resolvePrintAreaVersion(ctx, data);
   const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
   const viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
   const activeView = viewKeys.includes(ctx.printAreaActiveView) ? ctx.printAreaActiveView : viewKeys[0];

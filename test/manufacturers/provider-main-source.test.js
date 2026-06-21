@@ -56,11 +56,11 @@ describe("print area main source inheritance (smoke)", () => {
 });
 
 describe("listViewKeys provider scoping (smoke)", () => {
-  it("filters views by version placeholder slots intersected with mockups", () => {
+  it("derives views from version print positions via unionPatPlaceholderPositions", () => {
     const src = readFileSync(join(portal, "print-area/helpers.js"), "utf8");
-    expect(src).toContain("const versionKeys = []");
-    expect(src).toContain("placeholderViewHasSlots(slots)");
-    expect(src).toContain("if (versionKeys.length)");
+    expect(src).toContain("unionPatPlaceholderPositions");
+    expect(src).toContain("resolvePrintAreaVersion");
     expect(src).toContain("getVersionPlaceholderConfig(version, catalogDetail)");
+    expect(src).not.toContain("placeholderViewHasSlots");
   });
 });

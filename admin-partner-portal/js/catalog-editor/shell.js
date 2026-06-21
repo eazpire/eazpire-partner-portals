@@ -37,6 +37,7 @@ import {
   setSubnavDrawerCollapsed,
 } from "./editor-subnav.js";
 import { renderPrintAreaProviderPill, bindPrintAreaMainSourceSubnav } from "./print-area/main-source.js";
+import { removeViewDock } from "./print-area/view-dock.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
@@ -339,6 +340,7 @@ async function loadActiveTab(ctx) {
   window.__catalogEditorState = ctx;
   editorState?.printAreaUiCleanup?.();
   if (editorState) editorState.printAreaUiCleanup = null;
+  if (ctx.activeTab !== "print_area") removeViewDock();
   ensureEditorSelections(ctx);
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;
@@ -538,6 +540,7 @@ export async function openProductEditor(productKey) {
   overlayEl.querySelector("#ce-unsaved-dialog")?.setAttribute("hidden", "");
   applyEditorSidebarState();
   document.body.classList.add("catalog-editor-open");
+  removeViewDock();
 
   editorState = {
     productKey,
@@ -570,6 +573,8 @@ export async function openProductEditor(productKey) {
 export function closeProductEditor() {
   if (!overlayEl) return;
   hideUnsavedCloseDialog();
+  editorState?.printAreaUiCleanup?.();
+  removeViewDock();
   overlayEl.hidden = true;
   document.body.classList.remove("catalog-editor-open");
   editorState = null;
