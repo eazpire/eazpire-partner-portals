@@ -1,45 +1,77 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { uploadPrintAreaImage, clearPrintAreaImage } from "../api.js";
-import { printAreaTemplateImageUrl, mockupImageUrl, buildMockupImagesByView, pickMockUrlForView } from "./helpers.js";
+import { printAreaTemplateImageUrl, buildMockupImagesByView, pickMockUrlForView } from "./helpers.js";
 
-function renderViewImageCard(viewKey, md, byView) {
+function activeMockColor(st) {
+  return st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId)?.title || null;
+}
+
+function renderUploadTile(viewKey, md) {
   const url = printAreaTemplateImageUrl(md);
-  const mockEntries = byView?.[viewKey] ? Object.entries(byView[viewKey]) : [];
-
-  const mockThumbs = mockEntries
-    .slice(0, 6)
-    .map(
-      ([color, entry]) => `
-    <button type="button" class="ce-pa-mock-pick" data-view="${escapeHtml(viewKey)}" data-color="${escapeHtml(color)}" title="${escapeHtml(color)}">
-      <img src="${escapeHtml(entry.image_url)}" alt="" />
-      <span>${escapeHtml(color)}</span>
-    </button>`
-    )
-    .join("");
-
-  const tile = url
-    ? `
+  if (url) {
+    return `
       <div class="ce-pa-img-tile ce-pa-img-tile--filled" id="ce-pa-img-preview-${escapeHtml(viewKey)}">
         <img src="${escapeHtml(url)}" alt="" />
         <button type="button" class="ce-pa-img-remove" data-view="${escapeHtml(viewKey)}" aria-label="Remove image">×</button>
-      </div>`
-    : `
-      <label class="ce-pa-img-tile ce-pa-img-tile--empty" id="ce-pa-img-preview-${escapeHtml(viewKey)}" aria-label="Upload image">
-        <span class="ce-pa-img-add-icon" aria-hidden="true">+</span>
-        <input type="file" class="ce-pa-upload-input" accept="image/png,image/jpeg,image/webp" data-view="${escapeHtml(viewKey)}" hidden />
-      </label>`;
-
+      </div>`;
+  }
   return `
-    <div class="ce-pa-img-view" data-view="${escapeHtml(viewKey)}">
-      <div class="ce-pa-img-view-head">${escapeHtml(viewKey)}</div>
-      <div class="ce-pa-img-grid">${tile}</div>
-      ${mockThumbs ? `<div class="ce-pa-mock-picks">${mockThumbs}</div>` : ""}
-    </div>`;
+    <label class="ce-pa-img-tile ce-pa-img-tile--empty" id="ce-pa-img-preview-${escapeHtml(viewKey)}" aria-label="Upload image">
+      <span class="ce-pa-img-add-icon" aria-hidden="true">+</span>
+      <input type="file" class="ce-pa-upload-input" accept="image/png,image/jpeg,image/webp" data-view="${escapeHtml(viewKey)}" hidden />
+    </label>`;
 }
 
-export function renderImageGrids(st, data) {
+export function renderUploadGrids(st, data) {
+  return st.viewKeys
+    .map((vk) => {
+      const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === vk) || null;
+      return `
+    <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
+      <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
+      <div class="ce-pa-img-grid">${renderUploadTile(vk, md)}</div>
+    </div>`;
+    })
+    .join("");
+}
+
+export function renderMockCarousels(st, data) {
   const byView = st.mockupImagesByView || buildMockupImagesByView(data.mockup_images || []);
-  return st.viewKeys.map((vk) => renderViewImageCard(vk, data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === vk) || null, byView)).join("");
+  const activeColor = activeMockColor(st);
+
+  return st.viewKeys
+    .map((vk) => {
+      const mockEntries = byView?.[vk] ? Object.entries(byView[vk]) : [];
+      if (!mockEntries.length) {
+        return `
+    <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
+      <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
+      <p class="ce-hint">No Printify mocks for this view. Use refresh in the Printify viewer.</p>
+    </div>`;
+      }
+
+      const items = mockEntries
+        .map(
+          ([color, entry]) => `
+      <button type="button" class="ce-pa-mock-pick ${color === activeColor ? "ce-pa-mock-pick--active" : ""}" data-view="${escapeHtml(vk)}" data-color="${escapeHtml(color)}" title="${escapeHtml(color)}" role="listitem">
+        <img src="${escapeHtml(entry.image_url)}" alt="" />
+        <span>${escapeHtml(color)}</span>
+      </button>`
+        )
+        .join("");
+
+      return `
+    <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
+      <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
+      <div class="ce-pa-mock-carousel" role="list" aria-label="${escapeHtml(vk)} mock variants">${items}</div>
+    </div>`;
+    })
+    .join("");
+}
+
+/** @deprecated use renderUploadGrids + renderMockCarousels */
+export function renderImageGrids(st, data) {
+  return st.useMockups ? renderMockCarousels(st, data) : renderUploadGrids(st, data);
 }
 
 export function bindImageGrids(root, ctx, st, data, callbacks = {}) {

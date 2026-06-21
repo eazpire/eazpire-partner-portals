@@ -7,7 +7,7 @@ import {
   normalizeDesignTypeKey,
   loadRectsForVariantGroup,
 } from "./helpers.js";
-import { renderImageGrids, bindImageGrids } from "./image-grid.js";
+import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -136,12 +136,13 @@ function renderImagesSection(st, data) {
   return `
     <details class="ce-pa-acc">
       <summary>Print area images</summary>
-      <div class="ce-pa-acc-body">
+      <div class="ce-pa-acc-body" id="ce-pa-images-body">
         <label class="ce-pa-check">
           <input type="checkbox" id="ce-pa-use-mocks" ${st.useMockups ? "checked" : ""} />
           <span>Use mockups (hide upload grids)</span>
         </label>
-        <div class="ce-pa-img-grids ${st.useMockups ? "ce-pa-img-grids--hidden" : ""}" id="ce-pa-img-grids">${renderImageGrids(st, data)}</div>
+        <div class="ce-pa-img-upload-section ${st.useMockups ? "ce-pa-img-section--hidden" : ""}" id="ce-pa-upload-section">${renderUploadGrids(st, data)}</div>
+        <div class="ce-pa-img-mock-section ${st.useMockups ? "" : "ce-pa-img-section--hidden"}" id="ce-pa-mock-section">${renderMockCarousels(st, data)}</div>
       </div>
     </details>`;
 }
@@ -229,10 +230,22 @@ export function refreshPlacementValues(root, st) {
 }
 
 export function refreshImagesGrids(root, ctx, st, data, gridCallbacks) {
-  const grids = root.querySelector("#ce-pa-img-grids");
-  if (!grids) return;
-  grids.innerHTML = renderImageGrids(st, data);
+  const upload = root.querySelector("#ce-pa-upload-section");
+  const mock = root.querySelector("#ce-pa-mock-section");
+  if (upload) {
+    upload.innerHTML = renderUploadGrids(st, data);
+    upload.classList.toggle("ce-pa-img-section--hidden", st.useMockups);
+  }
+  if (mock) {
+    mock.innerHTML = renderMockCarousels(st, data);
+    mock.classList.toggle("ce-pa-img-section--hidden", !st.useMockups);
+  }
   bindImageGrids(root, ctx, st, data, gridCallbacks);
+}
+
+function toggleImageSections(root, st) {
+  root.querySelector("#ce-pa-upload-section")?.classList.toggle("ce-pa-img-section--hidden", st.useMockups);
+  root.querySelector("#ce-pa-mock-section")?.classList.toggle("ce-pa-img-section--hidden", !st.useMockups);
 }
 
 function bindPatternControls(root, st, onChange) {
@@ -278,13 +291,12 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     onUploaded: (...args) => imageGridCallbacks?.onUploaded?.(...args),
     onCleared: (...args) => imageGridCallbacks?.onCleared?.(...args),
     onUseMockPick: (viewKey, color) => {
-      st.useMockups = true;
       st.activeVariantGroupId =
         st.variantGroups.groups.find((g) => g.title === color)?.id || st.activeVariantGroupId;
-      const useMocks = root.querySelector("#ce-pa-use-mocks");
-      if (useMocks) useMocks.checked = true;
-      root.querySelector("#ce-pa-img-grids")?.classList.add("ce-pa-img-grids--hidden");
       refreshScopeActiveStates(root, st);
+      root.querySelectorAll(".ce-pa-mock-pick").forEach((btn) => {
+        btn.classList.toggle("ce-pa-mock-pick--active", btn.dataset.color === color);
+      });
       onChange?.();
       onPrintAreaRefresh?.();
     },
@@ -386,7 +398,12 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
 
   root.querySelector("#ce-pa-use-mocks")?.addEventListener("change", (e) => {
     st.useMockups = e.target.checked;
-    root.querySelector("#ce-pa-img-grids")?.classList.toggle("ce-pa-img-grids--hidden", st.useMockups);
+    toggleImageSections(root, st);
+    if (st.useMockups) {
+      const mockSection = root.querySelector("#ce-pa-mock-section");
+      if (mockSection) mockSection.innerHTML = renderMockCarousels(st, data);
+      bindImageGrids(root, ctx, st, data, gridCallbacks);
+    }
     onChange?.();
     onPrintAreaRefresh?.();
   });
