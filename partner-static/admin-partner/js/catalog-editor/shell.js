@@ -431,13 +431,6 @@ async function saveCurrentTab() {
   }
 }
 
-function refreshDirtyBeforeClose(ctx) {
-  if (!ctx) return;
-  if (ctx.activeTab === "provider") syncProvidersDomState(ctx);
-  const state = getCurrentTabDirtyState(ctx);
-  if (state != null) checkDirty(state);
-}
-
 let unsavedCloseResolver = null;
 
 function hideUnsavedCloseDialog() {
