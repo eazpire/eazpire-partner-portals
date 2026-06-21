@@ -1,6 +1,13 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
+import { showToast } from "/partner/shared/js/partner-shell.js";
 import { uploadPrintAreaImage, clearPrintAreaImage } from "../api.js";
-import { printAreaTemplateImageUrl, buildMockupImagesByView, pickMockUrlForView } from "./helpers.js";
+import {
+  printAreaTemplateImageUrl,
+  buildMockupImagesByView,
+  pickMockUrlForView,
+  getMockupDefaultForView,
+  canonicalPrintAreaKey,
+} from "./helpers.js";
 
 function activeMockColor(st) {
   return st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId)?.title || null;
@@ -25,7 +32,7 @@ function renderUploadTile(viewKey, md) {
 export function renderUploadGrids(st, data) {
   return st.viewKeys
     .map((vk) => {
-      const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === vk) || null;
+      const md = getMockupDefaultForView(data.mockup_defaults, vk);
       return `
     <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
       <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
@@ -74,6 +81,12 @@ export function renderImageGrids(st, data) {
   return st.useMockups ? renderMockCarousels(st, data) : renderUploadGrids(st, data);
 }
 
+function clearLocalTemplateFields(md) {
+  if (!md) return;
+  md.print_area_template_r2_key = null;
+  md.print_area_template_url = null;
+}
+
 export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
   const { onUploaded, onCleared, onUseMockPick } = callbacks;
 
@@ -82,14 +95,20 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
       const file = input.files?.[0];
       if (!file) return;
       const viewKey = input.dataset.view;
+      const dbKey = canonicalPrintAreaKey(data.mockup_defaults, viewKey);
       input.disabled = true;
       try {
-        const res = await uploadPrintAreaImage(ctx.productKey, viewKey, file);
-        const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === viewKey);
-        if (md) md.print_area_template_r2_key = res.r2_key;
+        const res = await uploadPrintAreaImage(ctx.productKey, dbKey, file);
+        const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
+        if (md) {
+          md.print_area_template_r2_key = res.r2_key;
+          md.print_area_template_url = res.image_url || null;
+        }
+        showToast("Image added", `${viewKey} print area image uploaded.`);
         onUploaded?.(viewKey, res);
       } catch (err) {
         console.error("Print area upload failed", err);
+        showToast("Upload failed", err?.message || "Could not upload image.");
       } finally {
         input.disabled = false;
         input.value = "";
@@ -102,12 +121,18 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
       e.preventDefault();
       e.stopPropagation();
       const viewKey = btn.dataset.view;
+      const dbKey = canonicalPrintAreaKey(data.mockup_defaults, viewKey);
       btn.disabled = true;
       try {
-        await clearPrintAreaImage(ctx.productKey, viewKey);
-        const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === viewKey);
-        if (md) md.print_area_template_r2_key = null;
+        const res = await clearPrintAreaImage(ctx.productKey, dbKey);
+        if (res?.ok === false) throw new Error(res.error || "clear_failed");
+        const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
+        clearLocalTemplateFields(md);
+        showToast("Image removed", `${viewKey} print area image deleted.`);
         onCleared?.(viewKey);
+      } catch (err) {
+        console.error("Print area clear failed", err);
+        showToast("Delete failed", err?.message || "Could not remove image.");
       } finally {
         btn.disabled = false;
       }
@@ -128,7 +153,7 @@ export function resolveLeftViewerImage(st, data, viewKey) {
     const fromMock = pickMockUrlForView(st.mockupImagesByView, viewKey, colorTitle);
     if (fromMock) return fromMock;
   }
-  const md = data.mockup_defaults?.find((r) => String(r.print_area_key || "").toLowerCase() === String(viewKey).toLowerCase());
+  const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
   return printAreaTemplateImageUrl(md);
 }
 

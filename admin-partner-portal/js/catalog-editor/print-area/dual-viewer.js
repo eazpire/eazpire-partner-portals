@@ -6,6 +6,7 @@ import {
   aspectRatioFromDefault,
   clampRectToStage,
   getDesignTypeSlice,
+  normalizeRectToPrintAspect,
 } from "./helpers.js";
 import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
 import { renderPatternOverlayHtml } from "./pattern-preview.js";
@@ -16,6 +17,7 @@ import {
   angleDeg,
   lockAspectForPhType,
   setOverlayAreaRect,
+  updateResizeHandleCursors,
 } from "./rect-interaction.js";
 
 function clamp(v, min, max) {
@@ -59,6 +61,13 @@ function drawRect(el, rect, active = false) {
   const angle = Number(rect.angle) || 0;
   el.style.transform = angle ? `rotate(${angle}deg)` : "";
   toggleRectHandles(el, active);
+  updateResizeHandleCursors(el, rect);
+}
+
+function stageInnerBox(stageInner) {
+  const w = stageInner?.clientWidth || 0;
+  const h = stageInner?.clientHeight || 0;
+  return w > 0 && h > 0 ? { w, h } : null;
 }
 
 function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
@@ -161,8 +170,10 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   const { onStateChange, brandAssets } = callbacks;
 
   let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
-  let aspect = aspectRatioFromDefault(md);
+  let aspect = aspectRatioFromDefault(md, data, st.activeView);
   const stageInner = root.querySelector('[data-stage-inner="left"]');
+
+  const getStageBox = () => stageInnerBox(stageInner);
   const rectRed = root.querySelector('[data-rect="red"]');
   const rectGreen = root.querySelector('[data-rect="green"]');
   const lockBtn = root.querySelector("[data-bounds-lock]");
@@ -199,7 +210,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
   const refresh = (nextSt = st, nextData = data) => {
     md = getMockupDefaultForView(nextData.mockup_defaults, nextSt.activeView);
-    aspect = aspectRatioFromDefault(md);
+    aspect = aspectRatioFromDefault(md, nextData, nextSt.activeView);
     const imgEl = root.querySelector('[data-stage-img="left"]');
     const leftImg = resolveLeftViewerImage(nextSt, nextData, nextSt.activeView);
     if (imgEl) {
@@ -210,7 +221,16 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
         imgEl.removeAttribute("src");
       }
     }
-    redraw();
+    const applyAspect = () => {
+      const box = getStageBox();
+      st.redRect = normalizeRectToPrintAspect(st.redRect, md, nextData, nextSt.activeView, box);
+      redraw();
+    };
+    if (imgEl && leftImg && !imgEl.complete) {
+      imgEl.addEventListener("load", applyAspect, { once: true });
+    } else {
+      requestAnimationFrame(applyAspect);
+    }
   };
 
   const pickLayer = (layer) => {
@@ -444,8 +464,13 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       const next = resizeRectByCorner(dragState.corner, dragState.rect, px, py, {
         lockAspect: lockAspectFlag,
         aspectRatio: aspect > 0 ? aspect : null,
+        stageBox: getStageBox(),
       });
       Object.assign(target, next);
+      updateResizeHandleCursors(
+        drag.kind === "layer" ? (drag.layer === "red" ? rectRed : rectGreen) : drag.el,
+        target
+      );
     }
   }
 
@@ -458,6 +483,12 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   };
 
   redraw();
+
+  requestAnimationFrame(() => {
+    const box = getStageBox();
+    st.redRect = normalizeRectToPrintAspect(st.redRect, md, data, st.activeView, box);
+    drawRect(rectRed, st.redRect, st.activeLayer === "red" && !st.boundsLocked);
+  });
 
   stageInner?.addEventListener("mousedown", (ev) => {
     if (ev.target.closest(".ce-pa-rect")) return;

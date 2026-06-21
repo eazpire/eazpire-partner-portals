@@ -20,9 +20,56 @@ function applyAspect(w, h, ar) {
   return { w, h: w / ar };
 }
 
+/** Map pointer in stage-normalized coords into unrotated rect-local space. */
+export function stagePointToRectLocal(px, py, rect) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const rad = (-(Number(rect.angle) || 0) * Math.PI) / 180;
+  const dx = px - cx;
+  const dy = py - cy;
+  return {
+    x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+    y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
+}
+
+/** Screen-aligned resize cursor for a corner at a given rect rotation. */
+export function resizeCursorForCorner(corner, angleDeg = 0) {
+  const cornerDeg = { nw: 225, ne: 315, sw: 135, se: 45 }[corner] ?? 45;
+  const screen = (((cornerDeg + angleDeg) % 360) + 360) % 360;
+  const bucket = Math.round(screen / 90) % 2;
+  return bucket === 0 ? "nwse-resize" : "nesw-resize";
+}
+
+export function updateResizeHandleCursors(el, rect) {
+  if (!el || !rect) return;
+  const angle = Number(rect.angle) || 0;
+  el.querySelectorAll("[data-resize]").forEach((handle) => {
+    handle.style.cursor = resizeCursorForCorner(handle.dataset.resize, angle);
+  });
+}
+
 /** Resize rect by dragging a corner; px/py are normalized 0–1 in stage. */
-export function resizeRectByCorner(corner, start, px, py, { lockAspect = false, aspectRatio = null, minSize = 0.02 } = {}) {
-  const ar = lockAspect ? (aspectRatio > 0 ? aspectRatio : start.w / Math.max(start.h, 0.001)) : null;
+export function resizeRectByCorner(
+  corner,
+  start,
+  px,
+  py,
+  { lockAspect = false, aspectRatio = null, minSize = 0.02, stageBox = null } = {}
+) {
+  let lpx = px;
+  let lpy = py;
+  const angle = Number(start.angle) || 0;
+  if (angle) {
+    const local = stagePointToRectLocal(px, py, start);
+    lpx = local.x;
+    lpy = local.y;
+  }
+
+  let ar = lockAspect ? (aspectRatio > 0 ? aspectRatio : start.w / Math.max(start.h, 0.001)) : null;
+  if (ar && stageBox?.w > 0 && stageBox?.h > 0) {
+    ar = ar * (stageBox.h / stageBox.w);
+  }
   const ax = start.x + start.w;
   const ay = start.y + start.h;
   let x = start.x;
@@ -31,24 +78,24 @@ export function resizeRectByCorner(corner, start, px, py, { lockAspect = false, 
   let h = start.h;
 
   if (corner === "se") {
-    w = clamp(px - start.x, minSize, 1 - start.x);
-    h = clamp(py - start.y, minSize, 1 - start.y);
+    w = clamp(lpx - start.x, minSize, 1 - start.x);
+    h = clamp(lpy - start.y, minSize, 1 - start.y);
     if (ar) ({ w, h } = applyAspect(w, h, ar));
   } else if (corner === "nw") {
-    w = clamp(ax - px, minSize, ax);
-    h = clamp(ay - py, minSize, ay);
+    w = clamp(ax - lpx, minSize, ax);
+    h = clamp(ay - lpy, minSize, ay);
     if (ar) ({ w, h } = applyAspect(w, h, ar));
     x = ax - w;
     y = ay - h;
   } else if (corner === "ne") {
-    w = clamp(px - start.x, minSize, 1 - start.x);
-    h = clamp(ay - py, minSize, ay);
+    w = clamp(lpx - start.x, minSize, 1 - start.x);
+    h = clamp(ay - lpy, minSize, ay);
     if (ar) ({ w, h } = applyAspect(w, h, ar));
     y = ay - h;
     x = start.x;
   } else if (corner === "sw") {
-    w = clamp(ax - px, minSize, ax);
-    h = clamp(py - start.y, minSize, 1 - start.y);
+    w = clamp(ax - lpx, minSize, ax);
+    h = clamp(lpy - start.y, minSize, 1 - start.y);
     if (ar) ({ w, h } = applyAspect(w, h, ar));
     x = ax - w;
     y = start.y;

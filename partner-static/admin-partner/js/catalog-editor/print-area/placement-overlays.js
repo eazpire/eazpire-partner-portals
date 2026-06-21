@@ -46,7 +46,7 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
   };
   const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
   const md = getMockupDefaultForView(data?.mockup_defaults, st.activeView);
-  const aspect = aspectRatioFromDefault(md);
+  const aspect = aspectRatioFromDefault(md, data, st.activeView);
   const red = st.redRect || defaultCenteredRect(aspect, 0.5);
   const saved = savedAreasForView(slice, st.activeView);
 

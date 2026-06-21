@@ -32,17 +32,12 @@ export function placeholdersFromFirstVariant(variants) {
 }
 
 export function mergeCatalogAndDbPrintDimensions(ph, variantPrintAreas, position) {
-  const pk = String(position || "")
-    .trim()
-    .toLowerCase();
   let w0 = null;
   let h0 = null;
   if (Array.isArray(variantPrintAreas)) {
+    const pkNorm = normalizePatPositionKey(position);
     for (const r of variantPrintAreas) {
-      const rpk = String(r?.print_area_key || "")
-        .trim()
-        .toLowerCase();
-      if (rpk !== pk) continue;
+      if (normalizePatPositionKey(r?.print_area_key) !== pkNorm) continue;
       const rw = Number(r.printify_print_area_width);
       const rh = Number(r.printify_print_area_height);
       if (rw > 0 && rh > 0) {

@@ -3827,22 +3827,18 @@ body.catalog-editor-open #partner-toast {
 .ce-pa-resize-handle--nw {
   top: -6px;
   left: -6px;
-  cursor: nwse-resize;
 }
 .ce-pa-resize-handle--ne {
   top: -6px;
   right: -6px;
-  cursor: nesw-resize;
 }
 .ce-pa-resize-handle--sw {
   bottom: -6px;
   left: -6px;
-  cursor: nesw-resize;
 }
 .ce-pa-resize-handle--se {
   bottom: -6px;
   right: -6px;
-  cursor: nwse-resize;
 }
 .ce-pa-fs-modal {
   position: fixed;

@@ -1,4 +1,4 @@
-import { DESIGN_TYPES_ALL, PH_TYPES } from "../provider-print-technical.js";
+import { DESIGN_TYPES_ALL, PH_TYPES, normalizePatPositionKey } from "../provider-print-technical.js";
 import { buildVariantGroupList } from "../utils/variant-matrix.js";
 
 export { DESIGN_TYPES_ALL, PH_TYPES };
@@ -106,9 +106,47 @@ export function listViewKeys(mockupDefaults, configSlice) {
   return [...keys].sort();
 }
 
+function printAreaKeyCandidates(viewKey) {
+  const vk = String(viewKey || "front").trim().toLowerCase();
+  const norm = normalizePatPositionKey(vk);
+  return [...new Set([vk, vk.replace(/-/g, "_"), vk.replace(/_/g, "-"), norm])];
+}
+
 export function getMockupDefaultForView(mockupDefaults, viewKey) {
-  const vk = String(viewKey || "front").toLowerCase();
-  return (mockupDefaults || []).find((r) => String(r.print_area_key || "").toLowerCase() === vk) || mockupDefaults?.[0] || null;
+  const rows = mockupDefaults || [];
+  for (const candidate of printAreaKeyCandidates(viewKey)) {
+    const row = rows.find((r) => String(r.print_area_key || "").toLowerCase() === candidate);
+    if (row) return row;
+  }
+  const norm = normalizePatPositionKey(viewKey);
+  return rows.find((r) => normalizePatPositionKey(r.print_area_key) === norm) || null;
+}
+
+/** DB print_area_key for API writes (upload/clear/save). */
+export function canonicalPrintAreaKey(mockupDefaults, viewKey) {
+  const row = getMockupDefaultForView(mockupDefaults, viewKey);
+  if (row?.print_area_key) return String(row.print_area_key).trim().toLowerCase();
+  return normalizePatPositionKey(viewKey) || String(viewKey || "front").trim().toLowerCase();
+}
+
+export function mergePrintDimensionsForView(data, viewKey) {
+  const md = getMockupDefaultForView(data?.mockup_defaults, viewKey);
+  let w = Number(md?.printify_print_area_width);
+  let h = Number(md?.printify_print_area_height);
+  if (!(w > 0 && h > 0)) {
+    const norm = normalizePatPositionKey(viewKey);
+    for (const row of data?.variant_print_areas || []) {
+      if (normalizePatPositionKey(row?.print_area_key) !== norm) continue;
+      const rw = Number(row.printify_print_area_width);
+      const rh = Number(row.printify_print_area_height);
+      if (rw > 0 && rh > 0) {
+        w = rw;
+        h = rh;
+        break;
+      }
+    }
+  }
+  return { w, h, md };
 }
 
 export function mockupPublicBase() {
@@ -181,9 +219,9 @@ export function pickMockUrlForView(byView, viewKey, colorHint = null) {
 }
 
 export function findVariantPrintAreaRow(vpas, viewKey, variantId) {
-  const vk = String(viewKey || "front").toLowerCase();
+  const norm = normalizePatPositionKey(viewKey);
   return (vpas || []).find(
-    (r) => String(r.print_area_key || "").toLowerCase() === vk && Number(r.variant_id) === Number(variantId)
+    (r) => normalizePatPositionKey(r?.print_area_key) === norm && Number(r.variant_id) === Number(variantId)
   );
 }
 
@@ -196,7 +234,7 @@ export function loadRectsForVariantGroup(st, data, groupId) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
 
   if (vpa?.print_area_rect_json) {
-    st.redRect = normalizeRectToPrintAspect(vpa.print_area_rect_json, md);
+    st.redRect = normalizeRectToPrintAspect(vpa.print_area_rect_json, md, data, st.activeView);
   }
   if (vpa?.mockup_print_area_rect_json) {
     st.greenRect = clampRectToStage(parseRect(vpa.mockup_print_area_rect_json));
@@ -221,11 +259,22 @@ export function parseRect(raw) {
   return { x: 0.2, y: 0.2, w: 0.45, h: 0.45, angle: 0 };
 }
 
-export function aspectRatioFromDefault(row) {
+/** Print width ÷ height (Provider tab: Width × Height in px). */
+export function aspectRatioFromDefault(row, data = null, viewKey = null) {
+  if (data && viewKey) {
+    const merged = mergePrintDimensionsForView(data, viewKey);
+    if (merged.w > 0 && merged.h > 0) return merged.w / merged.h;
+  }
   const w = Number(row?.printify_print_area_width);
   const h = Number(row?.printify_print_area_height);
   if (w > 0 && h > 0) return w / h;
   return null;
+}
+
+/** Normalized w/h so pixel ratio on stage-inner matches print aspect. */
+export function normalizedDisplayAspect(printAspect, stageW, stageH) {
+  if (!(printAspect > 0) || !(stageW > 0) || !(stageH > 0)) return printAspect;
+  return printAspect * (stageH / stageW);
 }
 
 export function clampRectToStage(rect) {
@@ -237,33 +286,35 @@ export function clampRectToStage(rect) {
   return r;
 }
 
-export function fitRectWithAspect(baseRect, aspect) {
+export function fitRectWithAspect(baseRect, aspect, stageBox = null) {
   if (!(aspect > 0)) return clampRectToStage(baseRect);
+  const displayAspect = normalizedDisplayAspect(aspect, stageBox?.w, stageBox?.h) ?? aspect;
   const cx = baseRect.x + baseRect.w / 2;
   const cy = baseRect.y + baseRect.h / 2;
   let w = baseRect.w;
   let h = baseRect.h;
-  if (w / h > aspect) w = h * aspect;
-  else h = w / aspect;
+  if (w / h > displayAspect) w = h * displayAspect;
+  else h = w / displayAspect;
   let x = cx - w / 2;
   let y = cy - h / 2;
   return clampRectToStage({ ...baseRect, x, y, w, h });
 }
 
 /** Centered rect at `scale` fraction of stage (default 50%), preserving Printify aspect ratio. */
-export function defaultCenteredRect(aspect, scale = 0.5) {
+export function defaultCenteredRect(aspect, scale = 0.5, stageBox = null) {
   const s = Math.max(0.02, Math.min(1, scale));
   if (!(aspect > 0)) {
     return clampRectToStage({ x: (1 - s) / 2, y: (1 - s) / 2, w: s, h: s, angle: 0 });
   }
+  const displayAspect = normalizedDisplayAspect(aspect, stageBox?.w, stageBox?.h) ?? aspect;
   let w;
   let h;
-  if (aspect >= 1) {
+  if (displayAspect >= 1) {
     w = s;
-    h = s / aspect;
+    h = s / displayAspect;
   } else {
     h = s;
-    w = s * aspect;
+    w = s * displayAspect;
   }
   return clampRectToStage({ x: (1 - w) / 2, y: (1 - h) / 2, w, h, angle: 0 });
 }
@@ -330,17 +381,17 @@ export function hasSavedGreenRect(slice, viewKey) {
   });
 }
 
-export function normalizeRectToPrintAspect(rect, md) {
+export function normalizeRectToPrintAspect(rect, md, data = null, viewKey = null, stageBox = null) {
   const parsed = parseRect(rect);
-  const aspect = aspectRatioFromDefault(md);
+  const aspect = aspectRatioFromDefault(md, data, viewKey);
   if (!(aspect > 0)) return clampRectToStage(parsed);
-  return fitRectWithAspect(parsed, aspect);
+  return fitRectWithAspect(parsed, aspect, stageBox);
 }
 
 function resolveRedRectForView(data, viewKey, md) {
-  const aspect = aspectRatioFromDefault(md);
+  const aspect = aspectRatioFromDefault(md, data, viewKey);
   if (hasDbPrintAreaRect(md)) {
-    return normalizeRectToPrintAspect(md.print_area_rect_json, md);
+    return normalizeRectToPrintAspect(md.print_area_rect_json, md, data, viewKey);
   }
   return defaultCenteredRect(aspect, 0.5);
 }
