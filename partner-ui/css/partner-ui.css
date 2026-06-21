@@ -3848,12 +3848,12 @@ body.catalog-editor-open #partner-toast {
   background: rgba(15, 23, 42, 0.55);
   display: grid;
   place-items: center;
-  padding: 8px;
+  padding: 4px;
 }
 .ce-pa-fs-card {
-  width: min(96vw, 1200px);
-  height: min(calc(100vh - 16px), 920px);
-  max-height: calc(100vh - 16px);
+  width: min(98vw, 1400px);
+  height: calc(100vh - 8px);
+  max-height: calc(100vh - 8px);
   display: flex;
   flex-direction: column;
   border-radius: 16px;
@@ -3867,7 +3867,7 @@ body.catalog-editor-open #partner-toast {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -3876,41 +3876,61 @@ body.catalog-editor-open #partner-toast {
   font-size: 0.95rem;
 }
 .ce-pa-fs-body {
-  padding: 8px;
+  padding: 2px;
   overflow: hidden;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
 }
 .ce-pa-fs-body .ce-pa-viewer {
+  flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
+  max-width: none;
   height: 100%;
   max-height: 100%;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
 }
 .ce-pa-fs-body .ce-pa-viewer-head {
-  flex: 0 0 auto;
+  display: none;
 }
 .ce-pa-fs-body .ce-pa-stage {
+  flex: 1 1 auto;
   min-height: 0;
   height: 100%;
   width: 100%;
-  padding: 4px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
 }
 .ce-pa-fs-body .ce-pa-stage-inner {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
+  vertical-align: middle;
 }
 .ce-pa-fs-body .ce-pa-stage-img {
-  max-width: 100%;
-  max-height: calc(100vh - 120px);
+  display: block;
+  max-width: 100cqw;
+  max-height: 100cqh;
   width: auto;
   height: auto;
   object-fit: contain;
+  object-position: center center;
 }
 .ce-pa-brand-grid {
   display: flex;

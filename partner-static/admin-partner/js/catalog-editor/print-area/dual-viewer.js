@@ -191,7 +191,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     bindOverlayInteractions();
   };
 
-  const redraw = () => {
+  const redrawStageRects = () => {
     const showGreen = shouldShowGreenRect(ctx, st, data);
     drawRect(rectRed, st.redRect, st.activeLayer === "red" && !st.boundsLocked);
     if (rectGreen) {
@@ -199,12 +199,28 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       if (showGreen) drawRect(rectGreen, st.greenRect, st.activeLayer === "green");
       else toggleRectHandles(rectGreen, false);
     }
-    if (!showGreen && st.activeLayer === "green") st.activeLayer = "red";
     rectRed?.classList.toggle("is-locked", st.boundsLocked);
     rectGreen?.classList.toggle("is-active", st.activeLayer === "green");
     rectRed?.classList.toggle("is-active", st.activeLayer === "red" && !st.boundsLocked);
     if (lockBtn) lockBtn.textContent = st.boundsLocked ? "🔒" : "🔓";
     root.querySelector("#ce-pa-stage-left, #ce-pa-fs-stage")?.setAttribute("data-layer", st.activeLayer);
+
+    const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+    const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
+    stageInner?.querySelectorAll(".ce-pa-rect--overlay").forEach((el) => {
+      const phType = el.dataset.phType;
+      const phIndex = Number(el.dataset.phIndex) || 0;
+      const ov = overlays.find((o) => o.type === phType && o.index === phIndex);
+      if (!ov) return;
+      const rect = { ...(ov.rect || {}) };
+      overlayRectMap.set(el, rect);
+      drawRect(el, rect, el === activeOverlayEl);
+    });
+  };
+
+  const redraw = () => {
+    if (!shouldShowGreenRect(ctx, st, data) && st.activeLayer === "green") st.activeLayer = "red";
+    redrawStageRects();
     const patternLayer = root.querySelector("[data-pattern-layer]");
     if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
     refreshOverlays();
@@ -257,6 +273,14 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   const pickOverlay = (el) => {
     activeOverlayEl = el;
     st.activeLayer = "overlay";
+
+    const phType = el.dataset.phType;
+    const phIndex = Number(el.dataset.phIndex) || 0;
+    const snappedRect = { ...st.redRect };
+    overlayRectMap.set(el, snappedRect);
+    setOverlayAreaRect(st, st.activeView, phType, phIndex, snappedRect);
+    st.mockPreviewStale = true;
+
     stageInner?.querySelectorAll(".ce-pa-rect--overlay").forEach((node) => {
       const active = node === el;
       node.classList.toggle("is-active", active);
@@ -268,6 +292,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     toggleRectHandles(rectRed, false);
     toggleRectHandles(rectGreen, false);
     root.querySelector("#ce-pa-stage-left, #ce-pa-fs-stage")?.setAttribute("data-layer", "overlay");
+    onStateChange?.();
   };
 
   const stagePoint = (ev) => {
@@ -327,14 +352,16 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
       bindResizeHandles(el, (ev, corner) => {
         pickOverlay(el);
-        startOverlayResize(ev, el, phType, phIndex, corner, rect);
+        const liveRect = overlayRectMap.get(el);
+        if (liveRect) startOverlayResize(ev, el, phType, phIndex, corner, liveRect);
       });
 
       el.querySelectorAll(".ce-pa-rotate-handle").forEach((handle) => {
         handle.addEventListener("mousedown", (ev) => {
           ev.stopPropagation();
           pickOverlay(el);
-          startOverlayRotate(ev, el, phType, phIndex, rect);
+          const liveRect = overlayRectMap.get(el);
+          if (liveRect) startOverlayRotate(ev, el, phType, phIndex, liveRect);
           ev.preventDefault();
         });
       });
@@ -342,7 +369,8 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       el.addEventListener("mousedown", (ev) => {
         if (ev.target.closest(".ce-pa-rotate-handle, .ce-pa-resize-handle")) return;
         pickOverlay(el);
-        startOverlayMove(ev, el, phType, phIndex, rect);
+        const liveRect = overlayRectMap.get(el);
+        if (liveRect) startOverlayMove(ev, el, phType, phIndex, liveRect);
         ev.stopPropagation();
       });
     });
