@@ -63,10 +63,18 @@ function applyAspect(w, h, ar) {
 
 /** Screen-aligned resize cursor for a corner at a given rect rotation. */
 export function resizeCursorForCorner(corner, angleDeg = 0) {
-  const cornerDeg = { nw: 225, ne: 315, sw: 135, se: 45 }[corner] ?? 45;
-  const screen = (((cornerDeg + angleDeg) % 360) + 360) % 360;
-  const bucket = Math.round(screen / 90) % 2;
-  return bucket === 0 ? "nwse-resize" : "nesw-resize";
+  const spec = CORNER_LOCAL[corner];
+  const opp = CORNER_LOCAL[OPPOSITE_CORNER[corner]];
+  if (!spec || !opp) return "nwse-resize";
+
+  const lx = spec.lx - opp.lx;
+  const ly = spec.ly - opp.ly;
+  const rad = (angleDeg * Math.PI) / 180;
+  const sx = lx * Math.cos(rad) - ly * Math.sin(rad);
+  const sy = lx * Math.sin(rad) + ly * Math.cos(rad);
+  const norm = ((Math.atan2(sy, sx) * 180) / Math.PI + 360) % 360;
+  const mod180 = norm % 180;
+  return mod180 < 90 ? "nwse-resize" : "nesw-resize";
 }
 
 export function updateResizeHandleCursors(el, rect) {
