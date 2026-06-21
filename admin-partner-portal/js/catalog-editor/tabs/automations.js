@@ -1,23 +1,20 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { saveAutomations } from "../api.js";
+import { getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
 
 export function renderAutomationsTab(ctx) {
-  const versions = ctx.bundle.versions || [];
-  const version = versions.find((v) => v.id === ctx.selectedVersionId) || versions[0];
+  const versions = getVersionsForProvider(ctx, ctx.selectedPrintProviderId);
+  const version =
+    versions.find((v) => String(v.id) === String(ctx.selectedVersionId)) || versions[0] || null;
   const auto = version?.auto_publish_config || {};
-  const versionOptions = versions
-    .map(
-      (v) =>
-        `<option value="${escapeHtml(v.id)}" ${v.id === version?.id ? "selected" : ""}>${escapeHtml(v.display_name)}</option>`
-    )
-    .join("");
+
   return `
     <div class="ce-tab-panel">
       <div class="ce-automation-layout">
         <aside class="ce-automation-side">
-          <div class="field"><label>Product version</label>
-            <select class="input" id="ce-auto-version">${versionOptions}</select></div>
-          <div class="ce-hint">Marketplace sections</div>
+          <div class="ce-hint">Marketplace sections${
+            version ? ` · ${escapeHtml(versionDisplayName(version, versions.indexOf(version)))}` : ""
+          }</div>
           <div class="ce-check-list">
             <label class="ce-check-row"><input type="checkbox" id="ce-auto-publish" ${
               auto.auto_publish_enabled ? "checked" : ""
@@ -41,15 +38,12 @@ export function renderAutomationsTab(ctx) {
     </div>`;
 }
 
-export function bindAutomationsTab(ctx, root) {
-  root.querySelector("#ce-auto-version")?.addEventListener("change", (e) => {
-    ctx.selectedVersionId = e.target.value;
-    ctx.reloadTab();
-  });
+export function bindAutomationsTab() {
+  /* version selection lives in editor subnav */
 }
 
 export async function saveAutomationsTab(ctx) {
-  const versionId = document.getElementById("ce-auto-version")?.value || ctx.selectedVersionId;
+  const versionId = ctx.selectedVersionId;
   if (!versionId) return;
   let automation_social = null;
   try {

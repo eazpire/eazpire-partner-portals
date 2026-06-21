@@ -24,6 +24,15 @@ import {
   hasDirtySnapshot,
   checkDirty,
 } from "./editor-dirty.js";
+import {
+  tabUsesEditorSubnav,
+  ensureEditorSelections,
+  getSubnavVisibility,
+  providerLabel,
+  renderVersionPills,
+  isSubnavDrawerCollapsed,
+  setSubnavDrawerCollapsed,
+} from "./editor-subnav.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
@@ -128,10 +137,21 @@ function ensureOverlay() {
           </button>
         </aside>
         <div class="catalog-editor-main">
-          <nav class="catalog-editor-subnav" id="ce-subnav" hidden aria-label="Print providers">
-            <span class="catalog-editor-subnav-label">Print provider</span>
-            <div class="ce-provider-pills" id="ce-subnav-pills"></div>
-          </nav>
+          <div class="ce-subnav-stack" id="ce-subnav-stack" hidden>
+            <button type="button" class="ce-subnav-drawer-toggle" id="ce-subnav-drawer-toggle" aria-expanded="true" aria-controls="ce-subnav-drawer-body" aria-label="Expand or collapse provider and version bars">
+              <span class="ce-subnav-drawer-icon" aria-hidden="true">▴</span>
+            </button>
+            <div class="ce-subnav-drawer-body" id="ce-subnav-drawer-body">
+              <nav class="catalog-editor-subnav ce-subnav-row" id="ce-subnav-providers" hidden aria-label="Print providers">
+                <span class="catalog-editor-subnav-label">Print provider</span>
+                <div class="ce-provider-pills" id="ce-subnav-pills"></div>
+              </nav>
+              <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--versions" id="ce-subnav-versions" hidden aria-label="Product versions">
+                <span class="catalog-editor-subnav-label">Versions</span>
+                <div class="ce-version-pills" id="ce-subnav-version-pills" role="tablist"></div>
+              </nav>
+            </div>
+          </div>
           <main class="catalog-editor-body" id="ce-body"></main>
           <footer class="catalog-editor-foot">
             <div class="catalog-editor-foot-actions">
@@ -159,6 +179,10 @@ function ensureOverlay() {
   overlayEl.querySelector("#ce-save").onclick = () => saveCurrentTab();
   overlayEl.querySelector("#ce-mirror").onclick = () => runMirror();
   overlayEl.querySelector("#ce-sidebar-toggle").onclick = toggleEditorSidebar;
+  overlayEl.querySelector("#ce-subnav-drawer-toggle")?.addEventListener("click", () => {
+    setSubnavDrawerCollapsed(!isSubnavDrawerCollapsed());
+    applySubnavDrawerState();
+  });
   dirtyUnsub = registerDirtyListener((dirty) => updateSaveButtonState(dirty));
   overlayEl.addEventListener("click", (e) => {
     if (e.target === overlayEl) void requestCloseProductEditor();
@@ -180,49 +204,81 @@ function ensureOverlay() {
   return overlayEl;
 }
 
-function activeProviderIds(ctx) {
-  return (ctx.bundle.active_providers || []).map((r) => String(r.print_provider_id));
+function applySubnavDrawerState() {
+  const stack = overlayEl?.querySelector("#ce-subnav-stack");
+  const toggle = overlayEl?.querySelector("#ce-subnav-drawer-toggle");
+  const icon = toggle?.querySelector(".ce-subnav-drawer-icon");
+  if (!stack || stack.hidden) return;
+  const collapsed = isSubnavDrawerCollapsed();
+  stack.classList.toggle("ce-subnav-stack--collapsed", collapsed);
+  if (toggle) toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (icon) icon.textContent = collapsed ? "▾" : "▴";
 }
 
 function renderSubnav(ctx) {
-  const tab = TABS.find((t) => t.id === ctx.activeTab);
-  const subnav = overlayEl.querySelector("#ce-subnav");
-  if (!tab?.needsProvider) {
-    subnav.hidden = true;
-    const pills = subnav.querySelector("#ce-subnav-pills");
-    if (pills) pills.innerHTML = "";
+  const stack = overlayEl.querySelector("#ce-subnav-stack");
+  const providerRow = overlayEl.querySelector("#ce-subnav-providers");
+  const versionRow = overlayEl.querySelector("#ce-subnav-versions");
+  const providerPills = overlayEl.querySelector("#ce-subnav-pills");
+  const versionPills = overlayEl.querySelector("#ce-subnav-version-pills");
+
+  if (!tabUsesEditorSubnav(ctx.activeTab)) {
+    stack.hidden = true;
+    if (providerPills) providerPills.innerHTML = "";
+    if (versionPills) versionPills.innerHTML = "";
     return;
   }
-  const ids = activeProviderIds(ctx);
-  if (!ids.length) {
-    subnav.hidden = true;
+
+  ensureEditorSelections(ctx);
+  const { showStack, showProviders, showVersions, providerIds, versions } = getSubnavVisibility(ctx);
+
+  if (!showStack) {
+    stack.hidden = true;
+    if (providerPills) providerPills.innerHTML = "";
+    if (versionPills) versionPills.innerHTML = "";
     return;
   }
-  if (!ctx.selectedPrintProviderId || !ids.includes(String(ctx.selectedPrintProviderId))) {
-    ctx.selectedPrintProviderId = ids[0];
+
+  stack.hidden = false;
+  providerRow.hidden = !showProviders;
+  versionRow.hidden = !showVersions;
+  applySubnavDrawerState();
+
+  if (showProviders && providerPills) {
+    providerPills.innerHTML = providerIds
+      .map((pid) => {
+        const label = providerLabel(ctx, pid);
+        return `<button type="button" class="ce-provider-pill ${
+          String(ctx.selectedPrintProviderId) === pid ? "active" : ""
+        }" data-pid="${escapeHtml(pid)}">${escapeHtml(label)}</button>`;
+      })
+      .join("");
+    providerPills.querySelectorAll(".ce-provider-pill").forEach((btn) => {
+      btn.onclick = () => {
+        ctx.selectedPrintProviderId = btn.dataset.pid;
+        ensureEditorSelections(ctx);
+        renderSubnav(ctx);
+        loadActiveTab(ctx);
+      };
+    });
+  } else if (providerPills) {
+    providerPills.innerHTML = "";
   }
-  subnav.hidden = false;
-  const pills = subnav.querySelector("#ce-subnav-pills");
-  if (!pills) return;
-  pills.innerHTML = ids
-    .map((pid) => {
-      const fp = (ctx.bundle.providers || []).find((p) => String(p.external_provider_id) === pid);
-      const label = fp?.name || `Provider ${pid}`;
-      return `<button type="button" class="ce-provider-pill ${String(ctx.selectedPrintProviderId) === pid ? "active" : ""}" data-pid="${escapeHtml(pid)}">${escapeHtml(label)}</button>`;
-    })
-    .join("");
-  pills.querySelectorAll(".ce-provider-pill").forEach((btn) => {
-    btn.onclick = () => {
-      ctx.selectedPrintProviderId = btn.dataset.pid;
-      const providerVersions = (ctx.bundle?.versions || []).filter(
-        (v) => String(v.external_provider_id) === String(btn.dataset.pid)
-      );
-      const first = providerVersions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))[0];
-      ctx.selectedVersionId = first?.id || null;
-      renderSubnav(ctx);
-      loadActiveTab(ctx);
-    };
-  });
+
+  if (showVersions && versionPills) {
+    versionPills.innerHTML = renderVersionPills(versions, ctx.selectedVersionId);
+    versionPills.querySelectorAll(".ce-version-pill").forEach((btn) => {
+      btn.onclick = () => {
+        const nextId = btn.dataset.versionId;
+        if (!nextId || String(nextId) === String(ctx.selectedVersionId)) return;
+        ctx.selectedVersionId = nextId;
+        renderSubnav(ctx);
+        loadActiveTab(ctx);
+      };
+    });
+  } else if (versionPills) {
+    versionPills.innerHTML = "";
+  }
 }
 
 function renderTabs(ctx) {
@@ -246,6 +302,7 @@ function renderTabs(ctx) {
 
 async function loadActiveTab(ctx) {
   window.__catalogEditorState = ctx;
+  ensureEditorSelections(ctx);
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;
   try {

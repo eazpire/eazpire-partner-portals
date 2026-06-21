@@ -1,21 +1,23 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchPublishedBundle, deletePublished } from "../api.js";
+import { getSubnavVisibility, providerLabel, getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
 
 export async function loadProductsTab(ctx) {
   const data = await fetchPublishedBundle(ctx.productKey);
   ctx.productsData = data;
   const allRows = data.published || [];
-  const providerFilter = ctx.productsFilterProvider || "all";
   const visibilityFilter = ctx.productsFilterVisibility || "all";
-  const versionFilter = ctx.productsFilterVersion || "all";
+  const { showProviders, showVersions } = getSubnavVisibility(ctx);
 
   const rows = allRows
     .filter((row) => {
       const providerOk =
-        providerFilter === "all" ||
-        String(row.print_provider_id || row.provider_id || "") === String(providerFilter);
+        !showProviders ||
+        String(row.print_provider_id || row.provider_id || "") === String(ctx.selectedPrintProviderId);
       const visOk = visibilityFilter === "all" || String(row.visibility || "") === visibilityFilter;
-      const versionOk = versionFilter === "all" || String(row.version_id || row.product_version_id || "") === versionFilter;
+      const versionOk =
+        !showVersions ||
+        String(row.version_id || row.product_version_id || "") === String(ctx.selectedVersionId);
       return providerOk && visOk && versionOk;
     })
     .slice(0, 100)
@@ -35,30 +37,24 @@ export async function loadProductsTab(ctx) {
     )
     .join("");
 
-  const providerIds = [...new Set(allRows.map((r) => String(r.print_provider_id || r.provider_id || "")).filter(Boolean))];
-  const providerOptions = [
-    `<option value="all">All providers</option>`,
-    ...providerIds.map(
-      (v) =>
-        `<option value="${escapeHtml(v)}" ${providerFilter === v ? "selected" : ""}>Provider ${escapeHtml(v)}</option>`
-    ),
-  ].join("");
-  const versionIds = [...new Set(allRows.map((r) => String(r.version_id || r.product_version_id || "")).filter(Boolean))];
-  const versionOptions = [
-    `<option value="all">All versions</option>`,
-    ...versionIds.map(
-      (v) =>
-        `<option value="${escapeHtml(v)}" ${versionFilter === v ? "selected" : ""}>Version ${escapeHtml(v)}</option>`
-    ),
-  ].join("");
+  const filterHint = [];
+  if (showProviders && ctx.selectedPrintProviderId) {
+    filterHint.push(providerLabel(ctx, ctx.selectedPrintProviderId));
+  }
+  if (showVersions && ctx.selectedVersionId) {
+    const versions = getVersionsForProvider(ctx, ctx.selectedPrintProviderId);
+    const v = versions.find((x) => String(x.id) === String(ctx.selectedVersionId));
+    if (v) filterHint.push(versionDisplayName(v, versions.indexOf(v)));
+  }
+  const filterLine = filterHint.length
+    ? `Filtered: ${escapeHtml(filterHint.join(" · "))}`
+    : "Showing all published listings";
 
   return `
     <div class="ce-tab-panel">
       <h3 class="ce-section-title">Published listings (${(data.published || []).length})</h3>
-      <p class="ce-hint">Data from creator DB · ${(data.versions || []).length} product version(s) in master.</p>
+      <p class="ce-hint">${filterLine} · ${(data.versions || []).length} product version(s) in master.</p>
       <div class="ce-inline-actions">
-        <select class="input input-sm" id="ce-products-provider-filter">${providerOptions}</select>
-        <select class="input input-sm" id="ce-products-version-filter">${versionOptions}</select>
         <select class="input input-sm" id="ce-products-visibility-filter">
           <option value="all" ${visibilityFilter === "all" ? "selected" : ""}>All visibility</option>
           <option value="public" ${visibilityFilter === "public" ? "selected" : ""}>Public</option>
@@ -71,14 +67,6 @@ export async function loadProductsTab(ctx) {
 }
 
 export function bindProductsTab(ctx, root) {
-  root.querySelector("#ce-products-provider-filter")?.addEventListener("change", (e) => {
-    ctx.productsFilterProvider = e.target.value;
-    ctx.reloadTab();
-  });
-  root.querySelector("#ce-products-version-filter")?.addEventListener("change", (e) => {
-    ctx.productsFilterVersion = e.target.value;
-    ctx.reloadTab();
-  });
   root.querySelector("#ce-products-visibility-filter")?.addEventListener("change", (e) => {
     ctx.productsFilterVisibility = e.target.value;
     ctx.reloadTab();

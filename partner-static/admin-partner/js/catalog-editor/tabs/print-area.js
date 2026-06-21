@@ -9,55 +9,7 @@ import { mountPrintAreaCanvas } from "../print-area-canvas.js";
 
 const DESIGN_TYPES = ["classic", "backprint", "pattern", "photo"];
 
-function versionsForProvider(ctx, sourceVersions) {
-  const pid = String(ctx.selectedPrintProviderId || "");
-  return (sourceVersions || ctx.bundle?.versions || [])
-    .filter((v) => String(v.external_provider_id) === pid)
-    .slice()
-    .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
-}
-
-function ensureSelectedVersionForProvider(ctx, providerVersions) {
-  const versions = versionsForProvider(ctx, providerVersions);
-  if (!versions.length) {
-    ctx.selectedVersionId = null;
-    return null;
-  }
-  const match = versions.find((v) => String(v.id) === String(ctx.selectedVersionId));
-  if (match) return match.id;
-  ctx.selectedVersionId = versions[0].id;
-  return versions[0].id;
-}
-
-function renderVersionSubnav(versions, selectedVersionId) {
-  if (versions.length <= 1) return "";
-  const tabs = versions
-    .map((v, idx) => {
-      const isStd = idx === 0;
-      const name = v.display_name || (isStd ? "Standard" : `Version ${idx + 1}`);
-      const active = String(v.id) === String(selectedVersionId) ? " active" : "";
-      const badge = isStd ? `<span class="ce-prov-ver-badge">Standard</span>` : "";
-      return `<button type="button" class="ce-pa-ver-tab ce-prov-ver-tab${active}" data-version-id="${escapeHtml(
-        String(v.id)
-      )}" role="tab" aria-selected="${active ? "true" : "false"}">${badge}<span class="ce-pa-ver-label">${escapeHtml(
-        name
-      )}</span></button>`;
-    })
-    .join("");
-  return `
-    <div class="ce-pa-version-subnav">
-      <div class="ce-pa-version-subnav-head">
-        <span class="ce-pa-version-subnav-title">Versions</span>
-        <span class="ce-hint ce-pa-version-subnav-hint">Configure print area per version</span>
-      </div>
-      <div class="ce-pa-version-tabs ce-prov-version-tabs" role="tablist">${tabs}</div>
-    </div>`;
-}
-
 export async function loadPrintAreaTab(ctx) {
-  const providerVersions = versionsForProvider(ctx, ctx.bundle?.versions);
-  ensureSelectedVersionForProvider(ctx, providerVersions);
-
   const data = await fetchPrintAreaBundle(
     ctx.productKey,
     ctx.selectedPrintProviderId,
@@ -67,7 +19,6 @@ export async function loadPrintAreaTab(ctx) {
   const version = data.version;
   const studioJson = JSON.stringify(version?.studio_config || {}, null, 2);
   const qrJson = JSON.stringify(version?.qr_logo_snapshot || {}, null, 2);
-  const versionSubnav = renderVersionSubnav(providerVersions, ctx.selectedVersionId);
 
   const designType = ctx.selectedDesignType || "classic";
   const imageUrl = data.mockup_defaults?.[0]?.template_r2_key
@@ -76,7 +27,6 @@ export async function loadPrintAreaTab(ctx) {
 
   return `
     <div class="ce-tab-panel">
-      ${versionSubnav}
       <div class="ce-inline-actions">
         ${DESIGN_TYPES.map(
           (t) =>
@@ -108,14 +58,6 @@ export async function loadPrintAreaTab(ctx) {
 }
 
 export function bindPrintAreaTab(ctx, root) {
-  root.querySelectorAll(".ce-pa-ver-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const nextId = btn.dataset.versionId;
-      if (!nextId || String(nextId) === String(ctx.selectedVersionId)) return;
-      ctx.selectedVersionId = nextId;
-      ctx.reloadTab();
-    });
-  });
   root.querySelectorAll(".ce-pa-design-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       ctx.selectedDesignType = btn.dataset.designType;

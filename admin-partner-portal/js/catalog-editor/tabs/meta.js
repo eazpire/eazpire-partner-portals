@@ -1,5 +1,6 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { saveMeta } from "../api.js";
+import { getSubnavVisibility, providerLabel, getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
 
 const COMMON_COUNTRIES = ["DE", "FR", "IT", "ES", "NL", "BE", "AT", "PL", "CZ", "US", "CA", "GB", "UK"];
 
@@ -10,6 +11,19 @@ export function renderMetaTab(ctx) {
       ctx.bundle.active_providers?.[0]?.print_provider_id ||
       ctx.bundle.publish_profiles?.[0]?.print_provider_id
   );
+  const { showProviders, showVersions } = getSubnavVisibility(ctx);
+  const versions = getVersionsForProvider(ctx, providerId);
+  const version =
+    versions.find((v) => String(v.id) === String(ctx.selectedVersionId)) || versions[0] || null;
+  const selectionHint = [];
+  if (showProviders && ctx.selectedPrintProviderId) {
+    selectionHint.push(providerLabel(ctx, ctx.selectedPrintProviderId));
+  } else if (providerId) {
+    selectionHint.push(`Provider ${providerId}`);
+  }
+  if (showVersions && version) {
+    selectionHint.push(versionDisplayName(version, versions.indexOf(version)));
+  }
   const profile = (ctx.bundle.publish_profiles || []).find(
     (r) => Number(r.print_provider_id) === providerId
   ) || ctx.bundle.publish_profiles?.[0];
@@ -50,7 +64,7 @@ export function renderMetaTab(ctx) {
       <div class="field"><label><input type="checkbox" id="ce-meta-use-mocks" ${p.print_area_edit_use_mocks ? "checked" : ""} /> Print area edit uses mockups</label></div>
 
       <h3 class="ce-section-title">Publish profile</h3>
-      <p class="ce-hint">Selected provider: ${escapeHtml(String(providerId || "n/a"))}</p>
+      <p class="ce-hint">${escapeHtml(selectionHint.join(" · ") || `Provider ${providerId || "n/a"}`)}</p>
       <div class="field"><label>Shopify category ID</label>
         <input class="input" id="ce-meta-shopify-cat" value="${escapeHtml(profile?.shopify_category_id || "")}" /></div>
       <div class="field"><label>Standard product display name</label>

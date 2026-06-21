@@ -2581,6 +2581,67 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   background: #fff;
   flex-shrink: 0;
 }
+.ce-subnav-stack {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.ce-subnav-stack--collapsed {
+  border-bottom: 1px solid var(--line);
+}
+.ce-subnav-drawer-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 12px;
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: rgba(109, 93, 252, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ce-subnav-stack:not(.ce-subnav-stack--collapsed) .ce-subnav-drawer-toggle {
+  border-bottom-color: var(--line);
+}
+.ce-subnav-drawer-toggle:hover {
+  background: rgba(109, 93, 252, 0.1);
+  color: var(--text);
+}
+.ce-subnav-drawer-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+.ce-subnav-stack--collapsed .ce-subnav-drawer-toggle {
+  min-height: 26px;
+  border-bottom: none;
+}
+.ce-subnav-drawer-body {
+  display: flex;
+  flex-direction: column;
+}
+.ce-subnav-stack--collapsed .ce-subnav-drawer-body {
+  display: none;
+}
+.ce-subnav-row {
+  margin: 0;
+}
+.ce-subnav-row--versions {
+  border-top: 1px dashed rgba(109, 93, 252, 0.12);
+}
+.ce-version-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.ce-version-pill {
+  cursor: pointer;
+}
 .catalog-editor-subnav-label {
   font-size: 11px;
   font-weight: 750;
