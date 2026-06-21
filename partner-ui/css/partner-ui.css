@@ -3071,6 +3071,38 @@ body.catalog-editor-open #partner-toast {
   margin-bottom: 16px;
   align-items: center;
 }
+.ce-pa-version-subnav {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ce-pa-version-subnav-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.ce-pa-version-subnav-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ce-pa-version-subnav-hint {
+  margin: 0;
+  font-size: 0.78rem;
+}
+.ce-pa-version-tabs {
+  margin-bottom: 0;
+}
+.ce-pa-ver-tab {
+  cursor: pointer;
+}
+.ce-pa-ver-label {
+  font-weight: 700;
+}
 .ce-prov-ver-tab {
   display: inline-flex;
   align-items: center;

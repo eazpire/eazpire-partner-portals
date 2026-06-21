@@ -214,6 +214,11 @@ function renderSubnav(ctx) {
   pills.querySelectorAll(".ce-provider-pill").forEach((btn) => {
     btn.onclick = () => {
       ctx.selectedPrintProviderId = btn.dataset.pid;
+      const providerVersions = (ctx.bundle?.versions || []).filter(
+        (v) => String(v.external_provider_id) === String(btn.dataset.pid)
+      );
+      const first = providerVersions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))[0];
+      ctx.selectedVersionId = first?.id || null;
       renderSubnav(ctx);
       loadActiveTab(ctx);
     };
