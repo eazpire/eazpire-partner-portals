@@ -46,6 +46,12 @@ function shouldShowGreenRect(ctx, st, data) {
   return !placementModeActive(slots);
 }
 
+/** True when version placeholder slots drive overlay rects (not the legacy green rect). */
+export function isPlacementOverlayMode(ctx, st, data) {
+  const slots = placeholderSlotsForView(ctx, st, data);
+  return placementModeActive(slots);
+}
+
 function toggleRectHandles(el, active) {
   if (!el) return;
   el.querySelectorAll(".ce-pa-resize-handle, .ce-pa-rotate-handle").forEach((h) => {
@@ -274,13 +280,6 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     activeOverlayEl = el;
     st.activeLayer = "overlay";
 
-    const phType = el.dataset.phType;
-    const phIndex = Number(el.dataset.phIndex) || 0;
-    const snappedRect = { ...st.redRect };
-    overlayRectMap.set(el, snappedRect);
-    setOverlayAreaRect(st, st.activeView, phType, phIndex, snappedRect);
-    st.mockPreviewStale = true;
-
     stageInner?.querySelectorAll(".ce-pa-rect--overlay").forEach((node) => {
       const active = node === el;
       node.classList.toggle("is-active", active);
@@ -292,6 +291,14 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     toggleRectHandles(rectRed, false);
     toggleRectHandles(rectGreen, false);
     root.querySelector("#ce-pa-stage-left, #ce-pa-fs-stage")?.setAttribute("data-layer", "overlay");
+  };
+
+  const snapOverlayToPrintArea = (el, phType, phIndex) => {
+    const snappedRect = { ...st.redRect };
+    overlayRectMap.set(el, snappedRect);
+    setOverlayAreaRect(st, st.activeView, phType, phIndex, snappedRect);
+    st.mockPreviewStale = true;
+    drawRect(el, snappedRect, true);
     onStateChange?.();
   };
 
@@ -366,8 +373,14 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
         });
       });
 
+      el.querySelector("[data-snap-overlay]")?.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        pickOverlay(el);
+        snapOverlayToPrintArea(el, phType, phIndex);
+      });
+
       el.addEventListener("mousedown", (ev) => {
-        if (ev.target.closest(".ce-pa-rotate-handle, .ce-pa-resize-handle")) return;
+        if (ev.target.closest(".ce-pa-rotate-handle, .ce-pa-resize-handle, .ce-pa-snap-btn")) return;
         pickOverlay(el);
         const liveRect = overlayRectMap.get(el);
         if (liveRect) startOverlayMove(ev, el, phType, phIndex, liveRect);

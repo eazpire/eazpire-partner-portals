@@ -3749,6 +3749,14 @@ body.catalog-editor-open #partner-toast {
   margin-bottom: 6px;
   text-transform: capitalize;
 }
+.ce-pa-rect--overlay .ce-pa-snap-btn {
+  display: none;
+  pointer-events: none;
+}
+.ce-pa-rect--overlay.is-active .ce-pa-snap-btn {
+  display: block;
+  pointer-events: auto;
+}
 .ce-pa-rect--overlay {
   pointer-events: auto;
   z-index: 4;
@@ -4184,6 +4192,41 @@ body.catalog-editor-open #partner-toast {
   border-radius: 10px;
   background: var(--surface-2);
   cursor: pointer;
+}
+.ce-save-loading {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(4px);
+}
+.ce-save-loading--show {
+  display: flex;
+}
+.ce-save-loading-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 36px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.ce-save-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--brand);
+  animation: login-wait-spin 0.9s linear infinite;
 }
 .ce-save-flash {
   position: absolute;

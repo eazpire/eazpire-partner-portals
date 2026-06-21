@@ -66,6 +66,31 @@ function updateSaveButtonState(dirty = false) {
   saveBtn.disabled = !enabled;
 }
 
+function showSaveLoading() {
+  const editor = overlayEl?.querySelector(".catalog-editor");
+  if (!editor) return;
+  let el = editor.querySelector(".ce-save-loading");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "ce-save-loading";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    el.setAttribute("aria-busy", "true");
+    el.innerHTML = `<div class="ce-save-loading-inner"><div class="ce-save-loading-spinner" aria-hidden="true"></div><span>Saving…</span></div>`;
+    editor.appendChild(el);
+  }
+  el.hidden = false;
+  el.classList.add("ce-save-loading--show");
+}
+
+function hideSaveLoading() {
+  const el = overlayEl?.querySelector(".ce-save-loading");
+  if (!el) return;
+  el.classList.remove("ce-save-loading--show");
+  el.hidden = true;
+  el.removeAttribute("aria-busy");
+}
+
 function showSaveFlash() {
   const main = overlayEl?.querySelector(".catalog-editor-main");
   if (!main) return;
@@ -356,6 +381,7 @@ async function saveCurrentTab() {
   const ctx = editorState;
   const saveBtn = overlayEl.querySelector("#ce-save");
   saveBtn.disabled = true;
+  showSaveLoading();
   try {
     switch (ctx.activeTab) {
       case "provider":
@@ -395,6 +421,7 @@ async function saveCurrentTab() {
   } catch (err) {
     showToast("Save failed", err.message || "Unknown error");
   } finally {
+    hideSaveLoading();
     updateSaveButtonState(isEditorDirty());
   }
 }

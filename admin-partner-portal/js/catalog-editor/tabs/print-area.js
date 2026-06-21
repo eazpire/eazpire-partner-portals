@@ -19,6 +19,7 @@ import {
   pickMockUrlForView,
   loadRectsForVariantGroup,
   resolveRectsForView,
+  getPublishProfileConfig,
 } from "../print-area/helpers.js";
 import {
   renderPrintAreaSidebar,
@@ -31,7 +32,7 @@ import {
   refreshPlacementSection,
   refreshImagesGrids,
 } from "../print-area/settings-sidebar.js";
-import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
+import { mountDualViewer, applyGreenRectToSlice, isPlacementOverlayMode } from "../print-area/dual-viewer.js";
 import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 
@@ -107,19 +108,24 @@ function getActiveColorTitle(st) {
   return st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId)?.title || null;
 }
 
-function buildConfigForSave(st) {
+function buildConfigForSave(st, ctx, data) {
   const cfg = ensureByDesignTypeConfig(JSON.parse(JSON.stringify(st.workingConfig)));
   const sourceDt = st.activeDesignType;
   const { slice: sourceSlice } = getDesignTypeSlice(cfg, sourceDt);
+  const placementMode = isPlacementOverlayMode(ctx, st, data);
 
-  applyGreenRectToSlice(sourceSlice, st.activeView, st.greenRect);
+  if (!placementMode) {
+    applyGreenRectToSlice(sourceSlice, st.activeView, st.greenRect);
+  }
   sourceSlice.pattern = { ...st.patternConfig };
   sourceSlice.publish_logic = { ...st.publishLogicByPh };
 
   for (const dt of st.designTypesScope) {
     if (dt === sourceDt) continue;
     const { slice: target } = getDesignTypeSlice(cfg, dt);
-    applyGreenRectToSlice(target, st.activeView, st.greenRect);
+    if (!placementMode) {
+      applyGreenRectToSlice(target, st.activeView, st.greenRect);
+    }
     target.pattern = { ...st.patternConfig };
     target.publish_logic = { ...st.publishLogicByPh };
   }
@@ -193,7 +199,16 @@ export async function loadPrintAreaTab(ctx) {
     }
     persistStateToCtx(ctx, st);
   } else {
-    ctx.printAreaState.mockupImagesByView = data.mockup_images_by_view;
+    const st = ctx.printAreaState;
+    st.mockupImagesByView = data.mockup_images_by_view;
+    st.workingConfig = ensureByDesignTypeConfig(getPublishProfileConfig(ctx));
+    const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+    st.patternConfig = { ...(slice.pattern || {}) };
+    st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
+    const { red, green, greenDirty } = resolveRectsForView(data, slice, st.activeView);
+    st.redRect = red;
+    st.greenRect = green;
+    st.greenDirty = greenDirty;
   }
 
   return `
@@ -372,7 +387,7 @@ export async function savePrintAreaTab(ctx) {
   const st = ctx.printAreaState;
   if (!st || !ctx.selectedPrintProviderId) return;
 
-  const config = buildConfigForSave(st);
+  const config = buildConfigForSave(st, ctx, ctx.printAreaData);
   await savePrintAreasConfig({
     product_key: ctx.productKey,
     print_provider_id: ctx.selectedPrintProviderId,

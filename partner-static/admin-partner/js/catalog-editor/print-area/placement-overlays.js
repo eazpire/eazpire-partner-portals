@@ -69,7 +69,7 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
     const bucket = buckets[spec.type] || [];
     const savedArea = bucket[spec.index]?.area;
     const savedRect = rectFromConfigArea(savedArea);
-    const rect = savedRect || defaultStackRect(red, globalIdx, specs.length, 1);
+    const rect = savedRect || defaultStackRect(red, spec.index, bucket.length || 1, aspect > 0 ? aspect : 1);
 
     const overlay = { type: spec.type, index: spec.index, rect };
     if (spec.type === "qr" || spec.type === "logo") {
@@ -97,7 +97,9 @@ export function renderPlacementOverlaysHtml(overlays) {
           ? `<img src="${escapeHtml(ov.imageUrl)}" alt="" />`
           : "";
       return `<div class="ce-pa-rect ce-pa-rect--overlay ${cls}" data-ph-type="${escapeHtml(ov.type)}" data-ph-index="${ov.index}"
-        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">${img}${rectHandlesHtml(`overlay-${ov.type}-${ov.index}`)}</div>`;
+        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">
+        <button type="button" class="ce-pa-snap-btn" data-snap-overlay aria-label="Snap to print area" title="Snap to print area">⊞</button>
+        ${img}${rectHandlesHtml(`overlay-${ov.type}-${ov.index}`)}</div>`;
     })
     .join("");
 }
