@@ -6,8 +6,6 @@ import {
   loadProvidersTab,
   bindProvidersTab,
   saveProvidersTab,
-  snapshotProvidersTab,
-  syncProvidersDomState,
 } from "./tabs/providers.js";
 import { loadTemplateTab, saveTemplateTab } from "./tabs/template.js";
 import { loadMockupsTab, saveMockupsTab, bindMockupsTab } from "./tabs/mockups.js";
@@ -24,6 +22,11 @@ import {
   hasDirtySnapshot,
   checkDirty,
 } from "./editor-dirty.js";
+import {
+  snapshotActiveTab,
+  syncActiveTabDom,
+  tabSaveDisabled,
+} from "./editor-tab-dirty.js";
 import {
   tabUsesEditorSubnav,
   ensureEditorSelections,
@@ -55,15 +58,21 @@ function updateSaveButtonState(dirty = false) {
   const saveBtn = overlayEl?.querySelector("#ce-save");
   if (!saveBtn) return;
   const tab = editorState?.activeTab;
-  let enabled = false;
-  if (tab === "template") {
-    enabled = false;
-  } else if (tab === "provider") {
-    enabled = hasDirtySnapshot() && dirty;
-  } else {
-    enabled = true;
-  }
+  const enabled = !tabSaveDisabled(tab) && hasDirtySnapshot() && dirty;
   saveBtn.disabled = !enabled;
+}
+
+function captureTabDirtySnapshot(ctx) {
+  const state = snapshotActiveTab(ctx);
+  if (state != null) {
+    setDirtySnapshot(state);
+    return;
+  }
+  clearDirtySnapshot();
+}
+
+function getCurrentTabDirtyState(ctx) {
+  return snapshotActiveTab(ctx);
 }
 
 function showSaveLoading() {
@@ -107,19 +116,11 @@ function showSaveFlash() {
   window.setTimeout(() => flash.classList.remove("ce-save-flash--show"), 1200);
 }
 
-function captureTabDirtySnapshot(ctx) {
-  if (ctx.activeTab === "provider" && ctx.providersTabState) {
-    setDirtySnapshot(snapshotProvidersTab(ctx));
-    return;
-  }
-  clearDirtySnapshot();
-}
-
-function getCurrentTabDirtyState(ctx) {
-  if (ctx.activeTab === "provider" && ctx.providersTabState) {
-    return snapshotProvidersTab(ctx);
-  }
-  return null;
+function refreshDirtyBeforeClose(ctx) {
+  if (!ctx) return;
+  syncActiveTabDom(ctx);
+  const state = snapshotActiveTab(ctx);
+  if (state != null) checkDirty(state);
 }
 
 function isEditorSidebarCollapsed() {
@@ -366,9 +367,10 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "provider") bindProvidersTab(ctx, body);
     if (ctx.activeTab === "print_area") bindPrintAreaTab(ctx, body);
     if (ctx.activeTab === "products") bindProductsTab(ctx, body);
+    if (ctx.activeTab === "meta_data") bindMetaTab(ctx, body);
     if (ctx.activeTab === "automations") bindAutomationsTab(ctx, body);
-    if (ctx.activeTab === "mockups") bindMockupsTab();
-    if (ctx.activeTab === "variants") bindVariantsTab();
+    if (ctx.activeTab === "mockups") bindMockupsTab(ctx, body);
+    if (ctx.activeTab === "variants") bindVariantsTab(ctx, body);
     captureTabDirtySnapshot(ctx);
     updateSaveButtonState(false);
   } catch (err) {
@@ -378,6 +380,9 @@ async function loadActiveTab(ctx) {
 
 async function saveCurrentTab() {
   if (!editorState) return;
+  syncActiveTabDom(editorState);
+  refreshDirtyBeforeClose(editorState);
+  if (!isEditorDirty()) return;
   const ctx = editorState;
   const saveBtn = overlayEl.querySelector("#ce-save");
   saveBtn.disabled = true;
@@ -465,6 +470,19 @@ function promptUnsavedCloseDialog() {
   });
 }
 
+async function discardEditorChanges(ctx) {
+  ctx.printAreaState = null;
+  ctx.providersTabState = null;
+  ctx.mockupsData = null;
+  ctx.variantsData = null;
+  ctx.printAreaData = null;
+  try {
+    ctx.bundle = await fetchEditorBundle(ctx.productKey);
+  } catch {
+    /* closing or reloading anyway */
+  }
+}
+
 async function requestCloseProductEditor() {
   if (!editorState) {
     closeProductEditor();
@@ -477,6 +495,7 @@ async function requestCloseProductEditor() {
     const choice = await promptUnsavedCloseDialog();
     if (choice === "keep") return;
     if (choice === "discard") {
+      await discardEditorChanges(editorState);
       closeProductEditor();
       return;
     }
