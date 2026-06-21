@@ -4,19 +4,28 @@ import {
   getMockupDefaultForView,
   aspectRatioFromDefault,
   clampRectToStage,
-  fitRectWithAspect,
   getDesignTypeSlice,
 } from "./helpers.js";
 import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
 import { renderPatternOverlayHtml } from "./pattern-preview.js";
-import { resolvePlacementOverlays, refreshPlacementOverlayLayer } from "./placement-overlays.js";
+import { resolvePlacementOverlays, refreshPlacementOverlayLayer, renderPlacementOverlaysHtml } from "./placement-overlays.js";
+import {
+  rectHandlesHtml,
+  resizeRectByCorner,
+  angleDeg,
+  lockAspectForPhType,
+  setOverlayAreaRect,
+} from "./rect-interaction.js";
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function angleDeg(cx, cy, x, y) {
-  return (Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90;
+function toggleRectHandles(el, active) {
+  if (!el) return;
+  el.querySelectorAll(".ce-pa-resize-handle, .ce-pa-rotate-handle").forEach((h) => {
+    h.classList.toggle("is-visible", active);
+  });
 }
 
 function drawRect(el, rect, active = false) {
@@ -27,7 +36,7 @@ function drawRect(el, rect, active = false) {
   el.style.height = `${rect.h * 100}%`;
   const angle = Number(rect.angle) || 0;
   el.style.transform = angle ? `rotate(${angle}deg)` : "";
-  el.querySelector(".ce-pa-rotate-handle")?.classList.toggle("is-visible", active);
+  toggleRectHandles(el, active);
 }
 
 function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
@@ -47,13 +56,13 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
           <img class="ce-pa-stage-img" data-stage-img="left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : ""} />
           <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" data-rect="red" title="Print area bounds">
             <button type="button" class="ce-pa-lock-btn" data-bounds-lock aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
-            <span class="ce-pa-rotate-handle" data-rotate="red" title="Rotate"></span>
+            ${rectHandlesHtml("red")}
           </div>
           <div class="ce-pa-pattern-layer" data-pattern-layer>${renderPatternOverlayHtml(st)}</div>
           <div class="ce-pa-placement-layer" data-placement-layer>${overlays || ""}</div>
           <div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" data-rect="green" title="Creator placement">
             <button type="button" class="ce-pa-snap-btn" data-snap-green aria-label="Snap to print area" title="Snap to print area">⊞</button>
-            <span class="ce-pa-rotate-handle" data-rotate="green" title="Rotate"></span>
+            ${rectHandlesHtml("green")}
           </div>
         </div>
       </div>
@@ -87,25 +96,7 @@ function mockStageHtml(st, mockImg, options = {}) {
 function placementHtml(ctx, st, data, brandAssets) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
-  return overlays
-    .map((ov) => {
-      const cls =
-        ov.type === "creator_design"
-          ? "ce-pa-rect--creator"
-          : ov.type === "additional_design"
-            ? "ce-pa-rect--additional"
-            : "ce-pa-rect--brand";
-      const r = ov.rect || {};
-      const angle = Number(r.angle) || 0;
-      const transform = angle ? ` transform: rotate(${angle}deg);` : "";
-      const img =
-        ov.imageUrl && (ov.type === "qr" || ov.type === "logo")
-          ? `<img src="${escapeHtml(ov.imageUrl)}" alt="" />`
-          : "";
-      return `<div class="ce-pa-rect ce-pa-rect--overlay ${cls}" data-ph-type="${escapeHtml(ov.type)}" data-ph-index="${ov.index}"
-        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">${img}</div>`;
-    })
-    .join("");
+  return renderPlacementOverlaysHtml(overlays);
 }
 
 function stageInnerHtml(st, data, ctx, brandAssets) {
@@ -148,11 +139,14 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   const lockBtn = root.querySelector("[data-bounds-lock]");
 
   let drag = null;
+  const overlayRectMap = new WeakMap();
+  let activeOverlayEl = null;
 
   const refreshOverlays = () => {
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
     refreshPlacementOverlayLayer(stageInner, overlays);
+    bindOverlayInteractions();
   };
 
   const redraw = () => {
@@ -184,112 +178,251 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     redraw();
   };
 
-  redraw();
-
   const pickLayer = (layer) => {
     st.activeLayer = layer;
+    activeOverlayEl = null;
     redraw();
   };
 
+  const pickOverlay = (el) => {
+    activeOverlayEl = el;
+    st.activeLayer = "overlay";
+    stageInner?.querySelectorAll(".ce-pa-rect--overlay").forEach((node) => {
+      const active = node === el;
+      node.classList.toggle("is-active", active);
+      const rect = overlayRectMap.get(node);
+      if (rect) drawRect(node, rect, active);
+    });
+    rectRed?.classList.remove("is-active");
+    rectGreen?.classList.remove("is-active");
+    toggleRectHandles(rectRed, false);
+    toggleRectHandles(rectGreen, false);
+    root.querySelector("#ce-pa-stage-left, #ce-pa-fs-stage")?.setAttribute("data-layer", "overlay");
+  };
+
+  const stagePoint = (ev) => {
+    const box = stageInner?.getBoundingClientRect();
+    if (!box?.width || !box?.height) return null;
+    return {
+      box,
+      x: clamp((ev.clientX - box.left) / box.width, 0, 1),
+      y: clamp((ev.clientY - box.top) / box.height, 0, 1),
+    };
+  };
+
+  const bindResizeHandles = (el, onStart) => {
+    el?.querySelectorAll("[data-resize]").forEach((handle) => {
+      handle.addEventListener("mousedown", (ev) => {
+        ev.stopPropagation();
+        onStart(ev, handle.dataset.resize);
+        ev.preventDefault();
+      });
+    });
+  };
+
   const bindRect = (el, layer) => {
+    bindResizeHandles(el, (ev, corner) => {
+      if (layer === "red" && st.boundsLocked) return;
+      pickLayer(layer);
+      startLayerResize(ev, layer, corner);
+    });
+
     el?.addEventListener("mousedown", (ev) => {
-      if (ev.target.closest(".ce-pa-lock-btn, .ce-pa-snap-btn, .ce-pa-rotate-handle")) return;
+      if (ev.target.closest(".ce-pa-lock-btn, .ce-pa-snap-btn, .ce-pa-rotate-handle, .ce-pa-resize-handle")) return;
       if (layer === "red" && st.boundsLocked) {
         pickLayer("red");
         return;
       }
       pickLayer(layer);
-      startDrag(ev, layer);
+      startLayerMove(ev, layer);
       ev.stopPropagation();
     });
   };
 
+  function bindOverlayInteractions() {
+    const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+    const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
+
+    stageInner?.querySelectorAll(".ce-pa-rect--overlay").forEach((el) => {
+      const phType = el.dataset.phType;
+      const phIndex = Number(el.dataset.phIndex) || 0;
+      const ov = overlays.find((o) => o.type === phType && o.index === phIndex);
+      if (!ov) return;
+
+      const rect = { ...(ov.rect || {}) };
+      overlayRectMap.set(el, rect);
+      const isActive = activeOverlayEl === el;
+      el.classList.toggle("is-active", isActive);
+      drawRect(el, rect, isActive);
+
+      bindResizeHandles(el, (ev, corner) => {
+        pickOverlay(el);
+        startOverlayResize(ev, el, phType, phIndex, corner, rect);
+      });
+
+      el.querySelectorAll(".ce-pa-rotate-handle").forEach((handle) => {
+        handle.addEventListener("mousedown", (ev) => {
+          ev.stopPropagation();
+          pickOverlay(el);
+          startOverlayRotate(ev, el, phType, phIndex, rect);
+          ev.preventDefault();
+        });
+      });
+
+      el.addEventListener("mousedown", (ev) => {
+        if (ev.target.closest(".ce-pa-rotate-handle, .ce-pa-resize-handle")) return;
+        pickOverlay(el);
+        startOverlayMove(ev, el, phType, phIndex, rect);
+        ev.stopPropagation();
+      });
+    });
+  }
+
   bindRect(rectRed, "red");
   bindRect(rectGreen, "green");
 
-  root.querySelectorAll(".ce-pa-rotate-handle").forEach((handle) => {
+  root.querySelectorAll('[data-rect="red"] .ce-pa-rotate-handle, [data-rect="green"] .ce-pa-rotate-handle').forEach((handle) => {
     handle.addEventListener("mousedown", (ev) => {
       ev.stopPropagation();
       const layer = handle.dataset.rotate;
       if (layer === "red" && st.boundsLocked) return;
       pickLayer(layer);
-      startRotate(ev, layer);
+      startLayerRotate(ev, layer);
       ev.preventDefault();
     });
   });
 
-  function startRotate(ev, layer) {
-    const box = stageInner?.getBoundingClientRect();
-    if (!box?.width || !box?.height) return;
+  function startLayerRotate(ev, layer) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
     const target = layer === "red" ? st.redRect : st.greenRect;
-    const cx = box.left + (target.x + target.w / 2) * box.width;
-    const cy = box.top + (target.y + target.h / 2) * box.height;
-    drag = { layer, type: "rotate", cx, cy, startAngle: Number(target.angle) || 0, baseAngle: angleDeg(cx, cy, ev.clientX, ev.clientY) };
+    const cx = pt.box.left + (target.x + target.w / 2) * pt.box.width;
+    const cy = pt.box.top + (target.y + target.h / 2) * pt.box.height;
+    drag = {
+      kind: "layer",
+      layer,
+      type: "rotate",
+      cx,
+      cy,
+      startAngle: Number(target.angle) || 0,
+      baseAngle: angleDeg(cx, cy, ev.clientX, ev.clientY),
+    };
   }
 
-  function startDrag(ev, layer) {
-    const box = stageInner?.getBoundingClientRect();
-    if (!box?.width || !box?.height) return;
+  function startLayerMove(ev, layer) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
     const target = layer === "red" ? st.redRect : st.greenRect;
-    const sx = (ev.clientX - box.left) / box.width;
-    const sy = (ev.clientY - box.top) / box.height;
-    const onEdge =
-      sx <= target.x + 0.02 ||
-      sx >= target.x + target.w - 0.02 ||
-      sy <= target.y + 0.02 ||
-      sy >= target.y + target.h - 0.02;
-    drag = {
-      layer,
-      type: onEdge && ev.shiftKey ? "resize" : "move",
-      sx,
-      sy,
-      rect: { ...target },
-    };
+    drag = { kind: "layer", layer, type: "move", sx: pt.x, sy: pt.y, rect: { ...target } };
     ev.preventDefault();
+  }
+
+  function startLayerResize(ev, layer, corner) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
+    const target = layer === "red" ? st.redRect : st.greenRect;
+    drag = { kind: "layer", layer, type: "resize", corner, rect: { ...target } };
+    ev.preventDefault();
+  }
+
+  function startOverlayMove(ev, el, phType, phIndex, rect) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
+    drag = { kind: "overlay", el, phType, phIndex, type: "move", sx: pt.x, sy: pt.y, rect: { ...rect } };
+    ev.preventDefault();
+  }
+
+  function startOverlayResize(ev, el, phType, phIndex, corner, rect) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
+    drag = { kind: "overlay", el, phType, phIndex, type: "resize", corner, rect: { ...rect } };
+    ev.preventDefault();
+  }
+
+  function startOverlayRotate(ev, el, phType, phIndex, rect) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
+    const cx = pt.box.left + (rect.x + rect.w / 2) * pt.box.width;
+    const cy = pt.box.top + (rect.y + rect.h / 2) * pt.box.height;
+    drag = {
+      kind: "overlay",
+      el,
+      phType,
+      phIndex,
+      type: "rotate",
+      cx,
+      cy,
+      startAngle: Number(rect.angle) || 0,
+      baseAngle: angleDeg(cx, cy, ev.clientX, ev.clientY),
+    };
   }
 
   const onMouseMove = (ev) => {
     if (!drag) return;
-    const box = stageInner?.getBoundingClientRect();
-    if (!box?.width || !box?.height) return;
-    const target = drag.layer === "red" ? st.redRect : st.greenRect;
+    const pt = stagePoint(ev);
+    if (!pt) return;
 
-    if (drag.type === "rotate") {
-      const cur = angleDeg(drag.cx, drag.cy, ev.clientX, ev.clientY);
-      target.angle = drag.startAngle + (cur - drag.baseAngle);
-      while (target.angle > 180) target.angle -= 360;
-      while (target.angle < -180) target.angle += 360;
-    } else {
-      const x = clamp((ev.clientX - box.left) / box.width, 0, 1);
-      const y = clamp((ev.clientY - box.top) / box.height, 0, 1);
-
-      if (drag.type === "move") {
-        target.x = clamp(drag.rect.x + (x - drag.sx), 0, 1 - target.w);
-        target.y = clamp(drag.rect.y + (y - drag.sy), 0, 1 - target.h);
-      } else {
-        const x1 = Math.min(drag.sx, x);
-        const y1 = Math.min(drag.sy, y);
-        const x2 = Math.max(drag.sx, x);
-        const y2 = Math.max(drag.sy, y);
-        let next = { ...target, x: x1, y: y1, w: clamp(x2 - x1, 0.02, 1), h: clamp(y2 - y1, 0.02, 1) };
-        if (aspect > 0) next = fitRectWithAspect(next, aspect);
-        else next = clampRectToStage(next);
-        Object.assign(target, next);
+    if (drag.kind === "layer") {
+      const target = drag.layer === "red" ? st.redRect : st.greenRect;
+      applyDragToRect(target, drag, ev, true);
+      if (drag.layer === "red") st.boundsDirty = true;
+      else {
+        st.greenDirty = true;
+        st.mockPreviewStale = true;
       }
+      drawRect(drag.layer === "red" ? rectRed : rectGreen, target, true);
+      onStateChange?.();
+      return;
     }
 
-    if (drag.layer === "red") st.boundsDirty = true;
-    else {
-      st.greenDirty = true;
-      st.mockPreviewStale = true;
-    }
-    redraw();
+    const rect = overlayRectMap.get(drag.el);
+    if (!rect) return;
+    applyDragToRect(rect, drag, ev, lockAspectForPhType(drag.phType));
+    drawRect(drag.el, rect, true);
     onStateChange?.();
   };
 
+  function applyDragToRect(target, dragState, ev, lockAspectFlag) {
+    const pt = stagePoint(ev);
+    if (!pt) return;
+    const { x: px, y: py } = pt;
+
+    if (dragState.type === "rotate") {
+      const cur = angleDeg(dragState.cx, dragState.cy, ev.clientX, ev.clientY);
+      target.angle = dragState.startAngle + (cur - dragState.baseAngle);
+      while (target.angle > 180) target.angle -= 360;
+      while (target.angle < -180) target.angle += 360;
+      return;
+    }
+
+    if (dragState.type === "move") {
+      const next = {
+        ...dragState.rect,
+        x: clamp(dragState.rect.x + (px - dragState.sx), 0, 1 - dragState.rect.w),
+        y: clamp(dragState.rect.y + (py - dragState.sy), 0, 1 - dragState.rect.h),
+      };
+      Object.assign(target, clampRectToStage(next));
+      return;
+    }
+
+    if (dragState.type === "resize") {
+      const next = resizeRectByCorner(dragState.corner, dragState.rect, px, py, {
+        lockAspect: lockAspectFlag,
+        aspectRatio: aspect > 0 ? aspect : null,
+      });
+      Object.assign(target, next);
+    }
+  }
+
   const onMouseUp = () => {
+    if (drag?.kind === "overlay") {
+      const rect = overlayRectMap.get(drag.el);
+      if (rect) setOverlayAreaRect(st, st.activeView, drag.phType, drag.phIndex, rect);
+    }
     drag = null;
   };
+
+  redraw();
 
   stageInner?.addEventListener("mousedown", (ev) => {
     if (ev.target.closest(".ce-pa-rect")) return;

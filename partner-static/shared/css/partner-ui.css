@@ -3749,10 +3749,14 @@ body.catalog-editor-open #partner-toast {
   text-transform: capitalize;
 }
 .ce-pa-rect--overlay {
-  pointer-events: none;
-  z-index: 2;
+  pointer-events: auto;
+  z-index: 4;
   border-width: 2px;
   background: transparent;
+  cursor: move;
+}
+.ce-pa-rect--overlay.is-active {
+  z-index: 5;
 }
 .ce-pa-rect--creator {
   border: 2px solid #43a047;
@@ -3802,6 +3806,43 @@ body.catalog-editor-open #partner-toast {
 }
 .ce-pa-rotate-handle:active {
   cursor: grabbing;
+}
+.ce-pa-resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  z-index: 6;
+  display: none;
+  background: #fff;
+  border: 2px solid var(--accent, #0d9488);
+  border-radius: 2px;
+  box-sizing: border-box;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+}
+.ce-pa-resize-handle.is-visible,
+.ce-pa-rect.is-active .ce-pa-resize-handle,
+.ce-pa-rect--overlay.is-active .ce-pa-resize-handle {
+  display: block;
+}
+.ce-pa-resize-handle--nw {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+.ce-pa-resize-handle--ne {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+.ce-pa-resize-handle--sw {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+.ce-pa-resize-handle--se {
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
 }
 .ce-pa-fs-modal {
   position: fixed;

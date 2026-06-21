@@ -30,6 +30,7 @@ describe("partner catalog editor assets (smoke)", () => {
     "print-area/image-grid.js",
     "print-area/view-dock.js",
     "print-area/placement-overlays.js",
+    "print-area/rect-interaction.js",
     "print-area/brand-assets.js",
     "print-area/fullscreen-viewer.js",
   ];

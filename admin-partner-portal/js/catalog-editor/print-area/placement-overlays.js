@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import { rectFromConfigArea, defaultCenteredRect, aspectRatioFromDefault, getMockupDefaultForView } from "./helpers.js";
+import { rectHandlesHtml } from "./rect-interaction.js";
 
 const PH_ORDER = ["creator_design", "additional_design", "qr", "logo"];
 
@@ -98,7 +99,7 @@ export function renderPlacementOverlaysHtml(overlays) {
           ? `<img src="${escapeHtml(ov.imageUrl)}" alt="" />`
           : "";
       return `<div class="ce-pa-rect ce-pa-rect--overlay ${cls}" data-ph-type="${escapeHtml(ov.type)}" data-ph-index="${ov.index}"
-        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">${img}</div>`;
+        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">${img}${rectHandlesHtml(`overlay-${ov.type}-${ov.index}`)}</div>`;
     })
     .join("");
 }
