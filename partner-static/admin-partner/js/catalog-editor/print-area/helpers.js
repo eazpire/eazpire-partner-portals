@@ -233,7 +233,7 @@ export function loadRectsForVariantGroup(st, data, groupId) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
 
   if (vpa?.print_area_rect_json) {
-    st.redRect = normalizeRectToPrintAspect(vpa.print_area_rect_json, md, data, st.activeView);
+    st.redRect = rectFromSavedSource(vpa.print_area_rect_json);
   }
   if (vpa?.mockup_print_area_rect_json) {
     st.greenRect = clampRectToStage(parseRect(vpa.mockup_print_area_rect_json));
@@ -387,10 +387,15 @@ export function normalizeRectToPrintAspect(rect, md, data = null, viewKey = null
   return fitRectWithAspect(parsed, aspect, stageBox);
 }
 
+/** Saved rects keep exact x,y,w,h — aspect lock is for interactive resize only. */
+export function rectFromSavedSource(raw) {
+  return clampRectToStage(parseRect(raw));
+}
+
 function resolveRedRectForView(data, viewKey, md) {
   const aspect = aspectRatioFromDefault(md, data, viewKey);
   if (hasDbPrintAreaRect(md)) {
-    return normalizeRectToPrintAspect(md.print_area_rect_json, md, data, viewKey);
+    return rectFromSavedSource(md.print_area_rect_json);
   }
   return defaultCenteredRect(aspect, 0.5);
 }

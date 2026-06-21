@@ -8,6 +8,7 @@ import {
   fetchTemplateBundle,
   fetchPrintifyMockups,
   saveVariantPrintAreaRect,
+  savePrintAreaRect,
   fetchBrandAssetsBundle,
 } from "../api.js";
 import {
@@ -135,6 +136,26 @@ function buildConfigForSave(st, ctx, data) {
   return cfg;
 }
 
+function buildRedRectPlacement(redRect) {
+  return {
+    x: Number((redRect.x + redRect.w / 2).toFixed(4)),
+    y: Number((redRect.y + redRect.h / 2).toFixed(4)),
+    scale: Number(Math.max(redRect.w, redRect.h).toFixed(4)),
+  };
+}
+
+async function persistMockupDefaultRects(ctx, st) {
+  await savePrintAreaRect({
+    product_key: ctx.productKey,
+    print_area_key: st.activeView,
+    print_area_rect: st.redRect,
+    mockup_rect: st.greenRect,
+    universal_rect: st.redRect,
+    placement: buildRedRectPlacement(st.redRect),
+    auto_mirror: false,
+  });
+}
+
 async function saveVariantRectsForScope(ctx, st) {
   const view = st.activeView;
   for (const group of st.variantGroups.groups) {
@@ -212,6 +233,9 @@ export async function loadPrintAreaTab(ctx) {
     st.redRect = red;
     st.greenRect = green;
     st.greenDirty = greenDirty;
+    if (st.perVariantProduct && st.activeVariantGroupId) {
+      loadRectsForVariantGroup(st, data, st.activeVariantGroupId);
+    }
   }
 
   return `
@@ -398,6 +422,8 @@ export async function savePrintAreaTab(ctx) {
     auto_mirror: false,
   });
 
+  await persistMockupDefaultRects(ctx, st);
+
   if (st.variantsScope.size && st.variantGroups.groups.length) {
     await saveVariantRectsForScope(ctx, st);
   }
@@ -411,6 +437,7 @@ export async function savePrintAreaTab(ctx) {
   }
 
   st.greenDirty = false;
+  st.boundsDirty = false;
   st.workingConfig = config;
   persistStateToCtx(ctx, st);
 }

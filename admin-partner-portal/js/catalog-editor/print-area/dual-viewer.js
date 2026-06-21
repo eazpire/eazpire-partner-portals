@@ -6,6 +6,7 @@ import {
   aspectRatioFromDefault,
   clampRectToStage,
   getDesignTypeSlice,
+  hasDbPrintAreaRect,
   normalizeRectToPrintAspect,
 } from "./helpers.js";
 import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
@@ -259,6 +260,10 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       }
     }
     const applyAspect = () => {
+      if (!st.boundsDirty && hasDbPrintAreaRect(md)) {
+        redraw();
+        return;
+      }
       const box = getStageBox();
       st.redRect = normalizeRectToPrintAspect(st.redRect, md, nextData, nextSt.activeView, box);
       redraw();
@@ -540,6 +545,10 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   redraw();
 
   requestAnimationFrame(() => {
+    if (!st.boundsDirty && hasDbPrintAreaRect(md)) {
+      drawRect(rectRed, st.redRect, st.activeLayer === "red" && !st.boundsLocked);
+      return;
+    }
     const box = getStageBox();
     st.redRect = normalizeRectToPrintAspect(st.redRect, md, data, st.activeView, box);
     drawRect(rectRed, st.redRect, st.activeLayer === "red" && !st.boundsLocked);
