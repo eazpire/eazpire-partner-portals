@@ -17,22 +17,24 @@ function renderViewImageCard(viewKey, md, byView) {
     )
     .join("");
 
+  const tile = url
+    ? `
+      <div class="ce-pa-img-tile ce-pa-img-tile--filled" id="ce-pa-img-preview-${escapeHtml(viewKey)}">
+        <img src="${escapeHtml(url)}" alt="" />
+        <button type="button" class="ce-pa-img-remove" data-view="${escapeHtml(viewKey)}" aria-label="Remove image">×</button>
+      </div>`
+    : `
+      <label class="ce-pa-img-tile ce-pa-img-tile--empty" id="ce-pa-img-preview-${escapeHtml(viewKey)}">
+        <span class="ce-pa-img-add-icon" aria-hidden="true">+</span>
+        <span class="visually-hidden">Upload image</span>
+        <input type="file" class="ce-pa-upload-input" accept="image/png,image/jpeg,image/webp" data-view="${escapeHtml(viewKey)}" hidden />
+      </label>`;
+
   return `
     <div class="ce-pa-img-view" data-view="${escapeHtml(viewKey)}">
       <div class="ce-pa-img-view-head">${escapeHtml(viewKey)}</div>
-      <div class="ce-pa-img-upload-row">
-        <div class="ce-pa-img-preview ${url ? "" : "ce-pa-img-preview--empty"}" id="ce-pa-img-preview-${escapeHtml(viewKey)}">
-          ${url ? `<img src="${escapeHtml(url)}" alt="" />` : `<span>No template</span>`}
-        </div>
-        <div class="ce-pa-img-actions">
-          <label class="btn btn-secondary btn-xs ce-pa-upload-label">
-            Upload
-            <input type="file" class="ce-pa-upload-input" accept="image/png,image/jpeg,image/webp" data-view="${escapeHtml(viewKey)}" hidden />
-          </label>
-          <button type="button" class="btn btn-ghost btn-xs ce-pa-clear-img" data-view="${escapeHtml(viewKey)}" ${url ? "" : "disabled"}>Clear</button>
-        </div>
-      </div>
-      ${mockThumbs ? `<div class="ce-pa-mock-picks"><span class="ce-hint">From Printify mocks:</span>${mockThumbs}</div>` : ""}
+      <div class="ce-pa-img-grid">${tile}</div>
+      ${mockThumbs ? `<div class="ce-pa-mock-picks">${mockThumbs}</div>` : ""}
     </div>`;
 }
 
@@ -65,8 +67,10 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
     });
   });
 
-  root.querySelectorAll(".ce-pa-clear-img").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+  root.querySelectorAll(".ce-pa-img-remove").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const viewKey = btn.dataset.view;
       btn.disabled = true;
       try {

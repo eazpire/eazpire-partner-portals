@@ -18,7 +18,10 @@ function stageInnerHtml(st, leftImg, mockImg) {
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
         <div class="ce-pa-viewer ce-pa-viewer--print">
-          <div class="ce-pa-viewer-head">Print Area</div>
+          <div class="ce-pa-viewer-head">
+            <span class="ce-pa-viewer-title">Print Area</span>
+            <span class="ce-pa-viewer-head-spacer" aria-hidden="true"></span>
+          </div>
           <div class="ce-pa-stage" id="ce-pa-stage-left" data-layer="${escapeHtml(st.activeLayer)}">
             <div class="ce-pa-stage-inner" id="ce-pa-stage-inner-left">
               <img class="ce-pa-stage-img" id="ce-pa-img-left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : ""} />
@@ -34,11 +37,11 @@ function stageInnerHtml(st, leftImg, mockImg) {
         </div>
         <div class="ce-pa-viewer ce-pa-viewer--mock">
           <div class="ce-pa-viewer-head">
-            <span>Printify Mock</span>
-            <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-mock-refresh" title="Refresh Printify mock">↻</button>
+            <span class="ce-pa-viewer-title">Printify Mock</span>
+            <button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action" id="ce-pa-mock-refresh" title="Refresh Printify mock">↻</button>
           </div>
           <div class="ce-pa-stage" id="ce-pa-stage-mock">
-            <div class="ce-pa-stage-inner">
+            <div class="ce-pa-stage-inner ce-pa-stage-inner--mock">
               ${
                 mockImg
                   ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
