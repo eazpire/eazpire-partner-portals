@@ -24,9 +24,8 @@ function renderViewImageCard(viewKey, md, byView) {
         <button type="button" class="ce-pa-img-remove" data-view="${escapeHtml(viewKey)}" aria-label="Remove image">×</button>
       </div>`
     : `
-      <label class="ce-pa-img-tile ce-pa-img-tile--empty" id="ce-pa-img-preview-${escapeHtml(viewKey)}">
+      <label class="ce-pa-img-tile ce-pa-img-tile--empty" id="ce-pa-img-preview-${escapeHtml(viewKey)}" aria-label="Upload image">
         <span class="ce-pa-img-add-icon" aria-hidden="true">+</span>
-        <span class="visually-hidden">Upload image</span>
         <input type="file" class="ce-pa-upload-input" accept="image/png,image/jpeg,image/webp" data-view="${escapeHtml(viewKey)}" hidden />
       </label>`;
 
