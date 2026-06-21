@@ -1,131 +1,186 @@
-import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import {
   fetchPrintAreaBundle,
-  savePrintAreaSnapshot,
-  loadPrintifySettings,
   savePrintAreasConfig,
+  saveMockups,
+  loadPrintifySettings,
+  fetchTemplateBundle,
+  fetchPrintifyMockups,
 } from "../api.js";
-import { mountPrintAreaCanvas } from "../print-area-canvas.js";
+import {
+  createInitialPrintAreaState,
+  getDesignTypeSlice,
+  getMockupDefaultForView,
+  getGreenRectFromSlice,
+  parseRect,
+  normalizeDesignTypeKey,
+  ensureByDesignTypeConfig,
+} from "../print-area/helpers.js";
+import { renderPrintAreaSidebar, bindPrintAreaSidebar } from "../print-area/settings-sidebar.js";
+import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
 
-const DESIGN_TYPES = ["classic", "backprint", "pattern", "photo"];
+function persistStateToCtx(ctx, st) {
+  ctx.printAreaState = st;
+  ctx.selectedDesignType = st.activeDesignType;
+  ctx.printAreaActiveView = st.activeView;
+}
+
+function loadDesignTypeIntoState(st, designType) {
+  const { full, slice } = getDesignTypeSlice(st.workingConfig, designType);
+  st.workingConfig = full;
+  st.activeDesignType = normalizeDesignTypeKey(designType);
+  st.patternConfig = { ...(slice.pattern || {}) };
+  st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
+  const green = getGreenRectFromSlice(slice, st.activeView);
+  if (green) st.greenRect = green;
+}
+
+function loadViewIntoState(st, data, viewKey) {
+  st.activeView = String(viewKey || "front").toLowerCase();
+  const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
+  st.redRect = parseRect(md?.print_area_rect_json);
+  const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+  st.greenRect =
+    getGreenRectFromSlice(slice, st.activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...st.redRect };
+  st.boundsLocked = true;
+  st.boundsDirty = false;
+}
+
+function buildConfigForSave(st) {
+  const cfg = ensureByDesignTypeConfig(JSON.parse(JSON.stringify(st.workingConfig)));
+  const sourceDt = st.activeDesignType;
+  const { slice: sourceSlice } = getDesignTypeSlice(cfg, sourceDt);
+
+  applyGreenRectToSlice(sourceSlice, st.activeView, st.greenRect);
+  sourceSlice.pattern = { ...st.patternConfig };
+  sourceSlice.publish_logic = { ...st.publishLogicByPh };
+
+  for (const dt of st.designTypesScope) {
+    if (dt === sourceDt) continue;
+    const { slice: target } = getDesignTypeSlice(cfg, dt);
+    applyGreenRectToSlice(target, st.activeView, st.greenRect);
+    target.pattern = { ...st.patternConfig };
+    target.publish_logic = { ...st.publishLogicByPh };
+  }
+
+  return cfg;
+}
+
+async function resolvePrintifyProductId(ctx) {
+  if (!ctx.templateData) {
+    try {
+      ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
+    } catch {
+      ctx.templateData = null;
+    }
+  }
+  const tpl = ctx.templateData?.template;
+  const version = (ctx.printAreaData?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId));
+  return (
+    tpl?.printify_print_areas_product_id ||
+    tpl?.print_areas_product_id ||
+    version?.external_template_product_id ||
+    tpl?.printify_product_id ||
+    null
+  );
+}
 
 export async function loadPrintAreaTab(ctx) {
-  const data = await fetchPrintAreaBundle(
-    ctx.productKey,
-    ctx.selectedPrintProviderId,
-    ctx.selectedVersionId
-  );
+  const data = await fetchPrintAreaBundle(ctx.productKey, ctx.selectedPrintProviderId, ctx.selectedVersionId);
   ctx.printAreaData = data;
-  const version = data.version;
-  const studioJson = JSON.stringify(version?.studio_config || {}, null, 2);
-  const qrJson = JSON.stringify(version?.qr_logo_snapshot || {}, null, 2);
 
-  const designType = ctx.selectedDesignType || "classic";
-  const imageUrl = data.mockup_defaults?.[0]?.template_r2_key
-    ? `${window.CREATOR_API_CONFIG?.BASE_URL || ""}/mockup/${data.mockup_defaults[0].template_r2_key}`
-    : "";
+  if (!ctx.printAreaState || ctx.printAreaState._key !== `${ctx.selectedPrintProviderId}:${ctx.selectedVersionId}`) {
+    const st = createInitialPrintAreaState(ctx, data);
+    st._key = `${ctx.selectedPrintProviderId}:${ctx.selectedVersionId}`;
+    persistStateToCtx(ctx, st);
+  }
 
   return `
-    <div class="ce-tab-panel">
-      <div class="ce-inline-actions">
-        ${DESIGN_TYPES.map(
-          (t) =>
-            `<button type="button" class="btn btn-secondary btn-sm ce-pa-design-tab ${
-              designType === t ? "active" : ""
-            }" data-design-type="${t}">${escapeHtml(t)}</button>`
-        ).join("")}
-      </div>
-      <div class="ce-inline-actions">
-        <button type="button" class="btn btn-secondary btn-sm" id="ce-pa-load-printify">Load Printify</button>
-      </div>
-      <div id="ce-print-area-canvas" data-image="${escapeHtml(imageUrl)}"></div>
-      <div class="field"><label>Studio config JSON</label>
-        <textarea class="textarea ce-code" id="ce-pa-studio" rows="10">${escapeHtml(studioJson)}</textarea></div>
-      <div class="field"><label>QR / logo snapshot JSON</label>
-        <textarea class="textarea ce-code" id="ce-pa-qr" rows="8">${escapeHtml(qrJson)}</textarea></div>
-      <div class="field"><label>Print areas config JSON (publish profile)</label>
-        <textarea class="textarea ce-code" id="ce-pa-config" rows="8">${escapeHtml(
-          JSON.stringify(
-            (ctx.bundle.publish_profiles || []).find(
-              (p) => Number(p.print_provider_id) === Number(ctx.selectedPrintProviderId)
-            )?.print_areas_config_json || {},
-            null,
-            2
-          )
-        )}</textarea></div>
-      <p class="ce-hint">${(data.mockup_defaults || []).length} mockup default(s), ${(data.variant_print_areas || []).length} variant print area(s).</p>
+    <div class="ce-tab-panel ce-tab-panel--print-area">
+      ${renderPrintAreaSidebar(ctx.printAreaState)}
     </div>`;
 }
 
 export function bindPrintAreaTab(ctx, root) {
-  root.querySelectorAll(".ce-pa-design-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      ctx.selectedDesignType = btn.dataset.designType;
+  const st = ctx.printAreaState;
+  const data = ctx.printAreaData;
+  if (!st || !data) return;
+
+  ctx.printAreaViewerHandle?.destroy?.();
+
+  bindPrintAreaSidebar(root, st, {
+    onChange: () => persistStateToCtx(ctx, st),
+    onDesignTypeChange: (dt) => {
+      loadDesignTypeIntoState(st, dt);
       ctx.reloadTab();
-    });
+    },
   });
 
-  const firstDefault = ctx.printAreaData?.mockup_defaults?.[0];
-  const imageUrl = firstDefault?.image_url
-    ? firstDefault.image_url
-    : firstDefault?.template_r2_key
-      ? `${window.CREATOR_API_CONFIG?.BASE_URL || ""}/mockup/${firstDefault.template_r2_key}`
-      : "";
-  ctx.printAreaCanvasHandle?.destroy?.();
-  ctx.printAreaCanvasHandle = mountPrintAreaCanvas(root, ctx, {
-    productKey: ctx.productKey,
-    printAreaKey: firstDefault?.print_area_key || "front",
-    imageUrl,
-    rect: firstDefault?.print_area_rect_json || { x: 0.2, y: 0.2, w: 0.45, h: 0.45 },
-    mockupRect: firstDefault?.mockup_print_area_rect_json || null,
-    universalRect: firstDefault?.universal_print_area_rect_json || null,
-  });
-
-  root.querySelector("#ce-pa-load-printify")?.addEventListener("click", async () => {
-    const pid = ctx.selectedPrintProviderId;
-    const version = (ctx.printAreaData?.versions || []).find((v) => String(v.id) === String(ctx.selectedVersionId));
-    const printifyProductId =
-      version?.external_template_product_id ||
-      (ctx.templateData?.template?.printify_product_id || ctx.templateData?.version?.external_template_product_id);
-    if (!pid || !printifyProductId) return;
-    await loadPrintifySettings({
-      product_key: ctx.productKey,
-      print_provider_id: pid,
-      version_id: ctx.selectedVersionId,
-      printify_product_id: printifyProductId,
-      design_type: ctx.selectedDesignType || "classic",
-      auto_mirror: false,
-    });
-    ctx.reloadTab();
+  ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
+    onStateChange: () => persistStateToCtx(ctx, st),
+    onViewChange: (viewKey) => {
+      loadViewIntoState(st, data, viewKey);
+      ctx.reloadTab();
+    },
+    onMockRefresh: () => refreshPrintifyMock(ctx),
   });
 }
 
-export async function savePrintAreaTab(ctx) {
-  const versionId = ctx.selectedVersionId;
-  if (!versionId) return;
-  let studio_config = {};
-  let qr_logo_snapshot = null;
+async function refreshPrintifyMock(ctx) {
+  const printifyId = await resolvePrintifyProductId(ctx);
+  if (!printifyId) return;
   try {
-    studio_config = JSON.parse(document.getElementById("ce-pa-studio")?.value || "{}");
-    const qrRaw = document.getElementById("ce-pa-qr")?.value?.trim();
-    if (qrRaw) qr_logo_snapshot = JSON.parse(qrRaw);
-  } catch {
-    throw new Error("Invalid print area JSON");
-  }
-  await savePrintAreaSnapshot(versionId, { studio_config, qr_logo_snapshot, auto_mirror: false });
-  const cfgRaw = document.getElementById("ce-pa-config")?.value?.trim();
-  if (cfgRaw && ctx.selectedPrintProviderId) {
-    let config = {};
-    try {
-      config = JSON.parse(cfgRaw);
-    } catch {
-      throw new Error("Invalid print areas config JSON");
-    }
-    await savePrintAreasConfig({
+    await loadPrintifySettings({
       product_key: ctx.productKey,
       print_provider_id: ctx.selectedPrintProviderId,
-      config,
+      version_id: ctx.selectedVersionId,
+      printify_product_id: printifyId,
+      design_type: ctx.printAreaState?.activeDesignType || "classic",
+      auto_mirror: false,
+    });
+    const mockRes = await fetchPrintifyMockups({
+      product_key: ctx.productKey,
+      print_provider_id: ctx.selectedPrintProviderId,
+      printify_product_id: printifyId,
+      auto_mirror: false,
+    });
+    const st = ctx.printAreaState;
+    const view = st?.activeView || "front";
+    const images = mockRes?.mockups || mockRes?.images || mockRes?.data || [];
+    const match =
+      images.find((m) => String(m.position || m.print_area_key || m.view || "").toLowerCase() === view) ||
+      images[0];
+    if (match?.src || match?.url || match?.image_url) {
+      st.printifyMockUrl = match.src || match.url || match.image_url;
+      st.mockPreviewStale = false;
+    }
+    const data = await fetchPrintAreaBundle(ctx.productKey, ctx.selectedPrintProviderId, ctx.selectedVersionId);
+    ctx.printAreaData = data;
+    ctx.reloadTab();
+  } catch (err) {
+    console.error("Printify mock refresh failed", err);
+  }
+}
+
+export async function savePrintAreaTab(ctx) {
+  const st = ctx.printAreaState;
+  if (!st || !ctx.selectedPrintProviderId) return;
+
+  const config = buildConfigForSave(st);
+  await savePrintAreasConfig({
+    product_key: ctx.productKey,
+    print_provider_id: ctx.selectedPrintProviderId,
+    config,
+    auto_mirror: false,
+  });
+
+  if (st.useMockups !== !!ctx.bundle?.product?.print_area_edit_use_mocks) {
+    await saveMockups(ctx.productKey, {
+      print_area_edit_use_mocks: st.useMockups,
       auto_mirror: false,
     });
   }
+
+  st.greenDirty = false;
+  st.workingConfig = config;
+  persistStateToCtx(ctx, st);
 }

@@ -1,0 +1,268 @@
+import { DESIGN_TYPES_ALL, PH_TYPES } from "../provider-print-technical.js";
+
+export { DESIGN_TYPES_ALL, PH_TYPES };
+
+const PA_SIDEBAR_KEY = "admin_catalog_editor_pa_sidebar_collapsed";
+
+export function isPaSidebarCollapsed() {
+  return sessionStorage.getItem(PA_SIDEBAR_KEY) === "1";
+}
+
+export function setPaSidebarCollapsed(v) {
+  sessionStorage.setItem(PA_SIDEBAR_KEY, v ? "1" : "0");
+}
+
+export function parseJsonSafe(value, fallback = null) {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return fallback;
+  }
+}
+
+export function productKeyExpectsPerVariantDimensions(productKey) {
+  const k = String(productKey || "").toLowerCase();
+  return (
+    k.includes("poster") ||
+    k.includes("photopaper") ||
+    k.includes("photo-paper") ||
+    k.includes("canvas") ||
+    k.includes("metal-print") ||
+    k.includes("acrylic") ||
+    k.includes("wall-art") ||
+    k.includes("foam") ||
+    k.includes("panel") ||
+    k.includes("wood-print") ||
+    k.includes("dibond") ||
+    k.includes("blanket")
+  );
+}
+
+export function defaultPatternConfig() {
+  return { enabled: false, style: "grid", spacingH: 0, spacingV: 0, angle: 0, offsetH: 0, rotH: 0, rotV: 0 };
+}
+
+export function defaultPublishLogicByPh() {
+  return { qr: "calculated", logo: "calculated", creator_design: "calculated", additional_design: "calculated" };
+}
+
+export function normalizeDesignTypeKey(dt) {
+  return String(dt || "classic")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+}
+
+export function visibleDesignTypes(ctx) {
+  const fromProduct = ctx.bundle?.product?.visible_design_types;
+  if (Array.isArray(fromProduct) && fromProduct.length) {
+    return fromProduct.map(normalizeDesignTypeKey).filter((d) => DESIGN_TYPES_ALL.includes(d));
+  }
+  return ["classic", "pattern"];
+}
+
+export function getPublishProfileConfig(ctx) {
+  const pid = Number(ctx.selectedPrintProviderId);
+  const row = (ctx.bundle?.publish_profiles || []).find((p) => Number(p.print_provider_id) === pid);
+  return parseJsonSafe(row?.print_areas_config_json, {}) || {};
+}
+
+export function ensureByDesignTypeConfig(raw) {
+  const base = raw && typeof raw === "object" ? { ...raw } : {};
+  if (base.by_design_type && typeof base.by_design_type === "object") return base;
+  if (base.mockup || base.edit_mode) {
+    return { ...base, by_design_type: { classic: { mockup: base.mockup || {}, edit_mode: base.edit_mode || {}, pattern: base.pattern || defaultPatternConfig() } } };
+  }
+  return { ...base, by_design_type: {} };
+}
+
+export function getDesignTypeSlice(config, designType) {
+  const cfg = ensureByDesignTypeConfig(config);
+  const key = normalizeDesignTypeKey(designType);
+  if (!cfg.by_design_type[key]) {
+    cfg.by_design_type[key] = { mockup: {}, edit_mode: {}, pattern: defaultPatternConfig() };
+  }
+  const slice = cfg.by_design_type[key];
+  if (!slice.pattern) slice.pattern = defaultPatternConfig();
+  return { full: cfg, slice, key };
+}
+
+export function listViewKeys(mockupDefaults, configSlice) {
+  const keys = new Set();
+  for (const row of mockupDefaults || []) {
+    const k = String(row.print_area_key || "").trim().toLowerCase();
+    if (k) keys.add(k);
+  }
+  for (const slot of ["mockup", "edit_mode"]) {
+    const sec = configSlice?.[slot];
+    if (sec && typeof sec === "object") {
+      Object.keys(sec).forEach((k) => keys.add(String(k).toLowerCase()));
+    }
+  }
+  if (!keys.size) keys.add("front");
+  return [...keys].sort();
+}
+
+export function getMockupDefaultForView(mockupDefaults, viewKey) {
+  const vk = String(viewKey || "front").toLowerCase();
+  return (mockupDefaults || []).find((r) => String(r.print_area_key || "").toLowerCase() === vk) || mockupDefaults?.[0] || null;
+}
+
+export function mockupImageUrl(row) {
+  if (!row) return "";
+  if (row.image_url) return row.image_url;
+  const key = row.template_r2_key || row.print_area_template_r2_key;
+  if (!key) return "";
+  const base = window.CREATOR_API_CONFIG?.BASE_URL || "";
+  return `${base}/mockup/${key}`;
+}
+
+export function parseRect(raw) {
+  const r = parseJsonSafe(raw, null);
+  if (r && typeof r === "object" && Number.isFinite(Number(r.w)) && Number.isFinite(Number(r.h))) {
+    return {
+      x: Number(r.x) || 0,
+      y: Number(r.y) || 0,
+      w: Number(r.w) || 0.4,
+      h: Number(r.h) || 0.4,
+      angle: Number(r.angle) || 0,
+    };
+  }
+  return { x: 0.2, y: 0.2, w: 0.45, h: 0.45, angle: 0 };
+}
+
+export function aspectRatioFromDefault(row) {
+  const w = Number(row?.printify_print_area_width);
+  const h = Number(row?.printify_print_area_height);
+  if (w > 0 && h > 0) return w / h;
+  return null;
+}
+
+export function clampRectToStage(rect) {
+  const r = { ...rect };
+  r.w = Math.max(0.02, Math.min(1, r.w));
+  r.h = Math.max(0.02, Math.min(1, r.h));
+  r.x = Math.max(0, Math.min(1 - r.w, r.x));
+  r.y = Math.max(0, Math.min(1 - r.h, r.y));
+  return r;
+}
+
+export function fitRectWithAspect(baseRect, aspect) {
+  if (!(aspect > 0)) return clampRectToStage(baseRect);
+  let w = baseRect.w;
+  let h = baseRect.h;
+  if (w / h > aspect) w = h * aspect;
+  else h = w / aspect;
+  return clampRectToStage({ ...baseRect, w, h });
+}
+
+export function rectFromConfigArea(area) {
+  if (!area) return null;
+  const rect = area.rect || area;
+  if (rect && Number.isFinite(Number(rect.w))) return parseRect(rect);
+  if (Number.isFinite(Number(area.x))) {
+    return parseRect({ x: area.x, y: area.y, w: area.w || area.width, h: area.h || area.height, angle: area.angle });
+  }
+  return null;
+}
+
+export function getGreenRectFromSlice(slice, viewKey) {
+  const vk = String(viewKey || "front").toLowerCase();
+  for (const slot of ["edit_mode", "mockup"]) {
+    const block = slice?.[slot]?.[vk];
+    const areas = block?.areas;
+    if (Array.isArray(areas)) {
+      const cd = areas.find((a) => String(a.type || a.placeholder_type || "").includes("creator") || a.type === "design");
+      const r = rectFromConfigArea(cd);
+      if (r) return r;
+      if (areas[0]) {
+        const r0 = rectFromConfigArea(areas[0]);
+        if (r0) return r0;
+      }
+    }
+  }
+  return null;
+}
+
+export function groupVariantsForPrintArea(product) {
+  const colorOption = (product?.options || []).find((opt) => {
+    const n = String(opt?.name || "").toLowerCase();
+    return opt?.type === "color" || n === "color" || n === "colors";
+  });
+  const groups = [];
+  if (colorOption) {
+    let colorIdx = 0;
+    (product.options || []).forEach((opt, i) => {
+      if (opt === colorOption) colorIdx = i;
+    });
+    const byColor = new Map();
+    for (const v of product?.variants || []) {
+      const opts = Array.isArray(v.options) ? v.options : [];
+      const cVal = opts[colorIdx];
+      const cId = cVal?.id != null ? String(cVal.id) : String(cVal || "default");
+      const cTitle = cVal?.title || cVal?.name || cId;
+      const hex = cVal?.colors?.[0] || "#888";
+      if (!byColor.has(cId)) byColor.set(cId, { id: cId, title: cTitle, hex, variantIds: [] });
+      const vid = v.id ?? v.variant_id;
+      if (vid != null) byColor.get(cId).variantIds.push(Number(vid));
+    }
+    byColor.forEach((g) => groups.push(g));
+    return { mode: "color", groups };
+  }
+  if (productKeyExpectsPerVariantDimensions(product?.product_key || product?.key)) {
+    const bySize = new Map();
+    for (const v of product?.variants || []) {
+      const title = v.title || v.variant_title || `Variant ${v.id}`;
+      const key = title.split("/")[0].trim() || title;
+      if (!bySize.has(key)) bySize.set(key, { id: key, title: key, hex: "#888", variantIds: [] });
+      const vid = v.id ?? v.variant_id;
+      if (vid != null) bySize.get(key).variantIds.push(Number(vid));
+    }
+    bySize.forEach((g) => groups.push(g));
+    return { mode: "size", groups };
+  }
+  const allIds = (product?.variants || []).map((v) => Number(v.id ?? v.variant_id)).filter(Boolean);
+  return { mode: "all", groups: [{ id: "_all", title: "All variants", hex: "#888", variantIds: allIds }] };
+}
+
+export function createInitialPrintAreaState(ctx, data) {
+  const designTypes = visibleDesignTypes(ctx);
+  const rawConfig = getPublishProfileConfig(ctx);
+  const { full, slice } = getDesignTypeSlice(rawConfig, ctx.selectedDesignType || designTypes[0]);
+  const viewKeys = listViewKeys(data.mockup_defaults, slice);
+  const activeView = viewKeys.includes(ctx.printAreaActiveView) ? ctx.printAreaActiveView : viewKeys[0];
+  const md = getMockupDefaultForView(data.mockup_defaults, activeView);
+  const red = parseRect(md?.print_area_rect_json);
+  const green = getGreenRectFromSlice(slice, activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...red };
+
+  const productForVariants = {
+    variants: data.variants || ctx.printAreaData?.variants || [],
+    options: data.variant_options || ctx.variantsBundle?.product?.options,
+    product_key: ctx.productKey,
+  };
+  const variantGroups = groupVariantsForPrintArea(productForVariants);
+
+  return {
+    designTypes,
+    activeDesignType: normalizeDesignTypeKey(ctx.selectedDesignType || designTypes[0]),
+    designTypesScope: new Set(designTypes),
+    viewKeys,
+    activeView,
+    boundsLocked: true,
+    boundsDirty: false,
+    greenDirty: false,
+    useMockups: !!ctx.bundle?.product?.print_area_edit_use_mocks,
+    redRect: red,
+    greenRect: green,
+    activeLayer: "green",
+    workingConfig: full,
+    patternConfig: { ...(slice.pattern || defaultPatternConfig()) },
+    publishLogicByPh: parseJsonSafe(slice.publish_logic, null) || defaultPublishLogicByPh(),
+    variantGroups,
+    variantsScope: new Set(variantGroups.groups.map((g) => g.id)),
+    variantGroupMode: variantGroups.mode,
+    mockPreviewStale: false,
+  };
+}

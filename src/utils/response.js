@@ -30,6 +30,7 @@ export function getCorsHeaders(request) {
     // Manufacturer network portals
     "https://partner.eazpire.com",
     "https://admin.eazpire.com",
+    "https://wear.eazpire.com",
     "https://community.eazpire.com",
     // Shopify-Store
     "https://allyoucanpink.myshopify.com",
