@@ -167,8 +167,11 @@ function clearMainSourceFromOtherProviders(ctx, pid) {
 export function setProviderAsMainSource(ctx, pid) {
   clearMainSourceFromOtherProviders(ctx, pid);
   const versions = versionsForProviderId(ctx, pid);
-  const idx = versions.findIndex((v) => String(v.id) === String(ctx.selectedVersionId));
-  const activeIdx = idx >= 0 ? idx : 0;
+  let activeIdx = 0;
+  if (String(ctx.selectedPrintProviderId) === String(pid) && ctx.selectedVersionId) {
+    const idx = versions.findIndex((v) => String(v.id) === String(ctx.selectedVersionId));
+    if (idx >= 0) activeIdx = idx;
+  }
   for (let i = 0; i < versions.length; i++) {
     patchProviderVersionConfig(
       ctx,
