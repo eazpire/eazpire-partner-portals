@@ -162,12 +162,11 @@ function mockupUrlFromR2Key(key) {
   return `${mockupPublicBase()}/mockup/${encodeURIComponent(key)}`;
 }
 
-/** Print-area template image (edit mode) — same source as old admin: print_area_template_r2_key first. */
+/** Print-area template image (edit mode) — only explicit print-area fields; never template_r2_key (Printify mock). */
 export function printAreaTemplateImageUrl(row) {
   if (!row) return "";
   if (row.print_area_template_url) return row.print_area_template_url;
-  const key = row.print_area_template_r2_key || row.template_r2_key;
-  return mockupUrlFromR2Key(key);
+  return mockupUrlFromR2Key(row.print_area_template_r2_key);
 }
 
 /** Color mockup / template_r2_key (mock preview). */

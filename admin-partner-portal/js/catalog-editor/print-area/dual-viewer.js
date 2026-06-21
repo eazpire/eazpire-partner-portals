@@ -85,7 +85,8 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
       </div>
       <div class="ce-pa-stage" id="${escapeHtml(stageId)}" data-layer="${escapeHtml(st.activeLayer)}">
         <div class="ce-pa-stage-inner" data-stage-inner="left">
-          <img class="ce-pa-stage-img" data-stage-img="left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : ""} />
+          <img class="ce-pa-stage-img" data-stage-img="left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : "hidden"} />
+          ${leftImg ? "" : `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">No print area image — upload in sidebar</div>`}
           <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" data-rect="red" title="Print area bounds">
             <button type="button" class="ce-pa-lock-btn" data-bounds-lock aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
             ${rectHandlesHtml("red")}
@@ -214,12 +215,25 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     aspect = aspectRatioFromDefault(md, nextData, nextSt.activeView);
     const imgEl = root.querySelector('[data-stage-img="left"]');
     const leftImg = resolveLeftViewerImage(nextSt, nextData, nextSt.activeView);
+    const stageInnerEl = root.querySelector('[data-stage-inner="left"]');
+    let emptyEl = root.querySelector('[data-stage-empty="left"]');
     if (imgEl) {
       if (leftImg) {
         imgEl.src = leftImg;
         imgEl.hidden = false;
+        emptyEl?.remove();
       } else {
         imgEl.removeAttribute("src");
+        imgEl.hidden = true;
+        if (stageInnerEl && !emptyEl) {
+          stageInnerEl.insertAdjacentHTML(
+            "beforeend",
+            `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">No print area image — upload in sidebar</div>`
+          );
+          emptyEl = root.querySelector('[data-stage-empty="left"]');
+        } else if (emptyEl) {
+          emptyEl.hidden = false;
+        }
       }
     }
     const applyAspect = () => {
