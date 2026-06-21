@@ -477,6 +477,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     if (!rect) return;
     applyDragToRect(rect, drag, ev, lockAspectForPhType(drag.phType));
     drawRect(drag.el, rect, true);
+    setOverlayAreaRect(st, st.activeView, drag.phType, drag.phIndex, rect);
     onStateChange?.();
   };
 
@@ -578,6 +579,8 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
   return {
     refresh,
+    redraw,
+    redrawStageRects,
     refreshPattern: () => {
       const patternLayer = root.querySelector("[data-pattern-layer]");
       if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
@@ -630,6 +633,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
       updatePrintAreaImage();
     },
     refreshPrintify: () => updatePrintifyPanel(),
+    redraw: () => stageHandle.redraw?.(),
+    redrawStageRects: () => stageHandle.redrawStageRects?.(),
     refreshOverlays: () => stageHandle.refreshOverlays?.(),
     destroy() {
       stageHandle.destroy?.();

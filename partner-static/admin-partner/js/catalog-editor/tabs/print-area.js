@@ -33,9 +33,11 @@ import {
 } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
 import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
-import { openPrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
+import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 
 export function teardownPrintAreaUi(ctx) {
+  closePrintAreaFullscreen();
+  ctx.printAreaFullscreenHandle = null;
   ctx.printAreaViewerHandle?.destroy?.();
   ctx.printAreaViewDockHandle?.destroy?.();
   removeViewDock();
@@ -271,11 +273,36 @@ export function bindPrintAreaTab(ctx, root) {
     ctx.printAreaViewerHandle?.refreshPrintify?.(st);
   };
 
+  const syncMainPrintAreaStage = (full = false) => {
+    if (full) ctx.printAreaViewerHandle?.redraw?.();
+    else ctx.printAreaViewerHandle?.redrawStageRects?.();
+  };
+
+  const syncFullscreenPrintAreaStage = (full = false) => {
+    if (full) ctx.printAreaFullscreenHandle?.redraw?.();
+    else ctx.printAreaFullscreenHandle?.redrawStageRects?.();
+  };
+
+  const onPrintAreaStageChange = () => {
+    persistStateToCtx(ctx, st);
+    syncMainPrintAreaStage(false);
+    syncFullscreenPrintAreaStage(false);
+  };
+
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
-    onStateChange: () => persistStateToCtx(ctx, st),
+    onStateChange: onPrintAreaStageChange,
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
     brandAssets: brandAssetsRef.current,
-    onMagnify: () => openPrintAreaFullscreen(ctx, st, data, { onStateChange: () => persistStateToCtx(ctx, st), brandAssets: brandAssetsRef.current }),
+    onMagnify: () => {
+      ctx.printAreaFullscreenHandle = openPrintAreaFullscreen(ctx, st, data, {
+        onStateChange: onPrintAreaStageChange,
+        onClose: () => {
+          syncMainPrintAreaStage(true);
+          ctx.printAreaFullscreenHandle = null;
+        },
+        brandAssets: brandAssetsRef.current,
+      });
+    },
   });
 
   ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, (viewKey) => {

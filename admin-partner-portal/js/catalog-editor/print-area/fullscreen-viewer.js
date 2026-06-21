@@ -20,15 +20,21 @@ export function openPrintAreaFullscreen(ctx, st, data, callbacks = {}) {
   openModal = overlay;
 
   const host = overlay.querySelector("#ce-pa-fs-stage-host");
+  const { onClose, onStateChange, ...stageCallbacks } = callbacks;
   const stageHandle = mountPrintAreaStage(host, ctx, st, data, {
-    ...callbacks,
+    ...stageCallbacks,
     fullscreen: true,
+    onStateChange: () => {
+      onStateChange?.();
+    },
   });
 
   const close = () => {
+    onClose?.();
     stageHandle?.destroy?.();
     overlay.remove();
     if (openModal === overlay) openModal = null;
+    window.removeEventListener("keydown", onKey);
   };
 
   overlay.querySelector(".ce-pa-fs-close")?.addEventListener("click", close);
@@ -36,14 +42,16 @@ export function openPrintAreaFullscreen(ctx, st, data, callbacks = {}) {
     if (ev.target === overlay) close();
   });
   const onKey = (ev) => {
-    if (ev.key === "Escape") {
-      window.removeEventListener("keydown", onKey);
-      close();
-    }
+    if (ev.key === "Escape") close();
   };
   window.addEventListener("keydown", onKey);
 
-  return { close, refresh: () => stageHandle?.refresh?.(st, data) };
+  return {
+    close,
+    refresh: (nextSt = st, nextData = data) => stageHandle?.refresh?.(nextSt, nextData),
+    redraw: () => stageHandle?.redraw?.(),
+    redrawStageRects: () => stageHandle?.redrawStageRects?.(),
+  };
 }
 
 export function closePrintAreaFullscreen() {
