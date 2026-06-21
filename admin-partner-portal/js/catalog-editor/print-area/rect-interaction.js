@@ -61,8 +61,9 @@ export function angleDeg(cx, cy, x, y) {
   return (Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90;
 }
 
-export function lockAspectForPhType(phType) {
-  return phType === "creator_design" || phType === "additional_design";
+/** Only the red print-bounds rect locks aspect; overlays resize freely. */
+export function lockAspectForPhType(_phType) {
+  return false;
 }
 
 export function normalizePhType(area) {

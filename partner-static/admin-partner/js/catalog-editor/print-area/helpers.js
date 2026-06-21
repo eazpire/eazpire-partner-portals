@@ -199,7 +199,7 @@ export function loadRectsForVariantGroup(st, data, groupId) {
     st.redRect = normalizeRectToPrintAspect(vpa.print_area_rect_json, md);
   }
   if (vpa?.mockup_print_area_rect_json) {
-    st.greenRect = normalizeRectToPrintAspect(vpa.mockup_print_area_rect_json, md);
+    st.greenRect = clampRectToStage(parseRect(vpa.mockup_print_area_rect_json));
     st.greenDirty = true;
   } else if (!hasSavedGreenRect(slice, st.activeView)) {
     st.greenRect = { ...st.redRect };
@@ -351,12 +351,12 @@ export function resolveRectsForView(data, slice, viewKey) {
   const red = resolveRedRectForView(data, viewKey, md);
 
   if (hasSavedGreenRect(slice, viewKey)) {
-    const green = normalizeRectToPrintAspect(getGreenRectFromSlice(slice, viewKey), md);
+    const green = clampRectToStage(parseRect(getGreenRectFromSlice(slice, viewKey)));
     return { red, green, greenDirty: true, md };
   }
 
   if (hasDbMockupPrintAreaRect(md)) {
-    const mockGreen = normalizeRectToPrintAspect(md.mockup_print_area_rect_json, md);
+    const mockGreen = clampRectToStage(parseRect(md.mockup_print_area_rect_json));
     if (!rectsNearlyEqual(mockGreen, red)) {
       return { red, green: mockGreen, greenDirty: true, md };
     }

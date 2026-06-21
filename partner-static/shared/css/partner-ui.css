@@ -3851,11 +3851,12 @@ body.catalog-editor-open #partner-toast {
   background: rgba(15, 23, 42, 0.55);
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: 8px;
 }
 .ce-pa-fs-card {
-  width: min(960px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  width: min(96vw, 1200px);
+  height: min(calc(100vh - 16px), 920px);
+  max-height: calc(100vh - 16px);
   display: flex;
   flex-direction: column;
   border-radius: 16px;
@@ -3869,20 +3870,50 @@ body.catalog-editor-open #partner-toast {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 .ce-pa-fs-title {
   font-weight: 800;
   font-size: 0.95rem;
 }
 .ce-pa-fs-body {
-  padding: 16px;
-  overflow: auto;
-  flex: 1;
+  padding: 8px;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ce-pa-fs-body .ce-pa-viewer {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+.ce-pa-fs-body .ce-pa-viewer-head {
+  flex: 0 0 auto;
 }
 .ce-pa-fs-body .ce-pa-stage {
-  min-height: min(70vh, 640px);
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  padding: 4px;
+}
+.ce-pa-fs-body .ce-pa-stage-inner {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+}
+.ce-pa-fs-body .ce-pa-stage-img {
+  max-width: 100%;
+  max-height: calc(100vh - 120px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 .ce-pa-brand-grid {
   display: flex;

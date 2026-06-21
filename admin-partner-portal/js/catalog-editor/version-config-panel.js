@@ -9,7 +9,10 @@ import {
   mergeCatalogAndDbPrintDimensions,
   applyPublishBrandingSemanticsToSlotsByPosition,
   catalogVariantIds,
+  normalizePatPositionKey,
 } from "./provider-print-technical.js";
+
+const EMPTY_PLACEHOLDER_SLOTS = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
 
 function versionTemplateRow(version) {
   return {
@@ -149,8 +152,20 @@ export function getVersionPlaceholderConfig(version, catalogDetail = {}) {
 export function getPlaceholderSlotsForView(version, catalogDetail, viewKey) {
   const byPos = getVersionPlaceholderConfig(version, catalogDetail);
   const vk = String(viewKey || "front").trim().toLowerCase();
-  const alt = vk.replace(/-/g, "_");
-  return byPos[vk] || byPos[alt] || byPos[vk.replace(/_/g, "-")] || { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+  const candidates = new Set([
+    vk,
+    vk.replace(/-/g, "_"),
+    vk.replace(/_/g, "-"),
+    normalizePatPositionKey(vk),
+  ]);
+  for (const key of candidates) {
+    if (byPos[key]) return { ...EMPTY_PLACEHOLDER_SLOTS, ...byPos[key] };
+  }
+  const norm = normalizePatPositionKey(vk);
+  for (const [k, slots] of Object.entries(byPos)) {
+    if (normalizePatPositionKey(k) === norm) return { ...EMPTY_PLACEHOLDER_SLOTS, ...slots };
+  }
+  return { ...EMPTY_PLACEHOLDER_SLOTS };
 }
 
 export function collectVersionConfigPanel(root, prevConfig = null, versionId = null) {

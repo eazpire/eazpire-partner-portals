@@ -1,5 +1,6 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { savePrintAreaRect } from "../api.js";
+import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import {
   getMockupDefaultForView,
   aspectRatioFromDefault,
@@ -21,6 +22,27 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function resolveVersion(ctx, data) {
+  return (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
+}
+
+function placeholderSlotsForView(ctx, st, data) {
+  const version = resolveVersion(ctx, data);
+  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  return getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
+}
+
+function placementModeActive(slots) {
+  return ["creator_design", "additional_design", "qr", "logo"].some((k) => (Number(slots[k]) || 0) > 0);
+}
+
+/** Green legacy rect: only when creator_design is configured and placement overlays are off. */
+function shouldShowGreenRect(ctx, st, data) {
+  const slots = placeholderSlotsForView(ctx, st, data);
+  if ((Number(slots.creator_design) || 0) <= 0) return false;
+  return !placementModeActive(slots);
+}
+
 function toggleRectHandles(el, active) {
   if (!el) return;
   el.querySelectorAll(".ce-pa-resize-handle, .ce-pa-rotate-handle").forEach((h) => {
@@ -40,7 +62,7 @@ function drawRect(el, rect, active = false) {
 }
 
 function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
-  const { showMagnify = true, stageId = "ce-pa-stage-left" } = options;
+  const { showMagnify = true, stageId = "ce-pa-stage-left", showGreenRect = true } = options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
     : "";
@@ -60,10 +82,14 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
           </div>
           <div class="ce-pa-pattern-layer" data-pattern-layer>${renderPatternOverlayHtml(st)}</div>
           <div class="ce-pa-placement-layer" data-placement-layer>${overlays || ""}</div>
-          <div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" data-rect="green" title="Creator placement">
+          ${
+            showGreenRect
+              ? `<div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" data-rect="green" title="Creator placement">
             <button type="button" class="ce-pa-snap-btn" data-snap-green aria-label="Snap to print area" title="Snap to print area">⊞</button>
             ${rectHandlesHtml("green")}
-          </div>
+          </div>`
+              : ""
+          }
         </div>
       </div>
     </div>`;
@@ -103,10 +129,11 @@ function stageInnerHtml(st, data, ctx, brandAssets) {
   const leftImg = resolveLeftViewerImage(st, data, st.activeView);
   const mockImg = resolvePrintifyMockUrl(st, st.activeView);
   const overlays = placementHtml(ctx, st, data, brandAssets);
+  const showGreenRect = shouldShowGreenRect(ctx, st, data);
   return `
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
-        ${printAreaStageHtml(st, data, leftImg, overlays)}
+        ${printAreaStageHtml(st, data, leftImg, overlays, { showGreenRect })}
         ${mockStageHtml(st, mockImg)}
       </div>
     </div>`;
@@ -120,9 +147,11 @@ export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
   const { onStateChange, brandAssets } = callbacks;
   const leftImg = resolveLeftViewerImage(st, data, st.activeView);
   const overlays = placementHtml(ctx, st, data, brandAssets);
+  const showGreenRect = shouldShowGreenRect(ctx, st, data);
   container.innerHTML = printAreaStageHtml(st, data, leftImg, overlays, {
     showMagnify: false,
     stageId: "ce-pa-fs-stage",
+    showGreenRect,
   });
 
   return bindStageInteractions(container, ctx, st, data, callbacks);
@@ -150,8 +179,14 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   };
 
   const redraw = () => {
+    const showGreen = shouldShowGreenRect(ctx, st, data);
     drawRect(rectRed, st.redRect, st.activeLayer === "red" && !st.boundsLocked);
-    drawRect(rectGreen, st.greenRect, st.activeLayer === "green");
+    if (rectGreen) {
+      rectGreen.hidden = !showGreen;
+      if (showGreen) drawRect(rectGreen, st.greenRect, st.activeLayer === "green");
+      else toggleRectHandles(rectGreen, false);
+    }
+    if (!showGreen && st.activeLayer === "green") st.activeLayer = "red";
     rectRed?.classList.toggle("is-locked", st.boundsLocked);
     rectGreen?.classList.toggle("is-active", st.activeLayer === "green");
     rectRed?.classList.toggle("is-active", st.activeLayer === "red" && !st.boundsLocked);
@@ -364,7 +399,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
     if (drag.kind === "layer") {
       const target = drag.layer === "red" ? st.redRect : st.greenRect;
-      applyDragToRect(target, drag, ev, true);
+      applyDragToRect(target, drag, ev, drag.layer === "red");
       if (drag.layer === "red") st.boundsDirty = true;
       else {
         st.greenDirty = true;
@@ -426,7 +461,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
   stageInner?.addEventListener("mousedown", (ev) => {
     if (ev.target.closest(".ce-pa-rect")) return;
-    pickLayer("green");
+    pickLayer(shouldShowGreenRect(ctx, st, data) ? "green" : "red");
   });
 
   window.addEventListener("mousemove", onMouseMove);

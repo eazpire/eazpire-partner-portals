@@ -69,9 +69,7 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
     const bucket = buckets[spec.type] || [];
     const savedArea = bucket[spec.index]?.area;
     const savedRect = rectFromConfigArea(savedArea);
-    const rect =
-      savedRect ||
-      defaultStackRect(red, globalIdx, specs.length, aspect > 0 ? aspect : 1);
+    const rect = savedRect || defaultStackRect(red, globalIdx, specs.length, 1);
 
     const overlay = { type: spec.type, index: spec.index, rect };
     if (spec.type === "qr" || spec.type === "logo") {

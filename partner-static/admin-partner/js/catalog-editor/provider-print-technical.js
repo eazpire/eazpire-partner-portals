@@ -187,7 +187,7 @@ function patSlotHasAny(s) {
   return !!(s && (s.qr > 0 || s.logo > 0 || s.creator_design > 0 || s.additional_design > 0));
 }
 
-function normalizePatPositionKey(k) {
+export function normalizePatPositionKey(k) {
   const s = String(k || "")
     .trim()
     .toLowerCase()
