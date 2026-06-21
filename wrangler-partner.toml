@@ -61,3 +61,7 @@ database_id = "9c7965da-2cad-40af-a6fa-1a4ce6c4d116"
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
 run_worker_first = ["/partner", "/partner/*"]
+
+[[r2_buckets]]
+binding = "MOCKUP_R2"
+bucket_name = "product-mockups"

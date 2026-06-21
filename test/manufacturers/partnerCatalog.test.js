@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { isManufacturerOp } from "../../src/features/manufacturers/manufacturerRouter.js";
 import {
   catalogStatusToIsActive,
@@ -1029,5 +1031,28 @@ describe("provider catalog location enrichment", () => {
     expect(row.locationDetail?.country).toBe("US");
     expect(row.locationLabel).toContain("US");
     expect(row.region).toBe("US");
+  });
+});
+
+describe("partner worker storage bindings", () => {
+  it("wrangler-partner.toml binds MOCKUP_R2 for print area uploads", () => {
+    const toml = readFileSync(resolve(process.cwd(), "wrangler-partner.toml"), "utf8");
+    expect(toml).toMatch(/binding\s*=\s*"MOCKUP_R2"/);
+    expect(toml).toMatch(/bucket_name\s*=\s*"product-mockups"/);
+  });
+});
+
+describe("uploadPrintAreaTemplateImage", () => {
+  it("returns storage_unavailable when MOCKUP_R2 is not bound", async () => {
+    const { uploadPrintAreaTemplateImage } = await import(
+      "../../src/features/manufacturers/partnerCatalog/editor/partnerEditorExtensions.js"
+    );
+    const request = new Request("https://admin.eazpire.com/partner?op=admin-eazpire-print-area-image-upload", {
+      method: "POST",
+      body: new FormData(),
+    });
+    const result = await uploadPrintAreaTemplateImage({}, request);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("storage_unavailable");
   });
 });
