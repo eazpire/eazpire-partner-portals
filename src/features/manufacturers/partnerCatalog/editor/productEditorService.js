@@ -3,6 +3,7 @@
  */
 
 import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
+import { enrichMockupDefaultsRows } from "../catalogOpsReadService.js";
 import {
   getCatalogOpsEditorBundle,
   getCatalogOpsVariantsBundle,
@@ -587,10 +588,13 @@ export async function getPrintAreaBundle(env, productKey, { printProviderId, ver
   if (printProviderId) {
     version = versions.find((v) => String(v.external_provider_id) === String(printProviderId)) || version;
   }
-  const mockupDefaults = await queryAll(
+  const mockupDefaults = enrichMockupDefaultsRows(
+    await queryAll(
     db,
     `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`,
     productKey
+  ),
+    env
   );
   const variantPrintAreas = await queryAll(
     db,
@@ -905,7 +909,7 @@ export async function saveTemplate(env, productKey, printProviderId, body) {
 }
 
 export async function getMockupsBundle(env, productKey, printProviderId) {
-  if (isCatalogOpsMasterWrite(env)) {
+  if (shouldUseCatalogOps(env)) {
     return getCatalogOpsMockupsBundle(env, productKey, printProviderId);
   }
   const db = env.MANUFACTURER_DB;
@@ -919,10 +923,9 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
     `SELECT * FROM eazpire_product_mockup_view_random WHERE product_key = ?`,
     productKey
   );
-  const defaults = await queryAll(
-    db,
-    `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`,
-    productKey
+  const defaults = enrichMockupDefaultsRows(
+    await queryAll(db, `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`, productKey),
+    env
   );
   return { ok: true, product, images, view_random: viewRandom, mockup_defaults: defaults };
 }

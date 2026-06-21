@@ -111,13 +111,33 @@ export function getMockupDefaultForView(mockupDefaults, viewKey) {
   return (mockupDefaults || []).find((r) => String(r.print_area_key || "").toLowerCase() === vk) || mockupDefaults?.[0] || null;
 }
 
+export function mockupPublicBase() {
+  const fromWindow =
+    typeof window !== "undefined"
+      ? window.__MOCKUP_PUBLIC_BASE__ || window.CREATOR_API_CONFIG?.BASE_URL
+      : "";
+  return String(fromWindow || "https://creator-engine.eazpire.workers.dev").replace(/\/$/, "");
+}
+
+function mockupUrlFromR2Key(key) {
+  if (!key) return "";
+  return `${mockupPublicBase()}/mockup/${encodeURIComponent(key)}`;
+}
+
+/** Print-area template image (edit mode) — same source as old admin: print_area_template_r2_key first. */
+export function printAreaTemplateImageUrl(row) {
+  if (!row) return "";
+  if (row.print_area_template_url) return row.print_area_template_url;
+  const key = row.print_area_template_r2_key || row.template_r2_key;
+  return mockupUrlFromR2Key(key);
+}
+
+/** Color mockup / template_r2_key (mock preview). */
 export function mockupImageUrl(row) {
   if (!row) return "";
+  if (row.template_url) return row.template_url;
   if (row.image_url) return row.image_url;
-  const key = row.template_r2_key || row.print_area_template_r2_key;
-  if (!key) return "";
-  const base = window.CREATOR_API_CONFIG?.BASE_URL || "";
-  return `${base}/mockup/${key}`;
+  return mockupUrlFromR2Key(row.template_r2_key);
 }
 
 export function buildMockupImagesByView(images) {

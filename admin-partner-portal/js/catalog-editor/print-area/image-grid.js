@@ -1,9 +1,9 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { uploadPrintAreaImage, clearPrintAreaImage } from "../api.js";
-import { mockupImageUrl, buildMockupImagesByView, pickMockUrlForView } from "./helpers.js";
+import { printAreaTemplateImageUrl, mockupImageUrl, buildMockupImagesByView, pickMockUrlForView } from "./helpers.js";
 
 function renderViewImageCard(viewKey, md, byView) {
-  const url = mockupImageUrl(md);
+  const url = printAreaTemplateImageUrl(md);
   const mockEntries = byView?.[viewKey] ? Object.entries(byView[viewKey]) : [];
 
   const mockThumbs = mockEntries
@@ -97,7 +97,7 @@ export function resolveLeftViewerImage(st, data, viewKey) {
     if (fromMock) return fromMock;
   }
   const md = data.mockup_defaults?.find((r) => String(r.print_area_key || "").toLowerCase() === String(viewKey).toLowerCase());
-  return mockupImageUrl(md);
+  return printAreaTemplateImageUrl(md);
 }
 
 export function resolvePrintifyMockUrl(st, viewKey) {

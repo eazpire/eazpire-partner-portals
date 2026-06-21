@@ -7,6 +7,7 @@ import {
   getCatalogOpsPrintAreaBundle,
   getCatalogOpsTemplateRow,
   listCatalogOpsProductVersions,
+  enrichMockupDefaultRow,
 } from "../../src/features/manufacturers/partnerCatalog/catalogOpsReadService.js";
 import { runCatalogOpsReconcile } from "../../src/features/manufacturers/partnerCatalog/catalogOpsReconcileService.js";
 import {
@@ -190,6 +191,22 @@ describe("catalogOpsReadService", () => {
     const result = await getCatalogOpsPrintAreaBundle(env, "test-tee", { printProviderId: 26 });
     expect(result.ok).toBe(true);
     expect(result.versions.length).toBeGreaterThan(0);
+  });
+
+  it("enrichMockupDefaultRow adds print_area_template_url from catalog-db keys", () => {
+    const row = enrichMockupDefaultRow(
+      {
+        print_area_key: "back",
+        print_area_template_r2_key: "print-area/test-tee/back.png",
+        template_r2_key: "mockups/test-tee/back-white.png",
+      },
+      "https://creator-engine.eazpire.workers.dev"
+    );
+    expect(row.print_area_template_url).toBe(
+      "https://creator-engine.eazpire.workers.dev/mockup/print-area/test-tee/back.png"
+    );
+    expect(row.template_url).toBe("https://creator-engine.eazpire.workers.dev/mockup/mockups/test-tee/back-white.png");
+    expect(row.has_print_area_in_image).toBe(true);
   });
 });
 

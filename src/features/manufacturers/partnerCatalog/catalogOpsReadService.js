@@ -20,6 +20,30 @@ async function queryAll(db, sql, ...binds) {
   }
 }
 
+/** Same public mockup base as creator-engine / old admin (getMockupDefaults). */
+export function mockupPublicBaseUrl(env) {
+  return env?.PUBLIC_FILE_BASE_URL || "https://creator-engine.eazpire.workers.dev";
+}
+
+/** Attach template_url + print_area_template_url for partner UI (shared with product_mockup_defaults). */
+export function enrichMockupDefaultRow(row, publicBaseUrl) {
+  if (!row) return row;
+  const base = String(publicBaseUrl || mockupPublicBaseUrl({})).replace(/\/$/, "");
+  const printAreaKey = row.print_area_template_r2_key || null;
+  const templateKey = row.template_r2_key || null;
+  return {
+    ...row,
+    print_area_template_url: printAreaKey ? `${base}/mockup/${printAreaKey}` : null,
+    template_url: templateKey ? `${base}/mockup/${templateKey}` : null,
+    has_print_area_in_image: !!printAreaKey,
+  };
+}
+
+export function enrichMockupDefaultsRows(rows, env) {
+  const base = mockupPublicBaseUrl(env);
+  return (rows || []).map((row) => enrichMockupDefaultRow(row, base));
+}
+
 function catalogRowToProduct(row, link = {}) {
   if (!row) return null;
   const status = isActiveToCatalogStatus(row.is_active);
@@ -348,10 +372,13 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
     `SELECT * FROM product_mockup_view_random WHERE product_key = ?`,
     productKey
   );
-  const defaults = await queryAll(
+  const defaults = enrichMockupDefaultsRows(
+    await queryAll(
     catalogDb,
     `SELECT * FROM product_mockup_defaults WHERE product_key = ?`,
     productKey
+  ),
+    env
   );
 
   return {
@@ -374,10 +401,13 @@ export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProvi
     version = versions.find((v) => String(v.external_provider_id) === String(printProviderId)) || version;
   }
 
-  const mockupDefaults = await queryAll(
+  const mockupDefaults = enrichMockupDefaultsRows(
+    await queryAll(
     catalogDb,
     `SELECT * FROM product_mockup_defaults WHERE product_key = ?`,
     productKey
+  ),
+    env
   );
   const variantPrintAreas = await queryAll(
     catalogDb,
