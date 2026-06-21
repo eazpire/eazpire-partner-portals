@@ -871,7 +871,9 @@ export async function handleManufacturerRouter(request, env) {
       );
       if (!result.ok) {
         const status =
-          result.error === "variants_refresh_failed" || result.error === "catalog_db_save_failed" ? 500 : 400;
+          result.error === "variants_refresh_failed" || result.error === "catalog_db_save_failed"
+            ? 500
+            : partnerSyncErrorStatus(result);
         return json(result, status, cors);
       }
       return json(result, 200, cors);

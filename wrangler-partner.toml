@@ -32,6 +32,8 @@ ACCOUNT_DELETION_FROM_EMAIL = "Eazpire <noreply@eazpire.com>"
 # Phase 2+3: catalog-db as ops master (read + write)
 CATALOG_OPS_MASTER_READ = "1"
 CATALOG_OPS_MASTER_WRITE = "1"
+# Same Printify shop as creator-engine (fetchPrintifyProductById / template sync)
+PRINTIFY_SHOP_ID = "22170465"
 
 [[kv_namespaces]]
 binding = "JOBS"

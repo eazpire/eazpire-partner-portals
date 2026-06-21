@@ -28,7 +28,7 @@ import { pickEnabledVariantIdsOnePerColor } from "../../../admin/adminTemplatePr
 import { buildProductPublishReadiness } from "../../../admin/adminPublishReadiness.js";
 import { fetchBlueprint, fetchBlueprintProviderVariants, fetchAllPrintProviders } from "../../adapters/printify/printifyCatalogClient.js";
 import { createPrintifyProduct, getPrintifyProduct } from "../../../../utils/printify.js";
-import { getPrintifyApiKey } from "../../../../utils/printifyEnv.js";
+import { getPrintifyApiKey, PARTNER_PRINTIFY_API_KEY_MISSING_HINT } from "../../../../utils/printifyEnv.js";
 import {
   mergeProviders,
   buildPrintProviderCatalogMap,
@@ -487,13 +487,28 @@ export async function refreshVariantsFromTemplate(
   autoMirror = false
 ) {
   if (!productKey || !printifyProductId) return { ok: false, error: "product_key_or_printify_product_id_required" };
+  if (!getPrintifyApiKey(env)) {
+    return {
+      ok: false,
+      error: "printify_api_key_not_configured",
+      hint: PARTNER_PRINTIFY_API_KEY_MISSING_HINT,
+    };
+  }
 
   try {
     let product;
     try {
-      product = await fetchPrintifyProductById(env, printifyProductId);
+      product = await getPrintifyProduct(env, printifyProductId);
     } catch (err) {
-      return { ok: false, error: "printify_product_fetch_failed", detail: String(err?.message || err) };
+      const msg = String(err?.message || err);
+      if (msg.includes("PRINTIFY_API_KEY") || msg.includes("printify_credentials_missing")) {
+        return {
+          ok: false,
+          error: "printify_api_key_not_configured",
+          hint: PARTNER_PRINTIFY_API_KEY_MISSING_HINT,
+        };
+      }
+      return { ok: false, error: "printify_product_fetch_failed", detail: msg };
     }
     if (!product?.id) return { ok: false, error: "printify_product_not_found" };
 
