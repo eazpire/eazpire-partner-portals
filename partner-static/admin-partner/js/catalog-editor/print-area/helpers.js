@@ -239,11 +239,47 @@ export function clampRectToStage(rect) {
 
 export function fitRectWithAspect(baseRect, aspect) {
   if (!(aspect > 0)) return clampRectToStage(baseRect);
+  const cx = baseRect.x + baseRect.w / 2;
+  const cy = baseRect.y + baseRect.h / 2;
   let w = baseRect.w;
   let h = baseRect.h;
   if (w / h > aspect) w = h * aspect;
   else h = w / aspect;
-  return clampRectToStage({ ...baseRect, w, h });
+  let x = cx - w / 2;
+  let y = cy - h / 2;
+  return clampRectToStage({ ...baseRect, x, y, w, h });
+}
+
+/** Centered rect at `scale` fraction of stage (default 50%), preserving Printify aspect ratio. */
+export function defaultCenteredRect(aspect, scale = 0.5) {
+  const s = Math.max(0.02, Math.min(1, scale));
+  if (!(aspect > 0)) {
+    return clampRectToStage({ x: (1 - s) / 2, y: (1 - s) / 2, w: s, h: s, angle: 0 });
+  }
+  let w;
+  let h;
+  if (aspect >= 1) {
+    w = s;
+    h = s / aspect;
+  } else {
+    h = s;
+    w = s * aspect;
+  }
+  return clampRectToStage({ x: (1 - w) / 2, y: (1 - h) / 2, w, h, angle: 0 });
+}
+
+export function hasDbPrintAreaRect(md) {
+  const raw = md?.print_area_rect_json;
+  if (raw == null || raw === "") return false;
+  const r = parseJsonSafe(raw, null);
+  return !!(r && Number.isFinite(Number(r.w)) && Number(r.w) > 0);
+}
+
+export function hasDbMockupPrintAreaRect(md) {
+  const raw = md?.mockup_print_area_rect_json;
+  if (raw == null || raw === "") return false;
+  const r = parseJsonSafe(raw, null);
+  return !!(r && Number.isFinite(Number(r.w)) && Number(r.w) > 0);
 }
 
 export function rectFromConfigArea(area) {
@@ -301,19 +337,26 @@ export function normalizeRectToPrintAspect(rect, md) {
   return fitRectWithAspect(parsed, aspect);
 }
 
+function resolveRedRectForView(data, viewKey, md) {
+  const aspect = aspectRatioFromDefault(md);
+  if (hasDbPrintAreaRect(md)) {
+    return normalizeRectToPrintAspect(md.print_area_rect_json, md);
+  }
+  return defaultCenteredRect(aspect, 0.5);
+}
+
 /** Red = print bounds; green overlaps red unless explicitly saved in DB/config. */
 export function resolveRectsForView(data, slice, viewKey) {
   const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
-  const red = normalizeRectToPrintAspect(md?.print_area_rect_json, md);
+  const red = resolveRedRectForView(data, viewKey, md);
 
   if (hasSavedGreenRect(slice, viewKey)) {
     const green = normalizeRectToPrintAspect(getGreenRectFromSlice(slice, viewKey), md);
     return { red, green, greenDirty: true, md };
   }
 
-  const mockupSaved = md?.mockup_print_area_rect_json;
-  if (mockupSaved) {
-    const mockGreen = normalizeRectToPrintAspect(mockupSaved, md);
+  if (hasDbMockupPrintAreaRect(md)) {
+    const mockGreen = normalizeRectToPrintAspect(md.mockup_print_area_rect_json, md);
     if (!rectsNearlyEqual(mockGreen, red)) {
       return { red, green: mockGreen, greenDirty: true, md };
     }

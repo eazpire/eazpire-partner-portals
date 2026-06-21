@@ -225,6 +225,8 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-print-area-image-clear",
   "admin-eazpire-variant-print-area-rect-save",
   "admin-eazpire-published-update-all",
+  "admin-eazpire-brand-assets-bundle",
+  "admin-eazpire-brand-asset-upload",
 ]);
 
 export function isManufacturerOp(op) {
@@ -943,6 +945,15 @@ export async function handleManufacturerRouter(request, env) {
         200,
         cors
       );
+    }
+    if (op === "admin-eazpire-brand-assets-bundle" && request.method === "GET") {
+      const result = await editorExt.getBrandAssetsBundle(env);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-brand-asset-upload" && request.method === "POST") {
+      const result = await editorExt.uploadBrandAsset(env, request);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

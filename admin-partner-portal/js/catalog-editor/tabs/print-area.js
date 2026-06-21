@@ -8,6 +8,7 @@ import {
   fetchTemplateBundle,
   fetchPrintifyMockups,
   saveVariantPrintAreaRect,
+  fetchBrandAssetsBundle,
 } from "../api.js";
 import {
   createInitialPrintAreaState,
@@ -19,9 +20,20 @@ import {
   loadRectsForVariantGroup,
   resolveRectsForView,
 } from "../print-area/helpers.js";
-import { renderPrintAreaSidebar, bindPrintAreaSidebar, refreshScopeActiveStates, refreshPatternSummary, refreshPatternSection, refreshPlacementSummary, refreshPlacementValues, refreshImagesGrids } from "../print-area/settings-sidebar.js";
+import {
+  renderPrintAreaSidebar,
+  bindPrintAreaSidebar,
+  refreshScopeActiveStates,
+  refreshPatternSummary,
+  refreshPatternSection,
+  refreshPlacementSummary,
+  refreshPlacementValues,
+  refreshPlacementSection,
+  refreshImagesGrids,
+} from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
 import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
+import { openPrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 
 export function teardownPrintAreaUi(ctx) {
   ctx.printAreaViewerHandle?.destroy?.();
@@ -160,13 +172,15 @@ async function resolvePrintifyProductId(ctx) {
 
 export async function loadPrintAreaTab(ctx) {
   const pid = ctx.selectedPrintProviderId;
-  const [printArea, mockups, variants] = await Promise.all([
+  const [printArea, mockups, variants, brandBundle] = await Promise.all([
     fetchPrintAreaBundle(ctx.productKey, pid, ctx.selectedVersionId),
     fetchMockupsBundle(ctx.productKey, pid).catch(() => ({ images: [] })),
     fetchVariantsBundle(ctx.productKey, pid).catch(() => ({})),
+    fetchBrandAssetsBundle().catch(() => ({ assets: { qr: {}, logo: {} } })),
   ]);
   const data = mergeTabData(printArea, mockups, variants);
   ctx.printAreaData = data;
+  ctx.brandAssetsBundle = brandBundle || { assets: { qr: {}, logo: {} } };
 
   const stateKey = `${pid}:${ctx.selectedVersionId}`;
   if (!ctx.printAreaState || ctx.printAreaState._key !== stateKey) {
@@ -182,7 +196,7 @@ export async function loadPrintAreaTab(ctx) {
 
   return `
     <div class="ce-tab-panel ce-tab-panel--print-area">
-      ${renderPrintAreaSidebar(ctx.printAreaState, data)}
+      ${renderPrintAreaSidebar(ctx.printAreaState, data, ctx, ctx.brandAssetsBundle?.assets)}
     </div>`;
 }
 
@@ -196,9 +210,16 @@ export function bindPrintAreaTab(ctx, root) {
 
   const editorMain = root.closest(".catalog-editor")?.querySelector(".catalog-editor-main");
 
+  const brandAssetsRef = { current: ctx.brandAssetsBundle?.assets || { qr: {}, logo: {} } };
+
+  const refreshOverlays = () => {
+    ctx.printAreaViewerHandle?.refreshOverlays?.();
+  };
+
   const refreshPrintAreaViewer = () => {
     persistStateToCtx(ctx, st);
     ctx.printAreaViewerHandle?.refreshPrintArea?.(st, ctx.printAreaData);
+    refreshOverlays();
   };
 
   const imageGridCallbacks = {
@@ -221,6 +242,8 @@ export function bindPrintAreaTab(ctx, root) {
   const sidebarCallbacks = {
     ctx,
     imageGridCallbacks,
+    brandAssetsRef,
+    onBrandAssetsChange: refreshOverlays,
     onChange: () => persistStateToCtx(ctx, st),
     onPatternChange: () => {
       persistStateToCtx(ctx, st);
@@ -251,12 +274,21 @@ export function bindPrintAreaTab(ctx, root) {
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: () => persistStateToCtx(ctx, st),
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
+    brandAssets: brandAssetsRef.current,
+    onMagnify: () => openPrintAreaFullscreen(ctx, st, data, { onStateChange: () => persistStateToCtx(ctx, st), brandAssets: brandAssetsRef.current }),
   });
 
   ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, (viewKey) => {
     loadViewIntoState(st, data, viewKey);
     updateViewDockActive(st);
     refreshPlacementSummary(root, st);
+    refreshPlacementSection(root, st, data, ctx);
+    root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        st.publishLogicByPh[sel.dataset.ph] = sel.value;
+        persistStateToCtx(ctx, st);
+      });
+    });
     refreshPrintAreaViewer();
   });
 

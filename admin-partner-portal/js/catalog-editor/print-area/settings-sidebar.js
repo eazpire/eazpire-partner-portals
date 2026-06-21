@@ -1,5 +1,6 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { PH_TYPES } from "../provider-print-technical.js";
+import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import {
   isPaSidebarCollapsed,
   setPaSidebarCollapsed,
@@ -8,6 +9,7 @@ import {
   loadRectsForVariantGroup,
 } from "./helpers.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
+import { renderBrandAssetsSection, bindBrandAssetsSection } from "./brand-assets.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -109,10 +111,18 @@ function renderPatternSection(st) {
     </details>`;
 }
 
-function renderPlacementSection(st) {
-  const rows = PH_TYPES.map((ph) => {
-    const val = st.publishLogicByPh?.[ph.key] || "calculated";
-    return `
+function renderPlacementSection(st, data, ctx) {
+  const version =
+    (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
+  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
+  const activePhTypes = PH_TYPES.filter((ph) => (Number(slots[ph.key]) || 0) > 0);
+  if (!activePhTypes.length) return "";
+
+  const rows = activePhTypes
+    .map((ph) => {
+      const val = st.publishLogicByPh?.[ph.key] || "calculated";
+      return `
     <div class="ce-pa-pl-row">
       <span class="ce-pa-pl-label">${escapeHtml(ph.label)}</span>
       <select class="select select-sm ce-pa-pl-mode" data-ph="${ph.key}">
@@ -120,10 +130,11 @@ function renderPlacementSection(st) {
         <option value="template" ${val === "template" ? "selected" : ""}>Template</option>
       </select>
     </div>`;
-  }).join("");
+    })
+    .join("");
 
   return `
-    <details class="ce-pa-acc">
+    <details class="ce-pa-acc ce-pa-acc--placement">
       <summary>Placement mode — ${escapeHtml(st.activeView)}</summary>
       <div class="ce-pa-acc-body">
         <p class="ce-hint">Per placeholder for the active view.</p>
@@ -147,7 +158,7 @@ function renderImagesSection(st, data) {
     </details>`;
 }
 
-export function renderPrintAreaSidebar(st, data) {
+export function renderPrintAreaSidebar(st, data, ctx, brandAssets) {
   const collapsed = isPaSidebarCollapsed();
   return `
     <div class="ce-pa-layout ${collapsed ? "ce-pa-layout--collapsed" : ""}">
@@ -157,7 +168,8 @@ export function renderPrintAreaSidebar(st, data) {
           <div class="ce-pa-sidebar-scroll">
             ${renderScopeSection(st)}
             ${renderPatternSection(st)}
-            ${renderPlacementSection(st)}
+            ${renderPlacementSection(st, data, ctx)}
+            ${renderBrandAssetsSection(brandAssets)}
             ${renderImagesSection(st, data)}
           </div>
         </div>
@@ -218,9 +230,25 @@ export function refreshPatternSummary(root, st) {
 }
 
 export function refreshPlacementSummary(root, st) {
-  const plAcc = root.querySelector(".ce-pa-acc:has(.ce-pa-pl-row)");
+  const plAcc = root.querySelector(".ce-pa-acc--placement");
   const summary = plAcc?.querySelector("summary");
   if (summary) summary.textContent = `Placement mode — ${st.activeView}`;
+}
+
+export function refreshPlacementSection(root, st, data, ctx) {
+  const patternAcc = root.querySelector(".ce-pa-acc--pattern");
+  const oldPl = root.querySelector(".ce-pa-acc--placement");
+  if (oldPl) oldPl.remove();
+  const html = renderPlacementSection(st, data, ctx);
+  if (html && patternAcc) {
+    patternAcc.insertAdjacentHTML("afterend", html);
+  }
+  refreshPlacementValues(root, st);
+  root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      st.publishLogicByPh[sel.dataset.ph] = sel.value;
+    });
+  });
 }
 
 export function refreshPlacementValues(root, st) {
@@ -284,8 +312,17 @@ function bindPatternControls(root, st, onChange) {
 }
 
 export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
-  const { onChange, onPatternChange, onPrintAreaRefresh, onDesignTypeChange, onVariantGroupChange, imageGridCallbacks, ctx } =
-    callbacks;
+  const {
+    onChange,
+    onPatternChange,
+    onPrintAreaRefresh,
+    onDesignTypeChange,
+    onVariantGroupChange,
+    imageGridCallbacks,
+    ctx,
+    brandAssetsRef,
+    onBrandAssetsChange,
+  } = callbacks;
 
   const gridCallbacks = {
     onUploaded: (...args) => imageGridCallbacks?.onUploaded?.(...args),
@@ -395,6 +432,13 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
       onChange?.();
     });
   });
+
+  if (brandAssetsRef) {
+    bindBrandAssetsSection(root, brandAssetsRef, {
+      onUploaded: () => onBrandAssetsChange?.(),
+      onCleared: () => onBrandAssetsChange?.(),
+    });
+  }
 
   root.querySelector("#ce-pa-use-mocks")?.addEventListener("change", (e) => {
     st.useMockups = e.target.checked;

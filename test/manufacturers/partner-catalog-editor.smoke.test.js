@@ -29,6 +29,9 @@ describe("partner catalog editor assets (smoke)", () => {
     "print-area/pattern-preview.js",
     "print-area/image-grid.js",
     "print-area/view-dock.js",
+    "print-area/placement-overlays.js",
+    "print-area/brand-assets.js",
+    "print-area/fullscreen-viewer.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {
@@ -67,6 +70,9 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-fetch-printify-mockups");
     expect(src).toContain("admin-eazpire-print-area-image-upload");
     expect(src).toContain("admin-eazpire-variant-print-area-rect-save");
+    expect(src).toContain("admin-eazpire-brand-assets-bundle");
+    expect(src).toContain("fetchBrandAssetsBundle");
+    expect(src).toContain("uploadBrandAsset");
     expect(src).toContain("syncTemplateSection");
     expect(src).toContain("saveTemplateSectionProductId");
     expect(src).toContain("admin-eazpire-template-section-id-save");

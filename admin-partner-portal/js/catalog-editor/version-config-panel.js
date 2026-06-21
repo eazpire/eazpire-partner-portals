@@ -138,6 +138,21 @@ function placeholdersFromVariants(variants) {
   return Array.isArray(phs) ? phs : [];
 }
 
+/** Placeholder counts per view from provider version config (for print-area sidebar/overlays). */
+export function getVersionPlaceholderConfig(version, catalogDetail = {}) {
+  const variants = catalogDetail?.variants || catalogDetail?.variants_json || [];
+  const phs = placeholdersFromVariants(Array.isArray(variants) ? variants : []);
+  const cfg = versionConfigForUi(version, phs);
+  return cfg.placeholders_by_position || {};
+}
+
+export function getPlaceholderSlotsForView(version, catalogDetail, viewKey) {
+  const byPos = getVersionPlaceholderConfig(version, catalogDetail);
+  const vk = String(viewKey || "front").trim().toLowerCase();
+  const alt = vk.replace(/-/g, "_");
+  return byPos[vk] || byPos[alt] || byPos[vk.replace(/_/g, "-")] || { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
+}
+
 export function collectVersionConfigPanel(root, prevConfig = null, versionId = null) {
   let wrap = root;
   if (versionId != null && root?.querySelectorAll) {

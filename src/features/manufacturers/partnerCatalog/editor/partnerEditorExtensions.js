@@ -1164,3 +1164,104 @@ export async function saveVariantPrintAreaRect(env, body) {
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
   return { ok: true, variant_id: variantId, rect_type: rectType };
 }
+
+const BRAND_ASSET_UPLOAD_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const BRAND_ASSET_MAX = 5 * 1024 * 1024;
+
+export async function getBrandAssetsBundle(env) {
+  const assets = { qr: { black: null, white: null }, logo: { black: null, white: null } };
+  if (!env.CREATOR_DB) return { ok: true, assets };
+
+  try {
+    const rows = await queryAll(
+      env.CREATOR_DB,
+      `SELECT asset_type, asset_color, image_url, r2_key, filename
+       FROM brand_assets
+       WHERE asset_type IN ('qr', 'logo') AND asset_color IN ('black', 'white')`
+    );
+    for (const r of rows) {
+      const type = String(r.asset_type || "").toLowerCase();
+      const color = String(r.asset_color || "").toLowerCase();
+      if (!assets[type] || (color !== "black" && color !== "white")) continue;
+      assets[type][color] = {
+        image_url: r.image_url || null,
+        r2_key: r.r2_key || null,
+        filename: r.filename || null,
+      };
+    }
+  } catch (e) {
+    console.warn("[getBrandAssetsBundle] read failed:", e?.message);
+  }
+
+  return { ok: true, assets };
+}
+
+export async function uploadBrandAsset(env, request) {
+  if (!env.R2) return { ok: false, error: "r2_not_configured" };
+  if (!env.CREATOR_DB) return { ok: false, error: "database_unavailable" };
+
+  const formData = await request.formData().catch(() => null);
+  if (!formData) return { ok: false, error: "invalid_form_data" };
+
+  const imageFile = formData.get("image");
+  const assetType = String(formData.get("asset_type") || "").toLowerCase().trim();
+  const assetColor = String(formData.get("asset_color") || "").toLowerCase().trim();
+
+  if (!imageFile || !(imageFile instanceof File)) return { ok: false, error: "missing_image" };
+  if (assetType !== "qr" && assetType !== "logo") return { ok: false, error: "invalid_asset_type" };
+  if (assetColor !== "black" && assetColor !== "white") return { ok: false, error: "invalid_asset_color" };
+
+  const fileType = imageFile.type || "";
+  if (!BRAND_ASSET_UPLOAD_TYPES.includes(fileType)) return { ok: false, error: "invalid_file_type" };
+  if (imageFile.size > BRAND_ASSET_MAX) return { ok: false, error: "file_too_large" };
+
+  const { publicFileURL } = await import("../../../../utils/helpers.js");
+  const { uploadImageToPrintifyFromBuffer } = await import("../../../../utils/printify.js");
+
+  const buffer = new Uint8Array(await imageFile.arrayBuffer());
+  const ext = fileType.includes("png") ? "png" : fileType.includes("webp") ? "webp" : "jpg";
+  const timestamp = Date.now();
+  const filename = `${assetType}_${assetColor}_${timestamp}.${ext}`;
+  const r2Key = `Brand Assets/${assetType}/${assetColor}/${filename}`;
+
+  await env.R2.put(r2Key, buffer, {
+    httpMetadata: { contentType: fileType || "image/png" },
+    customMetadata: { asset_type: assetType, asset_color: assetColor, uploaded_at: String(timestamp) },
+  });
+
+  const imageUrl = publicFileURL(request, r2Key);
+
+  await env.CREATOR_DB.prepare(
+    `INSERT OR REPLACE INTO brand_assets (asset_type, asset_color, filename, r2_key, image_url, uploaded_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(assetType, assetColor, filename, r2Key, imageUrl, timestamp)
+    .run();
+
+  let printifyImageId = null;
+  if (env.PRINTIFY_API_KEY) {
+    try {
+      const result = await uploadImageToPrintifyFromBuffer(env, buffer, filename, fileType || "image/png", imageUrl);
+      printifyImageId = result?.id ? String(result.id) : null;
+      if (printifyImageId) {
+        await env.CREATOR_DB.prepare(
+          `INSERT OR REPLACE INTO brand_assets_printify_archive (asset_type, asset_color, printify_image_id, uploaded_at)
+           VALUES (?, ?, ?, ?)`
+        )
+          .bind(assetType, assetColor, printifyImageId, timestamp)
+          .run();
+      }
+    } catch (e) {
+      console.warn("[uploadBrandAsset] Printify upload failed:", e?.message);
+    }
+  }
+
+  return {
+    ok: true,
+    image_url: imageUrl,
+    r2_key: r2Key,
+    printify_image_id: printifyImageId,
+    asset_type: assetType,
+    asset_color: assetColor,
+  };
+}
