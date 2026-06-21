@@ -68,7 +68,7 @@ function placeholderBadgesHtml(slots) {
   return parts.length ? `<div class="ce-prov-pv-badges">${parts.join("")}</div>` : "";
 }
 
-/** Active provider version body: print positions, placeholder counts, design types. */
+/** Active provider version body: print positions, placeholder counts, design types. Main source UI lives on Print Area tab only. */
 export function renderVersionConfigPanel(version, catalogDetail = {}) {
   const variants = catalogDetail.variants || [];
   const vpa = catalogDetail.variant_print_areas || [];

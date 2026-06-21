@@ -41,12 +41,17 @@ describe("print area main source inheritance (smoke)", () => {
     expect(src).not.toContain("ce-prov-main-source-cb");
     expect(src).not.toContain("ce-prov-use-main-provider-cb");
     expect(src).not.toContain("renderMainSourceHeader");
+    expect(src).not.toContain("No main source set");
+    expect(src).not.toContain("Use main source");
   });
 
   it("version config panel no longer renders provider inherit toggles", () => {
     const src = readFileSync(join(portal, "version-config-panel.js"), "utf8");
     expect(src).not.toContain("ce-prov-use-main-cb");
+    expect(src).not.toContain("ce-prov-inherit-label");
     expect(src).not.toContain("applyMainSourceInheritanceToConfig");
+    expect(src).not.toContain("Use main source");
+    expect(src).not.toContain("No main source set");
   });
 });
 

@@ -25,7 +25,7 @@ describe("print area brand assets + view keys (smoke)", () => {
     expect(src).toContain("Specific assets");
     expect(src).toContain("ce-pa-brand-specific");
     expect(src).toContain("uploadProductBrandAsset");
-    expect(src).toContain("readonly: !isSpecific");
+    expect(src).toContain("readonly: readonly || !isSpecific");
   });
 
   it("settings sidebar filters brand section by placeholder slots", () => {
