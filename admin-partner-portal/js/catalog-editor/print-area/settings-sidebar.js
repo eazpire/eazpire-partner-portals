@@ -168,7 +168,7 @@ export function renderPrintAreaSidebar(st, data) {
     </div>`;
 }
 
-function refreshPatternSection(root, st, onChange) {
+export function refreshPatternSection(root, st, onChange) {
   const acc = root.querySelector(".ce-pa-acc--pattern");
   if (!acc) return;
   const pat = st.patternConfig || defaultPatternConfig();
@@ -198,6 +198,41 @@ function refreshPatternSection(root, st, onChange) {
     ${sliders}`;
 
   bindPatternControls(root, st, onChange);
+}
+
+export function refreshScopeActiveStates(root, st) {
+  root.querySelectorAll(".ce-pa-dt-row").forEach((row) => {
+    const dt = normalizeDesignTypeKey(row.querySelector(".ce-pa-dt-name")?.dataset.dt);
+    row.classList.toggle("ce-pa-dt-row--active", dt === st.activeDesignType);
+  });
+  root.querySelectorAll(".ce-pa-variant-row").forEach((row) => {
+    const id = row.querySelector(".ce-pa-variant-name")?.dataset.variantId;
+    row.classList.toggle("ce-pa-variant-row--active", id === st.activeVariantGroupId);
+  });
+}
+
+export function refreshPatternSummary(root, st) {
+  const label = root.querySelector(".ce-pa-pattern-summary > span");
+  if (label) label.textContent = `Pattern — ${st.activeDesignType}`;
+}
+
+export function refreshPlacementSummary(root, st) {
+  const plAcc = root.querySelector(".ce-pa-acc:has(.ce-pa-pl-row)");
+  const summary = plAcc?.querySelector("summary");
+  if (summary) summary.textContent = `Placement mode — ${st.activeView}`;
+}
+
+export function refreshPlacementValues(root, st) {
+  root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
+    sel.value = st.publishLogicByPh?.[sel.dataset.ph] || "calculated";
+  });
+}
+
+export function refreshImagesGrids(root, ctx, st, data, gridCallbacks) {
+  const grids = root.querySelector("#ce-pa-img-grids");
+  if (!grids) return;
+  grids.innerHTML = renderImageGrids(st, data);
+  bindImageGrids(root, ctx, st, data, gridCallbacks);
 }
 
 function bindPatternControls(root, st, onChange) {
@@ -236,7 +271,24 @@ function bindPatternControls(root, st, onChange) {
 }
 
 export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
-  const { onChange, onDesignTypeChange, onVariantGroupChange, onReload, ctx } = callbacks;
+  const { onChange, onPatternChange, onPrintAreaRefresh, onDesignTypeChange, onVariantGroupChange, imageGridCallbacks, ctx } =
+    callbacks;
+
+  const gridCallbacks = {
+    onUploaded: (...args) => imageGridCallbacks?.onUploaded?.(...args),
+    onCleared: (...args) => imageGridCallbacks?.onCleared?.(...args),
+    onUseMockPick: (viewKey, color) => {
+      st.useMockups = true;
+      st.activeVariantGroupId =
+        st.variantGroups.groups.find((g) => g.title === color)?.id || st.activeVariantGroupId;
+      const useMocks = root.querySelector("#ce-pa-use-mocks");
+      if (useMocks) useMocks.checked = true;
+      root.querySelector("#ce-pa-img-grids")?.classList.add("ce-pa-img-grids--hidden");
+      refreshScopeActiveStates(root, st);
+      onChange?.();
+      onPrintAreaRefresh?.();
+    },
+  };
 
   root.querySelector("#ce-pa-sidebar-toggle")?.addEventListener("click", () => {
     setPaSidebarCollapsed(!isPaSidebarCollapsed());
@@ -319,11 +371,11 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
 
   root.querySelector("#ce-pa-pattern-enabled")?.addEventListener("change", (e) => {
     st.patternConfig.enabled = e.target.checked;
-    refreshPatternSection(root, st, onChange);
-    onChange?.();
+    refreshPatternSection(root, st, onPatternChange);
+    onPatternChange?.();
   });
 
-  bindPatternControls(root, st, onChange);
+  bindPatternControls(root, st, onPatternChange);
 
   root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -336,17 +388,8 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     st.useMockups = e.target.checked;
     root.querySelector("#ce-pa-img-grids")?.classList.toggle("ce-pa-img-grids--hidden", st.useMockups);
     onChange?.();
-    onReload?.();
+    onPrintAreaRefresh?.();
   });
 
-  bindImageGrids(root, ctx, st, data, {
-    onUploaded: () => onReload?.(),
-    onUseMockPick: (viewKey, color) => {
-      st.useMockups = true;
-      st.activeVariantGroupId =
-        st.variantGroups.groups.find((g) => g.title === color)?.id || st.activeVariantGroupId;
-      onChange?.();
-      onReload?.();
-    },
-  });
+  bindImageGrids(root, ctx, st, data, gridCallbacks);
 }

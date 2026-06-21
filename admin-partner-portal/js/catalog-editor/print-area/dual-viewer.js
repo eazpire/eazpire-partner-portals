@@ -65,6 +65,29 @@ function refreshPatternLayer(main, st) {
   if (layer) layer.innerHTML = renderPatternOverlayHtml(st);
 }
 
+function updatePrintAreaImage(main, st, data) {
+  const imgEl = main.querySelector("#ce-pa-img-left");
+  if (!imgEl) return;
+  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
+  if (leftImg) {
+    imgEl.src = leftImg;
+    imgEl.hidden = false;
+  } else {
+    imgEl.removeAttribute("src");
+  }
+}
+
+function updatePrintifyPanel(main, st) {
+  const inner = main.querySelector(".ce-pa-stage-inner--mock");
+  if (!inner) return;
+  const mockImg = resolvePrintifyMockUrl(st, st.activeView);
+  if (mockImg) {
+    inner.innerHTML = `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`;
+  } else {
+    inner.innerHTML = `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">Click refresh to load Printify mock</div>`;
+  }
+}
+
 export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   const { onStateChange, onMockRefresh } = callbacks;
   const main = root.querySelector("#ce-pa-main");
@@ -72,8 +95,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
 
   main.innerHTML = renderDualViewer(st, data);
 
-  const md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
-  const aspect = aspectRatioFromDefault(md);
+  let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
+  let aspect = aspectRatioFromDefault(md);
   const stageInner = main.querySelector("#ce-pa-stage-inner-left");
   const rectRed = main.querySelector("#ce-pa-rect-red");
   const rectGreen = main.querySelector("#ce-pa-rect-green");
@@ -98,6 +121,17 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     if (lockBtn) lockBtn.textContent = st.boundsLocked ? "🔒" : "🔓";
     main.querySelector("#ce-pa-stage-left")?.setAttribute("data-layer", st.activeLayer);
     refreshPatternLayer(main, st);
+  };
+
+  const refreshPrintArea = (nextSt, nextData) => {
+    md = getMockupDefaultForView(nextData.mockup_defaults, nextSt.activeView);
+    aspect = aspectRatioFromDefault(md);
+    updatePrintAreaImage(main, nextSt, nextData);
+    redraw();
+  };
+
+  const refreshPrintify = (nextSt) => {
+    updatePrintifyPanel(main, nextSt);
   };
 
   redraw();
@@ -232,6 +266,8 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
 
   return {
     refreshPattern: () => refreshPatternLayer(main, st),
+    refreshPrintArea: (nextSt = st, nextData = data) => refreshPrintArea(nextSt, nextData),
+    refreshPrintify: (nextSt = st) => refreshPrintify(nextSt),
     destroy() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);

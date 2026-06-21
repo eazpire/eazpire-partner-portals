@@ -43,7 +43,7 @@ export function renderImageGrids(st, data) {
 }
 
 export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
-  const { onUploaded, onUseMockPick } = callbacks;
+  const { onUploaded, onCleared, onUseMockPick } = callbacks;
 
   root.querySelectorAll(".ce-pa-upload-input").forEach((input) => {
     input.addEventListener("change", async () => {
@@ -56,7 +56,6 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
         const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === viewKey);
         if (md) md.print_area_template_r2_key = res.r2_key;
         onUploaded?.(viewKey, res);
-        ctx.reloadTab();
       } catch (err) {
         console.error("Print area upload failed", err);
       } finally {
@@ -76,7 +75,7 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
         await clearPrintAreaImage(ctx.productKey, viewKey);
         const md = data.mockup_defaults?.find((r) => String(r.print_area_key).toLowerCase() === viewKey);
         if (md) md.print_area_template_r2_key = null;
-        ctx.reloadTab();
+        onCleared?.(viewKey);
       } finally {
         btn.disabled = false;
       }

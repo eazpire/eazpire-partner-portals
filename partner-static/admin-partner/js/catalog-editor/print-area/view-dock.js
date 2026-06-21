@@ -25,6 +25,14 @@ export function mountViewDock(hostEl, st, onViewChange) {
   };
 }
 
+export function updateViewDockActive(st) {
+  const dock = document.getElementById("ce-pa-view-dock");
+  if (!dock) return;
+  dock.querySelectorAll(".ce-pa-view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === st.activeView);
+  });
+}
+
 export function removeViewDock() {
   document.getElementById("ce-pa-view-dock")?.remove();
 }

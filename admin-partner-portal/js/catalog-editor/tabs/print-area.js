@@ -19,9 +19,9 @@ import {
   loadRectsForVariantGroup,
   resolveRectsForView,
 } from "../print-area/helpers.js";
-import { renderPrintAreaSidebar, bindPrintAreaSidebar } from "../print-area/settings-sidebar.js";
+import { renderPrintAreaSidebar, bindPrintAreaSidebar, refreshScopeActiveStates, refreshPatternSummary, refreshPatternSection, refreshPlacementSummary, refreshPlacementValues, refreshImagesGrids } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice } from "../print-area/dual-viewer.js";
-import { mountViewDock, removeViewDock } from "../print-area/view-dock.js";
+import { mountViewDock, removeViewDock, updateViewDockActive } from "../print-area/view-dock.js";
 
 export function teardownPrintAreaUi(ctx) {
   ctx.printAreaViewerHandle?.destroy?.();
@@ -192,39 +192,78 @@ export function bindPrintAreaTab(ctx, root) {
   if (!st || !data) return;
 
   teardownPrintAreaUi(ctx);
+  ctx.printAreaRoot = root;
 
   const editorMain = root.closest(".catalog-editor")?.querySelector(".catalog-editor-main");
 
-  bindPrintAreaSidebar(root, st, data, {
+  const refreshPrintAreaViewer = () => {
+    persistStateToCtx(ctx, st);
+    ctx.printAreaViewerHandle?.refreshPrintArea?.(st, ctx.printAreaData);
+  };
+
+  const imageGridCallbacks = {
+    onUploaded: () => {
+      refreshImagesGrids(root, ctx, st, ctx.printAreaData, imageGridCallbacks);
+      refreshPrintAreaViewer();
+    },
+    onCleared: () => {
+      refreshImagesGrids(root, ctx, st, ctx.printAreaData, imageGridCallbacks);
+      refreshPrintAreaViewer();
+    },
+    onUseMockPick: () => {
+      refreshScopeActiveStates(root, st);
+      persistStateToCtx(ctx, st);
+      refreshPrintAreaViewer();
+    },
+  };
+  ctx.printAreaImageGridCallbacks = imageGridCallbacks;
+
+  const sidebarCallbacks = {
     ctx,
-    onChange: () => {
+    imageGridCallbacks,
+    onChange: () => persistStateToCtx(ctx, st),
+    onPatternChange: () => {
       persistStateToCtx(ctx, st);
       ctx.printAreaViewerHandle?.refreshPattern?.();
     },
+    onPrintAreaRefresh: refreshPrintAreaViewer,
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, data, dt);
-      ctx.reloadTab();
+      refreshScopeActiveStates(root, st);
+      refreshPatternSummary(root, st);
+      refreshPatternSection(root, st, sidebarCallbacks.onPatternChange);
+      refreshPlacementSummary(root, st);
+      refreshPlacementValues(root, st);
+      refreshPrintAreaViewer();
     },
     onVariantGroupChange: () => {
-      ctx.reloadTab();
+      refreshScopeActiveStates(root, st);
+      refreshPrintAreaViewer();
     },
-    onReload: () => ctx.reloadTab(),
-  });
+  };
+
+  bindPrintAreaSidebar(root, st, data, sidebarCallbacks);
+
+  const refreshPrintifyViewer = () => {
+    ctx.printAreaViewerHandle?.refreshPrintify?.(st);
+  };
 
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: () => persistStateToCtx(ctx, st),
-    onMockRefresh: () => refreshPrintifyMock(ctx),
+    onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
   });
 
   ctx.printAreaViewDockHandle = mountViewDock(editorMain, st, (viewKey) => {
     loadViewIntoState(st, data, viewKey);
-    ctx.reloadTab();
+    updateViewDockActive(st);
+    refreshPlacementSummary(root, st);
+    refreshPrintAreaViewer();
   });
 
   ctx.printAreaUiCleanup = () => teardownPrintAreaUi(ctx);
 }
 
-async function refreshPrintifyMock(ctx) {
+async function refreshPrintifyMock(ctx, refreshPrintifyViewer) {
   const printifyId = await resolvePrintifyProductId(ctx);
   if (!printifyId) return;
   try {
@@ -251,7 +290,10 @@ async function refreshPrintifyMock(ctx) {
     }
     const data = await loadPrintAreaTabData(ctx);
     ctx.printAreaData = data;
-    ctx.reloadTab();
+    refreshPrintifyViewer?.();
+    if (ctx.printAreaRoot) {
+      refreshImagesGrids(ctx.printAreaRoot, ctx, st, data, ctx.printAreaImageGridCallbacks || {});
+    }
   } catch (err) {
     console.error("Printify mock refresh failed", err);
   }
