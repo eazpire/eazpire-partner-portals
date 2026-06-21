@@ -221,6 +221,9 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-template-remove-draft",
   "admin-eazpire-template-section-id-save",
   "admin-eazpire-fetch-printify-mockups",
+  "admin-eazpire-print-area-image-upload",
+  "admin-eazpire-print-area-image-clear",
+  "admin-eazpire-variant-print-area-rect-save",
   "admin-eazpire-published-update-all",
 ]);
 
@@ -904,6 +907,27 @@ export async function handleManufacturerRouter(request, env) {
         body.auto_mirror !== false,
         body.printify_product_id || null
       );
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-area-image-upload" && request.method === "POST") {
+      const result = await editorExt.uploadPrintAreaTemplateImage(env, request);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-print-area-image-clear" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.clearPrintAreaTemplateImage(env, {
+        productKey: body.product_key,
+        printAreaKey: body.print_area_key,
+        autoMirror: body.auto_mirror !== false,
+      });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-variant-print-area-rect-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const result = await editorExt.saveVariantPrintAreaRect(env, body);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }

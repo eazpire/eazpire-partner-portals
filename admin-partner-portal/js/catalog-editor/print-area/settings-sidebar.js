@@ -5,7 +5,9 @@ import {
   setPaSidebarCollapsed,
   defaultPatternConfig,
   normalizeDesignTypeKey,
+  loadRectsForVariantGroup,
 } from "./helpers.js";
+import { renderImageGrids, bindImageGrids } from "./image-grid.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -64,6 +66,22 @@ function renderScopeSection(st) {
             <strong>Variants</strong>
             <button type="button" class="btn btn-ghost btn-xs" id="ce-pa-var-all">All</button>
           </div>
+          ${
+            st.variantGroups.groups.length > 1
+              ? `
+          <div class="ce-pa-variant-edit-row">
+            <span class="ce-hint">Edit group</span>
+            <select class="select select-sm" id="ce-pa-active-variant-group">
+              ${st.variantGroups.groups
+                .map(
+                  (g) =>
+                    `<option value="${escapeHtml(g.id)}" ${g.id === st.activeVariantGroupId ? "selected" : ""}>${escapeHtml(g.title)}</option>`
+                )
+                .join("")}
+            </select>
+          </div>`
+              : ""
+          }
           <div class="ce-pa-check-grid">${variantRows || '<p class="ce-hint">No variants loaded.</p>'}</div>
         </div>
       </div>
@@ -121,19 +139,7 @@ function renderPlacementSection(st) {
     </details>`;
 }
 
-function renderImagesSection(st) {
-  const grids = st.viewKeys
-    .map(
-      (vk) => `
-    <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
-      <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
-      <div class="ce-pa-img-grid" id="ce-pa-img-grid-${escapeHtml(vk)}">
-        <p class="ce-hint">Upload grid — phase 2</p>
-      </div>
-    </div>`
-    )
-    .join("");
-
+function renderImagesSection(st, data) {
   return `
     <details class="ce-pa-acc">
       <summary>Print area images</summary>
@@ -142,7 +148,7 @@ function renderImagesSection(st) {
           <input type="checkbox" id="ce-pa-use-mocks" ${st.useMockups ? "checked" : ""} />
           <span>Use mockups (hide upload grids)</span>
         </label>
-        <div class="ce-pa-img-grids ${st.useMockups ? "ce-pa-img-grids--hidden" : ""}" id="ce-pa-img-grids">${grids}</div>
+        <div class="ce-pa-img-grids ${st.useMockups ? "ce-pa-img-grids--hidden" : ""}" id="ce-pa-img-grids">${renderImageGrids(st, data)}</div>
       </div>
     </details>`;
 }

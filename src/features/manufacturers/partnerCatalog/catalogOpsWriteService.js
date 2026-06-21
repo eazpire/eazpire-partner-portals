@@ -1260,7 +1260,108 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
       .run();
   }
 
-  return { ok: true, count: entries.length, _ops_source: "catalog-db" };
+  const { buildMockupImagesByView } = await import("./mockupImagesByView.js");
+  const images = await queryAll(
+    db,
+    `SELECT * FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC`,
+    productKey,
+    pid
+  );
+
+  return {
+    ok: true,
+    count: entries.length,
+    printify_product_id: printifyProductId,
+    by_view: buildMockupImagesByView(images),
+    _ops_source: "catalog-db",
+  };
+}
+
+export async function setCatalogPrintAreaTemplateKey(env, productKey, printAreaKey, r2Key) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  const key = String(printAreaKey || "front").trim() || "front";
+  const now = Date.now();
+  const row = await queryFirst(
+    db,
+    `SELECT id FROM product_mockup_defaults WHERE product_key = ? AND print_area_key = ?`,
+    productKey,
+    key
+  );
+
+  if (row?.id) {
+    await db
+      .prepare(`UPDATE product_mockup_defaults SET print_area_template_r2_key = ?, updated_at = ? WHERE id = ?`)
+      .bind(r2Key || null, now, row.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO product_mockup_defaults
+          (product_key, print_area_key, print_area_template_r2_key, template_color, placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
+         VALUES (?, ?, ?, 'white', 0.5, 0.5, 1.0, 0.0, ?, ?)`
+      )
+      .bind(productKey, key, r2Key || null, now, now)
+      .run();
+  }
+
+  return { ok: true, _ops_source: "catalog-db" };
+}
+
+export async function saveCatalogVariantPrintAreaRect(env, body) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  const productKey = String(body.product_key || "").trim();
+  const printAreaKey = String(body.print_area_key || "front").trim();
+  const variantId = Number(body.variant_id);
+  const rect = body.print_area_rect;
+  const rectType = body.rect_type === "mockup" ? "mockup" : "print_area";
+
+  if (!productKey) return { ok: false, error: "product_key_required" };
+  if (!variantId) return { ok: false, error: "variant_id_required" };
+  if (!rect || typeof rect.x !== "number" || typeof rect.y !== "number") {
+    return { ok: false, error: "print_area_rect_required" };
+  }
+
+  const angle = typeof rect.angle === "number" ? Math.max(-180, Math.min(180, rect.angle)) : 0;
+  const rectJson = JSON.stringify({
+    x: Math.max(0, Math.min(1, rect.x)),
+    y: Math.max(0, Math.min(1, rect.y)),
+    w: Math.max(0.01, Math.min(1, rect.w)),
+    h: Math.max(0.01, Math.min(1, rect.h)),
+    angle,
+  });
+
+  const now = Date.now();
+  const col = rectType === "mockup" ? "mockup_print_area_rect_json" : "print_area_rect_json";
+  const result = await db
+    .prepare(
+      `UPDATE product_variant_print_areas SET ${col} = ?, updated_at = ? WHERE product_key = ? AND print_area_key = ? AND variant_id = ?`
+    )
+    .bind(rectJson, now, productKey, printAreaKey, variantId)
+    .run();
+
+  if (result.meta?.changes === 0) {
+    await db
+      .prepare(
+        `INSERT INTO product_variant_print_areas
+          (product_key, print_area_key, variant_id, ${col}, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .bind(productKey, printAreaKey, variantId, rectJson, now, now)
+      .run();
+  }
+
+  return {
+    ok: true,
+    product_key: productKey,
+    print_area_key: printAreaKey,
+    variant_id: variantId,
+    rect_type: rectType,
+    _ops_source: "catalog-db",
+  };
 }
 
 export async function updateCatalogPatPrintifyProductId(env, productKey, printProviderId, printifyProductId) {

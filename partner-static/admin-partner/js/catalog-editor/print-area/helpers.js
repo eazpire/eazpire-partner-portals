@@ -119,6 +119,62 @@ export function mockupImageUrl(row) {
   return `${base}/mockup/${key}`;
 }
 
+export function buildMockupImagesByView(images) {
+  const byView = {};
+  for (const img of images || []) {
+    const vk = String(img.view_key || "front")
+      .trim()
+      .toLowerCase();
+    const color = String(img.color_name || "Default").trim() || "Default";
+    if (!byView[vk]) byView[vk] = {};
+    let variantIds = img.printify_variant_ids;
+    if (typeof variantIds === "string") {
+      try {
+        variantIds = JSON.parse(variantIds);
+      } catch {
+        variantIds = [];
+      }
+    }
+    byView[vk][color] = {
+      image_url: img.image_url || "",
+      color_hex: img.color_hex || null,
+      is_default: Number(img.is_default) === 1,
+      printify_variant_ids: Array.isArray(variantIds) ? variantIds : [],
+    };
+  }
+  return byView;
+}
+
+export function pickMockUrlForView(byView, viewKey, colorHint = null) {
+  const vk = String(viewKey || "front").toLowerCase();
+  const viewMap = byView?.[vk];
+  if (!viewMap || typeof viewMap !== "object") return "";
+  if (colorHint && viewMap[colorHint]?.image_url) return viewMap[colorHint].image_url;
+  for (const name of Object.keys(viewMap)) {
+    if (viewMap[name]?.is_default && viewMap[name]?.image_url) return viewMap[name].image_url;
+  }
+  for (const name of Object.keys(viewMap)) {
+    if (viewMap[name]?.image_url) return viewMap[name].image_url;
+  }
+  return "";
+}
+
+export function findVariantPrintAreaRow(vpas, viewKey, variantId) {
+  const vk = String(viewKey || "front").toLowerCase();
+  return (vpas || []).find(
+    (r) => String(r.print_area_key || "").toLowerCase() === vk && Number(r.variant_id) === Number(variantId)
+  );
+}
+
+export function loadRectsForVariantGroup(st, data, groupId) {
+  const group = st.variantGroups.groups.find((g) => g.id === groupId);
+  if (!group?.variantIds?.length) return;
+  const vid = group.variantIds[0];
+  const vpa = findVariantPrintAreaRow(data.variant_print_areas, st.activeView, vid);
+  if (vpa?.print_area_rect_json) st.redRect = parseRect(vpa.print_area_rect_json);
+  if (vpa?.mockup_print_area_rect_json) st.greenRect = parseRect(vpa.mockup_print_area_rect_json);
+}
+
 export function parseRect(raw) {
   const r = parseJsonSafe(raw, null);
   if (r && typeof r === "object" && Number.isFinite(Number(r.w)) && Number.isFinite(Number(r.h))) {
@@ -238,13 +294,15 @@ export function createInitialPrintAreaState(ctx, data) {
   const green = getGreenRectFromSlice(slice, activeView) || parseRect(md?.mockup_print_area_rect_json) || { ...red };
 
   const productForVariants = {
-    variants: data.variants || ctx.printAreaData?.variants || [],
-    options: data.variant_options || ctx.variantsBundle?.product?.options,
+    variants: data.variants || data.variants_json || ctx.variantsBundle?.variants_json || [],
+    options: data.variant_options || data.product_data?.options || ctx.variantsBundle?.product_data?.options,
     product_key: ctx.productKey,
   };
   const variantGroups = groupVariantsForPrintArea(productForVariants);
+  const mockupImagesByView = data.mockup_images_by_view || buildMockupImagesByView(data.mockup_images || []);
+  const activeVariantGroupId = variantGroups.groups[0]?.id || null;
 
-  return {
+  const st = {
     designTypes,
     activeDesignType: normalizeDesignTypeKey(ctx.selectedDesignType || designTypes[0]),
     designTypesScope: new Set(designTypes),
@@ -263,6 +321,16 @@ export function createInitialPrintAreaState(ctx, data) {
     variantGroups,
     variantsScope: new Set(variantGroups.groups.map((g) => g.id)),
     variantGroupMode: variantGroups.mode,
+    activeVariantGroupId,
+    mockupImagesByView,
+    mockUrlsByView: {},
     mockPreviewStale: false,
+    perVariantProduct: productKeyExpectsPerVariantDimensions(ctx.productKey),
   };
+
+  if (st.perVariantProduct && activeVariantGroupId) {
+    loadRectsForVariantGroup(st, data, activeVariantGroupId);
+  }
+
+  return st;
 }

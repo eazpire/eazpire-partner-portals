@@ -3,6 +3,7 @@
  */
 
 import { parseJson, newId } from "../../db.js";
+import { buildMockupImagesByView, pickMockUrlForView } from "../mockupImagesByView.js";
 import { getEazpireProduct } from "../eazpireProductService.js";
 import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "../catalogOpsConfig.js";
 import {
@@ -20,6 +21,8 @@ import {
   updateCatalogPatPrintifyProductId,
   saveCatalogDraftProductId,
   clearCatalogDraftProductId,
+  setCatalogPrintAreaTemplateKey,
+  saveCatalogVariantPrintAreaRect,
 } from "../catalogOpsWriteService.js";
 import { listProductVersions, updateProductVersion } from "../eazpireProductVersionService.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
@@ -935,7 +938,18 @@ export async function fetchPrintifyMockups(env, productKey, printProviderId, aut
   }
 
   if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  return { ok: true, count: entries.length, printify_product_id: printifyProductId };
+  const images = await queryAll(
+    db,
+    `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC`,
+    productKey,
+    Number(printProviderId)
+  );
+  return {
+    ok: true,
+    count: entries.length,
+    printify_product_id: printifyProductId,
+    by_view: buildMockupImagesByView(images),
+  };
 }
 
 async function getBasicShadowReadiness(env, productKey) {
@@ -1007,4 +1021,146 @@ export async function resolveCountries(env, codes) {
   const normalized = [...new Set(list.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean))];
   const countries = normalized.map((code) => ({ code, name: COUNTRY_NAME_MAP[code] || code }));
   return { ok: true, countries };
+}
+
+const PA_UPLOAD_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const PA_UPLOAD_MAX = 10 * 1024 * 1024;
+
+function mockupPublicBase(env) {
+  return env.PUBLIC_FILE_BASE_URL || "https://creator-engine.eazpire.workers.dev";
+}
+
+export async function uploadPrintAreaTemplateImage(env, request) {
+  if (!env.MOCKUP_R2) return { ok: false, error: "storage_unavailable" };
+  const formData = await request.formData().catch(() => null);
+  if (!formData) return { ok: false, error: "invalid_form_data" };
+
+  const imageFile = formData.get("image");
+  const productKey = String(formData.get("product_key") ?? "").trim();
+  const printAreaKey = String(formData.get("print_area_key") ?? "front").trim() || "front";
+
+  if (!productKey) return { ok: false, error: "product_key_required" };
+  if (!imageFile || !(imageFile instanceof File)) return { ok: false, error: "missing_image" };
+
+  const fileType = imageFile.type || "";
+  if (!PA_UPLOAD_TYPES.includes(fileType)) return { ok: false, error: "invalid_file_type" };
+  if (imageFile.size > PA_UPLOAD_MAX) return { ok: false, error: "file_too_large" };
+
+  const ext =
+    fileType === "image/png"
+      ? "png"
+      : fileType === "image/webp"
+        ? "webp"
+        : fileType === "image/jpeg" || fileType === "image/jpg"
+          ? "jpg"
+          : "png";
+  const r2Key = `print-area/${productKey}/${printAreaKey}-${Date.now()}.${ext}`;
+  const buffer = new Uint8Array(await imageFile.arrayBuffer());
+
+  await env.MOCKUP_R2.put(r2Key, buffer, {
+    httpMetadata: { contentType: fileType || "image/png" },
+    customMetadata: { product_key: productKey, print_area_key: printAreaKey, image_type: "print_area_template" },
+  });
+
+  if (isCatalogOpsMasterWrite(env)) {
+    await setCatalogPrintAreaTemplateKey(env, productKey, printAreaKey, r2Key);
+  } else {
+    const db = env.MANUFACTURER_DB;
+    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+    const now = Date.now();
+    const row = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_mockup_defaults WHERE product_key = ? AND print_area_key = ?`,
+      productKey,
+      printAreaKey
+    );
+    if (row?.id) {
+      await db
+        .prepare(`UPDATE eazpire_product_mockup_defaults SET print_area_template_r2_key = ?, updated_at = ? WHERE id = ?`)
+        .bind(r2Key, now, row.id)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_mockup_defaults
+            (id, product_key, print_area_key, print_area_template_r2_key, placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 0.5, 0.5, 1, 0, ?, ?)`
+        )
+        .bind(newId(), productKey, printAreaKey, r2Key, now, now)
+        .run();
+    }
+  }
+
+  const imageUrl = `${mockupPublicBase(env)}/mockup/${r2Key}`;
+  return { ok: true, product_key: productKey, print_area_key: printAreaKey, r2_key: r2Key, image_url: imageUrl };
+}
+
+export async function clearPrintAreaTemplateImage(env, { productKey, printAreaKey, autoMirror = false }) {
+  if (!productKey) return { ok: false, error: "product_key_required" };
+  const key = String(printAreaKey || "front").trim() || "front";
+
+  if (isCatalogOpsMasterWrite(env)) {
+    await setCatalogPrintAreaTemplateKey(env, productKey, key, null);
+  } else {
+    const db = env.MANUFACTURER_DB;
+    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+    await db
+      .prepare(
+        `UPDATE eazpire_product_mockup_defaults SET print_area_template_r2_key = NULL, updated_at = ? WHERE product_key = ? AND print_area_key = ?`
+      )
+      .bind(Date.now(), productKey, key)
+      .run();
+  }
+
+  if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true };
+}
+
+export async function saveVariantPrintAreaRect(env, body) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return saveCatalogVariantPrintAreaRect(env, body);
+  }
+
+  const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+
+  const productKey = String(body.product_key || "").trim();
+  const printAreaKey = String(body.print_area_key || "front").trim();
+  const variantId = Number(body.variant_id);
+  const rect = body.print_area_rect;
+  const rectType = body.rect_type === "mockup" ? "mockup" : "print_area";
+
+  if (!productKey) return { ok: false, error: "product_key_required" };
+  if (!variantId) return { ok: false, error: "variant_id_required" };
+  if (!rect || typeof rect.x !== "number") return { ok: false, error: "print_area_rect_required" };
+
+  const rectJson = JSON.stringify(rect);
+  const now = Date.now();
+  const col = rectType === "mockup" ? "mockup_print_area_rect_json" : "print_area_rect_json";
+  const row = await queryFirst(
+    db,
+    `SELECT id FROM eazpire_product_variant_print_areas WHERE product_key = ? AND print_area_key = ? AND variant_id = ?`,
+    productKey,
+    printAreaKey,
+    variantId
+  );
+
+  if (row?.id) {
+    await db
+      .prepare(`UPDATE eazpire_product_variant_print_areas SET ${col} = ?, updated_at = ? WHERE id = ?`)
+      .bind(rectJson, now, row.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO eazpire_product_variant_print_areas
+          (id, product_key, print_area_key, variant_id, ${col}, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(newId(), productKey, printAreaKey, variantId, rectJson, now, now)
+      .run();
+  }
+
+  if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
+  return { ok: true, variant_id: variantId, rect_type: rectType };
 }
