@@ -2895,33 +2895,128 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   max-width: 920px;
 }
 
-/* Provider markets — country chip picker */
+/* Provider markets — region-grouped country picker */
 .ce-prov-markets {
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid var(--line);
 }
-.ce-market-chip-grid {
+.ce-market-regions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
 }
-.ce-market-chip {
-  min-width: 44px;
-  padding: 6px 10px;
-  border-radius: 999px;
+.ce-market-region {
   border: 1px solid var(--line);
+  border-radius: 14px;
   background: var(--surface);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  overflow: hidden;
+}
+.ce-market-region-head {
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.ce-market-region-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+}
+.ce-market-region-select input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
-.ce-market-chip--on {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  color: var(--text);
+.ce-market-region-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ce-market-region-code {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.ce-market-region-desc {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.ce-market-region-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ce-market-region-countries {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px 12px;
+  padding: 10px 14px 12px;
+}
+.ce-market-country {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin: 0;
+  transition: background 0.12s ease;
+}
+.ce-market-country:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.ce-market-country input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ce-market-country-flag {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.ce-market-country-flag--emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  background: var(--surface-3);
+}
+.ce-market-country-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ce-market-country-code {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.ce-market-country-hint {
+  margin-top: 10px;
 }
 .ce-prov-origin-field {
   margin-top: 16px;

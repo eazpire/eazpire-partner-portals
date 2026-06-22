@@ -126,6 +126,10 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("publish_plan_updates");
     expect(src).toContain("ce-prov-origin");
     expect(src).toContain("mergeVisibilityIntoVersionConfig");
+    const picker = readFileSync(join(portal, "market-country-picker.js"), "utf8");
+    expect(picker).toContain("ce-market-region");
+    expect(picker).toContain("buildCountryFlagHtml");
+    expect(picker).toContain("ce-market-country-cb");
   });
 
   it("all tab modules exist", () => {
