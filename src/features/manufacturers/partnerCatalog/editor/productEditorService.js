@@ -28,6 +28,7 @@ import {
   saveCatalogAutomations,
 } from "../catalogOpsWriteService.js";
 import { parseJson, newId } from "../../db.js";
+import { regionCodesFromCountryCodes } from "../../../catalog/resolvePlanCountries.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
 import {
   listProductVersions,
@@ -135,15 +136,7 @@ export async function saveProductMeta(env, productKey, body) {
   }
   const db = env.MANUFACTURER_DB;
   const product = await updateEazpireProduct(db, productKey, {
-    title: body.title,
     catalog_status: body.catalog_status,
-    regions: body.regions,
-    visible_design_types: body.visible_design_types,
-    catalog_category_group: body.catalog_category_group,
-    catalog_category_leaf: body.catalog_category_leaf,
-    catalog_audience: body.catalog_audience,
-    catalog_production_type: body.catalog_production_type,
-    print_area_edit_use_mocks: body.print_area_edit_use_mocks,
   });
   if (!product) return { ok: false, error: "not_found" };
 
@@ -212,32 +205,7 @@ export async function saveProductMeta(env, productKey, body) {
         .run();
     }
 
-    if (body.publish_plan) {
-      const plan = body.publish_plan;
-      const planExisting = await queryFirst(
-        db,
-        `SELECT id FROM eazpire_product_publish_plans WHERE product_key = ? AND provider_name = ?`,
-        productKey,
-        plan.provider_name || ""
-      );
-      if (planExisting?.id) {
-        await db
-          .prepare(
-            `UPDATE eazpire_product_publish_plans SET
-              region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
-             WHERE id = ?`
-          )
-          .bind(
-            JSON.stringify(plan.region_codes || []),
-            JSON.stringify(plan.country_codes || []),
-            plan.priority ?? 100,
-            plan.is_enabled !== false ? 1 : 0,
-            now,
-            planExisting.id
-          )
-          .run();
-      }
-    }
+    /* publish_plan updates live on Provider tab (markets section) */
   }
 
   if (body.auto_mirror !== false) {
@@ -418,6 +386,99 @@ async function upsertVariantPrintAreaDimensions(db, productKey, update, now) {
   }
 }
 
+/** After provider save: mirror version titles, design types, and market regions onto product + profiles. */
+async function syncProductDerivedFromProviders(db, productKey, activeIds, body, now) {
+  const designTypes = new Set();
+  const countryCodes = new Set();
+
+  const ingestVersion = (vu) => {
+    const cfg = vu?.product_version_config;
+    if (cfg && Array.isArray(cfg.design_types)) {
+      for (const dt of cfg.design_types) {
+        if (dt) designTypes.add(String(dt));
+      }
+    }
+  };
+
+  if (Array.isArray(body.version_updates)) {
+    for (const vu of body.version_updates) {
+      ingestVersion(vu);
+      if (vu.product_version_config == null) {
+        const v = await getProductVersion(db, vu.id);
+        ingestVersion(v);
+      }
+    }
+  }
+  if (Array.isArray(body.new_versions)) {
+    for (const nv of body.new_versions) ingestVersion(nv);
+  }
+
+  if (Array.isArray(body.publish_plan_updates)) {
+    for (const plan of body.publish_plan_updates) {
+      for (const cc of plan.country_codes || []) countryCodes.add(String(cc).toUpperCase());
+    }
+  }
+
+  let productTitle = null;
+  for (const pid of activeIds) {
+    const versions = await queryAll(
+      db,
+      `SELECT v.display_name, v.sort_order
+       FROM eazpire_product_versions v
+       JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
+       WHERE v.product_key = ? AND fp.external_provider_id = ?
+       ORDER BY v.sort_order ASC, v.created_at ASC`,
+      productKey,
+      String(pid)
+    );
+    const name = String(versions[0]?.display_name || "").trim();
+    if (name) {
+      productTitle = name;
+      break;
+    }
+  }
+
+  const regions = regionCodesFromCountryCodes([...countryCodes]);
+  const productPatch = {};
+  if (productTitle) productPatch.title = productTitle;
+  if (designTypes.size) productPatch.visible_design_types = [...designTypes];
+  if (regions.length) productPatch.regions = regions;
+  if (Object.keys(productPatch).length) {
+    await updateEazpireProduct(db, productKey, productPatch);
+  }
+
+  for (const pid of activeIds) {
+    const versions = await queryAll(
+      db,
+      `SELECT v.display_name, v.sort_order, fp.external_provider_id
+       FROM eazpire_product_versions v
+       JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
+       WHERE v.product_key = ? AND fp.external_provider_id = ?
+       ORDER BY v.sort_order ASC, v.created_at ASC`,
+      productKey,
+      String(pid)
+    );
+    const stdName = String(versions[0]?.display_name || "").trim();
+    if (!stdName) continue;
+    const profile = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      pid
+    );
+    if (profile?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_publish_profiles SET
+            title = ?, standard_product_display_name = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(stdName, stdName, now, profile.id)
+        .run();
+    }
+  }
+}
+
 export async function saveProviders(env, productKey, body) {
   if (isCatalogOpsMasterWrite(env)) {
     return saveCatalogProviders(env, productKey, body);
@@ -505,15 +566,26 @@ export async function saveProviders(env, productKey, body) {
         ? await queryFirst(db, `SELECT id FROM eazpire_product_publish_plans WHERE id = ?`, plan.id)
         : null;
       if (existing?.id) {
+        const countryCodes = Array.isArray(plan.country_codes) ? plan.country_codes : [];
+        const regionCodes =
+          Array.isArray(plan.region_codes) && plan.region_codes.length
+            ? plan.region_codes
+            : regionCodesFromCountryCodes(countryCodes);
+        const origin =
+          plan.country_of_origin != null
+            ? String(plan.country_of_origin).trim().toUpperCase().slice(0, 2) || null
+            : null;
         await db
           .prepare(
             `UPDATE eazpire_product_publish_plans SET
-              region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
+              region_codes_json = ?, country_codes_json = ?, country_of_origin = COALESCE(?, country_of_origin),
+              priority = ?, is_enabled = ?, updated_at = ?
              WHERE id = ?`
           )
           .bind(
-            JSON.stringify(plan.region_codes || []),
-            JSON.stringify(plan.country_codes || []),
+            JSON.stringify(regionCodes),
+            JSON.stringify(countryCodes),
+            origin,
             plan.priority ?? 100,
             plan.is_enabled !== false ? 1 : 0,
             now,
@@ -523,6 +595,8 @@ export async function saveProviders(env, productKey, body) {
       }
     }
   }
+
+  await syncProductDerivedFromProviders(db, productKey, activeIds, body, now);
 
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);
   return { ok: true };

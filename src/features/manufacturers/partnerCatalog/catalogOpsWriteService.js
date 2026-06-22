@@ -13,6 +13,7 @@ import {
 import { getProductVersion, patRowToStudioConfig } from "./eazpireProductVersionService.js";
 import { updateEazpireProduct } from "./eazpireProductService.js";
 import { getCatalogOpsProduct, listCatalogOpsProductVersions } from "./catalogOpsReadService.js";
+import { regionCodesFromCountryCodes } from "../../catalog/resolvePlanCountries.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -327,37 +328,17 @@ export async function updateCatalogProductMeta(env, productKey, body) {
   await db
     .prepare(
       `UPDATE product_catalog SET
-        title = COALESCE(?, title),
-        regions_json = COALESCE(?, regions_json),
         is_active = ?,
-        visible_design_types_json = COALESCE(?, visible_design_types_json),
-        catalog_category_group = COALESCE(?, catalog_category_group),
-        catalog_category_leaf = COALESCE(?, catalog_category_leaf),
-        catalog_audience_json = COALESCE(?, catalog_audience_json),
-        catalog_production_type = COALESCE(?, catalog_production_type),
-        print_area_edit_use_mocks = COALESCE(?, print_area_edit_use_mocks),
         updated_at = ?
        WHERE product_key = ?`
     )
-    .bind(
-      body.title ?? null,
-      body.regions != null ? JSON.stringify(body.regions) : null,
-      isActive,
-      body.visible_design_types != null ? JSON.stringify(body.visible_design_types) : null,
-      body.catalog_category_group ?? null,
-      body.catalog_category_leaf ?? null,
-      body.catalog_audience != null ? JSON.stringify(body.catalog_audience) : null,
-      body.catalog_production_type ?? null,
-      body.print_area_edit_use_mocks != null ? (body.print_area_edit_use_mocks ? 1 : 0) : null,
-      now,
-      productKey
-    )
+    .bind(isActive, now, productKey)
     .run();
 
   const printProviderId = body.print_provider_id;
   if (printProviderId != null) {
     await upsertCatalogPublishProfile(db, productKey, printProviderId, {
-      title: body.profile_title ?? body.title ?? existing.title,
+      title: body.profile_title ?? existing.title,
       shopify_category_id: body.shopify_category_id ?? null,
       standard_product_display_name: body.standard_product_display_name ?? null,
       product_features: body.product_features ?? null,
@@ -365,37 +346,103 @@ export async function updateCatalogProductMeta(env, productKey, body) {
       size_table_html: body.size_table_html ?? null,
       gpsr_html: body.gpsr_html ?? null,
     });
-
-    if (body.publish_plan) {
-      const plan = body.publish_plan;
-      const planExisting = await queryFirst(
-        db,
-        `SELECT id FROM product_publish_map WHERE product_key = ? AND provider_name = ? LIMIT 1`,
-        productKey,
-        plan.provider_name || ""
-      );
-      if (planExisting?.id) {
-        await db
-          .prepare(
-            `UPDATE product_publish_map SET
-              region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
-             WHERE id = ?`
-          )
-          .bind(
-            JSON.stringify(plan.region_codes || []),
-            JSON.stringify(plan.country_codes || []),
-            plan.priority ?? 100,
-            plan.is_enabled !== false ? 1 : 0,
-            now,
-            planExisting.id
-          )
-          .run();
-      }
-    }
   }
 
   const product = await getCatalogOpsProduct(env, productKey);
   return { ok: true, product: product.ok ? product.product : null, _ops_source: "catalog-db" };
+}
+
+async function syncCatalogProductDerivedFromProviders(db, productKey, activeIds, body, now) {
+  const designTypes = new Set();
+  const countryCodes = new Set();
+
+  const ingestConfig = (cfg) => {
+    if (cfg && Array.isArray(cfg.design_types)) {
+      for (const dt of cfg.design_types) {
+        if (dt) designTypes.add(String(dt));
+      }
+    }
+  };
+
+  if (Array.isArray(body.version_updates)) {
+    for (const vu of body.version_updates) {
+      if (vu.product_version_config) ingestConfig(vu.product_version_config);
+    }
+  }
+  if (Array.isArray(body.new_versions)) {
+    for (const nv of body.new_versions) ingestConfig(nv.product_version_config);
+  }
+
+  if (Array.isArray(body.publish_plan_updates)) {
+    for (const plan of body.publish_plan_updates) {
+      for (const cc of plan.country_codes || []) countryCodes.add(String(cc).toUpperCase());
+    }
+  }
+
+  let productTitle = null;
+  for (const pid of activeIds) {
+    const row = await queryFirst(
+      db,
+      `SELECT display_name FROM print_area_printify_templates
+       WHERE product_key = ? AND print_provider_id = ?
+       ORDER BY sort_order ASC, id ASC LIMIT 1`,
+      productKey,
+      pid
+    );
+    const name = String(row?.display_name || "").trim();
+    if (name) {
+      productTitle = name;
+      break;
+    }
+  }
+
+  const regions = regionCodesFromCountryCodes([...countryCodes]);
+  const patch = [];
+  const binds = [];
+  if (productTitle) {
+    patch.push("title = ?");
+    binds.push(productTitle);
+  }
+  if (designTypes.size) {
+    patch.push("visible_design_types_json = ?");
+    binds.push(JSON.stringify([...designTypes]));
+  }
+  if (regions.length) {
+    patch.push("regions_json = ?");
+    binds.push(JSON.stringify(regions));
+  }
+  if (patch.length) {
+    patch.push("updated_at = ?");
+    binds.push(now, productKey);
+    await db.prepare(`UPDATE product_catalog SET ${patch.join(", ")} WHERE product_key = ?`).bind(...binds).run();
+  }
+
+  for (const pid of activeIds) {
+    const row = await queryFirst(
+      db,
+      `SELECT display_name FROM print_area_printify_templates
+       WHERE product_key = ? AND print_provider_id = ?
+       ORDER BY sort_order ASC, id ASC LIMIT 1`,
+      productKey,
+      pid
+    );
+    const stdName = String(row?.display_name || "").trim();
+    if (!stdName) continue;
+    const profile = await queryFirst(
+      db,
+      `SELECT id FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+      productKey,
+      pid
+    );
+    if (profile?.id) {
+      await db
+        .prepare(
+          `UPDATE product_publish_profiles SET title = ?, standard_product_display_name = ?, updated_at = ? WHERE id = ?`
+        )
+        .bind(stdName, stdName, now, profile.id)
+        .run();
+    }
+  }
 }
 
 export async function saveCatalogProviders(env, productKey, body) {
@@ -507,15 +554,26 @@ export async function saveCatalogProviders(env, productKey, body) {
   if (Array.isArray(body.publish_plan_updates)) {
     for (const plan of body.publish_plan_updates) {
       if (!plan.id) continue;
+      const countryCodes = Array.isArray(plan.country_codes) ? plan.country_codes : [];
+      const regionCodes =
+        Array.isArray(plan.region_codes) && plan.region_codes.length
+          ? plan.region_codes
+          : regionCodesFromCountryCodes(countryCodes);
+      const origin =
+        plan.country_of_origin != null
+          ? String(plan.country_of_origin).trim().toUpperCase().slice(0, 2) || null
+          : null;
       await db
         .prepare(
           `UPDATE product_publish_map SET
-            region_codes_json = ?, country_codes_json = ?, priority = ?, is_enabled = ?, updated_at = ?
+            region_codes_json = ?, country_codes_json = ?, country_of_origin = COALESCE(?, country_of_origin),
+            priority = ?, is_enabled = ?, updated_at = ?
            WHERE id = ?`
         )
         .bind(
-          JSON.stringify(plan.region_codes || []),
-          JSON.stringify(plan.country_codes || []),
+          JSON.stringify(regionCodes),
+          JSON.stringify(countryCodes),
+          origin,
           plan.priority ?? 100,
           plan.is_enabled !== false ? 1 : 0,
           now,
@@ -524,6 +582,8 @@ export async function saveCatalogProviders(env, productKey, body) {
         .run();
     }
   }
+
+  await syncCatalogProductDerivedFromProviders(db, productKey, activeIds, body, now);
 
   return { ok: true, _ops_source: "catalog-db" };
 }

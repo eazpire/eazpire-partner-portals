@@ -111,6 +111,8 @@
     "changes:today": "node scripts/utils/view-changes.js --today",
     "migrate:hero-images": "node scripts/utils/migrate-hero-images.js",
     "migrate:auto-promotions": "node scripts/utils/migrate-auto-promotions.js",
+    "assets:scan": "node scripts/utils/scan-platform-assets.js",
+    "migrate:platform-assets": "node scripts/run-d1-migration-file.cjs creator-db migrations/0120_platform_asset_library.sql",
     "bootstrap:auto-promotions": "node scripts/utils/bootstrap-auto-promotions.js",
     "cleanup:hero-images": "node scripts/utils/cleanup-hero-prompts.js",
     "cleanup:saved-previews": "node scripts/fix-saved-previews.js",

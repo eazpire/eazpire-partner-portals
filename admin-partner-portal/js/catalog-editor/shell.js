@@ -38,6 +38,7 @@ import {
 } from "./editor-subnav.js";
 import { renderPrintAreaProviderPill, bindPrintAreaMainSourceSubnav } from "./print-area/main-source.js";
 import { removeViewDock } from "./print-area/view-dock.js";
+import { editorProductTitle } from "./editor-product-title.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
@@ -558,7 +559,7 @@ export async function openProductEditor(productKey) {
 
   try {
     ctx.bundle = await fetchEditorBundle(productKey);
-    overlayEl.querySelector("#ce-title").textContent = ctx.bundle.product?.title || productKey;
+    overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, productKey);
     const firstVersion = ctx.bundle.versions?.[0];
     ctx.selectedVersionId = firstVersion?.id || null;
     updateDriftBadge(ctx);

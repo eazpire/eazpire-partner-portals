@@ -1,234 +1,145 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { saveMeta } from "../api.js";
-import { getSubnavVisibility, providerLabel, getVersionsForProvider, versionDisplayName } from "../editor-subnav.js";
+import { getActiveProviderIds, providerLabel } from "../editor-subnav.js";
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
+import { publishProfileForProvider } from "../editor-product-title.js";
 
-const COMMON_COUNTRIES = ["DE", "FR", "IT", "ES", "NL", "BE", "AT", "PL", "CZ", "US", "CA", "GB", "UK"];
+function renderMetaProviderPills(ctx) {
+  const providerIds = getActiveProviderIds(ctx);
+  if (providerIds.length <= 1) return "";
+  const selected = String(ctx.metaSelectedProviderId || ctx.selectedPrintProviderId || providerIds[0]);
+  const pills = providerIds
+    .map((pid) => {
+      const active = String(pid) === selected ? " active" : "";
+      return `<button type="button" class="ce-meta-provider-pill${active}" data-pid="${escapeHtml(pid)}">${escapeHtml(providerLabel(ctx, pid))}</button>`;
+    })
+    .join("");
+  return `
+    <nav class="ce-meta-provider-nav" aria-label="Print provider">
+      <span class="catalog-editor-subnav-label">Print provider</span>
+      <div class="ce-meta-provider-pills">${pills}</div>
+    </nav>`;
+}
+
+function resolveMetaProviderId(ctx) {
+  const providerIds = getActiveProviderIds(ctx);
+  const fallback =
+    ctx.metaSelectedProviderId ||
+    ctx.selectedPrintProviderId ||
+    providerIds[0] ||
+    ctx.bundle.publish_profiles?.[0]?.print_provider_id;
+  return Number(fallback) || null;
+}
 
 export function renderMetaTab(ctx) {
   const p = ctx.bundle.product;
-  const providerId = Number(
-    ctx.selectedPrintProviderId ||
-      ctx.bundle.active_providers?.[0]?.print_provider_id ||
-      ctx.bundle.publish_profiles?.[0]?.print_provider_id
-  );
-  const { showProviders, showVersions } = getSubnavVisibility(ctx);
-  const versions = getVersionsForProvider(ctx, providerId);
-  const version =
-    versions.find((v) => String(v.id) === String(ctx.selectedVersionId)) || versions[0] || null;
-  const selectionHint = [];
-  if (showProviders && ctx.selectedPrintProviderId) {
-    selectionHint.push(providerLabel(ctx, ctx.selectedPrintProviderId));
-  } else if (providerId) {
-    selectionHint.push(`Provider ${providerId}`);
-  }
-  if (showVersions && version) {
-    selectionHint.push(versionDisplayName(version, versions.indexOf(version)));
-  }
-  const profile = (ctx.bundle.publish_profiles || []).find(
-    (r) => Number(r.print_provider_id) === providerId
-  ) || ctx.bundle.publish_profiles?.[0];
-  const plan = (ctx.bundle.publish_plans || []).find((r) => {
-    const pp = Number(r?.profile?.print_provider_id ?? r?.print_provider_id);
-    return pp === providerId;
-  });
-  let countries = [];
-  try {
-    countries = JSON.parse(plan?.country_codes_json || "[]");
-  } catch {
-    countries = [];
-  }
+  const providerId = resolveMetaProviderId(ctx);
+  const profile = publishProfileForProvider(ctx.bundle, providerId);
 
   return `
-    <div class="ce-tab-panel">
-      <h3 class="ce-section-title">Product meta</h3>
-      <div class="field"><label>Title</label><input class="input" id="ce-meta-title" value="${escapeHtml(p.title)}" /></div>
-      <div class="field"><label>Catalog status</label>
-        <select class="input" id="ce-meta-status">
-          <option value="offline" ${p.catalog_status === "offline" ? "selected" : ""}>Offline</option>
-          <option value="preview" ${p.catalog_status === "preview" ? "selected" : ""}>Preview</option>
-          <option value="online" ${p.catalog_status === "online" ? "selected" : ""}>Online</option>
-        </select>
-      </div>
-      <div class="field"><label>Regions (comma-separated)</label>
-        <input class="input" id="ce-meta-regions" value="${escapeHtml((p.regions || []).join(", "))}" /></div>
-      <div class="field"><label>Visible design types (comma-separated)</label>
-        <input class="input" id="ce-meta-vdt" value="${escapeHtml((p.visible_design_types || []).join(", "))}" /></div>
-      <div class="field"><label>Catalog audience</label>
-        <input class="input" id="ce-meta-audience" value="${escapeHtml((p.catalog_audience || []).join(", "))}" /></div>
-      <div class="field"><label>Category group</label>
-        <input class="input" id="ce-meta-cat-group" value="${escapeHtml(p.catalog_category_group || "")}" /></div>
-      <div class="field"><label>Category leaf</label>
-        <input class="input" id="ce-meta-cat-leaf" value="${escapeHtml(p.catalog_category_leaf || "")}" /></div>
-      <div class="field"><label>Production type</label>
-        <input class="input" id="ce-meta-prod-type" value="${escapeHtml(p.catalog_production_type || "")}" /></div>
-      <div class="field"><label><input type="checkbox" id="ce-meta-use-mocks" ${p.print_area_edit_use_mocks ? "checked" : ""} /> Print area edit uses mockups</label></div>
-
-      <h3 class="ce-section-title">Publish profile</h3>
-      <p class="ce-hint">${escapeHtml(selectionHint.join(" · ") || `Provider ${providerId || "n/a"}`)}</p>
-      <div class="field"><label>Shopify category ID</label>
-        <input class="input" id="ce-meta-shopify-cat" value="${escapeHtml(profile?.shopify_category_id || "")}" /></div>
-      <div class="field"><label>Standard product display name</label>
-        <input class="input" id="ce-meta-std-name" value="${escapeHtml(profile?.standard_product_display_name || "")}" /></div>
-      <div class="field"><label>Product features</label>
-        <textarea class="textarea" id="ce-meta-features" rows="3">${escapeHtml(profile?.product_features || "")}</textarea></div>
-      <div class="field"><label>Care instructions</label>
-        <textarea class="textarea" id="ce-meta-care" rows="2">${escapeHtml(profile?.care_instructions || "")}</textarea></div>
-      <div class="field"><label>Size table HTML</label>
-        <textarea class="textarea" id="ce-meta-size" rows="3">${escapeHtml(profile?.size_table_html || "")}</textarea></div>
-      <div class="field"><label>GPSR HTML</label>
-        <textarea class="textarea" id="ce-meta-gpsr" rows="2">${escapeHtml(profile?.gpsr_html || "")}</textarea></div>
-
-      <h3 class="ce-section-title">Publish plan</h3>
-      <div class="field"><label>Enabled</label>
-        <input type="checkbox" id="ce-meta-plan-enabled" ${Number(plan?.is_enabled ?? 1) === 1 ? "checked" : ""}></div>
-      <div class="field"><label>Priority</label>
-        <input class="input" id="ce-meta-plan-priority" value="${escapeHtml(String(plan?.priority ?? 100))}"></div>
-      <div class="field"><label>Country of origin</label>
-        <input class="input" id="ce-meta-origin" value="${escapeHtml(plan?.country_of_origin || "")}"></div>
-      <div class="field">
-        <label>Countries</label>
-        <button type="button" class="btn btn-secondary btn-sm" id="ce-meta-country-open">Open country picker</button>
-        <input type="hidden" id="ce-meta-countries" value="${escapeHtml(countries.join(","))}">
-        <div id="ce-meta-country-preview" class="ce-hint">${escapeHtml(countries.join(", ") || "No countries selected")}</div>
-      </div>
-      <div id="ce-meta-country-modal" class="ce-inline-modal" hidden>
-        <div class="ce-inline-modal-card">
-          <h4>Select countries</h4>
-          <div class="ce-country-list">
-            ${COMMON_COUNTRIES.map((cc) => {
-              const checked = countries.includes(cc) ? "checked" : "";
-              return `<label><input type="checkbox" class="ce-country-check" value="${cc}" ${checked}> ${cc}</label>`;
-            }).join("")}
+    <div class="ce-tab-panel ce-meta-panel">
+      <div class="ce-meta-layout">
+        <section class="ce-meta-card">
+          <h3 class="ce-section-title">Visibility</h3>
+          <p class="ce-hint">Controls whether creators can see this product in the catalog.</p>
+          <div class="ce-meta-status-pills" role="radiogroup" aria-label="Catalog status">
+            ${["offline", "preview", "online"]
+              .map((status) => {
+                const on = (p.catalog_status || "offline") === status;
+                const label = status.charAt(0).toUpperCase() + status.slice(1);
+                return `<button type="button" class="ce-meta-status-pill${on ? " active" : ""}" data-status="${status}" role="radio" aria-checked="${on ? "true" : "false"}">${escapeHtml(label)}</button>`;
+              })
+              .join("")}
           </div>
-          <div class="ce-inline-actions">
-            <button type="button" class="btn btn-secondary btn-sm" id="ce-meta-country-cancel">Close</button>
-            <button type="button" class="btn btn-primary btn-sm" id="ce-meta-country-apply">Apply</button>
+          <input type="hidden" id="ce-meta-status" value="${escapeHtml(p.catalog_status || "offline")}" />
+        </section>
+
+        <section class="ce-meta-card ce-meta-card--shop">
+          <h3 class="ce-section-title">Shop listing content</h3>
+          <p class="ce-hint">Texts and category used when publishing to Shopify. Product title is set per version on the Provider tab.</p>
+          ${renderMetaProviderPills(ctx)}
+          <div class="field">
+            <label for="ce-meta-shopify-cat">Shopify category ID</label>
+            <input class="input" id="ce-meta-shopify-cat" value="${escapeHtml(profile?.shopify_category_id || "")}" placeholder="e.g. gid://shopify/TaxonomyCategory/…" />
           </div>
-        </div>
+          <div class="field">
+            <label for="ce-meta-features">Product features</label>
+            <textarea class="textarea" id="ce-meta-features" rows="4" placeholder="HTML or plain text">${escapeHtml(profile?.product_features || "")}</textarea>
+          </div>
+          <div class="field">
+            <label for="ce-meta-care">Care instructions</label>
+            <textarea class="textarea" id="ce-meta-care" rows="3">${escapeHtml(profile?.care_instructions || "")}</textarea>
+          </div>
+          <div class="field">
+            <label for="ce-meta-size">Size table HTML</label>
+            <textarea class="textarea" id="ce-meta-size" rows="3">${escapeHtml(profile?.size_table_html || "")}</textarea>
+          </div>
+          <div class="field">
+            <label for="ce-meta-gpsr">GPSR HTML</label>
+            <textarea class="textarea" id="ce-meta-gpsr" rows="2">${escapeHtml(profile?.gpsr_html || "")}</textarea>
+          </div>
+          <input type="hidden" id="ce-meta-provider-id" value="${escapeHtml(String(providerId || ""))}" />
+        </section>
       </div>
     </div>`;
 }
 
 export function snapshotMetaTab() {
   const el = (id) => document.getElementById(id);
-  const regionsRaw = el("ce-meta-regions")?.value || "";
-  const regions = regionsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const visibleDesignTypes = (el("ce-meta-vdt")?.value || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const catalogAudience = (el("ce-meta-audience")?.value || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const countryCodes = (el("ce-meta-countries")?.value || "")
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-
   return {
-    title: el("ce-meta-title")?.value ?? "",
     catalog_status: el("ce-meta-status")?.value ?? "",
-    regions,
-    visible_design_types: visibleDesignTypes,
-    catalog_audience: catalogAudience,
-    catalog_category_group: el("ce-meta-cat-group")?.value || null,
-    catalog_category_leaf: el("ce-meta-cat-leaf")?.value || null,
-    catalog_production_type: el("ce-meta-prod-type")?.value || null,
-    print_area_edit_use_mocks: !!el("ce-meta-use-mocks")?.checked,
+    print_provider_id: Number(el("ce-meta-provider-id")?.value) || null,
     shopify_category_id: el("ce-meta-shopify-cat")?.value || null,
-    standard_product_display_name: el("ce-meta-std-name")?.value || null,
     product_features: el("ce-meta-features")?.value || null,
     care_instructions: el("ce-meta-care")?.value || null,
     size_table_html: el("ce-meta-size")?.value || null,
     gpsr_html: el("ce-meta-gpsr")?.value || null,
-    publish_plan: {
-      country_codes: countryCodes,
-      priority: Number(el("ce-meta-plan-priority")?.value || 100),
-      is_enabled: !!el("ce-meta-plan-enabled")?.checked,
-      country_of_origin: (el("ce-meta-origin")?.value || "").trim().toUpperCase() || null,
-    },
   };
 }
 
 export function bindMetaTab(ctx, root) {
+  root.querySelectorAll(".ce-meta-status-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const status = btn.dataset.status;
+      const hidden = root.querySelector("#ce-meta-status");
+      if (hidden) hidden.value = status;
+      root.querySelectorAll(".ce-meta-status-pill").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+      });
+      notifyActiveTabDirty(ctx);
+    });
+  });
+
+  root.querySelectorAll(".ce-meta-provider-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pid = btn.dataset.pid;
+      if (!pid || String(pid) === String(ctx.metaSelectedProviderId)) return;
+      ctx.metaSelectedProviderId = pid;
+      ctx.reloadTab();
+    });
+  });
+
   bindTabDirtyInputs(root, ctx);
 }
 
 export async function saveMetaTab(ctx) {
+  const snap = snapshotMetaTab();
   const printProviderId =
-    ctx.selectedPrintProviderId || ctx.bundle.active_providers?.[0]?.print_provider_id;
-  const regionsRaw = document.getElementById("ce-meta-regions")?.value || "";
-  const regions = regionsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const visibleDesignTypes = (document.getElementById("ce-meta-vdt")?.value || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const catalogAudience = (document.getElementById("ce-meta-audience")?.value || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const countryCodes = (document.getElementById("ce-meta-countries")?.value || "")
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
+    snap.print_provider_id ||
+    ctx.metaSelectedProviderId ||
+    ctx.selectedPrintProviderId ||
+    ctx.bundle.active_providers?.[0]?.print_provider_id;
 
   await saveMeta(ctx.productKey, {
-    title: document.getElementById("ce-meta-title")?.value,
-    catalog_status: document.getElementById("ce-meta-status")?.value,
-    regions,
-    visible_design_types: visibleDesignTypes,
-    catalog_audience: catalogAudience,
-    catalog_category_group: document.getElementById("ce-meta-cat-group")?.value || null,
-    catalog_category_leaf: document.getElementById("ce-meta-cat-leaf")?.value || null,
-    catalog_production_type: document.getElementById("ce-meta-prod-type")?.value || null,
-    print_area_edit_use_mocks: document.getElementById("ce-meta-use-mocks")?.checked,
+    catalog_status: snap.catalog_status,
     print_provider_id: printProviderId,
-    shopify_category_id: document.getElementById("ce-meta-shopify-cat")?.value || null,
-    standard_product_display_name: document.getElementById("ce-meta-std-name")?.value || null,
-    product_features: document.getElementById("ce-meta-features")?.value || null,
-    care_instructions: document.getElementById("ce-meta-care")?.value || null,
-    size_table_html: document.getElementById("ce-meta-size")?.value || null,
-    gpsr_html: document.getElementById("ce-meta-gpsr")?.value || null,
-    publish_plan: {
-      provider_name:
-        (ctx.bundle.publish_plans || []).find((x) => {
-          const pp = Number(x?.profile?.print_provider_id ?? x?.print_provider_id);
-          return pp === Number(printProviderId);
-        })?.provider_name || "",
-      country_codes: countryCodes,
-      priority: Number(document.getElementById("ce-meta-plan-priority")?.value || 100),
-      is_enabled: !!document.getElementById("ce-meta-plan-enabled")?.checked,
-      country_of_origin: (document.getElementById("ce-meta-origin")?.value || "").trim().toUpperCase() || null,
-    },
+    shopify_category_id: snap.shopify_category_id,
+    product_features: snap.product_features,
+    care_instructions: snap.care_instructions,
+    size_table_html: snap.size_table_html,
+    gpsr_html: snap.gpsr_html,
     auto_mirror: false,
   });
 }
-
-document.addEventListener("click", (ev) => {
-  const open = ev.target.closest("#ce-meta-country-open");
-  const close = ev.target.closest("#ce-meta-country-cancel");
-  const apply = ev.target.closest("#ce-meta-country-apply");
-  const modal = document.getElementById("ce-meta-country-modal");
-  if (!modal) return;
-
-  if (open) {
-    modal.hidden = false;
-    return;
-  }
-  if (close) {
-    modal.hidden = true;
-    return;
-  }
-  if (apply) {
-    const vals = [...document.querySelectorAll(".ce-country-check:checked")].map((n) => n.value);
-    const hidden = document.getElementById("ce-meta-countries");
-    const preview = document.getElementById("ce-meta-country-preview");
-    if (hidden) hidden.value = vals.join(",");
-    if (preview) preview.textContent = vals.join(", ") || "No countries selected";
-    modal.hidden = true;
-    const ctx = window.__catalogEditorState;
-    if (ctx?.activeTab === "meta_data") notifyActiveTabDirty(ctx);
-  }
-});

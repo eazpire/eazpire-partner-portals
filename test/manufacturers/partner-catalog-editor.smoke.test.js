@@ -33,6 +33,8 @@ describe("partner catalog editor assets (smoke)", () => {
     "print-area/rect-interaction.js",
     "print-area/brand-assets.js",
     "print-area/fullscreen-viewer.js",
+    "market-country-picker.js",
+    "editor-product-title.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {
@@ -93,6 +95,28 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(tabSrc).not.toMatch(/if\s*\(\s*st\.useMockups\s*!==\s*!!ctx\.bundle/);
     const helpersSrc = readFileSync(join(portal, "print-area/helpers.js"), "utf8");
     expect(helpersSrc).toContain("export function resolvePrintAreaUseMockups");
+  });
+
+  it("meta tab is slim shop content only", () => {
+    const src = readFileSync(join(portal, "tabs/meta.js"), "utf8");
+    expect(src).toContain("ce-meta-shopify-cat");
+    expect(src).toContain("catalog_status");
+    expect(src).not.toContain("ce-meta-title");
+    expect(src).not.toContain("ce-meta-regions");
+    expect(src).not.toContain("ce-meta-use-mocks");
+    expect(src).not.toContain("ce-meta-country-open");
+  });
+
+  it("provider tab has markets country picker", () => {
+    const src = readFileSync(join(portal, "tabs/providers.js"), "utf8");
+    expect(src).toContain("ce-prov-markets");
+    expect(src).toContain("publish_plan_updates");
+    expect(src).toContain("ce-prov-origin");
+  });
+
+  it("meta tab is not in editor subnav stack", () => {
+    const src = readFileSync(join(portal, "editor-subnav.js"), "utf8");
+    expect(src).not.toContain('"meta_data"');
   });
 
   it("all tab modules exist", () => {

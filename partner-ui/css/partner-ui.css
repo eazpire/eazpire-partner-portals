@@ -2812,6 +2812,105 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 .ce-section-title:first-child {
   margin-top: 0;
 }
+
+/* Meta tab — slim shop content layout */
+.ce-meta-panel .ce-meta-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .ce-meta-panel .ce-meta-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.ce-meta-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+.ce-meta-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ce-meta-status-pill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ce-meta-status-pill.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.ce-meta-provider-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ce-meta-provider-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ce-meta-provider-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ce-meta-provider-pill.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+/* Provider markets — country chip picker */
+.ce-prov-markets {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.ce-market-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ce-market-chip {
+  min-width: 44px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.ce-market-chip--on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
+}
+.ce-prov-origin-field {
+  margin-top: 16px;
+  max-width: 120px;
+}
+
 .ce-error {
   padding: 16px 18px;
   border-radius: 14px;

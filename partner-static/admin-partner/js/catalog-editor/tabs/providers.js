@@ -16,6 +16,14 @@ import {
   resolveProviderShipCountry,
   buildCountryFlagHtml,
 } from "../provider-country-groups.js";
+import {
+  renderMarketCountryPicker,
+  bindMarketCountryPicker,
+  syncMarketCountryPickerFromDom,
+  normalizeCountryCodeList,
+  regionCodesFromCountryCodes,
+} from "../market-country-picker.js";
+import { publishPlanForProvider } from "../editor-product-title.js";
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -101,7 +109,25 @@ function initProvidersState(ctx, data) {
     printAreaDimEdits: new Map(),
     expandedCountries: new Set(),
     editingVersionId: null,
+    marketEdits: new Map(),
   };
+
+  for (const plan of data.publish_plans || []) {
+    const pp = Number(plan?.profile?.print_provider_id ?? plan?.print_provider_id);
+    if (!Number.isFinite(pp)) continue;
+    let countryCodes = [];
+    try {
+      countryCodes = JSON.parse(plan.country_codes_json || "[]");
+    } catch {
+      countryCodes = [];
+    }
+    ctx.providersTabState.marketEdits.set(pp, {
+      plan_id: plan.id,
+      provider_name: plan.provider_name || "",
+      country_codes: normalizeCountryCodeList(countryCodes),
+      country_of_origin: String(plan.country_of_origin || "").trim().toUpperCase(),
+    });
+  }
 
   if (merged.length) {
     const first =
@@ -241,6 +267,44 @@ function allLocalVersions(state) {
   return out;
 }
 
+function marketStateForProvider(state, pid) {
+  const key = Number(pid);
+  if (!state.marketEdits.has(key)) {
+    const plan = publishPlanForProvider(state.bundle, key);
+    let countryCodes = [];
+    try {
+      countryCodes = JSON.parse(plan?.country_codes_json || "[]");
+    } catch {
+      countryCodes = [];
+    }
+    state.marketEdits.set(key, {
+      plan_id: plan?.id || null,
+      provider_name: plan?.provider_name || "",
+      country_codes: normalizeCountryCodeList(countryCodes),
+      country_of_origin: String(plan?.country_of_origin || "").trim().toUpperCase(),
+    });
+  }
+  return state.marketEdits.get(key);
+}
+
+function renderProviderMarketsSection(state, pid) {
+  const market = marketStateForProvider(state, pid);
+  const pickerId = `ce-prov-market-${pid}`;
+  return `
+    <section class="ce-prov-markets">
+      <h4 class="ce-prov-section-title">Markets</h4>
+      <p class="ce-hint">Choose countries where this provider can publish. Catalog regions are derived automatically.</p>
+      ${renderMarketCountryPicker({
+        idPrefix: pickerId,
+        selected: market.country_codes,
+      })}
+      <div class="field ce-prov-origin-field">
+        <label for="${escapeHtml(pickerId)}-origin">Country of origin</label>
+        <input class="input ce-prov-origin" id="${escapeHtml(pickerId)}-origin" data-pid="${pid}" maxlength="2" placeholder="e.g. DE" value="${escapeHtml(market.country_of_origin || "")}" />
+      </div>
+    </section>`;
+}
+
 function renderActiveDetail(state, catalogDetail) {
   const pid = state.selectedPid;
   const versions = versionsForProvider(state, pid);
@@ -264,6 +328,7 @@ function renderActiveDetail(state, catalogDetail) {
       </div>
       ${renderVersionTabs(versions, idx, state.editingVersionId)}
       <div class="ce-prov-version-pane">${versionBody}</div>
+      ${renderProviderMarketsSection(state, pid)}
     </div>`;
 }
 
@@ -409,15 +474,31 @@ function syncVersionsFromDom(ctx, root) {
   if (dimUpdates.length) state.printAreaDimEdits.set(String(pid), dimUpdates);
 }
 
+function syncMarketsFromDom(ctx, root) {
+  const state = ctx.providersTabState;
+  const pid = state.selectedPid;
+  if (!pid || !root) return;
+  const pickerId = `ce-prov-market-${pid}`;
+  const market = marketStateForProvider(state, pid);
+  market.country_codes = syncMarketCountryPickerFromDom(root, pickerId);
+  const originEl = root.querySelector(`#${CSS.escape(`${pickerId}-origin`)}`);
+  if (originEl) {
+    market.country_of_origin = String(originEl.value || "").trim().toUpperCase().slice(0, 2);
+  }
+  state.marketEdits.set(Number(pid), market);
+}
+
 /** Sync in-memory provider tab state from DOM before save/close dirty check. */
 export function syncProvidersDomState(ctx) {
   const root = document.getElementById("ce-body");
   if (!root || !ctx?.providersTabState) return;
   syncVersionsFromDom(ctx, root);
+  syncMarketsFromDom(ctx, root);
 }
 
 function onProvidersInput(ctx, root) {
   syncVersionsFromDom(ctx, root);
+  syncMarketsFromDom(ctx, root);
   markEditorDirty();
   checkDirty(collectProvidersTabState(ctx));
 }
@@ -637,6 +718,15 @@ function bindDetailEvents(ctx, root) {
     el.addEventListener("input", () => onProvidersInput(ctx, root));
     el.addEventListener("change", () => onProvidersInput(ctx, root));
   });
+
+  const pid = ctx.providersTabState?.selectedPid;
+  if (pid) {
+    const pickerId = `ce-prov-market-${pid}`;
+    bindMarketCountryPicker(root, pickerId, () => onProvidersInput(ctx, root));
+    root.querySelector(`#${CSS.escape(`${pickerId}-origin`)}`)?.addEventListener("input", () =>
+      onProvidersInput(ctx, root)
+    );
+  }
 }
 
 function stateActivate(ctx, pid) {
@@ -742,6 +832,7 @@ export function collectProvidersTabState(ctx) {
   if (!state) return { active_print_provider_ids: [] };
 
   const root = document.getElementById("ce-body");
+  if (root) syncMarketsFromDom(ctx, root);
   const versionUpdates = [];
   const newVersions = [];
   const variantPrintAreaUpdates = [];
@@ -788,12 +879,27 @@ export function collectProvidersTabState(ctx) {
     }
   }
 
+  const publishPlanUpdates = [];
+  for (const pid of state.activeIds) {
+    const market = state.marketEdits.get(Number(pid));
+    if (!market?.plan_id) continue;
+    const regionCodes = regionCodesFromCountryCodes(market.country_codes || []);
+    publishPlanUpdates.push({
+      id: market.plan_id,
+      provider_name: market.provider_name,
+      country_codes: market.country_codes || [],
+      region_codes: regionCodes,
+      country_of_origin: market.country_of_origin || null,
+    });
+  }
+
   return {
     active_print_provider_ids: [...state.activeIds],
     version_updates: versionUpdates,
     new_versions: newVersions.map(({ _tempId, ...rest }) => rest),
     deleted_version_ids: deletedIds,
     variant_print_area_updates: variantPrintAreaUpdates,
+    publish_plan_updates: publishPlanUpdates,
     auto_mirror: false,
   };
 }

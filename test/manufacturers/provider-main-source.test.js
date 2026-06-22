@@ -62,6 +62,6 @@ describe("listViewKeys provider scoping (smoke)", () => {
     expect(src).toContain("resolvePrintAreaVersion");
     expect(src).toContain("getVersionPlaceholderConfig(version, catalogDetail)");
     expect(src).toContain("resolvePrintAreaCatalogVariants");
-    expect(src).toContain("fetchProviderCatalogDetail");
+    expect(src).toContain("printAreaCatalogDetail");
   });
 });
