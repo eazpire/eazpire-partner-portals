@@ -25,12 +25,6 @@ function versionTemplateRow(version) {
   };
 }
 
-function placeholdersFromVariants(variants) {
-  if (!variants?.length) return [];
-  const phs = variants[0].placeholders;
-  return Array.isArray(phs) ? phs : [];
-}
-
 function versionConfigForUi(version, positions) {
   const tpl = versionTemplateRow(version);
   const merged = mergePatDisplayConfigFromTemplate(tpl);
@@ -157,8 +151,9 @@ export function renderVersionConfigPanel(version, catalogDetail = {}) {
 /** Placeholder counts per view from provider version config (for print-area sidebar/overlays). */
 export function getVersionPlaceholderConfig(version, catalogDetail = {}) {
   const variants = catalogDetail?.variants || catalogDetail?.variants_json || [];
-  const phs = placeholdersFromVariants(Array.isArray(variants) ? variants : []);
-  const cfg = versionConfigForUi(version, phs);
+  const variantList = Array.isArray(variants) ? variants : [];
+  const positions = unionPatPlaceholderPositions(variantList, {});
+  const cfg = versionConfigForUi(version, positions);
   return cfg.placeholders_by_position || {};
 }
 

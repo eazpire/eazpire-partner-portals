@@ -1,6 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { savePrintAreaRect } from "../api.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
+import { printAreaCatalogDetail, resolvePrintAreaVersion } from "./helpers.js";
 import {
   getMockupDefaultForView,
   aspectRatioFromDefault,
@@ -26,13 +27,9 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function resolveVersion(ctx, data) {
-  return (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
-}
-
 function placeholderSlotsForView(ctx, st, data) {
-  const version = resolveVersion(ctx, data);
-  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const version = resolvePrintAreaVersion(ctx, data);
+  const catalogDetail = printAreaCatalogDetail(ctx, data);
   return getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
 }
 

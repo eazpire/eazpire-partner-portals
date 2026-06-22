@@ -2,6 +2,7 @@ import {
   fetchPrintAreaBundle,
   fetchMockupsBundle,
   fetchVariantsBundle,
+  fetchProviderCatalogDetail,
   savePrintAreasConfig,
   saveMockups,
   loadPrintifySettings,
@@ -24,6 +25,7 @@ import {
   resolvePrintAreaUseMockups,
   getPublishProfileConfig,
   listViewKeys,
+  printAreaCatalogDetail,
   resolvePrintAreaVersion,
   readBrandAssetsFromConfig,
   resolveEffectiveBrandAssets,
@@ -128,7 +130,7 @@ function getActiveColorTitle(st) {
 
 function syncViewKeys(st, data, ctx) {
   const version = resolvePrintAreaVersion(ctx, data);
-  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const catalogDetail = printAreaCatalogDetail(ctx, data);
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   st.viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
   if (!st.viewKeys.includes(st.activeView)) {
@@ -257,13 +259,17 @@ async function resolvePrintifyProductId(ctx) {
 
 export async function loadPrintAreaTab(ctx) {
   const pid = ctx.selectedPrintProviderId;
-  const [printArea, mockups, variants, brandBundle] = await Promise.all([
+  const [printArea, mockups, variants, catalogDetail, brandBundle] = await Promise.all([
     fetchPrintAreaBundle(ctx.productKey, pid, ctx.selectedVersionId),
     fetchMockupsBundle(ctx.productKey, pid).catch(() => ({ images: [] })),
     fetchVariantsBundle(ctx.productKey, pid).catch(() => ({})),
+    fetchProviderCatalogDetail(ctx.productKey, pid).catch(() => ({})),
     fetchBrandAssetsBundle().catch(() => ({ assets: { qr: {}, logo: {} } })),
   ]);
   const data = mergeTabData(printArea, mockups, variants);
+  if (Array.isArray(catalogDetail?.variants) && catalogDetail.variants.length) {
+    data.catalog_variants = catalogDetail.variants;
+  }
   ctx.printAreaData = data;
   ctx.brandAssetsBundle = brandBundle || { assets: { qr: {}, logo: {} } };
 

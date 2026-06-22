@@ -96,6 +96,23 @@ export function getDesignTypeSlice(config, designType) {
   return { full: cfg, slice, key };
 }
 
+/** Catalog variants for print-area — live provider catalog matches Provider tab; fallback to saved variants_json. */
+export function resolvePrintAreaCatalogVariants(ctx, data) {
+  const fromLive = data?.catalog_variants;
+  if (Array.isArray(fromLive) && fromLive.length) return fromLive;
+
+  const pid = ctx?.selectedPrintProviderId;
+  const cached = ctx?.providersTabState?.catalogCache?.get(String(pid));
+  if (Array.isArray(cached?.variants) && cached.variants.length) return cached.variants;
+
+  const saved = data?.variants_json || data?.variants;
+  return Array.isArray(saved) ? saved : [];
+}
+
+export function printAreaCatalogDetail(ctx, data) {
+  return { variants: resolvePrintAreaCatalogVariants(ctx, data) };
+}
+
 /** Active provider version row for print-area (bundle fallback when tab payload omits versions). */
 export function resolvePrintAreaVersion(ctx, data) {
   const fromData =
@@ -113,21 +130,29 @@ function mockupDefaultViewKeys(mockupDefaults) {
   return [...new Set(keys)].sort();
 }
 
+function viewKeysFromPositions(positions) {
+  const seen = new Map();
+  for (const ph of positions || []) {
+    const pos = String(ph?.position ?? "")
+      .trim()
+      .toLowerCase();
+    if (!pos) continue;
+    const norm = normalizePatPositionKey(pos);
+    if (!norm || seen.has(norm)) continue;
+    seen.set(norm, pos);
+  }
+  return [...seen.values()].sort();
+}
+
 /** Views for the active provider version — same position keys as Provider tab print area positions. */
 export function listViewKeys(mockupDefaults, _configSlice, version = null, catalogDetail = null) {
   const variants = catalogDetail?.variants || catalogDetail?.variants_json || [];
   const variantList = Array.isArray(variants) ? variants : [];
   const byPos = getVersionPlaceholderConfig(version, catalogDetail);
   const positions = unionPatPlaceholderPositions(variantList, byPos);
-  const versionKeys = positions
-    .map((ph) =>
-      String(ph?.position ?? "")
-        .trim()
-        .toLowerCase()
-    )
-    .filter(Boolean);
+  const versionKeys = viewKeysFromPositions(positions);
 
-  if (versionKeys.length) return [...new Set(versionKeys)].sort();
+  if (versionKeys.length) return versionKeys;
 
   const mockupKeys = mockupDefaultViewKeys(mockupDefaults);
   if (mockupKeys.length) return mockupKeys;
@@ -524,7 +549,7 @@ export function createInitialPrintAreaState(ctx, data) {
   const rawConfig = getPublishProfileConfig(ctx);
   const { full, slice } = getDesignTypeSlice(rawConfig, ctx.selectedDesignType || designTypes[0]);
   const version = resolvePrintAreaVersion(ctx, data);
-  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const catalogDetail = printAreaCatalogDetail(ctx, data);
   const viewKeys = listViewKeys(data.mockup_defaults, slice, version, catalogDetail);
   const activeView = viewKeys.includes(ctx.printAreaActiveView) ? ctx.printAreaActiveView : viewKeys[0];
   const brandFromConfig = readBrandAssetsFromConfig(rawConfig);

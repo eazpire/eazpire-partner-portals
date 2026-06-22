@@ -40,6 +40,36 @@ export function placeholdersFromFirstVariant(variants) {
   return [];
 }
 
+/** Union placeholder positions across all catalog variants (deduped by normalized key). */
+export function catalogPlaceholdersFromVariants(variants) {
+  if (!variants?.length) return [];
+
+  const collect = (skipDisabled) => {
+    const seen = new Set();
+    const out = [];
+    for (const v of variants) {
+      if (skipDisabled && v?.is_enabled === false) continue;
+      const phs = v?.placeholders;
+      if (!Array.isArray(phs)) continue;
+      for (const ph of phs) {
+        const pos = String(ph?.position ?? "")
+          .trim()
+          .toLowerCase();
+        if (!pos) continue;
+        const norm = normalizePatPositionKey(pos);
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        out.push({ ...ph, position: pos });
+      }
+    }
+    return out;
+  };
+
+  const enabled = collect(true);
+  if (enabled.length) return enabled;
+  return collect(false);
+}
+
 export function mergeCatalogAndDbPrintDimensions(ph, variantPrintAreas, position) {
   let w0 = null;
   let h0 = null;
@@ -468,25 +498,33 @@ export function applyPublishBrandingSemanticsToSlotsByPosition(map) {
 }
 
 export function unionPatPlaceholderPositions(variants, placeholdersByPosition) {
-  const catalog = placeholdersFromFirstVariant(variants);
+  const catalog = catalogPlaceholdersFromVariants(variants);
   const seen = new Set();
   const out = [];
+  const remember = (ph, pos) => {
+    const norm = normalizePatPositionKey(pos);
+    if (!norm || seen.has(norm)) return;
+    seen.add(norm);
+    if (ph && typeof ph === "object") {
+      out.push({ ...ph, position: pos });
+      return;
+    }
+    out.push({ position: pos, decoration_method: "", width: null, height: null });
+  };
   for (const ph of catalog) {
     const pos = String(ph?.position ?? "")
       .trim()
       .toLowerCase();
     if (!pos) continue;
-    seen.add(pos);
-    out.push(ph);
+    remember(ph, pos);
   }
   if (placeholdersByPosition && typeof placeholdersByPosition === "object") {
     for (const k of Object.keys(placeholdersByPosition)) {
       const pos = String(k || "")
         .trim()
         .toLowerCase();
-      if (!pos || seen.has(pos)) continue;
-      seen.add(pos);
-      out.push({ position: pos, decoration_method: "", width: null, height: null });
+      if (!pos) continue;
+      remember(null, pos);
     }
   }
   return out;

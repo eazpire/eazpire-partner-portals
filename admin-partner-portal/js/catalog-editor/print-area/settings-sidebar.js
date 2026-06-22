@@ -8,6 +8,8 @@ import {
   normalizeDesignTypeKey,
   loadRectsForVariantGroup,
   aggregateBrandAssetSlots,
+  printAreaCatalogDetail,
+  resolvePrintAreaVersion,
 } from "./helpers.js";
 import {
   categoryInheritToggleHtml,
@@ -134,9 +136,8 @@ function renderPatternSection(st, msCtx) {
 }
 
 function renderPlacementSection(st, data, ctx, msCtx) {
-  const version =
-    (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
-  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const version = resolvePrintAreaVersion(ctx, data);
+  const catalogDetail = printAreaCatalogDetail(ctx, data);
   const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
   const activePhTypes = PH_TYPES.filter((ph) => (Number(slots[ph.key]) || 0) > 0);
   if (!activePhTypes.length) return "";
@@ -185,9 +186,8 @@ function renderImagesSection(st, data, msCtx) {
 }
 
 function brandAssetsOptions(st, data, ctx, globalAssets) {
-  const version =
-    (data?.versions || []).find((v) => String(v.id) === String(ctx?.selectedVersionId)) || data?.version || null;
-  const catalogDetail = { variants: data?.variants_json || data?.variants || [] };
+  const version = resolvePrintAreaVersion(ctx, data);
+  const catalogDetail = printAreaCatalogDetail(ctx, data);
   const slots = aggregateBrandAssetSlots(version, catalogDetail, st.viewKeys);
   return {
     mode: st.brandAssetsMode || "global",

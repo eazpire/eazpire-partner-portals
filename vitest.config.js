@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const webpEncodeStub = path.resolve(rootDir, "test/mocks/webpEncodeBundled.stub.js");
 const imageBufferStub = path.resolve(rootDir, "test/mocks/imageBufferToWebp.stub.js");
+const partnerApiStub = path.resolve(rootDir, "test/mocks/partner-api.stub.js");
 
 /** Redirect worker image utils that import bundled .wasm (Vitest cannot load them). */
 function stubWasmImageUtilsForVitest() {
@@ -26,6 +27,11 @@ function stubWasmImageUtilsForVitest() {
 
 export default defineConfig({
   plugins: [stubWasmImageUtilsForVitest()],
+  resolve: {
+    alias: {
+      "/partner/shared/js/partner-api.js": partnerApiStub,
+    },
+  },
   test: {
     include: ["test/**/*.test.{js,ts,mjs,cjs}"],
     exclude: [
