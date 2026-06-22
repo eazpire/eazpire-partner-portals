@@ -28,6 +28,15 @@ import {
   tabSaveDisabled,
 } from "./editor-tab-dirty.js";
 import {
+  renderCatalogEditorTriSwitch,
+  bindCatalogEditorTriSwitch,
+  refreshVisibilityTriSwitch,
+  initVisibilityFromBundle,
+  captureVisibilityBaseline,
+  saveVisibilityFromFooter,
+  snapshotVisibilityState,
+} from "./editor-visibility.js";
+import {
   tabUsesEditorSubnav,
   ensureEditorSelections,
   getSubnavVisibility,
@@ -183,6 +192,11 @@ function ensureOverlay() {
           </div>
           <main class="catalog-editor-body" id="ce-body"></main>
           <footer class="catalog-editor-foot">
+            <div class="ce-foot-visibility" id="ce-foot-visibility">
+              <span class="ce-foot-visibility-label">Visibility</span>
+              <p class="ce-foot-visibility-hint ce-hint"></p>
+              ${renderCatalogEditorTriSwitch("offline")}
+            </div>
             <div class="catalog-editor-foot-actions">
               <button type="button" class="btn btn-secondary" id="ce-mirror">Mirror to publish index</button>
               <button type="button" class="btn btn-primary" id="ce-save">Save tab</button>
@@ -255,6 +269,7 @@ function renderSubnav(ctx) {
     stack.hidden = true;
     if (providerPills) providerPills.innerHTML = "";
     if (versionPills) versionPills.innerHTML = "";
+    refreshVisibilityTriSwitch(ctx);
     return;
   }
 
@@ -265,6 +280,7 @@ function renderSubnav(ctx) {
     stack.hidden = true;
     if (providerPills) providerPills.innerHTML = "";
     if (versionPills) versionPills.innerHTML = "";
+    refreshVisibilityTriSwitch(ctx);
     return;
   }
 
@@ -290,6 +306,7 @@ function renderSubnav(ctx) {
         ensureEditorSelections(ctx);
         renderSubnav(ctx);
         loadActiveTab(ctx);
+        refreshVisibilityTriSwitch(ctx);
       };
     });
     if (ctx.activeTab === "print_area") {
@@ -311,11 +328,13 @@ function renderSubnav(ctx) {
         ctx.selectedVersionId = nextId;
         renderSubnav(ctx);
         loadActiveTab(ctx);
+        refreshVisibilityTriSwitch(ctx);
       };
     });
   } else if (versionPills) {
     versionPills.innerHTML = "";
   }
+  refreshVisibilityTriSwitch(ctx);
 }
 
 function renderTabs(ctx) {
@@ -384,6 +403,8 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "mockups") bindMockupsTab(ctx, body);
     if (ctx.activeTab === "variants") bindVariantsTab(ctx, body);
     captureTabDirtySnapshot(ctx);
+    captureVisibilityBaseline(ctx);
+    refreshVisibilityTriSwitch(ctx);
     updateSaveButtonState(false);
   } catch (err) {
     body.innerHTML = `<div class="ce-error">${escapeHtml(err.message || "Load failed")}</div>`;
@@ -427,6 +448,9 @@ async function saveCurrentTab() {
         break;
       default:
         break;
+    }
+    if (ctx.activeTab !== "provider") {
+      await saveVisibilityFromFooter(ctx);
     }
     await runMirror(true);
     ctx.bundle = await fetchEditorBundle(ctx.productKey);
@@ -562,6 +586,9 @@ export async function openProductEditor(productKey) {
     overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, productKey);
     const firstVersion = ctx.bundle.versions?.[0];
     ctx.selectedVersionId = firstVersion?.id || null;
+    initVisibilityFromBundle(ctx);
+    captureVisibilityBaseline(ctx);
+    bindCatalogEditorTriSwitch(ctx, () => refreshDirtyBeforeClose(ctx));
     updateDriftBadge(ctx);
     renderTabs(ctx);
     renderSubnav(ctx);

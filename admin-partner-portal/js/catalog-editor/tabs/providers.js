@@ -24,6 +24,7 @@ import {
   regionCodesFromCountryCodes,
 } from "../market-country-picker.js";
 import { publishPlanForProvider } from "../editor-product-title.js";
+import { mergeVisibilityIntoVersionConfig, refreshVisibilityTriSwitch } from "../editor-visibility.js";
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -438,6 +439,7 @@ function refreshDetail(ctx, root, { loading = false } = {}) {
   const catalogDetail = state.catalogCache.get(String(state.selectedPid)) || null;
   detailEl.innerHTML = renderDetailPane(state, catalogDetail, loading);
   bindDetailEvents(ctx, root);
+  refreshVisibilityTriSwitch(ctx);
 }
 
 function refreshProviderList(ctx, root) {
@@ -465,6 +467,7 @@ function syncVersionsFromDom(ctx, root) {
     const nameInput = root.querySelector(`.ce-prov-ver-name[data-version-id="${vid}"]`);
     if (nameInput) v.display_name = nameInput.value?.trim() || v.display_name;
     v.product_version_config = collectVersionConfigPanel(pane, v.product_version_config, vid);
+    v.product_version_config = mergeVisibilityIntoVersionConfig(ctx, v, v.product_version_config);
     versions[idx] = v;
   }
   state.localVersions.set(String(pid), versions);
@@ -851,6 +854,7 @@ export function collectProvidersTabState(ctx) {
       } else {
         product_version_config = product_version_config || collectVersionConfigPanel(root, null, vid);
       }
+      product_version_config = mergeVisibilityIntoVersionConfig(ctx, v, product_version_config);
 
       if (v._tempId && !v.id) {
         newVersions.push({

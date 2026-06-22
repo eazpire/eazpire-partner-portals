@@ -35,6 +35,7 @@ describe("partner catalog editor assets (smoke)", () => {
     "print-area/fullscreen-viewer.js",
     "market-country-picker.js",
     "editor-product-title.js",
+    "editor-visibility.js",
   ];
 
   it("has shell with 8 tabs and mirror save bar", () => {
@@ -100,11 +101,23 @@ describe("partner catalog editor assets (smoke)", () => {
   it("meta tab is slim shop content only", () => {
     const src = readFileSync(join(portal, "tabs/meta.js"), "utf8");
     expect(src).toContain("ce-meta-shopify-cat");
-    expect(src).toContain("catalog_status");
+    expect(src).not.toContain("ce-meta-status");
     expect(src).not.toContain("ce-meta-title");
-    expect(src).not.toContain("ce-meta-regions");
-    expect(src).not.toContain("ce-meta-use-mocks");
-    expect(src).not.toContain("ce-meta-country-open");
+    expect(src).not.toContain("ce-meta-provider-pill");
+  });
+
+  it("footer has visibility triswitch", () => {
+    const shell = readFileSync(join(portal, "shell.js"), "utf8");
+    expect(shell).toContain("ce-foot-visibility");
+    expect(shell).toContain("renderCatalogEditorTriSwitch");
+    expect(shell).toContain("editor-visibility.js");
+    const vis = readFileSync(join(portal, "editor-visibility.js"), "utf8");
+    expect(vis).toContain("ce-triswitch");
+  });
+
+  it("meta tab uses collapsible provider subnav", () => {
+    const src = readFileSync(join(portal, "editor-subnav.js"), "utf8");
+    expect(src).toContain('"meta_data"');
   });
 
   it("provider tab has markets country picker", () => {
@@ -112,11 +125,7 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("ce-prov-markets");
     expect(src).toContain("publish_plan_updates");
     expect(src).toContain("ce-prov-origin");
-  });
-
-  it("meta tab is not in editor subnav stack", () => {
-    const src = readFileSync(join(portal, "editor-subnav.js"), "utf8");
-    expect(src).not.toContain('"meta_data"');
+    expect(src).toContain("mergeVisibilityIntoVersionConfig");
   });
 
   it("all tab modules exist", () => {

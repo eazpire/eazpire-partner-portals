@@ -5,6 +5,13 @@ import { snapshotMetaTab } from "./tabs/meta.js";
 import { snapshotMockupsTab } from "./tabs/mockups.js";
 import { snapshotVariantsTab } from "./tabs/variants.js";
 import { snapshotAutomationsTab } from "./tabs/automations.js";
+import { snapshotVisibilityState } from "./editor-visibility.js";
+
+function withVisibility(ctx, base) {
+  const visibility = snapshotVisibilityState(ctx);
+  if (base == null && visibility == null) return null;
+  return { ...(base || {}), visibility };
+}
 
 const SAVE_DISABLED_TABS = new Set(["template", "products"]);
 
@@ -22,19 +29,19 @@ export function snapshotActiveTab(ctx) {
   if (!ctx) return null;
   switch (ctx.activeTab) {
     case "provider":
-      return ctx.providersTabState ? snapshotProvidersTab(ctx) : null;
+      return withVisibility(ctx, ctx.providersTabState ? snapshotProvidersTab(ctx) : null);
     case "print_area":
-      return snapshotPrintAreaTab(ctx);
+      return withVisibility(ctx, snapshotPrintAreaTab(ctx));
     case "meta_data":
-      return snapshotMetaTab();
+      return withVisibility(ctx, snapshotMetaTab());
     case "mockups":
-      return snapshotMockupsTab();
+      return withVisibility(ctx, snapshotMockupsTab());
     case "variants":
-      return snapshotVariantsTab();
+      return withVisibility(ctx, snapshotVariantsTab());
     case "automations":
-      return snapshotAutomationsTab();
+      return withVisibility(ctx, snapshotAutomationsTab());
     default:
-      return null;
+      return withVisibility(ctx, null);
   }
 }
 

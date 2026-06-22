@@ -2705,12 +2705,83 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 .catalog-editor-foot {
   flex-shrink: 0;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 8px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(120deg, rgba(17, 24, 39, 0.98) 0%, rgba(30, 27, 75, 0.95) 55%, rgba(15, 23, 42, 0.98) 100%);
   box-shadow: 0 -2px 16px rgba(15, 23, 42, 0.1);
 }
+.ce-foot-visibility {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  max-width: 280px;
+}
+.ce-foot-visibility-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+.ce-foot-visibility-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.2;
+}
+.ce-triswitch {
+  min-width: 200px;
+  user-select: none;
+}
+.ce-triswitch__track {
+  position: relative;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  touch-action: none;
+  overflow: hidden;
+}
+.ce-triswitch__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 33.33%;
+  border-radius: 12px;
+  pointer-events: none;
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s;
+}
+.ce-triswitch[data-status="0"] .ce-triswitch__thumb { left: 0; background: #cf222e; }
+.ce-triswitch[data-status="1"] .ce-triswitch__thumb { left: 33.33%; background: #d4a017; }
+.ce-triswitch[data-status="2"] .ce-triswitch__thumb { left: 66.67%; background: #2ea043; }
+.ce-triswitch__labels {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  z-index: 1;
+}
+.ce-triswitch__label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: color 0.2s;
+}
+.ce-triswitch[data-status="0"] .ce-triswitch__label[data-val="0"],
+.ce-triswitch[data-status="1"] .ce-triswitch__label[data-val="1"],
+.ce-triswitch[data-status="2"] .ce-triswitch__label[data-val="2"] {
+  color: #fff;
+}
+.ce-triswitch--swiping .ce-triswitch__thumb { transition: none; }
 .catalog-editor-foot-actions {
   display: flex;
   gap: 8px;
@@ -2813,69 +2884,15 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   margin-top: 0;
 }
 
-/* Meta tab — slim shop content layout */
-.ce-meta-panel .ce-meta-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-@media (max-width: 900px) {
-  .ce-meta-panel .ce-meta-layout {
-    grid-template-columns: 1fr;
-  }
-}
-.ce-meta-card {
+/* Meta tab — shop content */
+.ce-meta-panel .ce-meta-card {
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--surface-2);
 }
-.ce-meta-status-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-.ce-meta-status-pill {
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.ce-meta-status-pill.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-}
-.ce-meta-provider-nav {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin: 16px 0 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
-}
-.ce-meta-provider-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.ce-meta-provider-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.ce-meta-provider-pill.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+.ce-meta-panel .ce-meta-card--shop {
+  max-width: 920px;
 }
 
 /* Provider markets — country chip picker */

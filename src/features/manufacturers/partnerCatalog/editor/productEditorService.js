@@ -443,6 +443,29 @@ async function syncProductDerivedFromProviders(db, productKey, activeIds, body, 
   if (productTitle) productPatch.title = productTitle;
   if (designTypes.size) productPatch.visible_design_types = [...designTypes];
   if (regions.length) productPatch.regions = regions;
+
+  const statusVersions = await queryAll(
+    db,
+    `SELECT v.product_version_config_json, v.sort_order
+     FROM eazpire_product_versions v
+     JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
+     WHERE v.product_key = ? AND fp.external_provider_id IN (${activeIds.map(() => "?").join(",") || "?"})
+     ORDER BY v.sort_order ASC, v.created_at ASC`,
+    ...(activeIds.length ? [productKey, ...activeIds.map(String)] : [productKey, "0"])
+  );
+  if (statusVersions.length) {
+    let cfg = {};
+    try {
+      cfg = JSON.parse(statusVersions[0].product_version_config_json || "{}");
+    } catch {
+      cfg = {};
+    }
+    const st = String(cfg.catalog_status || "").toLowerCase();
+    if (["offline", "preview", "online"].includes(st)) {
+      productPatch.catalog_status = st;
+    }
+  }
+
   if (Object.keys(productPatch).length) {
     await updateEazpireProduct(db, productKey, productPatch);
   }
@@ -648,6 +671,10 @@ export async function saveVersionConfig(env, versionId, body) {
     is_active: body.is_active,
   });
   if (!version) return { ok: false, error: "not_found" };
+  const st = String(body.product_version_config?.catalog_status || "").toLowerCase();
+  if (["offline", "preview", "online"].includes(st)) {
+    await updateEazpireProduct(db, version.product_key, { catalog_status: st });
+  }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
   return { ok: true, version };
 }
