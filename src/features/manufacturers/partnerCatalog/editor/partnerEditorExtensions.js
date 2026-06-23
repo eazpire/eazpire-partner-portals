@@ -14,6 +14,12 @@ import {
 } from "../catalogOpsReadService.js";
 import { dedupeMockupEntriesByViewColor } from "../ensureCatalogMockupImageSchema.js";
 import {
+  normalizeMockupSet,
+  templatePrintifyColumnForMockupSet,
+  missingPrintifyIdMessageForMockupSet,
+  mockupSetSqlMatch,
+} from "../mockupSet.js";
+import {
   upsertCatalogPublishProfile,
   upsertCatalogTemplatePrintAreasFromPrintify,
   upsertCatalogMockupDefault,
@@ -879,9 +885,8 @@ export async function fetchPrintifyMockups(
   try {
     const catalogDbRef = env.CATALOG_DB;
     const mfgDb = env.MANUFACTURER_DB;
-    const set = String(mockupSet || "clean").toLowerCase() === "shop_preview" ? "shop_preview" : "clean";
-    const templateField =
-      set === "shop_preview" ? "printify_shop_preview_mockups_product_id" : "printify_mockups_product_id";
+    const set = normalizeMockupSet(mockupSet);
+    const templateField = templatePrintifyColumnForMockupSet(set);
 
     const overrideId = String(printifyProductIdOverride || "").trim();
     let printifyProductId = overrideId;
@@ -890,13 +895,13 @@ export async function fetchPrintifyMockups(
       const tpl = isCatalogOpsMasterWrite(env)
         ? await queryFirst(
             catalogDbRef,
-            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_calibration_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
             productKey,
             Number(printProviderId)
           )
         : await queryFirst(
             mfgDb,
-            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_calibration_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
             productKey,
             Number(printProviderId)
           );
@@ -910,10 +915,7 @@ export async function fetchPrintifyMockups(
         ok: false,
         error: "template_printify_product_missing",
         mockup_set: set,
-        message:
-          set === "shop_preview"
-            ? "Save a Shop Preview Mockups Printify product ID on the Templates tab first."
-            : "Save a Clean Mockups Printify product ID on the Templates tab first.",
+        message: missingPrintifyIdMessageForMockupSet(set),
       };
     }
 
@@ -941,11 +943,7 @@ export async function fetchPrintifyMockups(
 
     const db = mfgDb;
     const now = Date.now();
-    const matchClause =
-      set === "shop_preview"
-        ? "mockup_set = ?"
-        : "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)";
-    const matchBind = set === "shop_preview" ? "shop_preview" : "clean";
+    const { clause: matchClause, bind: matchBind } = mockupSetSqlMatch(set);
 
     await db
       .prepare(`DELETE FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause}`)

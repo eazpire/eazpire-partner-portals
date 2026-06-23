@@ -7,6 +7,28 @@ import {
 } from "../../src/features/manufacturers/partnerCatalog/ensureCatalogMockupImageSchema.js";
 import { persistMockupEntriesToR2 } from "../../src/features/manufacturers/partnerCatalog/persistMockupImagesToR2.js";
 
+import {
+  normalizeMockupSet,
+  MOCKUP_SET_CLEAN,
+  MOCKUP_SET_SHOP_PREVIEW,
+  MOCKUP_SET_CALIBRATION,
+  templatePrintifyColumnForMockupSet,
+} from "../../src/features/manufacturers/partnerCatalog/mockupSet.js";
+
+describe("mockupSet", () => {
+  it("normalizeMockupSet recognizes calibration", () => {
+    expect(normalizeMockupSet("calibration")).toBe(MOCKUP_SET_CALIBRATION);
+    expect(normalizeMockupSet("CALIBRATION")).toBe(MOCKUP_SET_CALIBRATION);
+    expect(normalizeMockupSet("shop_preview")).toBe(MOCKUP_SET_SHOP_PREVIEW);
+    expect(normalizeMockupSet("")).toBe(MOCKUP_SET_CLEAN);
+  });
+
+  it("templatePrintifyColumnForMockupSet maps calibration column", () => {
+    expect(templatePrintifyColumnForMockupSet("calibration")).toBe("printify_calibration_mockups_product_id");
+    expect(templatePrintifyColumnForMockupSet("clean")).toBe("printify_mockups_product_id");
+  });
+});
+
 describe("mockup sync helpers", () => {
   it("tableSqlNeedsMockupSetUnique detects legacy UNIQUE without mockup_set", () => {
     const legacy = `CREATE TABLE product_mockup_images (

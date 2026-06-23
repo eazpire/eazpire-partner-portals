@@ -5,19 +5,23 @@ import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js
 
 export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
+export const MOCKUP_SET_CALIBRATION = "calibration";
 
 const MOCK_SECTION_IDS = {
   clean: MOCKUP_SET_CLEAN,
   shop_preview: MOCKUP_SET_SHOP_PREVIEW,
+  calibration: MOCKUP_SET_CALIBRATION,
 };
 
 const SECTION_META = {
   [MOCKUP_SET_CLEAN]: {
     id: "clean",
     title: "Clean Mockups",
-    hint: "DB mockups for print area and publishing — sync via Templates → Clean Mockups. Enable one Preview Mock globally (Shopify alt text).",
+    hint: "Catalog product mockups for publishing and shop display — sync via Templates → Clean Mockups. Enable one Preview Mock globally (Shopify alt text).",
     emptyHint: "No clean mockup images yet. Sync on the Templates tab under Clean Mockups.",
     showPrintAreaToggle: true,
+    showPreviewToggle: true,
+    internal: false,
   },
   [MOCKUP_SET_SHOP_PREVIEW]: {
     id: "shop_preview",
@@ -25,6 +29,17 @@ const SECTION_META = {
     hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Sync via Templates → Shop Preview Mockups.",
     emptyHint: "No shop preview mockups yet. Set a Printify product ID on Templates → Shop Preview Mockups and sync.",
     showPrintAreaToggle: false,
+    showPreviewToggle: true,
+    internal: false,
+  },
+  [MOCKUP_SET_CALIBRATION]: {
+    id: "calibration",
+    title: "Calibration Mockup",
+    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Not shown in the shop. Sync via Templates → Calibration Mockup.",
+    emptyHint: "No calibration mockup images yet. Set a Printify product ID on Templates → Calibration Mockup and sync.",
+    showPrintAreaToggle: false,
+    showPreviewToggle: false,
+    internal: true,
   },
 };
 
@@ -42,11 +57,16 @@ function ensureMockupsUiState(ctx) {
 
 export function resolveActiveMockSection(ctx) {
   const ui = ensureMockupsUiState(ctx);
-  return ui.selectedSection === MOCKUP_SET_SHOP_PREVIEW ? MOCKUP_SET_SHOP_PREVIEW : MOCKUP_SET_CLEAN;
+  const section = ui.selectedSection;
+  if (section === MOCKUP_SET_SHOP_PREVIEW) return MOCKUP_SET_SHOP_PREVIEW;
+  if (section === MOCKUP_SET_CALIBRATION) return MOCKUP_SET_CALIBRATION;
+  return MOCKUP_SET_CLEAN;
 }
 
 function imagesForSet(data, mockupSet) {
-  return mockupSet === MOCKUP_SET_SHOP_PREVIEW ? data?.shop_preview_images || [] : data?.images || [];
+  if (mockupSet === MOCKUP_SET_SHOP_PREVIEW) return data?.shop_preview_images || [];
+  if (mockupSet === MOCKUP_SET_CALIBRATION) return data?.calibration_images || [];
+  return data?.images || [];
 }
 
 function groupImagesByView(images) {
@@ -65,12 +85,12 @@ function formatViewLabel(viewKey) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function renderCarousel(mockupSet, viewKey, slides, previewId) {
+function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle) {
   const viewEsc = escapeHtml(viewKey);
-  const isPreviewView = slides.some((s) => String(s.id) === String(previewId));
+  const isPreviewView = showPreviewToggle && slides.some((s) => String(s.id) === String(previewId));
   const slideHtml = slides
     .map((img) => {
-      const isPreview = String(img.id) === String(previewId);
+      const isPreview = showPreviewToggle && String(img.id) === String(previewId);
       return `
         <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)} — click to enlarge" aria-label="View mockup ${escapeHtml(img.color_name || viewKey)}">
           <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
@@ -79,14 +99,8 @@ function renderCarousel(mockupSet, viewKey, slides, previewId) {
     })
     .join("");
 
-  return `
-    <article class="ce-mock-view" data-view-key="${viewEsc}">
-      <header class="ce-mock-view__header">
-        <div class="ce-mock-view__title-wrap">
-          <h4 class="ce-mock-view__title">${escapeHtml(formatViewLabel(viewKey))}</h4>
-          <span class="ce-mock-view__count">${slides.length} color${slides.length === 1 ? "" : "s"}</span>
-        </div>
-        <label class="ce-mock-preview-toggle">
+  const previewToggle = showPreviewToggle
+    ? `<label class="ce-mock-preview-toggle">
           <span class="ce-mock-preview-toggle__label">Preview Mock</span>
           <input
             type="checkbox"
@@ -96,14 +110,28 @@ function renderCarousel(mockupSet, viewKey, slides, previewId) {
             ${isPreviewView ? "checked" : ""}
           />
           <span class="ce-mock-preview-toggle__track" aria-hidden="true"></span>
-        </label>
+        </label>`
+    : "";
+
+  return `
+    <article class="ce-mock-view" data-view-key="${viewEsc}">
+      <header class="ce-mock-view__header">
+        <div class="ce-mock-view__title-wrap">
+          <h4 class="ce-mock-view__title">${escapeHtml(formatViewLabel(viewKey))}</h4>
+          <span class="ce-mock-view__count">${slides.length} color${slides.length === 1 ? "" : "s"}</span>
+        </div>
+        ${previewToggle}
       </header>
       <div class="ce-mock-carousel" data-mock-set="${escapeHtml(mockupSet)}" data-view="${viewEsc}">
         <div class="ce-mock-carousel__viewport">
           <div class="ce-mock-carousel__track">${slideHtml}</div>
         </div>
       </div>
-      <input type="hidden" class="ce-mock-preview-id" data-mock-set="${escapeHtml(mockupSet)}" data-view="${viewEsc}" value="${isPreviewView ? escapeHtml(String(previewId)) : ""}" />
+      ${
+        showPreviewToggle
+          ? `<input type="hidden" class="ce-mock-preview-id" data-mock-set="${escapeHtml(mockupSet)}" data-view="${viewEsc}" value="${isPreviewView ? escapeHtml(String(previewId)) : ""}" />`
+          : ""
+      }
     </article>`;
 }
 
@@ -115,7 +143,11 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
   const previewId = savedPreviewId || previewRow?.id || null;
   const grouped = groupImagesByView(images);
   const carousels = grouped.length
-    ? grouped.map(([viewKey, slides]) => renderCarousel(mockupSet, viewKey, slides, previewId)).join("")
+    ? grouped
+        .map(([viewKey, slides]) =>
+          renderCarousel(mockupSet, viewKey, slides, previewId, meta.showPreviewToggle !== false)
+        )
+        .join("")
     : `<p class="ce-hint">${escapeHtml(meta.emptyHint)}</p>`;
 
   const printAreaField = meta.showPrintAreaToggle
@@ -124,8 +156,16 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
       </div>`
     : "";
 
+  const internalBadge = meta.internal
+    ? `<span class="ce-mock-internal-badge">Internal · Detection only</span>`
+    : "";
+
   return `
-    <section class="ce-mock-section-panel" data-mock-section="${escapeHtml(meta.id)}" data-mock-set="${escapeHtml(mockupSet)}">
+    <section class="ce-mock-section-panel${meta.internal ? " ce-mock-section-panel--internal" : ""}" data-mock-section="${escapeHtml(meta.id)}" data-mock-set="${escapeHtml(mockupSet)}">
+      <div class="ce-mock-section-panel__head">
+        <h3 class="ce-section-title">${escapeHtml(meta.title)}</h3>
+        ${internalBadge}
+      </div>
       <p class="ce-hint">${escapeHtml(meta.hint)}</p>
       ${printAreaField}
       <div class="ce-mock-views">${carousels}</div>

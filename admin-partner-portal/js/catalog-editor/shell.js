@@ -189,6 +189,7 @@ function ensureOverlay() {
                 <div class="ce-version-pills" id="ce-subnav-version-pills" role="tablist"></div>
               </nav>
               <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--mock-sections" id="ce-subnav-mock-sections" hidden aria-label="Mockup sections" role="tablist">
+                <button type="button" class="ce-mock-section-pill" data-mock-section="calibration" role="tab" aria-selected="false">Calibration Mockup</button>
                 <button type="button" class="ce-mock-section-pill active" data-mock-section="clean" role="tab" aria-selected="true">Clean Mockups</button>
                 <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" role="tab" aria-selected="false">Shop Preview Mockups</button>
               </nav>

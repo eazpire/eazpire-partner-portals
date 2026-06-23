@@ -5,6 +5,7 @@ import { fetchTemplateBundle, createTemplateDraft, removeTemplateDraft, saveTemp
 const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
 
 const SECTION_ID_FIELDS = {
+  calibration_mockup: "printify_calibration_mockups_product_id",
   mockups: "printify_mockups_product_id",
   shop_preview_mockups: "printify_shop_preview_mockups_product_id",
   variants: "printify_variants_product_id",
@@ -12,6 +13,11 @@ const SECTION_ID_FIELDS = {
 };
 
 const SECTIONS = [
+  {
+    id: "calibration_mockup",
+    title: "Calibration Mockup",
+    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Sync from a Printify product that includes the green print-area marker.",
+  },
   {
     id: "mockups",
     title: "Clean Mockups",
@@ -30,7 +36,7 @@ const SECTIONS = [
   {
     id: "print_areas",
     title: "Print Areas",
-    hint: "Load print area geometry and placeholder settings from Printify.",
+    hint: "Load print area placeholders, Creator Design frames, and brand asset geometry from Printify.",
   },
 ];
 

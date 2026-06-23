@@ -3,7 +3,12 @@
  */
 
 import { parseJson } from "../db.js";
-import { filterImagesByMockupSet, MOCKUP_SET_CLEAN, MOCKUP_SET_SHOP_PREVIEW } from "./mockupSet.js";
+import {
+  filterImagesByMockupSet,
+  MOCKUP_SET_CLEAN,
+  MOCKUP_SET_SHOP_PREVIEW,
+  MOCKUP_SET_CALIBRATION,
+} from "./mockupSet.js";
 import { catalogStatusToIsActive, isActiveToCatalogStatus } from "./constants.js";
 import { getEazpireProduct } from "./eazpireProductService.js";
 import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } from "./eazpireProductVersionService.js";
@@ -370,6 +375,7 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
   }
   const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
   const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
+  const calibrationImages = filterImagesByMockupSet(images, MOCKUP_SET_CALIBRATION);
   const viewRandom = await queryAll(
     catalogDb,
     `SELECT * FROM product_mockup_view_random WHERE product_key = ?`,
@@ -389,6 +395,7 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
     product,
     images: cleanImages,
     shop_preview_images: shopPreviewImages,
+    calibration_images: calibrationImages,
     view_random: viewRandom,
     mockup_defaults: defaults,
     _ops_source: "catalog-db",

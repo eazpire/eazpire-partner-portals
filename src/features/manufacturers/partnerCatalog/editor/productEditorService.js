@@ -33,6 +33,7 @@ import {
   filterImagesByMockupSet,
   MOCKUP_SET_CLEAN,
   MOCKUP_SET_SHOP_PREVIEW,
+  MOCKUP_SET_CALIBRATION,
   mockupSetSqlMatch,
 } from "../mockupSet.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
@@ -1027,6 +1028,7 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
   }
   const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
   const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
+  const calibrationImages = filterImagesByMockupSet(images, MOCKUP_SET_CALIBRATION);
   const viewRandom = await queryAll(
     db,
     `SELECT * FROM eazpire_product_mockup_view_random WHERE product_key = ?`,
@@ -1036,7 +1038,15 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
     await queryAll(db, `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`, productKey),
     env
   );
-  return { ok: true, product, images: cleanImages, shop_preview_images: shopPreviewImages, view_random: viewRandom, mockup_defaults: defaults };
+  return {
+    ok: true,
+    product,
+    images: cleanImages,
+    shop_preview_images: shopPreviewImages,
+    calibration_images: calibrationImages,
+    view_random: viewRandom,
+    mockup_defaults: defaults,
+  };
 }
 
 export async function saveMockups(env, productKey, body) {

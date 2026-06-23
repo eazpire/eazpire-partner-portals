@@ -66,6 +66,7 @@ async function ensureCatalogTemplateProductColumns(db) {
     await add("printify_draft_product_id");
     await add("printify_mockups_product_id");
     await add("printify_shop_preview_mockups_product_id");
+    await add("printify_calibration_mockups_product_id");
     await add("printify_variants_product_id");
     await add("printify_print_areas_product_id");
     catalogTemplateColumnsReady = true;
@@ -76,6 +77,7 @@ async function ensureCatalogTemplateProductColumns(db) {
 
 /** Templates tab sync sections → template_products column */
 export const TEMPLATE_SECTION_PRINTIFY_COLUMNS = {
+  calibration_mockup: "printify_calibration_mockups_product_id",
   mockups: "printify_mockups_product_id",
   shop_preview_mockups: "printify_shop_preview_mockups_product_id",
   variants: "printify_variants_product_id",
