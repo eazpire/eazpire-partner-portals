@@ -1304,6 +1304,91 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
   return { ok: true, _ops_source: "catalog-db" };
 }
 
+/** Persist print_areas snapshot on template_products after Print Areas sync (publish reads DB, not live template). */
+export async function upsertCatalogTemplatePrintAreasFromPrintify(
+  env,
+  productKey,
+  printProviderId,
+  product,
+  printifyProductId
+) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  await ensureCatalogTemplateProductColumns(db);
+
+  const now = Date.now();
+  const pid = Number(printProviderId);
+  const printAreas = Array.isArray(product?.print_areas) ? product.print_areas : [];
+  const productId = String(printifyProductId || "").trim();
+  if (!productId) return { ok: false, error: "printify_product_id_required" };
+
+  try {
+    const existing = await queryFirst(
+      db,
+      `SELECT id, product_data_json FROM template_products WHERE product_key = ? AND print_provider_id = ?`,
+      productKey,
+      pid
+    );
+    let mergedProduct = product;
+    if (existing?.product_data_json) {
+      try {
+        const prev = JSON.parse(existing.product_data_json);
+        mergedProduct = { ...prev, ...product, print_areas: printAreas.length ? printAreas : prev?.print_areas || [] };
+      } catch {
+        mergedProduct = product;
+      }
+    }
+
+    if (existing?.id) {
+      await db
+        .prepare(
+          `UPDATE template_products SET
+            printify_print_areas_product_id = ?,
+            print_areas_json = ?,
+            product_data_json = ?,
+            blueprint_id = COALESCE(?, blueprint_id),
+            updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(
+          productId,
+          JSON.stringify(printAreas),
+          JSON.stringify(mergedProduct),
+          product?.blueprint_id ?? null,
+          now,
+          existing.id
+        )
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO template_products
+            (product_key, print_provider_id, printify_product_id, printify_print_areas_product_id, blueprint_id, title, print_areas_json, product_data_json, created_at, updated_at)
+           VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          productKey,
+          pid,
+          productId,
+          product?.blueprint_id ?? null,
+          product?.title || null,
+          JSON.stringify(printAreas),
+          JSON.stringify(mergedProduct),
+          now,
+          now
+        )
+        .run();
+    }
+
+    await mergeCatalogPublishProfileTemplateSources(db, productKey, pid, "print_areas", productId);
+  } catch (err) {
+    return { ok: false, error: "catalog_db_save_failed", detail: String(err?.message || err) };
+  }
+
+  return { ok: true, _ops_source: "catalog-db" };
+}
+
 export async function replaceCatalogMockupImages(env, productKey, printProviderId, printifyProductId, entries, mockupSet = MOCKUP_SET_CLEAN) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
@@ -1313,12 +1398,15 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
   const set = normalizeMockupSet(mockupSet);
   const match = mockupSetSqlMatch(set);
 
+  const { persistMockupEntriesToR2 } = await import("./persistMockupImagesToR2.js");
+  const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries || [], set);
+
   await db
     .prepare(`DELETE FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
     .bind(productKey, pid, match.bind)
     .run();
 
-  for (const e of entries) {
+  for (const e of persistedEntries) {
     await db
       .prepare(
         `INSERT INTO product_mockup_images
@@ -1341,7 +1429,7 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
       .run();
   }
 
-  if (entries.length > 0) {
+  if (persistedEntries.length > 0) {
     await db
       .prepare(
         `UPDATE product_mockup_images SET is_default = 1
@@ -1364,7 +1452,7 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
 
   return {
     ok: true,
-    count: entries.length,
+    count: persistedEntries.length,
     printify_product_id: printifyProductId,
     by_view: buildMockupImagesByView(images),
     _ops_source: "catalog-db",

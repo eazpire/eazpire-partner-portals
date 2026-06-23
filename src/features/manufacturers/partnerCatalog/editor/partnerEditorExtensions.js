@@ -14,6 +14,7 @@ import {
 } from "../catalogOpsReadService.js";
 import {
   upsertCatalogPublishProfile,
+  upsertCatalogTemplatePrintAreasFromPrintify,
   upsertCatalogMockupDefault,
   patchCatalogPatStudioConfig,
   upsertCatalogTemplateFromPrintify,
@@ -322,6 +323,14 @@ export async function loadPrintifySettings(
       blueprint_id: product?.blueprint_id ?? null,
       print_areas_config_json: mergedConfig,
     });
+
+    await upsertCatalogTemplatePrintAreasFromPrintify(
+      env,
+      productKey,
+      Number(printProviderId),
+      product,
+      printifyProductId
+    );
 
     return { ok: true, version_id: version?.id || null, printify_product: product, print_areas_config_json: mergedConfig };
   }
@@ -904,6 +913,9 @@ export async function fetchPrintifyMockups(
     return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries, set);
   }
 
+  const { persistMockupEntriesToR2 } = await import("../persistMockupImagesToR2.js");
+  const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries, set);
+
   const db = mfgDb;
   const now = Date.now();
   const matchClause =
@@ -917,7 +929,7 @@ export async function fetchPrintifyMockups(
     .bind(productKey, Number(printProviderId), matchBind)
     .run();
 
-  for (const e of entries) {
+  for (const e of persistedEntries) {
     await db
       .prepare(
         `INSERT INTO eazpire_product_mockup_images
@@ -941,7 +953,7 @@ export async function fetchPrintifyMockups(
       .run();
   }
 
-  if (entries.length > 0) {
+  if (persistedEntries.length > 0) {
     await db
       .prepare(
         `UPDATE eazpire_product_mockup_images SET is_default = 1
