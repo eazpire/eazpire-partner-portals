@@ -18,6 +18,7 @@ import {
   templatePrintifyColumnForMockupSet,
   missingPrintifyIdMessageForMockupSet,
   mockupSetSqlMatch,
+  MOCKUP_SET_CALIBRATION,
 } from "../mockupSet.js";
 import {
   upsertCatalogPublishProfile,
@@ -872,6 +873,27 @@ function extractMockupEntries(product) {
   return out;
 }
 
+export async function setTemplatePrintAreaMarkers(
+  env,
+  productKey,
+  printProviderId,
+  printifyProductIdOverride,
+  section = "calibration_mockup"
+) {
+  if (!productKey || printProviderId == null) {
+    return { ok: false, error: "product_key_or_print_provider_id_required" };
+  }
+  const printifyProductId = String(printifyProductIdOverride || "").trim();
+  if (!printifyProductId) return { ok: false, error: "printify_product_id_required" };
+
+  const { saveTemplateSectionProductId } = await import("./productEditorService.js");
+  const saveRes = await saveTemplateSectionProductId(env, productKey, printProviderId, section, printifyProductId);
+  if (!saveRes?.ok) return saveRes;
+
+  const { setPrintifyCalibrationMarkersOnProduct } = await import("../setPrintifyCalibrationMarkers.js");
+  return setPrintifyCalibrationMarkersOnProduct(env, { productKey, printifyProductId });
+}
+
 export async function fetchPrintifyMockups(
   env,
   productKey,
@@ -994,12 +1016,20 @@ export async function fetchPrintifyMockups(
       Number(printProviderId),
       matchBind
     );
+
+    let calibration_detection = null;
+    if (set === MOCKUP_SET_CALIBRATION && persistedEntries.length > 0) {
+      const { persistCalibrationRectsFromMockupEntries } = await import("../persistCalibrationRectsFromMockups.js");
+      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries);
+    }
+
     return {
       ok: true,
       count: persistedEntries.length,
       printify_product_id: printifyProductId,
       mockup_set: set,
       by_view: buildMockupImagesByView(images),
+      calibration_detection,
     };
   } catch (err) {
     console.error("[fetchPrintifyMockups]", productKey, mockupSet, err?.message || err);

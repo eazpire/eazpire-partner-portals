@@ -17,6 +17,7 @@ import { regionCodesFromCountryCodes } from "../../catalog/resolvePlanCountries.
 import {
   MOCKUP_SET_CLEAN,
   MOCKUP_SET_SHOP_PREVIEW,
+  MOCKUP_SET_CALIBRATION,
   normalizeMockupSet,
   filterImagesByMockupSet,
   mockupSetSqlMatch,
@@ -1464,12 +1465,19 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
       match.bind
     );
 
+    let calibration_detection = null;
+    if (set === MOCKUP_SET_CALIBRATION && persistedEntries.length > 0) {
+      const { persistCalibrationRectsFromMockupEntries } = await import("./persistCalibrationRectsFromMockups.js");
+      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries);
+    }
+
     return {
       ok: true,
       count: persistedEntries.length,
       printify_product_id: printifyProductId,
       mockup_set: set,
       by_view: buildMockupImagesByView(images),
+      calibration_detection,
       _ops_source: "catalog-db",
     };
   } catch (err) {

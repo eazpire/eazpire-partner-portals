@@ -100,6 +100,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("Clean Mockups");
     expect(src).toContain("shop_preview_mockups");
     expect(src).toContain("printify_shop_preview_mockups_product_id");
+    expect(src).toContain("ce-tpl-set-print-area");
+    expect(src).toContain("ce-tpl-section__title-link");
   });
 
   it("print-area tab persists useMockups on every save", () => {

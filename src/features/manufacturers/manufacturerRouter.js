@@ -221,6 +221,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-template-remove-draft",
   "admin-eazpire-template-section-id-save",
   "admin-eazpire-fetch-printify-mockups",
+  "admin-eazpire-template-set-print-area",
   "admin-eazpire-print-area-image-upload",
   "admin-eazpire-print-area-image-clear",
   "admin-eazpire-variant-print-area-rect-save",
@@ -918,6 +919,27 @@ export async function handleManufacturerRouter(request, env) {
         console.error("[admin-eazpire-fetch-printify-mockups]", err?.message || err);
         return json(
           { ok: false, error: "mockup_sync_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
+    }
+    if (op === "admin-eazpire-template-set-print-area" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      try {
+        const result = await editorExt.setTemplatePrintAreaMarkers(
+          env,
+          body.product_key,
+          body.print_provider_id,
+          body.printify_product_id || null,
+          body.section || "calibration_mockup"
+        );
+        if (!result.ok) return json(result, partnerSyncErrorStatus(result), cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-template-set-print-area]", err?.message || err);
+        return json(
+          { ok: false, error: "set_print_area_failed", detail: String(err?.message || err) },
           500,
           cors
         );

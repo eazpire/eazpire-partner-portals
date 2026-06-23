@@ -1,6 +1,13 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
-import { fetchTemplateBundle, createTemplateDraft, removeTemplateDraft, saveTemplateSectionProductId, syncTemplateSection } from "../api.js";
+import {
+  fetchTemplateBundle,
+  createTemplateDraft,
+  removeTemplateDraft,
+  saveTemplateSectionProductId,
+  syncTemplateSection,
+  setTemplatePrintArea,
+} from "../api.js";
 
 const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
 
@@ -16,7 +23,8 @@ const SECTIONS = [
   {
     id: "calibration_mockup",
     title: "Calibration Mockup",
-    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Sync from a Printify product that includes the green print-area marker.",
+    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Use Set Print Area to place green markers in Printify, then Sync to detect geometry.",
+    supportsSetPrintArea: true,
   },
   {
     id: "mockups",
@@ -86,11 +94,23 @@ function renderPanelHead(draftId) {
     </div>`;
 }
 
+function renderSectionTitle(section, printifyId) {
+  const url = printifyProductUrl(printifyId);
+  if (url) {
+    return `<a class="ce-tpl-section__title-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(section.title)}</a>`;
+  }
+  return escapeHtml(section.title);
+}
+
 function renderSection(section, printifyId) {
+  const setPrintAreaBtn = section.supportsSetPrintArea
+    ? `<button type="button" class="btn btn-secondary btn-sm ce-tpl-set-print-area" data-section="${section.id}">Set Print Area</button>`
+    : "";
+
   return `
     <section class="ce-tpl-section" id="ce-tpl-section-${section.id}" data-section="${section.id}">
       <div class="ce-tpl-section__head">
-        <h4 class="ce-tpl-section__title">${escapeHtml(section.title)}</h4>
+        <h4 class="ce-tpl-section__title">${renderSectionTitle(section, printifyId)}</h4>
         <p class="ce-tpl-section__hint">${escapeHtml(section.hint)}</p>
       </div>
       <div class="ce-tpl-section__row">
@@ -104,6 +124,7 @@ function renderSection(section, printifyId) {
           spellcheck="false"
         />
         <div class="ce-tpl-section__actions">
+          ${setPrintAreaBtn}
           <button type="button" class="btn btn-secondary btn-sm ce-tpl-sync" data-section="${section.id}">Sync</button>
           <button type="button" class="btn btn-secondary btn-sm ce-tpl-open" data-section="${section.id}"${printifyId ? "" : " disabled"}>Open</button>
         </div>
@@ -151,16 +172,18 @@ export async function saveTemplateTab() {
   /* Sync buttons persist data; footer save is a no-op on this tab. */
 }
 
-function setSectionState(sectionEl, state) {
+function setSectionState(sectionEl, state, overlayText) {
   if (!sectionEl) return;
   sectionEl.classList.remove("ce-tpl-section--loading", "ce-tpl-section--success", "ce-tpl-section--error");
   const overlay = sectionEl.querySelector(".ce-tpl-section__overlay");
   const success = sectionEl.querySelector(".ce-tpl-section__success");
   const status = sectionEl.querySelector(".ce-tpl-section__status");
+  const overlayLabel = sectionEl.querySelector(".ce-tpl-section__overlay-text");
 
   if (state === "loading") {
     sectionEl.classList.add("ce-tpl-section--loading");
     if (overlay) overlay.hidden = false;
+    if (overlayLabel && overlayText) overlayLabel.textContent = overlayText;
     if (success) success.hidden = true;
     if (status) status.textContent = "";
     return;
@@ -198,16 +221,21 @@ async function runSectionSync(sectionId, ctx) {
 
   const syncBtn = sectionEl?.querySelector(".ce-tpl-sync");
   if (syncBtn) syncBtn.disabled = true;
-  setSectionState(sectionEl, "loading");
+  setSectionState(sectionEl, "loading", "Syncing…");
 
   try {
     const extra = {};
     if (sectionId === "print_areas" && ctx.selectedVersionId) {
       extra.version_id = ctx.selectedVersionId;
     }
-    await syncTemplateSection(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId, extra);
+    const result = await syncTemplateSection(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId, extra);
     setSectionState(sectionEl, "success");
-    showToast("Synced", `${sectionId.replace("_", " ")} data updated from Printify.`);
+    const detected = result?.calibration_detection?.detected_count;
+    const syncMsg =
+      sectionId === "calibration_mockup" && detected > 0
+        ? `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected.`
+        : `${sectionId.replace(/_/g, " ")} data updated from Printify.`;
+    showToast("Synced", syncMsg);
     ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
   } catch (err) {
     setSectionState(sectionEl, "error");
@@ -222,20 +250,69 @@ async function runSectionSync(sectionId, ctx) {
   }
 }
 
+async function runSetPrintArea(sectionId, ctx) {
+  const sectionEl = document.getElementById(`ce-tpl-section-${sectionId}`);
+  const input = document.getElementById(`ce-tpl-id-${sectionId}`);
+  const printifyId = input?.value?.trim();
+  if (!printifyId) {
+    showToast("Set Print Area failed", "Printify product ID required.");
+    return;
+  }
+
+  const actionBtn = sectionEl?.querySelector(".ce-tpl-set-print-area");
+  const syncBtn = sectionEl?.querySelector(".ce-tpl-sync");
+  if (actionBtn) actionBtn.disabled = true;
+  if (syncBtn) syncBtn.disabled = true;
+  setSectionState(sectionEl, "loading", "Setting print area…");
+
+  try {
+    const result = await setTemplatePrintArea(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId);
+    setSectionState(sectionEl, "success");
+    const count = result?.placements_applied?.length || 0;
+    showToast(
+      "Print area set",
+      count
+        ? `Green markers placed on ${count} print area${count === 1 ? "" : "s"}. Run Sync to save geometry to the database.`
+        : "Green markers placed. Run Sync to save geometry to the database."
+    );
+    ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
+  } catch (err) {
+    setSectionState(sectionEl, "error");
+    const status = sectionEl?.querySelector(".ce-tpl-section__status");
+    if (status) status.textContent = partnerFetchErrorMessage(err);
+    showToast("Set Print Area failed", partnerFetchErrorMessage(err));
+  } finally {
+    if (actionBtn) actionBtn.disabled = false;
+    if (syncBtn) syncBtn.disabled = false;
+    sectionEl?.classList.remove("ce-tpl-section--loading");
+    const overlay = sectionEl?.querySelector(".ce-tpl-section__overlay");
+    if (overlay) overlay.hidden = true;
+    const overlayLabel = sectionEl?.querySelector(".ce-tpl-section__overlay-text");
+    if (overlayLabel) overlayLabel.textContent = "Syncing…";
+  }
+}
+
 document.addEventListener("input", (ev) => {
   const input = ev.target.closest("[data-section-input]");
   if (!input) return;
-  const openBtn = document.querySelector(`.ce-tpl-open[data-section="${input.dataset.sectionInput}"]`);
+  const sectionId = input.dataset.sectionInput;
+  const openBtn = document.querySelector(`.ce-tpl-open[data-section="${sectionId}"]`);
   if (openBtn) openBtn.disabled = !input.value?.trim();
+  const titleEl = document.querySelector(`#ce-tpl-section-${sectionId} .ce-tpl-section__title`);
+  if (!titleEl) return;
+  const section = SECTIONS.find((s) => s.id === sectionId);
+  if (!section) return;
+  titleEl.innerHTML = renderSectionTitle(section, input.value?.trim());
 });
 
 document.addEventListener("click", async (ev) => {
   const syncBtn = ev.target.closest(".ce-tpl-sync");
+  const setPrintAreaBtn = ev.target.closest(".ce-tpl-set-print-area");
   const openBtn = ev.target.closest(".ce-tpl-open");
   const draftOpenBtn = ev.target.closest(".ce-tpl-open-draft");
   const draftBtn = ev.target.closest("#ce-tpl-create-draft");
   const removeBtn = ev.target.closest("#ce-tpl-remove-draft");
-  if (!syncBtn && !openBtn && !draftBtn && !removeBtn && !draftOpenBtn) return;
+  if (!syncBtn && !setPrintAreaBtn && !openBtn && !draftBtn && !removeBtn && !draftOpenBtn) return;
 
   if (openBtn) {
     const sectionId = openBtn.dataset.section;
@@ -297,6 +374,11 @@ document.addEventListener("click", async (ev) => {
     } finally {
       removeBtn.disabled = false;
     }
+    return;
+  }
+
+  if (setPrintAreaBtn) {
+    await runSetPrintArea(setPrintAreaBtn.dataset.section, ctx);
     return;
   }
 

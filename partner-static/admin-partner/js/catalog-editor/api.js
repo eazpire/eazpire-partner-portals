@@ -176,6 +176,19 @@ export async function fetchPrintifyMockups(body) {
   return partnerFetch("admin-eazpire-fetch-printify-mockups", { method: "POST", body });
 }
 
+export async function setTemplatePrintArea(productKey, printProviderId, section, printifyProductId) {
+  return partnerFetch("admin-eazpire-template-set-print-area", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      print_provider_id: printProviderId,
+      section,
+      printify_product_id: printifyProductId,
+      auto_mirror: false,
+    },
+  });
+}
+
 export async function uploadPrintAreaImage(productKey, printAreaKey, file) {
   const url = new URL(partnerApiBase());
   url.searchParams.set("op", "admin-eazpire-print-area-image-upload");
