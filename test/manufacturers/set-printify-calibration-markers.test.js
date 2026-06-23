@@ -7,6 +7,7 @@ import {
   createSolidGreenPngBuffer,
   viewKeyToPrintAreaKey,
   normPlaceholderPosition,
+  resolveCalibrationPlaceholderDimensions,
 } from "../../src/features/manufacturers/partnerCatalog/setPrintifyCalibrationMarkers.js";
 
 describe("setPrintifyCalibrationMarkers", () => {
@@ -31,7 +32,30 @@ describe("setPrintifyCalibrationMarkers", () => {
     ]);
     expect(targets.has("front")).toBe(true);
     expect(targets.get("front")).toEqual({ width: 2400, height: 3200 });
-    expect(targets.has("back")).toBe(false);
+    expect(targets.has("back")).toBe(true);
+  });
+
+  it("resolves dimensions from image metadata when placeholder width is missing", () => {
+    const dims = resolveCalibrationPlaceholderDimensions(
+      { position: "front", images: [{ width: 1800, height: 2400 }] },
+      {},
+      null
+    );
+    expect(dims).toEqual({ width: 1800, height: 2400 });
+    const targets = collectCalibrationPlaceholderTargets(
+      [{ placeholders: [{ position: "front", images: [{ width: 1800, height: 2400 }] }] }],
+      null
+    );
+    expect(targets.get("front")).toEqual({ width: 1800, height: 2400 });
+  });
+
+  it("falls back to catalog dimensions by position", () => {
+    const catalog = new Map([["front", { width: 4200, height: 4800 }]]);
+    const targets = collectCalibrationPlaceholderTargets(
+      [{ placeholders: [{ position: "front", images: [] }] }],
+      catalog
+    );
+    expect(targets.get("front")).toEqual({ width: 4200, height: 4800 });
   });
 
   it("replaces all existing images with only the green marker", () => {

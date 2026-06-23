@@ -12,6 +12,7 @@ import {
 } from "../../../utils/printify.js";
 import { getPrintifyShopId, getPrintifyApiKey } from "../../../utils/printifyEnv.js";
 import { uniformContainPrintifyScale } from "../../../utils/printAreas.js";
+import { loadPrintAreaDimensionsByKeyFromCatalog } from "../../../utils/printAreaDimensionsCatalog.js";
 import { sanitizeStudioPrintAreasForPrintifyApi } from "../../shop/studioPrintAreaPlacement.js";
 
 export const PARTNER_CALIBRATION_PH_PREFIX = "partner-calibration-ph-fill";
@@ -55,31 +56,159 @@ export function createSolidGreenPngBuffer(width, height) {
   return pngBytes.buffer.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength);
 }
 
-function isTextOnlyPlaceholder(ph) {
-  const imgs = Array.isArray(ph?.images) ? ph.images : [];
-  if (!imgs.length) return false;
-  return imgs.every((im) => String(im?.type || "").toLowerCase().includes("text"));
+function lookupDimsByPosition(pos, dimsByPosition) {
+  if (!pos || !dimsByPosition) return null;
+  if (dimsByPosition instanceof Map) {
+    if (dimsByPosition.has(pos)) return dimsByPosition.get(pos);
+    for (const [key, dims] of dimsByPosition.entries()) {
+      if (normPlaceholderPosition(key) === pos) return dims;
+    }
+  } else if (typeof dimsByPosition === "object") {
+    if (dimsByPosition[pos]) return dimsByPosition[pos];
+    for (const [key, dims] of Object.entries(dimsByPosition)) {
+      if (normPlaceholderPosition(key) === pos) return dims;
+    }
+  }
+  if (pos.includes("sleeve")) {
+    const iter = dimsByPosition instanceof Map ? dimsByPosition.entries() : Object.entries(dimsByPosition || {});
+    for (const [key, dims] of iter) {
+      const k = normPlaceholderPosition(key);
+      if (!k.includes("sleeve")) continue;
+      const left = pos.includes("left") || k.includes("left");
+      const right = pos.includes("right") || k.includes("right");
+      if (left && k.includes("left")) return dims;
+      if (right && k.includes("right")) return dims;
+      if (!left && !right) return dims;
+    }
+  }
+  if (pos.includes("neck")) {
+    const iter = dimsByPosition instanceof Map ? dimsByPosition.entries() : Object.entries(dimsByPosition || {});
+    for (const [key, dims] of iter) {
+      if (normPlaceholderPosition(key).includes("neck")) return dims;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve placeholder pixel size from Printify product data and optional catalog fallbacks.
+ */
+export function resolveCalibrationPlaceholderDimensions(ph, area, dimsByPosition = null) {
+  let w = Number(ph?.width);
+  let h = Number(ph?.height);
+  if (!(w > 0 && h > 0)) {
+    w = Number(area?.width);
+    h = Number(area?.height);
+  }
+  if (!(w > 0 && h > 0)) {
+    for (const img of ph?.images || []) {
+      const iw = Number(img?.width);
+      const ih = Number(img?.height);
+      if (iw > 0 && ih > 0) {
+        w = iw;
+        h = ih;
+        break;
+      }
+    }
+  }
+  const pos = normPlaceholderPosition(ph?.position);
+  if (!(w > 0 && h > 0) && pos) {
+    const fromCatalog = lookupDimsByPosition(pos, dimsByPosition);
+    if (fromCatalog) {
+      w = Number(fromCatalog.width);
+      h = Number(fromCatalog.height);
+    }
+  }
+  if (!(w > 0 && h > 0)) return null;
+  return { width: w, height: h };
+}
+
+async function fetchCatalogBlueprintPlaceholderDimensions(env, blueprintId, printProviderId) {
+  const out = new Map();
+  const bp = Number(blueprintId);
+  const pp = Number(printProviderId);
+  const key = getPrintifyApiKey(env);
+  if (!key || !Number.isFinite(bp) || bp <= 0 || !Number.isFinite(pp) || pp <= 0) return out;
+  try {
+    const res = await fetch(
+      `https://api.printify.com/v1/catalog/blueprints/${bp}/print_providers/${pp}/variants.json`,
+      { headers: { Authorization: `Bearer ${key}` } }
+    );
+    if (!res.ok) return out;
+    const data = await res.json();
+    const variants = Array.isArray(data) ? data : data?.variants || [];
+    for (const variant of variants) {
+      for (const ph of variant?.placeholders || []) {
+        const pos = normPlaceholderPosition(ph?.position);
+        const w = Number(ph?.width);
+        const h = Number(ph?.height);
+        if (!pos || !(w > 0 && h > 0) || out.has(pos)) continue;
+        out.set(pos, { width: w, height: h });
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+/**
+ * Build position → { width, height } from product, catalog DB, and Printify blueprint catalog.
+ */
+export async function buildCalibrationDimensionLookup(env, product, productKey = "") {
+  const map = new Map();
+  const printAreas = Array.isArray(product?.print_areas) ? product.print_areas : [];
+
+  for (const area of printAreas) {
+    for (const ph of area?.placeholders || []) {
+      const pos = normPlaceholderPosition(ph?.position);
+      const dims = resolveCalibrationPlaceholderDimensions(ph, area, map);
+      if (pos && dims && !map.has(pos)) map.set(pos, dims);
+    }
+  }
+
+  if (productKey) {
+    const fromDb = await loadPrintAreaDimensionsByKeyFromCatalog(env, productKey);
+    for (const [key, dims] of Object.entries(fromDb)) {
+      const pos = normPlaceholderPosition(key);
+      if (pos && dims?.width > 0 && dims?.height > 0 && !map.has(pos)) {
+        map.set(pos, { width: Number(dims.width), height: Number(dims.height) });
+      }
+    }
+  }
+
+  const fromBlueprint = await fetchCatalogBlueprintPlaceholderDimensions(
+    env,
+    product?.blueprint_id,
+    product?.print_provider_id
+  );
+  for (const [pos, dims] of fromBlueprint.entries()) {
+    if (!map.has(pos)) map.set(pos, dims);
+  }
+
+  return map;
 }
 
 /**
  * Collect placeholder positions that should receive a green calibration image.
  * @param {any[]} printAreas
- * @returns {Map<string, { width: number, height: number }>}
+ * @param {Map<string, { width: number, height: number }>|null} dimsByPosition
  */
-export function collectCalibrationPlaceholderTargets(printAreas) {
+export function collectCalibrationPlaceholderTargets(printAreas, dimsByPosition = null) {
   const out = new Map();
-  for (const area of printAreas || []) {
+  const areas = Array.isArray(printAreas) ? printAreas : [];
+
+  for (const area of areas) {
     for (const ph of area?.placeholders || []) {
       if (!ph || typeof ph !== "object") continue;
-      if (isTextOnlyPlaceholder(ph)) continue;
       const pos = normPlaceholderPosition(ph.position);
       if (!pos) continue;
-      const w = Number(ph.width);
-      const h = Number(ph.height);
-      if (!(w > 0 && h > 0)) continue;
-      if (!out.has(pos)) out.set(pos, { width: w, height: h });
+      const dims = resolveCalibrationPlaceholderDimensions(ph, area, dimsByPosition);
+      if (!dims) continue;
+      if (!out.has(pos)) out.set(pos, dims);
     }
   }
+
   return out;
 }
 
@@ -174,12 +303,25 @@ export async function setPrintifyCalibrationMarkersOnProduct(env, opts) {
   if (!product) return { ok: false, error: "printify_product_not_found" };
 
   const printAreas = Array.isArray(product.print_areas) ? product.print_areas : [];
-  const targets = collectCalibrationPlaceholderTargets(printAreas);
+  if (!printAreas.length) {
+    return {
+      ok: false,
+      error: "no_print_area_placeholders",
+      message: "Printify product has no print_areas. Open the product in Printify or sync the Print Areas template first.",
+    };
+  }
+
+  const productKey = String(opts?.productKey || "").trim();
+  const dimsByPosition = await buildCalibrationDimensionLookup(env, product, productKey);
+  const targets = collectCalibrationPlaceholderTargets(printAreas, dimsByPosition);
   if (!targets.size) {
     return {
       ok: false,
       error: "no_print_area_placeholders",
-      message: "Printify product has no placeholders with width/height.",
+      message:
+        "Could not resolve print-area dimensions for this Printify product. Sync Print Areas on the Templates tab first, or ensure the product still has placeholder positions (front, back, …).",
+      dimension_sources: dimsByPosition.size,
+      placeholder_count: printAreas.reduce((n, a) => n + (a?.placeholders?.length || 0), 0),
     };
   }
 
