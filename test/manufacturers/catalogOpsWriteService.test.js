@@ -9,7 +9,9 @@ import {
   updateCatalogProductMeta,
   saveCatalogProviders,
   saveCatalogMockups,
+  saveCatalogVersionConfig,
 } from "../../src/features/manufacturers/partnerCatalog/catalogOpsWriteService.js";
+import { mirrorEazpireProductToCatalogDb } from "../../src/features/manufacturers/partnerCatalog/mirrorToCatalogDb.js";
 import {
   saveProductMeta,
   saveProviders,
@@ -168,6 +170,30 @@ describe("catalogOpsWriteService", () => {
         (u) => u.sql.includes("print_area_edit_use_mocks") && u.args[0] === 0
       )
     ).toBe(true);
+  });
+
+  it("saveCatalogVersionConfig writes catalog_status to product_catalog", async () => {
+    const catalogDb = makeWritableCatalogDb();
+    catalogDb._state.patRows[0].product_version_config_json = JSON.stringify({ catalog_status: "online" });
+    const env = {
+      CATALOG_OPS_MASTER_WRITE: "1",
+      CATALOG_DB: catalogDb,
+      MANUFACTURER_DB: null,
+    };
+    const result = await saveCatalogVersionConfig(env, "pat-10", {
+      product_version_config: { catalog_status: "offline", design_types: ["classic"] },
+    });
+    expect(result.ok).toBe(true);
+    expect(catalogDb._state.product.is_active).toBe(0);
+  });
+
+  it("mirrorEazpireProductToCatalogDb skips when catalog-db is master", async () => {
+    const result = await mirrorEazpireProductToCatalogDb(
+      { CATALOG_OPS_MASTER_WRITE: "1", MANUFACTURER_DB: {}, CATALOG_DB: {} },
+      "test-tee"
+    );
+    expect(result.ok).toBe(true);
+    expect(result.skipped).toBe(true);
   });
 });
 

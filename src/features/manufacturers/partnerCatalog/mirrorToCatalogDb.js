@@ -1,12 +1,24 @@
 /**
  * One-way mirror: MANUFACTURER_DB master → catalog-db publish index
+ * When CATALOG_OPS_MASTER_WRITE is on, catalog-db is master — do not overwrite it from manufacturer.
  */
 
 import { catalogStatusToIsActive } from "./constants.js";
+import { isCatalogOpsMasterWrite } from "./catalogOpsConfig.js";
 import { parseJson } from "../db.js";
 import { studioConfigToPatFields, autoPublishConfigToPatFields } from "./catalogOpsPatFields.js";
 
 export async function mirrorEazpireProductToCatalogDb(env, productKey) {
+  if (isCatalogOpsMasterWrite(env)) {
+    return {
+      ok: true,
+      product_key: productKey,
+      skipped: true,
+      reason: "catalog_ops_master_write",
+      message: "Catalog-db is master; mirror from manufacturer-db skipped.",
+    };
+  }
+
   const mfgDb = env.MANUFACTURER_DB;
   const catalogDb = env.CATALOG_DB;
   if (!mfgDb || !catalogDb) return { ok: false, error: "database_unavailable" };

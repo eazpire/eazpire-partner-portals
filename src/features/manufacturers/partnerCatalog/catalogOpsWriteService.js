@@ -650,6 +650,35 @@ export async function deleteCatalogPatVersion(env, versionId, productKey = null)
   return { ok: true, product_key: pat.product_key, _ops_source: "catalog-db" };
 }
 
+async function syncPatVisibilityToManufacturerShadow(env, patId, productVersionConfig, productKey) {
+  const mfgDb = env?.MANUFACTURER_DB;
+  if (!mfgDb || patId == null || !productVersionConfig) return;
+
+  const cfgJson = JSON.stringify(productVersionConfig);
+  const now = Date.now();
+  const versionRow = await queryFirst(
+    mfgDb,
+    `SELECT id FROM eazpire_product_versions WHERE catalog_pat_id = ? LIMIT 1`,
+    patId
+  );
+  if (versionRow?.id) {
+    await mfgDb
+      .prepare(
+        `UPDATE eazpire_product_versions SET product_version_config_json = ?, updated_at = ? WHERE id = ?`
+      )
+      .bind(cfgJson, now, versionRow.id)
+      .run();
+  }
+
+  const st = String(productVersionConfig.catalog_status || "").toLowerCase();
+  if (!["offline", "preview", "online"].includes(st) || !productKey) return;
+
+  await mfgDb
+    .prepare(`UPDATE eazpire_products SET catalog_status = ?, updated_at = ? WHERE product_key = ?`)
+    .bind(st, now, productKey)
+    .run();
+}
+
 export async function saveCatalogVersionConfig(env, versionId, body, productKey = null) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
@@ -661,6 +690,11 @@ export async function saveCatalogVersionConfig(env, versionId, body, productKey 
   if (!existing) return { ok: false, error: "not_found" };
 
   const now = Date.now();
+  const nextConfig =
+    body.product_version_config != null
+      ? body.product_version_config
+      : parseJson(existing.product_version_config_json, null);
+
   await db
     .prepare(
       `UPDATE print_area_printify_templates SET
@@ -680,6 +714,15 @@ export async function saveCatalogVersionConfig(env, versionId, body, productKey 
       patId
     )
     .run();
+
+  const catalogStatus = String(nextConfig?.catalog_status || "").toLowerCase();
+  if (["offline", "preview", "online"].includes(catalogStatus)) {
+    await db
+      .prepare(`UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`)
+      .bind(catalogStatusToIsActive(catalogStatus), now, existing.product_key)
+      .run();
+    await syncPatVisibilityToManufacturerShadow(env, patId, nextConfig, existing.product_key);
+  }
 
   const versions = await listCatalogOpsProductVersions(env, existing.product_key);
   const version = versions.find((v) => Number(v.catalog_pat_id) === patId) || null;
