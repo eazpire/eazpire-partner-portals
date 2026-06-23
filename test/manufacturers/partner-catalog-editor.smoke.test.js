@@ -89,7 +89,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("Clean Mockups");
     expect(src).toContain("Shop Preview Mockups");
     expect(src).toContain("shop_preview_mock_id");
-    expect(src).toContain("ce-mock-section");
+    expect(src).toContain("switchMockSection");
+    expect(src).toContain("renderMockupsTabHtml");
     const shell = readFileSync(join(portal, "shell.js"), "utf8");
     expect(shell).toContain("ce-subnav-mock-sections");
   });

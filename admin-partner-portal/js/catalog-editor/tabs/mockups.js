@@ -6,12 +6,16 @@ import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js
 export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
 
+const MOCK_SECTION_IDS = {
+  clean: MOCKUP_SET_CLEAN,
+  shop_preview: MOCKUP_SET_SHOP_PREVIEW,
+};
+
 const SECTION_META = {
   [MOCKUP_SET_CLEAN]: {
     id: "clean",
     title: "Clean Mockups",
     hint: "DB mockups for print area and publishing — sync via Templates → Clean Mockups. Enable one Preview Mock globally (Shopify alt text).",
-    syncLabel: "Clean Mockups",
     emptyHint: "No clean mockup images yet. Sync on the Templates tab under Clean Mockups.",
     showPrintAreaToggle: true,
   },
@@ -19,11 +23,31 @@ const SECTION_META = {
     id: "shop_preview",
     title: "Shop Preview Mockups",
     hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Sync via Templates → Shop Preview Mockups.",
-    syncLabel: "Shop Preview Mockups",
     emptyHint: "No shop preview mockups yet. Set a Printify product ID on Templates → Shop Preview Mockups and sync.",
     showPrintAreaToggle: false,
   },
 };
+
+function ensureMockupsUiState(ctx) {
+  if (!ctx.mockupsUiState) {
+    ctx.mockupsUiState = {
+      selectedSection: MOCKUP_SET_CLEAN,
+      print_area_edit_use_mocks: false,
+      preview_mock_id: null,
+      shop_preview_mock_id: null,
+    };
+  }
+  return ctx.mockupsUiState;
+}
+
+export function resolveActiveMockSection(ctx) {
+  const ui = ensureMockupsUiState(ctx);
+  return ui.selectedSection === MOCKUP_SET_SHOP_PREVIEW ? MOCKUP_SET_SHOP_PREVIEW : MOCKUP_SET_CLEAN;
+}
+
+function imagesForSet(data, mockupSet) {
+  return mockupSet === MOCKUP_SET_SHOP_PREVIEW ? data?.shop_preview_images || [] : data?.images || [];
+}
 
 function groupImagesByView(images) {
   const byView = new Map();
@@ -83,10 +107,12 @@ function renderCarousel(mockupSet, viewKey, slides, previewId) {
     </article>`;
 }
 
-function renderMockupSetPanel(mockupSet, images, data) {
+function renderMockupSetPanel(mockupSet, images, data, ui) {
   const meta = SECTION_META[mockupSet];
+  const savedPreviewId =
+    mockupSet === MOCKUP_SET_SHOP_PREVIEW ? ui.shop_preview_mock_id : ui.preview_mock_id;
   const previewRow = (images || []).find((img) => Number(img.is_default) === 1);
-  const previewId = previewRow?.id || null;
+  const previewId = savedPreviewId || previewRow?.id || null;
   const grouped = groupImagesByView(images);
   const carousels = grouped.length
     ? grouped.map(([viewKey, slides]) => renderCarousel(mockupSet, viewKey, slides, previewId)).join("")
@@ -94,33 +120,41 @@ function renderMockupSetPanel(mockupSet, images, data) {
 
   const printAreaField = meta.showPrintAreaToggle
     ? `<div class="field ce-mock-print-area-field">
-        <label><input type="checkbox" id="ce-mock-use-mocks" ${data.product?.print_area_edit_use_mocks ? "checked" : ""} /> Print area edit uses mockups</label>
+        <label><input type="checkbox" id="ce-mock-use-mocks" ${ui.print_area_edit_use_mocks ? "checked" : ""} /> Print area edit uses mockups</label>
       </div>`
     : "";
 
   return `
-    <details class="ce-mock-section" id="ce-mock-section-${escapeHtml(meta.id)}" data-mock-section="${escapeHtml(meta.id)}" open>
-      <summary class="ce-mock-section__summary">
-        <span class="ce-mock-section__chevron" aria-hidden="true">▾</span>
-        <span class="ce-mock-section__title">${escapeHtml(meta.title)}</span>
-      </summary>
-      <div class="ce-mock-section__body" data-mock-set="${escapeHtml(mockupSet)}">
-        <p class="ce-hint">${escapeHtml(meta.hint)}</p>
-        ${printAreaField}
-        <div class="ce-mock-views">${carousels}</div>
-      </div>
-    </details>`;
+    <section class="ce-mock-section-panel" data-mock-section="${escapeHtml(meta.id)}" data-mock-set="${escapeHtml(mockupSet)}">
+      <p class="ce-hint">${escapeHtml(meta.hint)}</p>
+      ${printAreaField}
+      <div class="ce-mock-views">${carousels}</div>
+    </section>`;
+}
+
+export function renderMockupsTabHtml(ctx, data) {
+  const ui = ensureMockupsUiState(ctx);
+  const mockupSet = resolveActiveMockSection(ctx);
+  const images = imagesForSet(data, mockupSet);
+
+  return `
+    <div class="ce-tab-panel ce-mock-panel">
+      ${renderMockupSetPanel(mockupSet, images, data, ui)}
+    </div>`;
 }
 
 export async function loadMockupsTab(ctx) {
   const data = await fetchMockupsBundle(ctx.productKey, ctx.selectedPrintProviderId);
   ctx.mockupsData = data;
-
-  return `
-    <div class="ce-tab-panel ce-mock-panel">
-      ${renderMockupSetPanel(MOCKUP_SET_CLEAN, data.images || [], data)}
-      ${renderMockupSetPanel(MOCKUP_SET_SHOP_PREVIEW, data.shop_preview_images || [], data)}
-    </div>`;
+  const ui = ensureMockupsUiState(ctx);
+  if (data.product?.print_area_edit_use_mocks !== undefined) {
+    ui.print_area_edit_use_mocks = !!data.product.print_area_edit_use_mocks;
+  }
+  const cleanDefault = (data.images || []).find((img) => Number(img.is_default) === 1);
+  const shopDefault = (data.shop_preview_images || []).find((img) => Number(img.is_default) === 1);
+  ui.preview_mock_id = cleanDefault?.id || null;
+  ui.shop_preview_mock_id = shopDefault?.id || null;
+  return renderMockupsTabHtml(ctx, data);
 }
 
 function getActiveSlideId(carousel) {
@@ -167,11 +201,26 @@ function readPreviewMockIdForSet(mockupSet) {
   return previewMockId;
 }
 
+/** Persist visible mock UI into ctx before switching mock sub-tabs. */
+export function syncMockupsUiFromDom(ctx) {
+  const ui = ensureMockupsUiState(ctx);
+  const activeSet = resolveActiveMockSection(ctx);
+  ui.print_area_edit_use_mocks = !!document.getElementById("ce-mock-use-mocks")?.checked;
+  if (activeSet === MOCKUP_SET_CLEAN) {
+    ui.preview_mock_id = readPreviewMockIdForSet(MOCKUP_SET_CLEAN);
+  } else {
+    ui.shop_preview_mock_id = readPreviewMockIdForSet(MOCKUP_SET_SHOP_PREVIEW);
+  }
+}
+
 export function snapshotMockupsTab() {
+  const ui = window.__catalogEditorState?.mockupsUiState;
+  syncMockupsUiFromDom(window.__catalogEditorState || {});
   return {
-    print_area_edit_use_mocks: !!document.getElementById("ce-mock-use-mocks")?.checked,
-    preview_mock_id: readPreviewMockIdForSet(MOCKUP_SET_CLEAN),
-    shop_preview_mock_id: readPreviewMockIdForSet(MOCKUP_SET_SHOP_PREVIEW),
+    print_area_edit_use_mocks: !!ui?.print_area_edit_use_mocks,
+    preview_mock_id: ui?.preview_mock_id || null,
+    shop_preview_mock_id: ui?.shop_preview_mock_id || null,
+    selected_mock_section: ui?.selectedSection || MOCKUP_SET_CLEAN,
   };
 }
 
@@ -188,6 +237,7 @@ function bindMockupSetCarousels(ctx, mockupSet) {
         );
         if (toggle?.checked) {
           syncPreviewHiddenInput(mockupSet, viewKey, slide.getAttribute("data-id") || "");
+          syncMockupsUiFromDom(ctx);
         }
         openMockViewer(collectCarouselViewerItems(carousel), index);
       });
@@ -199,7 +249,8 @@ function bindMockupSetCarousels(ctx, mockupSet) {
       const viewKey = toggle.dataset.view;
       if (!toggle.checked) {
         syncPreviewHiddenInput(mockupSet, viewKey, "");
-        if (ctx) notifyActiveTabDirty(ctx);
+        syncMockupsUiFromDom(ctx);
+        notifyActiveTabDirty(ctx);
         return;
       }
       document.querySelectorAll(`.ce-mock-preview-switch[data-mock-set="${CSS.escape(mockupSet)}"]`).forEach((other) => {
@@ -209,58 +260,61 @@ function bindMockupSetCarousels(ctx, mockupSet) {
         `.ce-mock-carousel[data-mock-set="${CSS.escape(mockupSet)}"][data-view="${CSS.escape(viewKey)}"]`
       );
       syncPreviewHiddenInput(mockupSet, viewKey, getActiveSlideId(carousel));
-      if (ctx) notifyActiveTabDirty(ctx);
+      syncMockupsUiFromDom(ctx);
+      notifyActiveTabDirty(ctx);
     });
   });
 }
 
-export function bindMockSectionSubnav() {
-  const stack = document.getElementById("ce-subnav-stack");
+export function updateMockSectionSubnav(ctx) {
+  const activeId = SECTION_META[resolveActiveMockSection(ctx)].id;
+  document.querySelectorAll("#ce-subnav-mock-sections .ce-mock-section-pill").forEach((pill) => {
+    const on = pill.dataset.mockSection === activeId;
+    pill.classList.toggle("active", on);
+    pill.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+
+export function bindMockSectionSubnav(ctx) {
   const pills = document.querySelectorAll("#ce-subnav-mock-sections .ce-mock-section-pill");
   if (!pills.length) return;
 
-  const syncPillState = () => {
-    pills.forEach((pill) => {
-      const sectionId = pill.dataset.mockSection;
-      const details = document.getElementById(`ce-mock-section-${sectionId}`);
-      const open = details?.open !== false;
-      pill.classList.toggle("active", open);
-      pill.setAttribute("aria-expanded", open ? "true" : "false");
-    });
-  };
+  updateMockSectionSubnav(ctx);
 
   pills.forEach((pill) => {
     pill.onclick = () => {
       const sectionId = pill.dataset.mockSection;
-      const details = document.getElementById(`ce-mock-section-${sectionId}`);
-      if (!details) return;
-      details.open = !details.open;
-      syncPillState();
+      const mockupSet = MOCK_SECTION_IDS[sectionId];
+      if (!mockupSet || mockupSet === resolveActiveMockSection(ctx)) return;
+      switchMockSection(ctx, mockupSet);
     };
   });
+}
 
-  document.querySelectorAll(".ce-mock-section").forEach((details) => {
-    details.addEventListener("toggle", syncPillState);
-  });
-
-  syncPillState();
-  stack?.classList.toggle("ce-subnav-stack--has-mock-sections", true);
+export function switchMockSection(ctx, mockupSet) {
+  syncMockupsUiFromDom(ctx);
+  ensureMockupsUiState(ctx).selectedSection = mockupSet;
+  const body = document.getElementById("ce-body");
+  if (!body || !ctx.mockupsData) return;
+  body.innerHTML = renderMockupsTabHtml(ctx, ctx.mockupsData);
+  bindMockupsTab(ctx, body);
+  updateMockSectionSubnav(ctx);
 }
 
 export function bindMockupsTab(ctx, root) {
   bindTabDirtyInputs(root || document, ctx);
-  bindMockupSetCarousels(ctx, MOCKUP_SET_CLEAN);
-  bindMockupSetCarousels(ctx, MOCKUP_SET_SHOP_PREVIEW);
-  bindMockSectionSubnav();
+  bindMockupSetCarousels(ctx, resolveActiveMockSection(ctx));
+  bindMockSectionSubnav(ctx);
 }
 
 export async function saveMockupsTab(ctx) {
-  const snap = snapshotMockupsTab();
+  syncMockupsUiFromDom(ctx);
+  const ui = ensureMockupsUiState(ctx);
   await saveMockups(ctx.productKey, {
     print_provider_id: ctx.selectedPrintProviderId,
-    print_area_edit_use_mocks: snap.print_area_edit_use_mocks,
-    preview_mock_id: snap.preview_mock_id || undefined,
-    shop_preview_mock_id: snap.shop_preview_mock_id || undefined,
+    print_area_edit_use_mocks: ui.print_area_edit_use_mocks,
+    preview_mock_id: ui.preview_mock_id || undefined,
+    shop_preview_mock_id: ui.shop_preview_mock_id || undefined,
     auto_mirror: false,
   });
 }

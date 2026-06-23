@@ -8,7 +8,7 @@ import {
   saveProvidersTab,
 } from "./tabs/providers.js";
 import { loadTemplateTab, saveTemplateTab } from "./tabs/template.js";
-import { loadMockupsTab, saveMockupsTab, bindMockupsTab } from "./tabs/mockups.js";
+import { loadMockupsTab, saveMockupsTab, bindMockupsTab, updateMockSectionSubnav } from "./tabs/mockups.js";
 import { loadVariantsTab, saveVariantsTab, bindVariantsTab } from "./tabs/variants.js";
 import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/print-area.js";
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
@@ -188,9 +188,9 @@ function ensureOverlay() {
                 <span class="catalog-editor-subnav-label">Versions</span>
                 <div class="ce-version-pills" id="ce-subnav-version-pills" role="tablist"></div>
               </nav>
-              <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--mock-sections" id="ce-subnav-mock-sections" hidden aria-label="Mockup sections">
-                <button type="button" class="ce-mock-section-pill" data-mock-section="clean" aria-expanded="true">Clean Mockups</button>
-                <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" aria-expanded="true">Shop Preview Mockups</button>
+              <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--mock-sections" id="ce-subnav-mock-sections" hidden aria-label="Mockup sections" role="tablist">
+                <button type="button" class="ce-mock-section-pill active" data-mock-section="clean" role="tab" aria-selected="true">Clean Mockups</button>
+                <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" role="tab" aria-selected="false">Shop Preview Mockups</button>
               </nav>
             </div>
           </div>
@@ -298,6 +298,7 @@ function renderSubnav(ctx) {
   providerRow.hidden = !showProviders;
   versionRow.hidden = !showVersions;
   if (mockSectionsRow) mockSectionsRow.hidden = !showMockSections;
+  if (showMockSections) updateMockSectionSubnav(ctx);
   applySubnavDrawerState();
 
   if (showProviders && providerPills) {
