@@ -58,6 +58,27 @@ describe("setPrintifyCalibrationMarkers", () => {
     expect(targets.get("front")).toEqual({ width: 4200, height: 4800 });
   });
 
+  it("prefers catalog dimensions over scaled-down design image metadata", () => {
+    const catalog = new Map([
+      ["front", { width: 3185, height: 3636 }],
+      ["back", { width: 3185, height: 3636 }],
+    ]);
+    const targets = collectCalibrationPlaceholderTargets(
+      [
+        {
+          placeholders: [
+            {
+              position: "front",
+              images: [{ type: "image/png", width: 2560, height: 3136, scale: 0.01 }],
+            },
+          ],
+        },
+      ],
+      catalog
+    );
+    expect(targets.get("front")).toEqual({ width: 3185, height: 3636 });
+  });
+
   it("replaces all existing images with only the green marker", () => {
     const areas = [
       {

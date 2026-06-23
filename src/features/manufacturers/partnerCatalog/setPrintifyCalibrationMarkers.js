@@ -90,33 +90,46 @@ function lookupDimsByPosition(pos, dimsByPosition) {
   return null;
 }
 
+function isCalibrationImageDimensionCandidate(img) {
+  if (!img || typeof img !== "object") return false;
+  const t = String(img.type || "").toLowerCase();
+  if (t.includes("text") || t === "qr" || t === "logo") return false;
+  const scale = Number(img.scale);
+  if (Number.isFinite(scale) && scale > 0 && scale < 0.2) return false;
+  const w = Number(img.width);
+  const h = Number(img.height);
+  return w > 0 && h > 0;
+}
+
 /**
  * Resolve placeholder pixel size from Printify product data and optional catalog fallbacks.
  */
 export function resolveCalibrationPlaceholderDimensions(ph, area, dimsByPosition = null) {
   let w = Number(ph?.width);
   let h = Number(ph?.height);
+  const pos = normPlaceholderPosition(ph?.position);
+
+  if (!(w > 0 && h > 0) && pos) {
+    const fromCatalog = lookupDimsByPosition(pos, dimsByPosition);
+    if (fromCatalog) {
+      w = Number(fromCatalog.width);
+      h = Number(fromCatalog.height);
+    }
+  }
   if (!(w > 0 && h > 0)) {
     w = Number(area?.width);
     h = Number(area?.height);
   }
   if (!(w > 0 && h > 0)) {
     for (const img of ph?.images || []) {
-      const iw = Number(img?.width);
-      const ih = Number(img?.height);
+      if (!isCalibrationImageDimensionCandidate(img)) continue;
+      const iw = Number(img.width);
+      const ih = Number(img.height);
       if (iw > 0 && ih > 0) {
         w = iw;
         h = ih;
         break;
       }
-    }
-  }
-  const pos = normPlaceholderPosition(ph?.position);
-  if (!(w > 0 && h > 0) && pos) {
-    const fromCatalog = lookupDimsByPosition(pos, dimsByPosition);
-    if (fromCatalog) {
-      w = Number(fromCatalog.width);
-      h = Number(fromCatalog.height);
     }
   }
   if (!(w > 0 && h > 0)) return null;
@@ -159,12 +172,13 @@ export async function buildCalibrationDimensionLookup(env, product, productKey =
   const map = new Map();
   const printAreas = Array.isArray(product?.print_areas) ? product.print_areas : [];
 
-  for (const area of printAreas) {
-    for (const ph of area?.placeholders || []) {
-      const pos = normPlaceholderPosition(ph?.position);
-      const dims = resolveCalibrationPlaceholderDimensions(ph, area, map);
-      if (pos && dims && !map.has(pos)) map.set(pos, dims);
-    }
+  const fromBlueprint = await fetchCatalogBlueprintPlaceholderDimensions(
+    env,
+    product?.blueprint_id,
+    product?.print_provider_id
+  );
+  for (const [pos, dims] of fromBlueprint.entries()) {
+    map.set(pos, dims);
   }
 
   if (productKey) {
@@ -177,13 +191,14 @@ export async function buildCalibrationDimensionLookup(env, product, productKey =
     }
   }
 
-  const fromBlueprint = await fetchCatalogBlueprintPlaceholderDimensions(
-    env,
-    product?.blueprint_id,
-    product?.print_provider_id
-  );
-  for (const [pos, dims] of fromBlueprint.entries()) {
-    if (!map.has(pos)) map.set(pos, dims);
+  for (const area of printAreas) {
+    for (const ph of area?.placeholders || []) {
+      const pos = normPlaceholderPosition(ph?.position);
+      if (!pos || map.has(pos)) continue;
+      const w = Number(ph?.width);
+      const h = Number(ph?.height);
+      if (w > 0 && h > 0) map.set(pos, { width: w, height: h });
+    }
   }
 
   return map;
