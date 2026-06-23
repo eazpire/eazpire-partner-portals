@@ -12,6 +12,7 @@ import {
   getCatalogOpsTemplateRow,
   listCatalogOpsProductVersions,
 } from "../catalogOpsReadService.js";
+import { dedupeMockupEntriesByViewColor } from "../ensureCatalogMockupImageSchema.js";
 import {
   upsertCatalogPublishProfile,
   upsertCatalogTemplatePrintAreasFromPrintify,
@@ -918,7 +919,7 @@ export async function fetchPrintifyMockups(
 
     const product = await getPrintifyProduct(env, printifyProductId);
     if (!product) return { ok: false, error: "printify_product_not_found", mockup_set: set };
-    const entries = extractMockupEntries(product);
+    const entries = dedupeMockupEntriesByViewColor(extractMockupEntries(product));
     if (!entries.length) {
       return {
         ok: false,

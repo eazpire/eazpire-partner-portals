@@ -21,6 +21,10 @@ import {
   filterImagesByMockupSet,
   mockupSetSqlMatch,
 } from "./mockupSet.js";
+import {
+  ensureCatalogMockupImageSchema,
+  dedupeMockupEntriesByViewColor,
+} from "./ensureCatalogMockupImageSchema.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -47,24 +51,6 @@ function catalogDb(env) {
 }
 
 let catalogTemplateColumnsReady = false;
-let catalogMockupImageColumnsReady = false;
-
-/** Ensure product_mockup_images supports mockup_set (migration 0062 may not be applied yet). */
-export async function ensureCatalogMockupImageColumns(db) {
-  if (!db || catalogMockupImageColumnsReady) return;
-  try {
-    const res = await db.prepare(`PRAGMA table_info(product_mockup_images)`).all();
-    const cols = new Set((res?.results || []).map((row) => row.name));
-    if (!cols.has("mockup_set")) {
-      await db
-        .prepare(`ALTER TABLE product_mockup_images ADD COLUMN mockup_set TEXT NOT NULL DEFAULT 'clean'`)
-        .run();
-    }
-    catalogMockupImageColumnsReady = true;
-  } catch (err) {
-    console.warn("[catalogOpsWriteService] ensureCatalogMockupImageColumns:", err?.message || err);
-  }
-}
 
 async function ensureCatalogTemplateProductColumns(db) {
   if (!db || catalogTemplateColumnsReady) return;
@@ -1412,7 +1398,7 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
   try {
-    await ensureCatalogMockupImageColumns(db);
+    await ensureCatalogMockupImageSchema(db);
     await ensureCatalogTemplateProductColumns(db);
 
     const now = Date.now();
@@ -1421,7 +1407,8 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
     const match = mockupSetSqlMatch(set);
 
     const { persistMockupEntriesToR2 } = await import("./persistMockupImagesToR2.js");
-    const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries || [], set, {
+    const dedupedEntries = dedupeMockupEntriesByViewColor(entries || []);
+    const persistedEntries = await persistMockupEntriesToR2(env, productKey, dedupedEntries, set, {
       encodeWebp: false,
       concurrency: 6,
     });

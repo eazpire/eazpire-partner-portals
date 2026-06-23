@@ -1,28 +1,84 @@
 import { describe, it, expect, vi } from "vitest";
-import { ensureCatalogMockupImageColumns } from "../../src/features/manufacturers/partnerCatalog/catalogOpsWriteService.js";
+import {
+  ensureCatalogMockupImageSchema,
+  tableSqlNeedsMockupSetUnique,
+  dedupeMockupEntriesByViewColor,
+  resetCatalogMockupImageSchemaReadyForTests,
+} from "../../src/features/manufacturers/partnerCatalog/ensureCatalogMockupImageSchema.js";
 import { persistMockupEntriesToR2 } from "../../src/features/manufacturers/partnerCatalog/persistMockupImagesToR2.js";
 
 describe("mockup sync helpers", () => {
-  it("ensureCatalogMockupImageColumns adds mockup_set when missing", async () => {
+  it("tableSqlNeedsMockupSetUnique detects legacy UNIQUE without mockup_set", () => {
+    const legacy = `CREATE TABLE product_mockup_images (
+      UNIQUE(product_key, print_provider_id, view_key, color_name)
+    )`;
+    const modern = `CREATE TABLE product_mockup_images (
+      UNIQUE(product_key, print_provider_id, view_key, color_name, mockup_set)
+    )`;
+    expect(tableSqlNeedsMockupSetUnique(legacy)).toBe(true);
+    expect(tableSqlNeedsMockupSetUnique(modern)).toBe(false);
+  });
+
+  it("dedupeMockupEntriesByViewColor keeps first row per view/color", () => {
+    const out = dedupeMockupEntriesByViewColor([
+      { view_key: "front", color_name: "Black", image_url: "a" },
+      { view_key: "front", color_name: "Black", image_url: "b" },
+      { view_key: "back", color_name: "Black", image_url: "c" },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0].image_url).toBe("a");
+  });
+
+  it("ensureCatalogMockupImageSchema rebuilds when legacy UNIQUE is present", async () => {
+    resetCatalogMockupImageSchemaReadyForTests();
     const runs = [];
+    let tableSql = `CREATE TABLE product_mockup_images (
+      id INTEGER PRIMARY KEY,
+      product_key TEXT, print_provider_id INTEGER, printify_product_id TEXT,
+      view_key TEXT, color_name TEXT, color_hex TEXT, image_url TEXT,
+      printify_variant_ids TEXT, is_default INTEGER, created_at INTEGER,
+      preview_template_ids_json TEXT, mockup_set TEXT,
+      UNIQUE(product_key, print_provider_id, view_key, color_name)
+    )`;
+
     const db = {
       prepare(sql) {
         return {
           async all() {
             if (sql.includes("PRAGMA table_info")) {
-              return { results: [{ name: "product_key" }] };
+              return {
+                results: [
+                  { name: "id" },
+                  { name: "mockup_set" },
+                  { name: "product_key" },
+                  { name: "print_provider_id" },
+                  { name: "view_key" },
+                  { name: "color_name" },
+                ],
+              };
             }
             return { results: [] };
           },
+          async first() {
+            if (sql.includes("sqlite_master")) return { sql: tableSql };
+            return null;
+          },
           async run() {
             runs.push(sql);
+            if (sql.includes("RENAME TO product_mockup_images")) {
+              tableSql = `CREATE TABLE product_mockup_images (
+                UNIQUE(product_key, print_provider_id, view_key, color_name, mockup_set)
+              )`;
+            }
             return {};
           },
         };
       },
     };
-    await ensureCatalogMockupImageColumns(db);
-    expect(runs.some((s) => s.includes("mockup_set"))).toBe(true);
+
+    await ensureCatalogMockupImageSchema(db);
+    expect(runs.some((s) => s.includes("product_mockup_images_new"))).toBe(true);
+    expect(tableSqlNeedsMockupSetUnique(tableSql)).toBe(false);
   });
 
   it("persistMockupEntriesToR2 stores bytes without webp by default", async () => {
