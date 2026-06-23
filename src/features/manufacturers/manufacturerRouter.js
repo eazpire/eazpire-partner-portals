@@ -246,7 +246,7 @@ function partnerSyncErrorStatus(result) {
   if (err === "printify_unauthorized" || err === "printify_catalog_error" || err === "printify_rate_limited") {
     return httpStatusForPrintifyUpstreamError(result.status);
   }
-  if (err === "sync_failed" || err === "catalog_db_query_failed") return 500;
+  if (err === "sync_failed" || err === "catalog_db_query_failed" || err === "mockup_sync_failed") return 500;
   return 400;
 }
 
@@ -903,16 +903,25 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-eazpire-fetch-printify-mockups" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const result = await editorExt.fetchPrintifyMockups(
-        env,
-        body.product_key,
-        body.print_provider_id,
-        body.auto_mirror !== false,
-        body.printify_product_id || null,
-        body.mockup_set || "clean"
-      );
-      if (!result.ok) return json(result, 400, cors);
-      return json(result, 200, cors);
+      try {
+        const result = await editorExt.fetchPrintifyMockups(
+          env,
+          body.product_key,
+          body.print_provider_id,
+          body.auto_mirror !== false,
+          body.printify_product_id || null,
+          body.mockup_set || "clean"
+        );
+        if (!result.ok) return json(result, partnerSyncErrorStatus(result), cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-fetch-printify-mockups]", err?.message || err);
+        return json(
+          { ok: false, error: "mockup_sync_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
     }
     if (op === "admin-eazpire-print-area-image-upload" && request.method === "POST") {
       const result = await editorExt.uploadPrintAreaTemplateImage(env, request);

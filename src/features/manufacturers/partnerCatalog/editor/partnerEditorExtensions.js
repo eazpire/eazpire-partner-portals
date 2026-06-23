@@ -875,111 +875,142 @@ export async function fetchPrintifyMockups(
 ) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
-  const catalogDbRef = env.CATALOG_DB;
-  const mfgDb = env.MANUFACTURER_DB;
-  const set = String(mockupSet || "clean").toLowerCase() === "shop_preview" ? "shop_preview" : "clean";
-  const templateField =
-    set === "shop_preview" ? "printify_shop_preview_mockups_product_id" : "printify_mockups_product_id";
+  try {
+    const catalogDbRef = env.CATALOG_DB;
+    const mfgDb = env.MANUFACTURER_DB;
+    const set = String(mockupSet || "clean").toLowerCase() === "shop_preview" ? "shop_preview" : "clean";
+    const templateField =
+      set === "shop_preview" ? "printify_shop_preview_mockups_product_id" : "printify_mockups_product_id";
 
-  const overrideId = String(printifyProductIdOverride || "").trim();
-  let printifyProductId = overrideId;
+    const overrideId = String(printifyProductIdOverride || "").trim();
+    let printifyProductId = overrideId;
 
-  if (!printifyProductId) {
-    const tpl = isCatalogOpsMasterWrite(env)
-      ? await queryFirst(
-          catalogDbRef,
-          `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-          productKey,
-          Number(printProviderId)
-        )
-      : await queryFirst(
-          mfgDb,
-          `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
-          productKey,
-          Number(printProviderId)
-        );
-    printifyProductId = String(tpl?.[templateField] || tpl?.printify_product_id || "").trim();
-  }
-  if (!isCatalogOpsMasterWrite(env) && !mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
-  if (isCatalogOpsMasterWrite(env) && !catalogDbRef) return { ok: false, error: "catalog_db_unavailable" };
+    if (!printifyProductId) {
+      const tpl = isCatalogOpsMasterWrite(env)
+        ? await queryFirst(
+            catalogDbRef,
+            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+            productKey,
+            Number(printProviderId)
+          )
+        : await queryFirst(
+            mfgDb,
+            `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+            productKey,
+            Number(printProviderId)
+          );
+      printifyProductId = String(tpl?.[templateField] || tpl?.printify_product_id || "").trim();
+    }
+    if (!isCatalogOpsMasterWrite(env) && !mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
+    if (isCatalogOpsMasterWrite(env) && !catalogDbRef) return { ok: false, error: "catalog_db_unavailable" };
 
-  if (!printifyProductId) return { ok: false, error: "template_printify_product_missing" };
+    if (!printifyProductId) {
+      return {
+        ok: false,
+        error: "template_printify_product_missing",
+        mockup_set: set,
+        message:
+          set === "shop_preview"
+            ? "Save a Shop Preview Mockups Printify product ID on the Templates tab first."
+            : "Save a Clean Mockups Printify product ID on the Templates tab first.",
+      };
+    }
 
-  const product = await getPrintifyProduct(env, printifyProductId);
-  if (!product) return { ok: false, error: "printify_product_not_found" };
-  const entries = extractMockupEntries(product);
+    const product = await getPrintifyProduct(env, printifyProductId);
+    if (!product) return { ok: false, error: "printify_product_not_found", mockup_set: set };
+    const entries = extractMockupEntries(product);
+    if (!entries.length) {
+      return {
+        ok: false,
+        error: "printify_mockups_empty",
+        mockup_set: set,
+        message: "Printify product has no mockup images yet. Open it in Printify and wait for mockups to generate, then sync again.",
+      };
+    }
 
-  if (isCatalogOpsMasterWrite(env)) {
-    return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries, set);
-  }
+    if (isCatalogOpsMasterWrite(env)) {
+      return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries, set);
+    }
 
-  const { persistMockupEntriesToR2 } = await import("../persistMockupImagesToR2.js");
-  const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries, set);
+    const { persistMockupEntriesToR2 } = await import("../persistMockupImagesToR2.js");
+    const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries, set, {
+      encodeWebp: false,
+      concurrency: 6,
+    });
 
-  const db = mfgDb;
-  const now = Date.now();
-  const matchClause =
-    set === "shop_preview"
-      ? "mockup_set = ?"
-      : "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)";
-  const matchBind = set === "shop_preview" ? "shop_preview" : "clean";
+    const db = mfgDb;
+    const now = Date.now();
+    const matchClause =
+      set === "shop_preview"
+        ? "mockup_set = ?"
+        : "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)";
+    const matchBind = set === "shop_preview" ? "shop_preview" : "clean";
 
-  await db
-    .prepare(`DELETE FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause}`)
-    .bind(productKey, Number(printProviderId), matchBind)
-    .run();
-
-  for (const e of persistedEntries) {
     await db
-      .prepare(
-        `INSERT INTO eazpire_product_mockup_images
+      .prepare(`DELETE FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause}`)
+      .bind(productKey, Number(printProviderId), matchBind)
+      .run();
+
+    for (const e of persistedEntries) {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_mockup_images
           (id, product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, mockup_set, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        newId(),
-        productKey,
-        Number(printProviderId),
-        printifyProductId,
-        e.view_key,
-        e.color_name,
-        e.color_hex,
-        e.image_url,
-        e.printify_variant_ids,
-        0,
-        set,
-        now
-      )
-      .run();
-  }
+        )
+        .bind(
+          newId(),
+          productKey,
+          Number(printProviderId),
+          printifyProductId,
+          e.view_key,
+          e.color_name,
+          e.color_hex,
+          e.image_url,
+          e.printify_variant_ids,
+          0,
+          set,
+          now
+        )
+        .run();
+    }
 
-  if (persistedEntries.length > 0) {
-    await db
-      .prepare(
-        `UPDATE eazpire_product_mockup_images SET is_default = 1
+    if (persistedEntries.length > 0) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_mockup_images SET is_default = 1
          WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} AND id = (
            SELECT id FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} ORDER BY created_at ASC LIMIT 1
          )`
-      )
-      .bind(productKey, Number(printProviderId), matchBind, productKey, Number(printProviderId), matchBind)
-      .run();
-  }
+        )
+        .bind(productKey, Number(printProviderId), matchBind, productKey, Number(printProviderId), matchBind)
+        .run();
+    }
 
-  if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  const images = await queryAll(
-    db,
-    `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} ORDER BY created_at ASC`,
-    productKey,
-    Number(printProviderId),
-    matchBind
-  );
-  return {
-    ok: true,
-    count: entries.length,
-    printify_product_id: printifyProductId,
-    mockup_set: set,
-    by_view: buildMockupImagesByView(images),
-  };
+    if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+    const images = await queryAll(
+      db,
+      `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} ORDER BY created_at ASC`,
+      productKey,
+      Number(printProviderId),
+      matchBind
+    );
+    return {
+      ok: true,
+      count: persistedEntries.length,
+      printify_product_id: printifyProductId,
+      mockup_set: set,
+      by_view: buildMockupImagesByView(images),
+    };
+  } catch (err) {
+    console.error("[fetchPrintifyMockups]", productKey, mockupSet, err?.message || err);
+    return {
+      ok: false,
+      error: "mockup_sync_failed",
+      detail: String(err?.message || err),
+      mockup_set: String(mockupSet || "clean"),
+    };
+  }
 }
 
 async function getBasicShadowReadiness(env, productKey) {

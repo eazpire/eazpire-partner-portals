@@ -47,14 +47,24 @@ function catalogDb(env) {
 }
 
 let catalogTemplateColumnsReady = false;
+let catalogMockupImageColumnsReady = false;
 
-/** Templates tab sync sections → template_products column */
-export const TEMPLATE_SECTION_PRINTIFY_COLUMNS = {
-  mockups: "printify_mockups_product_id",
-  shop_preview_mockups: "printify_shop_preview_mockups_product_id",
-  variants: "printify_variants_product_id",
-  print_areas: "printify_print_areas_product_id",
-};
+/** Ensure product_mockup_images supports mockup_set (migration 0062 may not be applied yet). */
+export async function ensureCatalogMockupImageColumns(db) {
+  if (!db || catalogMockupImageColumnsReady) return;
+  try {
+    const res = await db.prepare(`PRAGMA table_info(product_mockup_images)`).all();
+    const cols = new Set((res?.results || []).map((row) => row.name));
+    if (!cols.has("mockup_set")) {
+      await db
+        .prepare(`ALTER TABLE product_mockup_images ADD COLUMN mockup_set TEXT NOT NULL DEFAULT 'clean'`)
+        .run();
+    }
+    catalogMockupImageColumnsReady = true;
+  } catch (err) {
+    console.warn("[catalogOpsWriteService] ensureCatalogMockupImageColumns:", err?.message || err);
+  }
+}
 
 async function ensureCatalogTemplateProductColumns(db) {
   if (!db || catalogTemplateColumnsReady) return;
@@ -77,6 +87,14 @@ async function ensureCatalogTemplateProductColumns(db) {
     console.warn("[catalogOpsWriteService] ensureCatalogTemplateProductColumns:", err?.message || err);
   }
 }
+
+/** Templates tab sync sections → template_products column */
+export const TEMPLATE_SECTION_PRINTIFY_COLUMNS = {
+  mockups: "printify_mockups_product_id",
+  shop_preview_mockups: "printify_shop_preview_mockups_product_id",
+  variants: "printify_variants_product_id",
+  print_areas: "printify_print_areas_product_id",
+};
 
 async function ensureCatalogDraftProductIdColumn(db) {
   await ensureCatalogTemplateProductColumns(db);
@@ -1393,70 +1411,87 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
-  const now = Date.now();
-  const pid = Number(printProviderId);
-  const set = normalizeMockupSet(mockupSet);
-  const match = mockupSetSqlMatch(set);
+  try {
+    await ensureCatalogMockupImageColumns(db);
+    await ensureCatalogTemplateProductColumns(db);
 
-  const { persistMockupEntriesToR2 } = await import("./persistMockupImagesToR2.js");
-  const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries || [], set);
+    const now = Date.now();
+    const pid = Number(printProviderId);
+    const set = normalizeMockupSet(mockupSet);
+    const match = mockupSetSqlMatch(set);
 
-  await db
-    .prepare(`DELETE FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
-    .bind(productKey, pid, match.bind)
-    .run();
+    const { persistMockupEntriesToR2 } = await import("./persistMockupImagesToR2.js");
+    const persistedEntries = await persistMockupEntriesToR2(env, productKey, entries || [], set, {
+      encodeWebp: false,
+      concurrency: 6,
+    });
 
-  for (const e of persistedEntries) {
     await db
-      .prepare(
-        `INSERT INTO product_mockup_images
+      .prepare(`DELETE FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
+      .bind(productKey, pid, match.bind)
+      .run();
+
+    for (const e of persistedEntries) {
+      await db
+        .prepare(
+          `INSERT INTO product_mockup_images
           (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, mockup_set, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        productKey,
-        pid,
-        printifyProductId,
-        e.view_key,
-        e.color_name,
-        e.color_hex,
-        e.image_url,
-        e.printify_variant_ids,
-        0,
-        set,
-        now
-      )
-      .run();
-  }
+        )
+        .bind(
+          productKey,
+          pid,
+          printifyProductId,
+          e.view_key,
+          e.color_name,
+          e.color_hex,
+          e.image_url,
+          e.printify_variant_ids,
+          0,
+          set,
+          now
+        )
+        .run();
+    }
 
-  if (persistedEntries.length > 0) {
-    await db
-      .prepare(
-        `UPDATE product_mockup_images SET is_default = 1
+    if (persistedEntries.length > 0) {
+      await db
+        .prepare(
+          `UPDATE product_mockup_images SET is_default = 1
          WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} AND id = (
            SELECT id FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} ORDER BY created_at ASC LIMIT 1
          )`
-      )
-      .bind(productKey, pid, match.bind, productKey, pid, match.bind)
-      .run();
+        )
+        .bind(productKey, pid, match.bind, productKey, pid, match.bind)
+        .run();
+    }
+
+    const { buildMockupImagesByView } = await import("./mockupImagesByView.js");
+    const images = await queryAll(
+      db,
+      `SELECT * FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} ORDER BY created_at ASC`,
+      productKey,
+      pid,
+      match.bind
+    );
+
+    return {
+      ok: true,
+      count: persistedEntries.length,
+      printify_product_id: printifyProductId,
+      mockup_set: set,
+      by_view: buildMockupImagesByView(images),
+      _ops_source: "catalog-db",
+    };
+  } catch (err) {
+    console.error("[replaceCatalogMockupImages]", productKey, mockupSet, err?.message || err);
+    return {
+      ok: false,
+      error: "mockup_sync_failed",
+      detail: String(err?.message || err),
+      mockup_set: normalizeMockupSet(mockupSet),
+    };
   }
-
-  const { buildMockupImagesByView } = await import("./mockupImagesByView.js");
-  const images = await queryAll(
-    db,
-    `SELECT * FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} ORDER BY created_at ASC`,
-    productKey,
-    pid,
-    match.bind
-  );
-
-  return {
-    ok: true,
-    count: persistedEntries.length,
-    printify_product_id: printifyProductId,
-    by_view: buildMockupImagesByView(images),
-    _ops_source: "catalog-db",
-  };
 }
 
 export async function setCatalogPrintAreaTemplateKey(env, productKey, printAreaKey, r2Key) {
