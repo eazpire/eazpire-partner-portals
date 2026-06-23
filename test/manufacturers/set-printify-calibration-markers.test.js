@@ -34,7 +34,7 @@ describe("setPrintifyCalibrationMarkers", () => {
     expect(targets.has("back")).toBe(false);
   });
 
-  it("applies green upload id to creator-design placeholder", () => {
+  it("replaces all existing images with only the green marker", () => {
     const areas = [
       {
         placeholders: [
@@ -42,7 +42,11 @@ describe("setPrintifyCalibrationMarkers", () => {
             position: "front",
             width: 100,
             height: 100,
-            images: [{ id: "old", type: "image", x: "0.1", y: "0.1", scale: "0.5" }],
+            images: [
+              { id: "old-design", type: "image", x: "0.1", y: "0.1", scale: "0.5" },
+              { id: "qr-code", type: "qr" },
+              { id: "brand-logo", type: "logo", name: "eazpire-branding.png" },
+            ],
           },
         ],
       },
@@ -51,9 +55,34 @@ describe("setPrintifyCalibrationMarkers", () => {
     const scaleMap = new Map([["front", 1]]);
     const out = applyCalibrationGreenToPrintAreas(areas, idMap, scaleMap);
     const ph = out[0].placeholders[0];
+    expect(ph.images).toHaveLength(1);
     expect(ph.images[0].id).toBe("upload-green-1");
     expect(ph.images[0].x).toBe("0.5");
     expect(ph.images[0].scale).toBe("1.000000");
+  });
+
+  it("clears non-target placeholders so only green markers remain", () => {
+    const areas = [
+      {
+        placeholders: [
+          {
+            position: "front",
+            width: 100,
+            height: 100,
+            images: [{ id: "old", type: "image" }],
+          },
+          {
+            position: "neck",
+            images: [{ id: "neck-logo", type: "logo" }],
+          },
+        ],
+      },
+    ];
+    const idMap = new Map([["front", "upload-green-1"]]);
+    const scaleMap = new Map([["front", 1]]);
+    const out = applyCalibrationGreenToPrintAreas(areas, idMap, scaleMap);
+    expect(out[0].placeholders[0].images).toHaveLength(1);
+    expect(out[0].placeholders[1].images).toEqual([]);
   });
 
   it("maps view keys to print area keys", () => {

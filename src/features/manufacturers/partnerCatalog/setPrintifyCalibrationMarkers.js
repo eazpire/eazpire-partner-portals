@@ -12,7 +12,7 @@ import {
 } from "../../../utils/printify.js";
 import { getPrintifyShopId, getPrintifyApiKey } from "../../../utils/printifyEnv.js";
 import { uniformContainPrintifyScale } from "../../../utils/printAreas.js";
-import { sanitizeStudioPrintAreasForPrintifyApi, isStudioProtectedPrintifyImage } from "../../shop/studioPrintAreaPlacement.js";
+import { sanitizeStudioPrintAreasForPrintifyApi } from "../../shop/studioPrintAreaPlacement.js";
 
 export const PARTNER_CALIBRATION_PH_PREFIX = "partner-calibration-ph-fill";
 
@@ -84,6 +84,7 @@ export function collectCalibrationPlaceholderTargets(printAreas) {
 }
 
 /**
+ * Strip every placeholder image, then set only the green calibration marker per target position.
  * @param {any[]} printAreas
  * @param {Map<string, string>} uploadIdByPosition
  * @param {Map<string, number>} scaleByPosition
@@ -92,38 +93,25 @@ export function applyCalibrationGreenToPrintAreas(printAreas, uploadIdByPosition
   const clone = JSON.parse(JSON.stringify(Array.isArray(printAreas) ? printAreas : []));
   for (const area of clone) {
     for (const ph of area?.placeholders || []) {
-      if (!ph || isTextOnlyPlaceholder(ph)) continue;
+      if (!ph || typeof ph !== "object") continue;
       const pos = normPlaceholderPosition(ph.position);
       const uploadId = uploadIdByPosition.get(pos);
-      if (!uploadId) continue;
+
+      if (!uploadId) {
+        ph.images = [];
+        continue;
+      }
 
       const scale = scaleByPosition.get(pos) ?? 1;
-      const placement = {
-        x: "0.5",
-        y: "0.5",
-        scale: String(Math.min(1e3, Math.max(1e-6, Number(scale) || 1)).toFixed(6)),
-        angle: 0,
-      };
-
-      if (!Array.isArray(ph.images)) ph.images = [];
-      ph.images = ph.images.filter((im) => !isPartnerCalibrationPhFillImage(im));
-
-      let replaced = false;
-      for (const im of ph.images) {
-        if (!im || isStudioProtectedPrintifyImage(im)) continue;
-        const t = String(im.type || "").toLowerCase();
-        if (t.includes("text")) continue;
-        im.id = uploadId;
-        im.x = placement.x;
-        im.y = placement.y;
-        im.scale = placement.scale;
-        im.angle = placement.angle;
-        replaced = true;
-        break;
-      }
-      if (!replaced) {
-        ph.images.push({ id: uploadId, ...placement });
-      }
+      ph.images = [
+        {
+          id: uploadId,
+          x: "0.5",
+          y: "0.5",
+          scale: String(Math.min(1e3, Math.max(1e-6, Number(scale) || 1)).toFixed(6)),
+          angle: 0,
+        },
+      ];
     }
   }
   return clone;
