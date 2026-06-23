@@ -280,6 +280,9 @@ export async function syncTemplateSection(productKey, printProviderId, section, 
   if (!pid) throw new Error("Printify product ID required.");
 
   await saveTemplateSectionProductId(productKey, printProviderId, section, pid);
+  if (section === "variants") {
+    await saveTemplateSectionProductId(productKey, printProviderId, "print_areas", pid);
+  }
 
   const base = {
     product_key: productKey,

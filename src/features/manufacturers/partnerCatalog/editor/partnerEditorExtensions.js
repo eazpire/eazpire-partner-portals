@@ -504,7 +504,8 @@ export async function refreshVariantsFromTemplate(
   productKey,
   printProviderId,
   printifyProductId,
-  autoMirror = false
+  autoMirror = false,
+  versionId = null
 ) {
   if (!productKey || !printifyProductId) return { ok: false, error: "product_key_or_printify_product_id_required" };
   if (!getPrintifyApiKey(env)) {
@@ -543,7 +544,23 @@ export async function refreshVariantsFromTemplate(
         printifyProductId
       );
       if (!saved.ok) return saved;
-      return { ok: true, printify_product: product, variants_count: variants_json.length };
+
+      const placeholders = await loadPrintifySettings(env, {
+        productKey,
+        printProviderId,
+        versionId,
+        printifyProductId,
+        autoMirror: false,
+      });
+      if (!placeholders.ok) return placeholders;
+
+      if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+      return {
+        ok: true,
+        printify_product: product,
+        variants_count: variants_json.length,
+        placeholders_synced: true,
+      };
     }
 
     const db = env.MANUFACTURER_DB;
@@ -621,8 +638,22 @@ export async function refreshVariantsFromTemplate(
       },
     });
 
+    const placeholders = await loadPrintifySettings(env, {
+      productKey,
+      printProviderId,
+      versionId,
+      printifyProductId,
+      autoMirror: false,
+    });
+    if (!placeholders.ok) return placeholders;
+
     if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-    return { ok: true, printify_product: product, variants_count: variants_json.length };
+    return {
+      ok: true,
+      printify_product: product,
+      variants_count: variants_json.length,
+      placeholders_synced: true,
+    };
   } catch (err) {
     console.error("[refreshVariantsFromTemplate]", err?.message || err);
     return { ok: false, error: "variants_refresh_failed", detail: String(err?.message || err) };

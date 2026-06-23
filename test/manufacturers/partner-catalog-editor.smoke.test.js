@@ -100,8 +100,16 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("Clean Mockups");
     expect(src).toContain("shop_preview_mockups");
     expect(src).toContain("printify_shop_preview_mockups_product_id");
+    expect(src).toContain("Placeholder Settings");
+    expect(src).toContain("printify_variants_product_id");
     expect(src).toContain("ce-tpl-set-print-area");
     expect(src).toContain("ce-tpl-section__title-link");
+  });
+
+  it("variants sync also persists placeholder settings product id", () => {
+    const api = readFileSync(join(portal, "api.js"), "utf8");
+    expect(api).toContain('section === "variants"');
+    expect(api).toContain('saveTemplateSectionProductId(productKey, printProviderId, "print_areas", pid)');
   });
 
   it("print-area tab persists useMockups on every save", () => {

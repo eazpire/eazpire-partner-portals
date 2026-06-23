@@ -39,18 +39,23 @@ const SECTIONS = [
   {
     id: "variants",
     title: "Variants",
-    hint: "Refresh variant pricing, options, and publish profile data from the Printify template.",
+    hint: "Refresh variant pricing, options, and publish profile data from the Printify template. Also syncs placeholder settings (creator design, QR, logo slots) from the same product ID.",
   },
   {
     id: "print_areas",
-    title: "Print Areas",
-    hint: "Load print area placeholders, Creator Design frames, and brand asset geometry from Printify.",
+    title: "Placeholder Settings",
+    hint: "Load Printify placeholder slots (creator design, QR, logo, additional design) into the publish profile. Uses the Variants product ID by default — sync here only when you need a different Printify product.",
   },
 ];
 
 function sectionPrintifyId(data, sectionId) {
   const field = SECTION_ID_FIELDS[sectionId];
-  return String(data?.template?.[field] || "").trim();
+  const direct = String(data?.template?.[field] || "").trim();
+  if (direct) return direct;
+  if (sectionId === "print_areas") {
+    return String(data?.template?.printify_variants_product_id || "").trim();
+  }
+  return "";
 }
 
 function draftPrintifyId(data) {
@@ -225,8 +230,8 @@ async function runSectionSync(sectionId, ctx) {
 
   try {
     const extra = {};
-    if (sectionId === "print_areas" && ctx.selectedVersionId) {
-      extra.version_id = ctx.selectedVersionId;
+    if (sectionId === "print_areas" || sectionId === "variants") {
+      if (ctx.selectedVersionId) extra.version_id = ctx.selectedVersionId;
     }
     const result = await syncTemplateSection(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId, extra);
     setSectionState(sectionEl, "success");
@@ -234,7 +239,11 @@ async function runSectionSync(sectionId, ctx) {
     const syncMsg =
       sectionId === "calibration_mockup" && detected > 0
         ? `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected.`
-        : `${sectionId.replace(/_/g, " ")} data updated from Printify.`;
+        : sectionId === "variants"
+          ? "Variants and placeholder settings updated from Printify."
+          : sectionId === "print_areas"
+            ? "Placeholder settings updated from Printify."
+            : `${sectionId.replace(/_/g, " ")} data updated from Printify.`;
     showToast("Synced", syncMsg);
     ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
   } catch (err) {

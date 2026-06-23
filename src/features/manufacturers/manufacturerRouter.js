@@ -874,7 +874,8 @@ export async function handleManufacturerRouter(request, env) {
         body.product_key,
         body.print_provider_id,
         body.printify_product_id,
-        body.auto_mirror !== false
+        body.auto_mirror !== false,
+        body.version_id || null
       );
       if (!result.ok) {
         const status =
