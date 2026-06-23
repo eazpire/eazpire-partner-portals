@@ -4778,6 +4778,73 @@ a.ce-tpl-draft-head__id:hover {
 }
 
 /* Catalog editor — Mockups carousels */
+.ce-mock-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ce-mock-section {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.ce-mock-section__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+  background: var(--surface-2);
+  border-bottom: 1px solid transparent;
+  user-select: none;
+}
+.ce-mock-section__summary::-webkit-details-marker {
+  display: none;
+}
+.ce-mock-section[open] > .ce-mock-section__summary {
+  border-bottom-color: var(--line);
+}
+.ce-mock-section__chevron {
+  font-size: 0.75rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.ce-mock-section:not([open]) .ce-mock-section__chevron {
+  transform: rotate(-90deg);
+}
+.ce-mock-section__title {
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+}
+.ce-mock-section__body {
+  padding: 14px 16px 18px;
+}
+.ce-subnav-row--mock-sections {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+.ce-mock-section-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--muted);
+}
+.ce-mock-section-pill.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.ce-mock-print-area-field {
+  margin: 12px 0 4px;
+}
 .ce-mock-views {
   display: flex;
   flex-direction: column;

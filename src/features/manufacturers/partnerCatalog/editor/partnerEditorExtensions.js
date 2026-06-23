@@ -856,11 +856,21 @@ function extractMockupEntries(product) {
   return out;
 }
 
-export async function fetchPrintifyMockups(env, productKey, printProviderId, autoMirror = false, printifyProductIdOverride = null) {
+export async function fetchPrintifyMockups(
+  env,
+  productKey,
+  printProviderId,
+  autoMirror = false,
+  printifyProductIdOverride = null,
+  mockupSet = "clean"
+) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
   const catalogDbRef = env.CATALOG_DB;
   const mfgDb = env.MANUFACTURER_DB;
+  const set = String(mockupSet || "clean").toLowerCase() === "shop_preview" ? "shop_preview" : "clean";
+  const templateField =
+    set === "shop_preview" ? "printify_shop_preview_mockups_product_id" : "printify_mockups_product_id";
 
   const overrideId = String(printifyProductIdOverride || "").trim();
   let printifyProductId = overrideId;
@@ -869,17 +879,17 @@ export async function fetchPrintifyMockups(env, productKey, printProviderId, aut
     const tpl = isCatalogOpsMasterWrite(env)
       ? await queryFirst(
           catalogDbRef,
-          `SELECT printify_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+          `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
           productKey,
           Number(printProviderId)
         )
       : await queryFirst(
           mfgDb,
-          `SELECT printify_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
+          `SELECT printify_mockups_product_id, printify_shop_preview_mockups_product_id, printify_product_id FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
           productKey,
           Number(printProviderId)
         );
-    printifyProductId = String(tpl?.printify_mockups_product_id || tpl?.printify_product_id || "").trim();
+    printifyProductId = String(tpl?.[templateField] || tpl?.printify_product_id || "").trim();
   }
   if (!isCatalogOpsMasterWrite(env) && !mfgDb) return { ok: false, error: "manufacturer_db_unavailable" };
   if (isCatalogOpsMasterWrite(env) && !catalogDbRef) return { ok: false, error: "catalog_db_unavailable" };
@@ -891,23 +901,28 @@ export async function fetchPrintifyMockups(env, productKey, printProviderId, aut
   const entries = extractMockupEntries(product);
 
   if (isCatalogOpsMasterWrite(env)) {
-    return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries);
+    return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries, set);
   }
 
   const db = mfgDb;
   const now = Date.now();
+  const matchClause =
+    set === "shop_preview"
+      ? "mockup_set = ?"
+      : "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)";
+  const matchBind = set === "shop_preview" ? "shop_preview" : "clean";
 
   await db
-    .prepare(`DELETE FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ?`)
-    .bind(productKey, Number(printProviderId))
+    .prepare(`DELETE FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause}`)
+    .bind(productKey, Number(printProviderId), matchBind)
     .run();
 
   for (const e of entries) {
     await db
       .prepare(
         `INSERT INTO eazpire_product_mockup_images
-          (id, product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, mockup_set, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         newId(),
@@ -920,6 +935,7 @@ export async function fetchPrintifyMockups(env, productKey, printProviderId, aut
         e.image_url,
         e.printify_variant_ids,
         0,
+        set,
         now
       )
       .run();
@@ -929,25 +945,27 @@ export async function fetchPrintifyMockups(env, productKey, printProviderId, aut
     await db
       .prepare(
         `UPDATE eazpire_product_mockup_images SET is_default = 1
-         WHERE product_key = ? AND print_provider_id = ? AND id = (
-           SELECT id FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC LIMIT 1
+         WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} AND id = (
+           SELECT id FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} ORDER BY created_at ASC LIMIT 1
          )`
       )
-      .bind(productKey, Number(printProviderId), productKey, Number(printProviderId))
+      .bind(productKey, Number(printProviderId), matchBind, productKey, Number(printProviderId), matchBind)
       .run();
   }
 
   if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
   const images = await queryAll(
     db,
-    `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC`,
+    `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${matchClause} ORDER BY created_at ASC`,
     productKey,
-    Number(printProviderId)
+    Number(printProviderId),
+    matchBind
   );
   return {
     ok: true,
     count: entries.length,
     printify_product_id: printifyProductId,
+    mockup_set: set,
     by_view: buildMockupImagesByView(images),
   };
 }

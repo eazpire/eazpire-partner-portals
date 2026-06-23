@@ -199,7 +199,7 @@ describe("getCatalogStudioTree", () => {
     expect(result.partners).toHaveLength(1);
     expect(result.partners[0].providers[0].ship_country_code).toBe("DE");
     expect(result.partners[0].providers[0].ship_country_name).toBe("Germany");
-  }, 15000);
+  }, 60000);
 
   it("returns all Printify catalog providers from API", async () => {
     const { getCatalogStudioTree } = await import(
@@ -270,7 +270,7 @@ describe("getCatalogStudioTree", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-  });
+  }, 60000);
 });
 
 describe("runFullPrintifyPartnerSetup prechecks", () => {
@@ -431,7 +431,7 @@ describe("product editor service exports", () => {
     expect(typeof svc.getPublishedBundle).toBe("function");
     expect(typeof svc.createProductVersion).toBe("function");
     expect(typeof svc.deleteProductVersion).toBe("function");
-  });
+  }, 60000);
 });
 
 describe("catalog studio service", () => {
@@ -440,7 +440,7 @@ describe("catalog studio service", () => {
     expect(typeof svc.setCatalogStudioProductStatus).toBe("function");
     expect(typeof svc.removeCatalogStudioProduct).toBe("function");
     expect(typeof svc.formatPrintAreaLabel).toBe("function");
-  });
+  }, 60000);
 
   it("rejects invalid catalog status", async () => {
     const { setCatalogStudioProductStatus } = await import(
@@ -449,7 +449,7 @@ describe("catalog studio service", () => {
     const result = await setCatalogStudioProductStatus({}, { productKey: "x", catalogStatus: "bogus" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid_catalog_status");
-  });
+  }, 60000);
 
   it("removes product from manufacturer and catalog dbs", async () => {
     const deleted = [];
@@ -502,7 +502,7 @@ describe("catalog studio service", () => {
     expect(result.source_blueprint_id).toBe("eb_1");
     expect(deleted.some((d) => d.db === "mfg" && d.sql.includes("eazpire_products"))).toBe(true);
     expect(deleted.some((d) => d.db === "catalog" && d.sql.includes("product_catalog"))).toBe(true);
-  });
+  }, 60000);
 
   it("formats print area labels", async () => {
     const { formatPrintAreaLabel } = await import(

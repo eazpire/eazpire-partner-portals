@@ -14,6 +14,13 @@ import { getProductVersion, patRowToStudioConfig } from "./eazpireProductVersion
 import { updateEazpireProduct } from "./eazpireProductService.js";
 import { getCatalogOpsProduct, listCatalogOpsProductVersions } from "./catalogOpsReadService.js";
 import { regionCodesFromCountryCodes } from "../../catalog/resolvePlanCountries.js";
+import {
+  MOCKUP_SET_CLEAN,
+  MOCKUP_SET_SHOP_PREVIEW,
+  normalizeMockupSet,
+  filterImagesByMockupSet,
+  mockupSetSqlMatch,
+} from "./mockupSet.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -44,6 +51,7 @@ let catalogTemplateColumnsReady = false;
 /** Templates tab sync sections → template_products column */
 export const TEMPLATE_SECTION_PRINTIFY_COLUMNS = {
   mockups: "printify_mockups_product_id",
+  shop_preview_mockups: "printify_shop_preview_mockups_product_id",
   variants: "printify_variants_product_id",
   print_areas: "printify_print_areas_product_id",
 };
@@ -61,6 +69,7 @@ async function ensureCatalogTemplateProductColumns(db) {
     };
     await add("printify_draft_product_id");
     await add("printify_mockups_product_id");
+    await add("printify_shop_preview_mockups_product_id");
     await add("printify_variants_product_id");
     await add("printify_print_areas_product_id");
     catalogTemplateColumnsReady = true;
@@ -1035,13 +1044,27 @@ export async function saveCatalogMockups(env, productKey, body) {
 
   if (body.preview_mock_id && body.print_provider_id != null) {
     const ppId = Number(body.print_provider_id);
+    const match = mockupSetSqlMatch(MOCKUP_SET_CLEAN);
     await db
-      .prepare(`UPDATE product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ?`)
-      .bind(productKey, ppId)
+      .prepare(`UPDATE product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
+      .bind(productKey, ppId, match.bind)
       .run();
     await db
       .prepare(`UPDATE product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
       .bind(body.preview_mock_id, productKey)
+      .run();
+  }
+
+  if (body.shop_preview_mock_id && body.print_provider_id != null) {
+    const ppId = Number(body.print_provider_id);
+    const match = mockupSetSqlMatch(MOCKUP_SET_SHOP_PREVIEW);
+    await db
+      .prepare(`UPDATE product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
+      .bind(productKey, ppId, match.bind)
+      .run();
+    await db
+      .prepare(`UPDATE product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
+      .bind(body.shop_preview_mock_id, productKey)
       .run();
   }
 
@@ -1281,24 +1304,26 @@ export async function upsertCatalogTemplateFromPrintify(env, productKey, printPr
   return { ok: true, _ops_source: "catalog-db" };
 }
 
-export async function replaceCatalogMockupImages(env, productKey, printProviderId, printifyProductId, entries) {
+export async function replaceCatalogMockupImages(env, productKey, printProviderId, printifyProductId, entries, mockupSet = MOCKUP_SET_CLEAN) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
   const now = Date.now();
   const pid = Number(printProviderId);
+  const set = normalizeMockupSet(mockupSet);
+  const match = mockupSetSqlMatch(set);
 
   await db
-    .prepare(`DELETE FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ?`)
-    .bind(productKey, pid)
+    .prepare(`DELETE FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`)
+    .bind(productKey, pid, match.bind)
     .run();
 
   for (const e of entries) {
     await db
       .prepare(
         `INSERT INTO product_mockup_images
-          (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex, image_url, printify_variant_ids, is_default, mockup_set, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         productKey,
@@ -1310,6 +1335,7 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
         e.image_url,
         e.printify_variant_ids,
         0,
+        set,
         now
       )
       .run();
@@ -1319,20 +1345,21 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
     await db
       .prepare(
         `UPDATE product_mockup_images SET is_default = 1
-         WHERE product_key = ? AND print_provider_id = ? AND id = (
-           SELECT id FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC LIMIT 1
+         WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} AND id = (
+           SELECT id FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} ORDER BY created_at ASC LIMIT 1
          )`
       )
-      .bind(productKey, pid, productKey, pid)
+      .bind(productKey, pid, match.bind, productKey, pid, match.bind)
       .run();
   }
 
   const { buildMockupImagesByView } = await import("./mockupImagesByView.js");
   const images = await queryAll(
     db,
-    `SELECT * FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? ORDER BY created_at ASC`,
+    `SELECT * FROM product_mockup_images WHERE product_key = ? AND print_provider_id = ? AND ${match.clause} ORDER BY created_at ASC`,
     productKey,
-    pid
+    pid,
+    match.bind
   );
 
   return {

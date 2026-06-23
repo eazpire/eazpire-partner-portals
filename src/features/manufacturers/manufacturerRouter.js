@@ -908,7 +908,8 @@ export async function handleManufacturerRouter(request, env) {
         body.product_key,
         body.print_provider_id,
         body.auto_mirror !== false,
-        body.printify_product_id || null
+        body.printify_product_id || null,
+        body.mockup_set || "clean"
       );
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);

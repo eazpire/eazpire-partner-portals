@@ -541,8 +541,10 @@ async function applyEazpireShadowSchemaPatches(db) {
   );
   await ensureColumn(db, "eazpire_template_products", "printify_draft_product_id", "TEXT");
   await ensureColumn(db, "eazpire_template_products", "printify_mockups_product_id", "TEXT");
+  await ensureColumn(db, "eazpire_template_products", "printify_shop_preview_mockups_product_id", "TEXT");
   await ensureColumn(db, "eazpire_template_products", "printify_variants_product_id", "TEXT");
   await ensureColumn(db, "eazpire_template_products", "printify_print_areas_product_id", "TEXT");
+  await ensureColumn(db, "eazpire_product_mockup_images", "mockup_set", "TEXT NOT NULL DEFAULT 'clean'");
 }
 
 export async function ensureManufacturerSchema(env) {

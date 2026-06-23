@@ -276,7 +276,12 @@ export async function syncTemplateSection(productKey, printProviderId, section, 
     ...extra,
   };
 
-  if (section === "mockups") return fetchPrintifyMockups(base);
+  if (section === "mockups") {
+    return fetchPrintifyMockups({ ...base, mockup_set: "clean" });
+  }
+  if (section === "shop_preview_mockups") {
+    return fetchPrintifyMockups({ ...base, mockup_set: "shop_preview" });
+  }
   if (section === "variants") return refreshVariantsFromTemplate(base);
   if (section === "print_areas") return loadPrintifySettings(base);
   throw new Error(`Unknown template section: ${section}`);

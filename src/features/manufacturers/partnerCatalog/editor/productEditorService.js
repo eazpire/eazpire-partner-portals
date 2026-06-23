@@ -29,6 +29,12 @@ import {
 } from "../catalogOpsWriteService.js";
 import { parseJson, newId } from "../../db.js";
 import { regionCodesFromCountryCodes } from "../../../catalog/resolvePlanCountries.js";
+import {
+  filterImagesByMockupSet,
+  MOCKUP_SET_CLEAN,
+  MOCKUP_SET_SHOP_PREVIEW,
+  mockupSetSqlMatch,
+} from "../mockupSet.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
 import {
   listProductVersions,
@@ -1019,6 +1025,8 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
   if (printProviderId != null) {
     images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
   }
+  const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
+  const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
   const viewRandom = await queryAll(
     db,
     `SELECT * FROM eazpire_product_mockup_view_random WHERE product_key = ?`,
@@ -1028,7 +1036,7 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
     await queryAll(db, `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`, productKey),
     env
   );
-  return { ok: true, product, images, view_random: viewRandom, mockup_defaults: defaults };
+  return { ok: true, product, images: cleanImages, shop_preview_images: shopPreviewImages, view_random: viewRandom, mockup_defaults: defaults };
 }
 
 export async function saveMockups(env, productKey, body) {
@@ -1076,15 +1084,30 @@ export async function saveMockups(env, productKey, body) {
   }
   if (body.preview_mock_id && body.print_provider_id != null) {
     const ppId = Number(body.print_provider_id);
+    const match = mockupSetSqlMatch(MOCKUP_SET_CLEAN);
     await db
       .prepare(
-        `UPDATE eazpire_product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ?`
+        `UPDATE eazpire_product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
       )
-      .bind(productKey, ppId)
+      .bind(productKey, ppId, match.bind)
       .run();
     await db
       .prepare(`UPDATE eazpire_product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
       .bind(body.preview_mock_id, productKey)
+      .run();
+  }
+  if (body.shop_preview_mock_id && body.print_provider_id != null) {
+    const ppId = Number(body.print_provider_id);
+    const match = mockupSetSqlMatch(MOCKUP_SET_SHOP_PREVIEW);
+    await db
+      .prepare(
+        `UPDATE eazpire_product_mockup_images SET is_default = 0 WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
+      )
+      .bind(productKey, ppId, match.bind)
+      .run();
+    await db
+      .prepare(`UPDATE eazpire_product_mockup_images SET is_default = 1 WHERE id = ? AND product_key = ?`)
+      .bind(body.shop_preview_mock_id, productKey)
       .run();
   }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);

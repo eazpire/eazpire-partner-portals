@@ -188,6 +188,10 @@ function ensureOverlay() {
                 <span class="catalog-editor-subnav-label">Versions</span>
                 <div class="ce-version-pills" id="ce-subnav-version-pills" role="tablist"></div>
               </nav>
+              <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--mock-sections" id="ce-subnav-mock-sections" hidden aria-label="Mockup sections">
+                <button type="button" class="ce-mock-section-pill" data-mock-section="clean" aria-expanded="true">Clean Mockups</button>
+                <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" aria-expanded="true">Shop Preview Mockups</button>
+              </nav>
             </div>
           </div>
           <main class="catalog-editor-body" id="ce-body"></main>
@@ -262,31 +266,38 @@ function renderSubnav(ctx) {
   const stack = overlayEl.querySelector("#ce-subnav-stack");
   const providerRow = overlayEl.querySelector("#ce-subnav-providers");
   const versionRow = overlayEl.querySelector("#ce-subnav-versions");
+  const mockSectionsRow = overlayEl.querySelector("#ce-subnav-mock-sections");
   const providerPills = overlayEl.querySelector("#ce-subnav-pills");
   const versionPills = overlayEl.querySelector("#ce-subnav-version-pills");
+  const isMockupsTab = ctx.activeTab === "mockups";
 
   if (!tabUsesEditorSubnav(ctx.activeTab)) {
     stack.hidden = true;
     if (providerPills) providerPills.innerHTML = "";
     if (versionPills) versionPills.innerHTML = "";
+    if (mockSectionsRow) mockSectionsRow.hidden = true;
     refreshVisibilityTriSwitch(ctx);
     return;
   }
 
   ensureEditorSelections(ctx);
   const { showStack, showProviders, showVersions, providerIds, versions } = getSubnavVisibility(ctx);
+  const showMockSections = isMockupsTab;
 
-  if (!showStack) {
+  if (!showStack && !showMockSections) {
     stack.hidden = true;
     if (providerPills) providerPills.innerHTML = "";
     if (versionPills) versionPills.innerHTML = "";
+    if (mockSectionsRow) mockSectionsRow.hidden = true;
     refreshVisibilityTriSwitch(ctx);
     return;
   }
 
   stack.hidden = false;
+  stack.classList.toggle("ce-subnav-stack--has-mock-sections", showMockSections);
   providerRow.hidden = !showProviders;
   versionRow.hidden = !showVersions;
+  if (mockSectionsRow) mockSectionsRow.hidden = !showMockSections;
   applySubnavDrawerState();
 
   if (showProviders && providerPills) {

@@ -3,6 +3,7 @@
  */
 
 import { parseJson } from "../db.js";
+import { filterImagesByMockupSet, MOCKUP_SET_CLEAN, MOCKUP_SET_SHOP_PREVIEW } from "./mockupSet.js";
 import { catalogStatusToIsActive, isActiveToCatalogStatus } from "./constants.js";
 import { getEazpireProduct } from "./eazpireProductService.js";
 import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } from "./eazpireProductVersionService.js";
@@ -367,6 +368,8 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
   if (printProviderId != null) {
     images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
   }
+  const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
+  const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
   const viewRandom = await queryAll(
     catalogDb,
     `SELECT * FROM product_mockup_view_random WHERE product_key = ?`,
@@ -384,7 +387,8 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
   return {
     ok: true,
     product,
-    images,
+    images: cleanImages,
+    shop_preview_images: shopPreviewImages,
     view_random: viewRandom,
     mockup_defaults: defaults,
     _ops_source: "catalog-db",

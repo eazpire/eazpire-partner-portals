@@ -84,9 +84,21 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("admin-eazpire-template-section-id-save");
   });
 
-  it("mockups tab opens shared image viewer", () => {
+  it("mockups tab has clean and shop preview sections", () => {
     const src = readFileSync(join(portal, "tabs/mockups.js"), "utf8");
-    expect(src).toContain("openMockViewer");
+    expect(src).toContain("Clean Mockups");
+    expect(src).toContain("Shop Preview Mockups");
+    expect(src).toContain("shop_preview_mock_id");
+    expect(src).toContain("ce-mock-section");
+    const shell = readFileSync(join(portal, "shell.js"), "utf8");
+    expect(shell).toContain("ce-subnav-mock-sections");
+  });
+
+  it("templates tab has clean and shop preview mockup sections", () => {
+    const src = readFileSync(join(portal, "tabs/template.js"), "utf8");
+    expect(src).toContain("Clean Mockups");
+    expect(src).toContain("shop_preview_mockups");
+    expect(src).toContain("printify_shop_preview_mockups_product_id");
   });
 
   it("print-area tab persists useMockups on every save", () => {

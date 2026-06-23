@@ -6,6 +6,7 @@ const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?sea
 
 const SECTION_ID_FIELDS = {
   mockups: "printify_mockups_product_id",
+  shop_preview_mockups: "printify_shop_preview_mockups_product_id",
   variants: "printify_variants_product_id",
   print_areas: "printify_print_areas_product_id",
 };
@@ -13,8 +14,13 @@ const SECTION_ID_FIELDS = {
 const SECTIONS = [
   {
     id: "mockups",
-    title: "Mockups",
-    hint: "Fetch mockup images from Printify and save them to the catalog database.",
+    title: "Clean Mockups",
+    hint: "Fetch clean mockup images from Printify and save them to the catalog database.",
+  },
+  {
+    id: "shop_preview_mockups",
+    title: "Shop Preview Mockups",
+    hint: "Fetch wearing mockups for shop preview (Create from Scratch and Shop Create cards).",
   },
   {
     id: "variants",
