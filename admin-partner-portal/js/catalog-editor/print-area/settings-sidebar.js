@@ -153,6 +153,7 @@ function renderPlacementSection(st, data, ctx, msCtx) {
       <select class="select select-sm ce-pa-pl-mode" data-ph="${ph.key}"${ro}>
         <option value="calculated" ${val === "calculated" ? "selected" : ""}>Calculated</option>
         <option value="template" ${val === "template" ? "selected" : ""}>Template</option>
+        <option value="admin" ${val === "admin" ? "selected" : ""}>Admin</option>
       </select>
     </div>`;
     })

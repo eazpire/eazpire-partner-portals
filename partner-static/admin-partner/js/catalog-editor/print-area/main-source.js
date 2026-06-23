@@ -13,6 +13,7 @@ import {
   getDesignTypeSlice,
   defaultPatternConfig,
   defaultPublishLogicByPh,
+  readPublishLogicFromConfig,
   normalizeDesignTypeKey,
   parseJsonSafe,
   readBrandAssetsFromConfig,
@@ -257,7 +258,11 @@ export function applyPrintAreaInheritanceToState(st, ctx, data, msCtx) {
   }
 
   if (use.placement) {
-    st.publishLogicByPh = parseJsonSafe(mainSlice.publish_logic, null) || defaultPublishLogicByPh();
+    st.publishLogicByPh = readPublishLogicFromConfig(
+      mainConfig,
+      st.activeDesignType,
+      st.versionSlug || "standard"
+    );
   }
 
   if (use.print_area_images) {

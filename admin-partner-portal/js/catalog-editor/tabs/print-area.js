@@ -29,6 +29,9 @@ import {
   resolvePrintAreaVersion,
   readBrandAssetsFromConfig,
   resolveEffectiveBrandAssets,
+  readPublishLogicFromConfig,
+  writePublishLogicToConfig,
+  printAreaVersionSlug,
 } from "../print-area/helpers.js";
 import {
   renderPrintAreaSidebar,
@@ -103,7 +106,7 @@ function loadDesignTypeIntoState(st, data, designType) {
   st.workingConfig = full;
   st.activeDesignType = normalizeDesignTypeKey(designType);
   st.patternConfig = { ...(slice.pattern || {}) };
-  st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
+  st.publishLogicByPh = readPublishLogicFromConfig(full, designType, st.versionSlug || "standard");
   const { green, greenDirty } = resolveRectsForView(data, slice, st.activeView);
   st.greenRect = green;
   st.greenDirty = greenDirty;
@@ -148,7 +151,6 @@ function buildConfigForSave(st, ctx, data) {
     applyGreenRectToSlice(sourceSlice, st.activeView, st.greenRect);
   }
   sourceSlice.pattern = { ...st.patternConfig };
-  sourceSlice.publish_logic = { ...st.publishLogicByPh };
 
   for (const dt of st.designTypesScope) {
     if (dt === sourceDt) continue;
@@ -157,13 +159,18 @@ function buildConfigForSave(st, ctx, data) {
       applyGreenRectToSlice(target, st.activeView, st.greenRect);
     }
     target.pattern = { ...st.patternConfig };
-    target.publish_logic = { ...st.publishLogicByPh };
   }
 
   cfg.brand_assets_mode = st.brandAssetsMode || "global";
   cfg.brand_assets = JSON.parse(JSON.stringify(st.brandAssets || { qr: {}, logo: {} }));
 
-  return cfg;
+  const versionSlug = st.versionSlug || printAreaVersionSlug(resolvePrintAreaVersion(ctx, data));
+  let out = writePublishLogicToConfig(cfg, sourceDt, versionSlug, st.publishLogicByPh);
+  for (const dt of st.designTypesScope) {
+    if (dt === sourceDt) continue;
+    out = writePublishLogicToConfig(out, dt, versionSlug, st.publishLogicByPh);
+  }
+  return out;
 }
 
 export function snapshotPrintAreaTab(ctx) {
@@ -293,7 +300,7 @@ export async function loadPrintAreaTab(ctx) {
     ctx.printAreaRemountViewDock?.();
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     st.patternConfig = { ...(slice.pattern || {}) };
-    st.publishLogicByPh = { ...(slice.publish_logic || st.publishLogicByPh) };
+    st.publishLogicByPh = readPublishLogicFromConfig(st.workingConfig, st.activeDesignType, st.versionSlug || "standard");
     const { red, green, greenDirty } = resolveRectsForView(data, slice, st.activeView);
     st.redRect = red;
     st.greenRect = green;

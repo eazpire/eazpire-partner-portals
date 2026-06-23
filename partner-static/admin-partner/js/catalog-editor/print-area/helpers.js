@@ -55,6 +55,69 @@ export function defaultPublishLogicByPh() {
   return { qr: "calculated", logo: "calculated", creator_design: "calculated", additional_design: "calculated" };
 }
 
+/** Version slug for eaz_admin.by_version (matches publish slugifyPrintAreaTemplateVersionKey). */
+export function printAreaVersionSlug(version) {
+  const t = String(version?.display_name || version?.name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return t || "standard";
+}
+
+function parsePublishLogicObject(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = defaultPublishLogicByPh();
+  let any = false;
+  for (const key of Object.keys(out)) {
+    const v = String(raw[key] || "").toLowerCase();
+    if (v === "calculated" || v === "template" || v === "admin") {
+      out[key] = v;
+      any = true;
+    }
+  }
+  return any ? out : null;
+}
+
+/** Read per-placeholder publish_logic (eaz_admin.by_version first, then legacy by_design_type). */
+export function readPublishLogicFromConfig(config, designType, versionSlug) {
+  const key = normalizeDesignTypeKey(designType);
+  const ver = String(versionSlug || "standard").trim() || "standard";
+  const ea = config?.eaz_admin;
+  const bv = ea?.by_version?.[ver] || (ver !== "standard" ? ea?.by_version?.standard : null);
+  const fromEa = parsePublishLogicObject(bv?.by_design_type?.[key]?.publish_logic);
+  if (fromEa) return fromEa;
+  const fromClassic = parsePublishLogicObject(bv?.by_design_type?.classic?.publish_logic);
+  if (fromClassic && key !== "classic") return fromClassic;
+  const { slice } = getDesignTypeSlice(config || {}, designType);
+  return parsePublishLogicObject(slice.publish_logic) || defaultPublishLogicByPh();
+}
+
+/** Persist publish_logic to eaz_admin.by_version + legacy by_design_type slice. */
+export function writePublishLogicToConfig(config, designType, versionSlug, publishLogicByPh) {
+  const cfg = ensureByDesignTypeConfig(config && typeof config === "object" ? { ...config } : {});
+  const key = normalizeDesignTypeKey(designType);
+  const ver = String(versionSlug || "standard").trim() || "standard";
+  const logic = { ...defaultPublishLogicByPh(), ...(publishLogicByPh || {}) };
+  if (!cfg.eaz_admin || typeof cfg.eaz_admin !== "object") cfg.eaz_admin = {};
+  if (!cfg.eaz_admin.by_version || typeof cfg.eaz_admin.by_version !== "object") {
+    cfg.eaz_admin.by_version = {};
+  }
+  if (!cfg.eaz_admin.by_version[ver] || typeof cfg.eaz_admin.by_version[ver] !== "object") {
+    cfg.eaz_admin.by_version[ver] = {};
+  }
+  const verSlice = cfg.eaz_admin.by_version[ver];
+  if (!verSlice.by_design_type || typeof verSlice.by_design_type !== "object") {
+    verSlice.by_design_type = {};
+  }
+  if (!verSlice.by_design_type[key] || typeof verSlice.by_design_type[key] !== "object") {
+    verSlice.by_design_type[key] = {};
+  }
+  verSlice.by_design_type[key].publish_logic = { ...logic };
+  cfg.by_design_type[key].publish_logic = { ...logic };
+  return cfg;
+}
+
 export function normalizeDesignTypeKey(dt) {
   return String(dt || "classic")
     .trim()
@@ -574,7 +637,11 @@ export function createInitialPrintAreaState(ctx, data) {
     activeLayer: "green",
     workingConfig: full,
     patternConfig: { ...(slice.pattern || defaultPatternConfig()) },
-    publishLogicByPh: parseJsonSafe(slice.publish_logic, null) || defaultPublishLogicByPh(),
+    publishLogicByPh: readPublishLogicFromConfig(
+      rawConfig,
+      ctx.selectedDesignType || designTypes[0],
+      printAreaVersionSlug(version)
+    ),
     variantGroups,
     variantsScope: new Set(variantGroups.groups.map((g) => g.id)),
     variantGroupMode: variantGroups.mode,
@@ -585,6 +652,7 @@ export function createInitialPrintAreaState(ctx, data) {
     perVariantProduct: productKeyExpectsPerVariantDimensions(ctx.productKey),
     brandAssetsMode: brandFromConfig.mode,
     brandAssets: JSON.parse(JSON.stringify(brandFromConfig.assets)),
+    versionSlug: printAreaVersionSlug(version),
   };
 
   if (st.perVariantProduct && activeVariantGroupId) {
