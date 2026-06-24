@@ -173,11 +173,11 @@ function renderPlacementSection(st, data, ctx, msCtx) {
 function renderTestProductsSection() {
   return `
     <div class="ce-pa-test-products">
-      <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
-        Create Test Product
-      </button>
       <button type="button" class="btn btn-secondary btn-sm ce-pa-open-test-products" id="ce-pa-open-test-products">
         Test Products
+      </button>
+      <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
+        Create Test Product
       </button>
       <p class="ce-hint ce-pa-test-products-hint" id="ce-pa-test-products-status" hidden></p>
     </div>`;
@@ -228,9 +228,9 @@ export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets, msCtx =
             ${renderScopeSection(st, msCtx)}
             ${renderPatternSection(st, msCtx)}
             ${renderPlacementSection(st, data, ctx, msCtx)}
-            ${renderTestProductsSection()}
             ${brandSection}
             ${renderImagesSection(st, data, msCtx)}
+            ${renderTestProductsSection()}
           </div>
         </div>
         <button type="button" class="ce-pa-rail" id="ce-pa-sidebar-toggle" aria-label="Toggle print area sidebar">
