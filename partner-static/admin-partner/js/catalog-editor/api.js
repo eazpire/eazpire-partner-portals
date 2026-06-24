@@ -305,3 +305,31 @@ export async function syncTemplateSection(productKey, printProviderId, section, 
   if (section === "print_areas") return loadPrintifySettings(base);
   throw new Error(`Unknown template section: ${section}`);
 }
+
+export async function createTestPrintifyProduct(body) {
+  return partnerFetch("admin-eazpire-test-printify-create", { method: "POST", body });
+}
+
+export async function fetchTestPrintifyProducts(productKey, printProviderId) {
+  return partnerFetch("admin-eazpire-test-printify-list", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      print_provider_id: printProviderId ? Number(printProviderId) : undefined,
+    },
+  });
+}
+
+export async function deleteTestPrintifyProducts(ids) {
+  return partnerFetch("admin-eazpire-test-printify-delete", {
+    method: "POST",
+    body: { ids: Array.isArray(ids) ? ids : [ids] },
+  });
+}
+
+export async function fetchTestPrintifyProductPreview(id) {
+  return partnerFetch("admin-eazpire-test-printify-preview", {
+    method: "POST",
+    body: { id },
+  });
+}

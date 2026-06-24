@@ -267,6 +267,7 @@
     "wear-web:create-repo": "node scripts/wear-web/create-wear-web-repo.js",
     "wear-android:create-repo": "node scripts/wear-android/create-wear-android-repo.js",
     "wear-android:sync": "node scripts/wear-android/sync-to-wear-android-repo.js",
+    "wear-android:sync-icon": "node scripts/wear-android/sync-wear-app-icon-from-admin.mjs",
     "wear-android:build": "powershell -ExecutionPolicy Bypass -File scripts/wear-android/build-wear-android.ps1",
     "wear-android:install": "powershell -ExecutionPolicy Bypass -File scripts/wear-android/build-wear-android.ps1 -Install",
     "wear-os:create-repo": "node scripts/wear-os/create-wear-os-repo.js",

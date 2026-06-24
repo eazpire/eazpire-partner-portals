@@ -18,6 +18,7 @@ import {
 } from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
+import { createTestProductFromPrintArea, openTestProductsModal } from "./test-products.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -169,6 +170,19 @@ function renderPlacementSection(st, data, ctx, msCtx) {
     </details>`;
 }
 
+function renderTestProductsSection() {
+  return `
+    <div class="ce-pa-test-products">
+      <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
+        Create Test Product
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm ce-pa-open-test-products" id="ce-pa-open-test-products">
+        Test Products
+      </button>
+      <p class="ce-hint ce-pa-test-products-hint" id="ce-pa-test-products-status" hidden></p>
+    </div>`;
+}
+
 function renderImagesSection(st, data, msCtx) {
   const meta = sectionSummary("Print area images", "print_area_images", msCtx);
   const ro = meta.inherited ? " disabled" : "";
@@ -214,6 +228,7 @@ export function renderPrintAreaSidebar(st, data, ctx, globalBrandAssets, msCtx =
             ${renderScopeSection(st, msCtx)}
             ${renderPatternSection(st, msCtx)}
             ${renderPlacementSection(st, data, ctx, msCtx)}
+            ${renderTestProductsSection()}
             ${brandSection}
             ${renderImagesSection(st, data, msCtx)}
           </div>
@@ -410,6 +425,35 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
   root.querySelector("#ce-pa-sidebar-toggle")?.addEventListener("click", () => {
     setPaSidebarCollapsed(!isPaSidebarCollapsed());
     root.querySelector(".ce-pa-layout")?.classList.toggle("ce-pa-layout--collapsed", isPaSidebarCollapsed());
+  });
+
+  const statusEl = root.querySelector("#ce-pa-test-products-status");
+  root.querySelector("#ce-pa-create-test-product")?.addEventListener("click", async () => {
+    const btn = root.querySelector("#ce-pa-create-test-product");
+    if (!ctx || !st) return;
+    const prev = btn.textContent;
+    btn.disabled = true;
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Working…";
+    }
+    try {
+      await createTestProductFromPrintArea(ctx, st, {
+        onStatus: (msg) => {
+          if (statusEl) statusEl.textContent = msg;
+        },
+      });
+      if (statusEl) statusEl.textContent = "Test product created.";
+    } catch (e) {
+      if (statusEl) statusEl.textContent = e?.message || "Create failed";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
+  });
+
+  root.querySelector("#ce-pa-open-test-products")?.addEventListener("click", () => {
+    if (ctx) openTestProductsModal(ctx);
   });
 
   root.querySelector("#ce-pa-dt-all")?.addEventListener("click", () => {

@@ -229,6 +229,10 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-brand-assets-bundle",
   "admin-eazpire-brand-asset-upload",
   "admin-eazpire-product-brand-asset-upload",
+  "admin-eazpire-test-printify-create",
+  "admin-eazpire-test-printify-list",
+  "admin-eazpire-test-printify-delete",
+  "admin-eazpire-test-printify-preview",
 ]);
 
 export function isManufacturerOp(op) {
@@ -993,6 +997,22 @@ export async function handleManufacturerRouter(request, env) {
       const result = await editorExt.uploadProductBrandAsset(env, request);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-test-printify-create" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyCreate(request, env);
+    }
+    if (op === "admin-eazpire-test-printify-list" && (request.method === "GET" || request.method === "POST")) {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyList(request, env);
+    }
+    if (op === "admin-eazpire-test-printify-delete" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyDelete(request, env);
+    }
+    if (op === "admin-eazpire-test-printify-preview" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyPreview(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

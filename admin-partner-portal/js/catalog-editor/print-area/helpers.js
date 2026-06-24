@@ -65,6 +65,24 @@ export function printAreaVersionSlug(version) {
   return t || "standard";
 }
 
+/**
+ * Numeric print_area_printify_templates.id for API calls (test products, publish).
+ * Editor version ids may be `pat-123`, legacy eaz version ids, or numeric PAT ids.
+ */
+export function resolvePrintAreaTemplateId(ctx, data = null) {
+  const version = resolvePrintAreaVersion(ctx, data);
+  const fromPat = Number(version?.catalog_pat_id);
+  if (Number.isFinite(fromPat) && fromPat > 0) return fromPat;
+
+  const raw = String(ctx?.selectedVersionId || "").trim();
+  const patMatch = raw.match(/^pat-(\d+)$/i);
+  if (patMatch) return Number(patMatch[1]);
+
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n;
+  return 0;
+}
+
 function parsePublishLogicObject(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const out = defaultPublishLogicByPh();
