@@ -135,6 +135,7 @@ function closeViewer() {
     el.setAttribute("inert", "");
   }
   document.removeEventListener("keydown", onViewerKeydown);
+  setListModalAssistiveHidden(false);
 }
 
 function onViewerKeydown(e) {
@@ -223,7 +224,21 @@ function stepViewerVariant(delta) {
   renderViewer();
 }
 
+function setListModalAssistiveHidden(hidden) {
+  const listEl = document.getElementById("ce-pa-tp-modal");
+  if (!listEl?.classList.contains("is-open")) return;
+  if (hidden) {
+    blurModalFocus(listEl);
+    listEl.setAttribute("aria-hidden", "true");
+    listEl.setAttribute("inert", "");
+  } else {
+    listEl.setAttribute("aria-hidden", "false");
+    listEl.removeAttribute("inert");
+  }
+}
+
 async function openViewer(row) {
+  setListModalAssistiveHidden(true);
   const el = ensureViewerModal();
   el.classList.add("is-open");
   el.setAttribute("aria-hidden", "false");

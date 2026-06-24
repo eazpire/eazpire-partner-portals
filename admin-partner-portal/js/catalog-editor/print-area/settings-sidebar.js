@@ -438,6 +438,7 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
       statusEl.textContent = "Working…";
     }
     try {
+      btn.blur();
       await createTestProductFromPrintArea(ctx, st, {
         onStatus: (msg) => {
           if (statusEl) statusEl.textContent = msg;
