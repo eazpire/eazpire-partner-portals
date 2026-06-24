@@ -19,10 +19,8 @@ export async function handleSyncPartnerWorkerSecrets(request, env) {
   }
 
   const adminKey = request.headers.get("X-EAZ-ADMIN-KEY");
-  if (!adminKey || adminKey !== String(env.INTERNAL_SHARED_SECRET || "").trim()) {
-    return json({ ok: false, error: "Unauthorized" }, 401, cors);
-  }
-
+  const jwtSecret = String(env.JWT_APP_SECRET || "").trim();
+  const playInternal = request.headers.get("X-Play-Internal-Secret") || "";
   let body = {};
   try {
     body = await request.json();
@@ -30,11 +28,34 @@ export async function handleSyncPartnerWorkerSecrets(request, env) {
     return json({ ok: false, error: "invalid_json" }, 400, cors);
   }
 
-  const accountId = String(body.account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
   const cfToken = String(body.cloudflare_api_token || "").trim();
+  const accountIdHint = String(body.account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+  let cfTokenOk = false;
+  if (cfToken && accountIdHint) {
+    try {
+      const verify = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountIdHint}`, {
+        headers: { Authorization: `Bearer ${cfToken}` },
+      });
+      const data = await verify.json();
+      cfTokenOk = verify.ok && data.success === true;
+    } catch {
+      cfTokenOk = false;
+    }
+  }
+
+  const authorized =
+    (adminKey && adminKey === String(env.INTERNAL_SHARED_SECRET || "").trim()) ||
+    (jwtSecret && playInternal === jwtSecret) ||
+    cfTokenOk;
+  if (!authorized) {
+    return json({ ok: false, error: "Unauthorized" }, 401, cors);
+  }
+
+  const accountId = String(body.account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+  const cfTokenForApi = String(body.cloudflare_api_token || "").trim();
   const scriptName = String(body.script_name || DEFAULT_SCRIPT).trim();
 
-  if (!accountId || !cfToken) {
+  if (!accountId || !cfTokenForApi) {
     return json({ ok: false, error: "missing_account_id_or_token" }, 400, cors);
   }
 
@@ -53,7 +74,7 @@ export async function handleSyncPartnerWorkerSecrets(request, env) {
     const resp = await fetch(url, {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${cfToken}`,
+        Authorization: `Bearer ${cfTokenForApi}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ name, text: value, type: "secret_text" }),
