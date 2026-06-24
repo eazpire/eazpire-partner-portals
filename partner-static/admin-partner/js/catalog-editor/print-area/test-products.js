@@ -264,7 +264,7 @@ async function openViewer(row) {
     rowTitle: row.printify?.title || row.printify_title,
     data,
     colorKey: (data.colors && data.colors[0] && data.colors[0].color_key) || "default",
-    viewIndex: 0,
+    viewIndex: Number.isFinite(Number(data.preferred_view_index)) ? Number(data.preferred_view_index) : 0,
   };
   renderViewer();
 }

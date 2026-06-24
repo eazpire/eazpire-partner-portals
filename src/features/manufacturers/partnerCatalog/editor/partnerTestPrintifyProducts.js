@@ -10,11 +10,15 @@ import {
   buildPrintifyProductPreviewPayload,
 } from "../../../admin/adminTestPrintifyProducts.js";
 import { getPrintifyProduct } from "../../../../utils/printify.js";
+import { resolvePreviewMockupPreference } from "../../../mockup/resolvePreviewMockupPreference.js";
 
 async function buildPreviewPayload(env, row) {
   const product = await getPrintifyProduct(env, String(row.printify_product_id || "").trim());
   if (!product) return null;
-  return buildPrintifyProductPreviewPayload(product, row.product_key);
+  const templateId = Number(row.print_area_template_id) || 0;
+  const pref = await resolvePreviewMockupPreference(env, row.product_key, templateId).catch(() => null);
+  const preferredViewKey = String(pref?.view_key || "front").trim().toLowerCase() || "front";
+  return buildPrintifyProductPreviewPayload(product, row.product_key, { preferredViewKey });
 }
 
 async function deletePrintifyProduct(env, printifyProductId) {
