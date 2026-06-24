@@ -58,6 +58,7 @@ function ensureListModal() {
   el.id = "ce-pa-tp-modal";
   el.className = "ce-pa-tp-modal";
   el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
   el.innerHTML = `
     <div class="ce-pa-tp-modal__backdrop" data-ce-pa-tp-close></div>
     <div class="ce-pa-tp-modal__dialog" role="dialog" aria-modal="true">
@@ -86,6 +87,7 @@ function ensureViewerModal() {
   el.id = "ce-pa-tp-viewer";
   el.className = "ce-pa-tp-viewer";
   el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
   el.innerHTML = `
     <div class="ce-pa-tp-viewer__backdrop" data-ce-pa-tp-viewer-close></div>
     <div class="ce-pa-tp-viewer__dialog" role="dialog" aria-modal="true">
@@ -117,12 +119,20 @@ function ensureViewerModal() {
 
 let viewerState = null;
 
+function blurModalFocus(el) {
+  if (el?.contains(document.activeElement)) {
+    document.activeElement?.blur();
+  }
+}
+
 function closeViewer() {
   viewerState = null;
   const el = document.getElementById("ce-pa-tp-viewer");
   if (el) {
+    blurModalFocus(el);
     el.classList.remove("is-open");
     el.setAttribute("aria-hidden", "true");
+    el.setAttribute("inert", "");
   }
   document.removeEventListener("keydown", onViewerKeydown);
 }
@@ -217,6 +227,7 @@ async function openViewer(row) {
   const el = ensureViewerModal();
   el.classList.add("is-open");
   el.setAttribute("aria-hidden", "false");
+  el.removeAttribute("inert");
   document.addEventListener("keydown", onViewerKeydown);
 
   const cacheKey = String(row.id);
@@ -246,8 +257,10 @@ async function openViewer(row) {
 function closeListModal() {
   const el = document.getElementById("ce-pa-tp-modal");
   if (el) {
+    blurModalFocus(el);
     el.classList.remove("is-open");
     el.setAttribute("aria-hidden", "true");
+    el.setAttribute("inert", "");
   }
 }
 
@@ -348,6 +361,7 @@ export async function openTestProductsModal(ctx) {
   const el = ensureListModal();
   el.classList.add("is-open");
   el.setAttribute("aria-hidden", "false");
+  el.removeAttribute("inert");
   await loadTestProductsGrid(ctx);
 }
 

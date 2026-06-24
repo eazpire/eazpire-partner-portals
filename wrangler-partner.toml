@@ -34,6 +34,8 @@ CATALOG_OPS_MASTER_READ = "1"
 CATALOG_OPS_MASTER_WRITE = "1"
 # Same Printify shop as creator-engine (fetchPrintifyProductById / template sync)
 PRINTIFY_SHOP_ID = "22170465"
+# Design files for test-product create / Printify remote upload URLs
+PUBLIC_FILE_BASE_URL = "https://creator-engine.eazpire.workers.dev"
 
 [[kv_namespaces]]
 binding = "JOBS"
@@ -61,6 +63,10 @@ database_id = "9c7965da-2cad-40af-a6fa-1a4ce6c4d116"
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
 run_worker_first = ["/partner", "/partner/*"]
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "creator-uploads"
 
 [[r2_buckets]]
 binding = "MOCKUP_R2"
