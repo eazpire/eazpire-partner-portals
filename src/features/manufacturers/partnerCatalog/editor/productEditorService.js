@@ -27,6 +27,7 @@ import {
   saveCatalogMockups,
   saveCatalogAutomations,
 } from "../catalogOpsWriteService.js";
+import { resolveVariantProductDataForUi } from "../variantTemplateSync.js";
 import { parseJson, newId } from "../../db.js";
 import { regionCodesFromCountryCodes } from "../../../catalog/resolvePlanCountries.js";
 import {
@@ -787,14 +788,8 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
     variant_config: variantConfig ? parseJson(variantConfig.config_json, {}) : null,
     prices_json: profile ? parseJson(profile.prices_json, null) : null,
     variants_json: profile ? parseJson(profile.variants_json, null) : template ? parseJson(template.variants_json, null) : null,
-    product_data:
-      (profile ? parseJson(profile.product_data_json, null) : null) ||
-      (template ? parseJson(template.product_data_json, null) : null) ||
-      null,
-    product_data_json:
-      (profile ? parseJson(profile.product_data_json, null) : null) ||
-      (template ? parseJson(template.product_data_json, null) : null) ||
-      null,
+    product_data: resolveVariantProductDataForUi(template, profile),
+    product_data_json: resolveVariantProductDataForUi(template, profile),
     template,
   };
 }

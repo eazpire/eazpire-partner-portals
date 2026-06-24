@@ -70,6 +70,8 @@ async function ensureCatalogTemplateProductColumns(db) {
     await add("printify_calibration_mockups_product_id");
     await add("printify_variants_product_id");
     await add("printify_print_areas_product_id");
+    await add("variants_product_data_json");
+    await add("variants_printify_product_id");
     catalogTemplateColumnsReady = true;
   } catch (err) {
     console.warn("[catalogOpsWriteService] ensureCatalogTemplateProductColumns:", err?.message || err);

@@ -33,6 +33,7 @@ import {
   setCatalogPrintAreaTemplateKey,
   saveCatalogVariantPrintAreaRect,
 } from "../catalogOpsWriteService.js";
+import { persistVariantTemplateFromPrintify } from "../variantTemplateSync.js";
 import { listProductVersions, updateProductVersion } from "../eazpireProductVersionService.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { fetchPrintifyProductById } from "../../../admin/adminProducts.js";
@@ -545,6 +546,15 @@ export async function refreshVariantsFromTemplate(
       );
       if (!saved.ok) return saved;
 
+      const variantSync = await persistVariantTemplateFromPrintify(
+        env,
+        productKey,
+        Number(printProviderId),
+        product,
+        printifyProductId
+      );
+      if (!variantSync.ok) return variantSync;
+
       const placeholders = await loadPrintifySettings(env, {
         productKey,
         printProviderId,
@@ -560,6 +570,8 @@ export async function refreshVariantsFromTemplate(
         printify_product: product,
         variants_count: variants_json.length,
         placeholders_synced: true,
+        enabled_variants: variantSync.enabled_variants ?? 0,
+        synced_profiles: variantSync.synced_profiles ?? 0,
       };
     }
 
@@ -638,6 +650,15 @@ export async function refreshVariantsFromTemplate(
       },
     });
 
+    const variantSync = await persistVariantTemplateFromPrintify(
+      env,
+      productKey,
+      Number(printProviderId),
+      product,
+      printifyProductId
+    );
+    if (!variantSync.ok) return variantSync;
+
     const placeholders = await loadPrintifySettings(env, {
       productKey,
       printProviderId,
@@ -653,6 +674,8 @@ export async function refreshVariantsFromTemplate(
       printify_product: product,
       variants_count: variants_json.length,
       placeholders_synced: true,
+      enabled_variants: variantSync.enabled_variants ?? 0,
+      synced_profiles: variantSync.synced_profiles ?? 0,
     };
   } catch (err) {
     console.error("[refreshVariantsFromTemplate]", err?.message || err);

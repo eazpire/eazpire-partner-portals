@@ -14,6 +14,7 @@ import { getEazpireProduct } from "./eazpireProductService.js";
 import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } from "./eazpireProductVersionService.js";
 import { ensurePrintifyPartner } from "./printifyPartnerSeed.js";
 import { resolvePrintifyBlueprintId } from "./editor/partnerEditorExtensions.js";
+import { resolveVariantProductDataForUi } from "./variantTemplateSync.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -351,10 +352,8 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
       : template
         ? parseJson(template.variants_json, null)
         : null,
-    product_data:
-      (profile ? parseJson(profile.product_data_json, null) : null) ||
-      (template ? parseJson(template.product_data_json, null) : null) ||
-      null,
+    product_data: resolveVariantProductDataForUi(template, profile),
+    product_data_json: resolveVariantProductDataForUi(template, profile),
     template,
     _ops_source: "catalog-db",
   };
