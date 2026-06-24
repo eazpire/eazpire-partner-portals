@@ -3,6 +3,7 @@
  * Routes: partner.eazpire.com/*, admin.eazpire.com/*
  *
  * Deploy: npm run deploy:partner (wrangler-partner.toml)
+ * Rebuild when shared admin/publish/printify modules change (bundled via manufacturerRouter).
  */
 
 import { json, getCorsHeaders } from "./utils/response.js";

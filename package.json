@@ -84,6 +84,8 @@
     "gh:save-token": "node scripts/partner/save-github-token.cjs",
     "npm:setup": "powershell -ExecutionPolicy Bypass -File scripts/deployment/setup-node-npm.ps1",
     "predeploy:checks": "node scripts/deployment/pre-deploy-checks.cjs",
+    "tryon:generate-pilot-ar": "node scripts/tryon/generate-pilot-ar-garment.mjs",
+    "tryon:upload-ar-garment": "node scripts/tryon/upload-ar-garment-bundle.mjs",
     "deploy:proxy": "wrangler deploy -c wrangler-proxy.toml",
     "dev:partner": "wrangler dev -c wrangler-partner.toml",
     "deploy:partner": "npm run sync:partner-static && node scripts/utils/wrangler-with-local-env.cjs deploy -c wrangler-partner.toml",
