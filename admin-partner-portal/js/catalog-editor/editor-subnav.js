@@ -65,7 +65,9 @@ export function ensureEditorSelections(ctx) {
 export function getSubnavVisibility(ctx) {
   const providerIds = getActiveProviderIds(ctx);
   const versions = getVersionsForProvider(ctx, ctx.selectedPrintProviderId);
-  const showProviders = providerIds.length > 1;
+  const isPrintArea = ctx.activeTab === "print_area";
+  // Print area always needs the provider bar (selection + main-source toggles), even with one provider.
+  const showProviders = isPrintArea ? providerIds.length > 0 : providerIds.length > 1;
   const showVersions = versions.length > 1;
   return {
     showStack: showProviders || showVersions,
