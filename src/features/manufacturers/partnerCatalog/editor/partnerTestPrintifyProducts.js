@@ -9,17 +9,21 @@ import {
   ensureTestPrintifyTable,
   buildPrintifyProductPreviewPayload,
   listTestPrintifyCreations,
+  updateTestPrintifyProductPlacement,
 } from "../../../admin/adminTestPrintifyProducts.js";
 import { getPrintifyProduct } from "../../../../utils/printify.js";
 import { resolvePreviewMockupPreference } from "../../../mockup/resolvePreviewMockupPreference.js";
 
-async function buildPreviewPayload(env, row) {
+async function buildPreviewPayload(env, row, preferredViewKey = null) {
   const product = await getPrintifyProduct(env, String(row.printify_product_id || "").trim());
   if (!product) return null;
   const templateId = Number(row.print_area_template_id) || 0;
   const pref = await resolvePreviewMockupPreference(env, row.product_key, templateId).catch(() => null);
-  const preferredViewKey = String(pref?.view_key || "front").trim().toLowerCase() || "front";
-  return buildPrintifyProductPreviewPayload(product, row.product_key, { preferredViewKey });
+  const viewKey =
+    String(preferredViewKey || pref?.view_key || "front")
+      .trim()
+      .toLowerCase() || "front";
+  return buildPrintifyProductPreviewPayload(product, row.product_key, { preferredViewKey: viewKey });
 }
 
 async function deletePrintifyProduct(env, printifyProductId) {
@@ -188,6 +192,15 @@ export async function handlePartnerTestPrintifyDelete(request, env) {
   return json({ ok, deleted, failed, deleted_count: deleted.length }, ok ? 200 : deleted.length ? 207 : 502, cors);
 }
 
+export async function handlePartnerTestPrintifyPlacementUpdate(request, env) {
+  const cors = getCorsHeaders(request);
+  const auth = await requireAdminPartnerSession(request, env);
+  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+
+  const body = await request.json().catch(() => ({}));
+  return updateTestPrintifyProductPlacement(env, body, cors);
+}
+
 export async function handlePartnerTestPrintifyPreview(request, env) {
   const cors = getCorsHeaders(request);
   const auth = await requireAdminPartnerSession(request, env);
@@ -205,7 +218,8 @@ export async function handlePartnerTestPrintifyPreview(request, env) {
   if (!row) return json({ ok: false, error: "not_found" }, 404, cors);
 
   try {
-    const payload = await buildPreviewPayload(env, row);
+    const preferredViewKey = body.view_key || body.viewKey || null;
+    const payload = await buildPreviewPayload(env, row, preferredViewKey);
     if (!payload) return json({ ok: false, error: "printify_product_not_found" }, 404, cors);
     let placement_modes = null;
     if (row.placement_modes_json) {

@@ -448,6 +448,7 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
       onDesignPlaced: () => {
         callbacks.onSessionDesignPlaced?.();
       },
+      onMockReady: callbacks.onMockReady,
     });
   });
 

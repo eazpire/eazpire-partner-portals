@@ -7,6 +7,7 @@ import {
   getMockupDefaultForView,
   printAreaCatalogDetail,
   resolvePrintAreaVersion,
+  rectsNearlyEqual,
 } from "./helpers.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import { resolvePlacementOverlays } from "./placement-overlays.js";
@@ -26,6 +27,17 @@ function sessionKey(st) {
   return `${st.activeDesignType || "classic"}::${st.activeView || "front"}`;
 }
 
+function snapshotRect(rect) {
+  if (!rect) return null;
+  return {
+    x: Number(rect.x),
+    y: Number(rect.y),
+    w: Number(rect.w),
+    h: Number(rect.h),
+    angle: Number(rect.angle) || 0,
+  };
+}
+
 export function hasSessionTestDesign(st) {
   const sd = st?.sessionTestDesign;
   return !!(sd && Number(sd.designId) > 0 && sd.rect);
@@ -36,14 +48,62 @@ export function getSessionDesignPlacementForApi(st) {
   if (!sd?.rect) return null;
   return {
     view_key: sd.viewKey || st.activeView || "front",
-    rect: {
-      x: Number(sd.rect.x),
-      y: Number(sd.rect.y),
-      w: Number(sd.rect.w),
-      h: Number(sd.rect.h),
-      angle: Number(sd.rect.angle) || 0,
-    },
+    rect: snapshotRect(sd.rect),
   };
+}
+
+export function isSessionDesignDirty(st) {
+  const sd = st?.sessionTestDesign;
+  if (!sd?.rect) return false;
+  if (sd.dirty === true) return true;
+  if (!sd.savedRect) return true;
+  if (!rectsNearlyEqual(sd.rect, sd.savedRect, 0.002)) return true;
+  const a = Number(sd.rect.angle) || 0;
+  const b = Number(sd.savedRect.angle) || 0;
+  return Math.abs(a - b) > 0.5;
+}
+
+export function markSessionDesignSaved(st) {
+  const sd = st?.sessionTestDesign;
+  if (!sd?.rect) return;
+  sd.savedRect = snapshotRect(sd.rect);
+  sd.dirty = false;
+}
+
+export function markSessionDesignDirty(st) {
+  const sd = st?.sessionTestDesign;
+  if (!sd) return;
+  sd.dirty = true;
+}
+
+/**
+ * Contain-fit design rect within print area bounds (local canvas only).
+ */
+export function alignSessionDesignToPrintArea(st) {
+  const sd = st?.sessionTestDesign;
+  const bounds = st?.redRect;
+  if (!sd?.rect || !bounds) return false;
+  const aspect = sd.rect.w / Math.max(sd.rect.h, 0.001);
+  const bw = bounds.w;
+  const bh = bounds.h;
+  let w;
+  let h;
+  if (aspect >= bw / bh) {
+    w = bw;
+    h = bw / aspect;
+  } else {
+    h = bh;
+    w = bh * aspect;
+  }
+  sd.rect = clampRectToStage({
+    x: bounds.x + (bw - w) / 2,
+    y: bounds.y + (bh - h) / 2,
+    w,
+    h,
+    angle: Number(sd.rect.angle) || 0,
+  });
+  markSessionDesignDirty(st);
+  return true;
 }
 
 function placementOverlayModeActive(ctx, st, data) {
@@ -83,6 +143,7 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
 export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { onPlaced } = {}) {
   if (!designRow?.id) return false;
   const rect = resolveInitialDesignRect(ctx, st, data, brandAssets);
+  const normalized = clampRectToStage({ ...rect, angle: Number(rect.angle) || 0 });
   st.sessionTestDesign = {
     designId: Number(designRow.id),
     previewUrl: designRow.preview_url || "",
@@ -90,7 +151,12 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     viewKey: st.activeView || "front",
     designType: st.activeDesignType || "classic",
     sessionKey: sessionKey(st),
-    rect: clampRectToStage({ ...rect, angle: Number(rect.angle) || 0 }),
+    rect: normalized,
+    savedRect: null,
+    dirty: true,
+    testProductRowId: null,
+    testProductCreating: false,
+    previewCache: null,
   };
   onPlaced?.(st.sessionTestDesign);
   return true;
@@ -107,7 +173,23 @@ function toggleHandles(el, active) {
   });
 }
 
-function drawSessionRect(el, rect, active) {
+function updateSessionToolbar(layer, el, rect, dirty) {
+  const toolbar = layer?.querySelector("[data-session-toolbar]");
+  if (!toolbar || !rect) return;
+  toolbar.style.left = `${rect.x * 100}%`;
+  toolbar.style.top = `${rect.y * 100}%`;
+  toolbar.style.width = `${rect.w * 100}%`;
+  toolbar.style.height = `${rect.h * 100}%`;
+  const angle = Number(rect.angle) || 0;
+  toolbar.style.transform = angle ? `rotate(${angle}deg)` : "";
+  const saveBtn = toolbar.querySelector("[data-session-save]");
+  if (saveBtn) {
+    saveBtn.disabled = !dirty;
+    saveBtn.classList.toggle("is-dirty", !!dirty);
+  }
+}
+
+function drawSessionRect(layer, el, rect, active, dirty) {
   if (!el || !rect) return;
   el.style.left = `${rect.x * 100}%`;
   el.style.top = `${rect.y * 100}%`;
@@ -117,6 +199,7 @@ function drawSessionRect(el, rect, active) {
   el.style.transform = angle ? `rotate(${angle}deg)` : "";
   toggleHandles(el, active);
   updateResizeHandleCursors(el, rect);
+  updateSessionToolbar(layer, el, rect, dirty);
 }
 
 function sessionDesignHtml(sd) {
@@ -126,16 +209,20 @@ function sessionDesignHtml(sd) {
   return `<img class="ce-pa-session-design__img" src="${escapeHtml(sd.previewUrl)}" alt="" draggable="false" />`;
 }
 
-function renderSessionDesignEl(sd) {
+function renderSessionDesignEl(sd, dirty) {
   return `
     <div class="ce-pa-rect ce-pa-rect--session-design is-active" data-session-design title="${escapeHtml(sd.title || "Test design")}">
       ${sessionDesignHtml(sd)}
       <span class="ce-pa-move-handle is-visible" data-session-move title="Move" aria-hidden="true"></span>
       ${rectHandlesHtml("session-design")}
+    </div>
+    <div class="ce-pa-session-design-toolbar" data-session-toolbar>
+      <button type="button" class="btn btn-secondary btn-xs ce-pa-session-align-btn" data-session-align title="Align to print area">Align to print area</button>
+      <button type="button" class="btn btn-primary btn-xs ce-pa-session-save-btn" data-session-save title="Apply to Printify" aria-label="Apply to Printify" ${dirty ? "" : "disabled"}>✓</button>
     </div>`;
 }
 
-export function refreshSessionDesignLayer(stageInner, st, { onChange } = {}) {
+export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyChange } = {}) {
   const layer = stageInner?.querySelector?.("[data-session-design-layer]");
   if (!layer) return null;
 
@@ -148,20 +235,28 @@ export function refreshSessionDesignLayer(stageInner, st, { onChange } = {}) {
   }
 
   layer.hidden = false;
+  const dirty = isSessionDesignDirty(st);
   let el = layer.querySelector("[data-session-design]");
   if (!el) {
-    layer.innerHTML = renderSessionDesignEl(sd);
+    layer.innerHTML = renderSessionDesignEl(sd, dirty);
     el = layer.querySelector("[data-session-design]");
   } else {
     const img = el.querySelector(".ce-pa-session-design__img");
     if (img && sd.previewUrl && img.src !== sd.previewUrl) img.src = sd.previewUrl;
+    const saveBtn = layer.querySelector("[data-session-save]");
+    if (saveBtn) {
+      saveBtn.disabled = !dirty;
+      saveBtn.classList.toggle("is-dirty", dirty);
+    }
   }
-  drawSessionRect(el, sd.rect, true);
+  drawSessionRect(layer, el, sd.rect, true, dirty);
+  onDirtyChange?.(dirty);
   return el;
 }
 
-function bindSessionDesignEl(el, st, stageInner, { onChange } = {}) {
+function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign } = {}) {
   let drag = null;
+  const layer = stageInner?.querySelector("[data-session-design-layer]");
 
   const getStageBox = () => {
     const w = stageInner?.clientWidth || 0;
@@ -180,10 +275,32 @@ function bindSessionDesignEl(el, st, stageInner, { onChange } = {}) {
   };
 
   const syncRect = (rect) => {
-    if (st.sessionTestDesign) st.sessionTestDesign.rect = { ...rect };
-    drawSessionRect(el, rect, true);
+    if (st.sessionTestDesign) {
+      st.sessionTestDesign.rect = { ...rect };
+      markSessionDesignDirty(st);
+    }
+    drawSessionRect(layer, el, rect, true, isSessionDesignDirty(st));
     onChange?.();
   };
+
+  layer?.querySelector("[data-session-align]")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (onAlign?.()) {
+      const sd = st.sessionTestDesign;
+      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
+      onChange?.();
+    } else if (alignSessionDesignToPrintArea(st)) {
+      const sd = st.sessionTestDesign;
+      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
+      onChange?.();
+    }
+  });
+
+  layer?.querySelector("[data-session-save]")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (!isSessionDesignDirty(st)) return;
+    void onSave?.();
+  });
 
   el.querySelectorAll("[data-resize]").forEach((handle) => {
     handle.addEventListener("mousedown", (ev) => {

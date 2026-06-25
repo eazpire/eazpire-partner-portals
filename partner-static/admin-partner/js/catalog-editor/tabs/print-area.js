@@ -49,6 +49,11 @@ import { mountViewDock, removeViewDock, remountViewDock, updateViewDockActive } 
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import {
+  bindSessionTestProductFlow,
+  refreshSessionTestProductMock,
+  applySessionTestProductMockToState,
+} from "../print-area/test-products.js";
+import {
   printAreaMainSourceContext,
   applyPrintAreaInheritanceToState,
   collectMainSourceVersionUpdates,
@@ -367,6 +372,15 @@ export function bindPrintAreaTab(ctx, root) {
   };
   ctx.printAreaImageGridCallbacks = imageGridCallbacks;
 
+  const refreshPrintifyViewer = () => {
+    ctx.printAreaViewerHandle?.refreshPrintify?.(st);
+  };
+
+  const onSessionTestProductMockReady = (preview) => {
+    if (preview) applySessionTestProductMockToState(st, preview, st.activeView);
+    refreshPrintifyViewer();
+  };
+
   const sidebarCallbacks = {
     ctx,
     imageGridCallbacks,
@@ -396,6 +410,7 @@ export function bindPrintAreaTab(ctx, root) {
       ctx.printAreaViewerHandle?.refreshSessionDesign?.();
       ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
     },
+    onMockReady: onSessionTestProductMockReady,
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, data, dt);
       applyPrintAreaInheritanceToState(st, ctx, data, printAreaMainSourceContext(ctx));
@@ -424,9 +439,20 @@ export function bindPrintAreaTab(ctx, root) {
 
   bindPrintAreaSidebar(root, st, data, sidebarCallbacks);
 
-  const refreshPrintifyViewer = () => {
-    ctx.printAreaViewerHandle?.refreshPrintify?.(st);
-  };
+  const sessionTestFlow = bindSessionTestProductFlow(ctx, st, {
+    onStatus: (msg) => {
+      const statusEl = root.querySelector("#ce-pa-test-products-status");
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = msg;
+      }
+    },
+    onMockReady: onSessionTestProductMockReady,
+    onDesignPlaced: () => {
+      ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+      ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+    },
+  });
 
   const syncMainPrintAreaStage = (full = false) => {
     if (full) ctx.printAreaViewerHandle?.redraw?.();
@@ -448,10 +474,12 @@ export function bindPrintAreaTab(ctx, root) {
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: onPrintAreaStageChange,
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
+    onSessionDesignSave: () => sessionTestFlow.onSave(),
     brandAssets: getEffectiveBrandAssets(),
     onMagnify: () => {
       ctx.printAreaFullscreenHandle = openPrintAreaFullscreen(ctx, st, data, {
         onStateChange: onPrintAreaStageChange,
+        onSessionDesignSave: () => sessionTestFlow.onSave(),
         onClose: () => {
           syncMainPrintAreaStage(true);
           ctx.printAreaFullscreenHandle = null;
@@ -461,7 +489,7 @@ export function bindPrintAreaTab(ctx, root) {
     },
   });
 
-  const onViewDockChange = (viewKey) => {
+  const onViewDockChange = async (viewKey) => {
     loadViewIntoState(st, data, viewKey);
     updateViewDockActive(st);
     refreshPlacementSummary(root, st);
@@ -475,6 +503,14 @@ export function bindPrintAreaTab(ctx, root) {
     });
     ctx.printAreaViewerHandle?.refreshSessionDesign?.();
     refreshPrintAreaViewer();
+    if (st.sessionTestDesign?.testProductRowId) {
+      try {
+        await refreshSessionTestProductMock(st, viewKey);
+        refreshPrintifyViewer();
+      } catch (err) {
+        console.warn("Session test product mock refresh failed", err);
+      }
+    }
   };
 
   const mountOrRefreshViewDock = () => {

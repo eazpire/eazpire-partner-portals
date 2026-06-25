@@ -6,6 +6,7 @@ import {
   fetchTestPrintifyProducts,
   fetchTestPrintifyProductPreview,
   fetchTestPrintifyCreations,
+  updateTestPrintifyProductPlacement,
 } from "../api.js";
 import {
   printAreaVersionSlug,
@@ -17,6 +18,8 @@ import {
   getSessionDesignPlacementForApi,
   placeSessionTestDesign,
   clearSessionTestDesign,
+  markSessionDesignSaved,
+  isSessionDesignDirty,
 } from "./design-session-overlay.js";
 
 const previewCache = new Map();
@@ -26,6 +29,14 @@ function capitalizeMode(m) {
   if (s === "template") return "Template";
   if (s === "admin") return "Admin";
   return "Calculated";
+}
+
+function normViewKey(viewKey) {
+  return String(viewKey || "front")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
 }
 
 function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = true, designId } = {}) {
@@ -55,6 +66,85 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = t
     body.design_session_placement = sessionPlacement;
   }
   return body;
+}
+
+function mockUrlFromPreview(preview, viewKey, colorKey = "default") {
+  if (!preview) return null;
+  const vk = normViewKey(viewKey);
+  const byColor = preview.views_by_color || {};
+  const colors = preview.colors || [];
+  const color =
+    colorKey && byColor[colorKey]
+      ? colorKey
+      : colors[0]?.color_key || (byColor.default ? "default" : Object.keys(byColor)[0]);
+  const views = byColor[color] || byColor.default || [];
+  const match = views.find((v) => normViewKey(v.view_key) === vk) || views[0];
+  return match?.url || preview.thumbnail_url || null;
+}
+
+/**
+ * Apply cached test-product preview URLs to the inline Printify mock viewer.
+ */
+export function applySessionTestProductMockToState(st, preview, viewKey) {
+  if (!st || !preview) return null;
+  const sd = st.sessionTestDesign;
+  if (sd) sd.previewCache = preview;
+  const vk = normViewKey(viewKey || st.activeView || "front");
+  const url = mockUrlFromPreview(preview, vk);
+  if (url) {
+    if (!st.mockUrlsByView) st.mockUrlsByView = {};
+    st.mockUrlsByView[vk] = url;
+    st.useSessionTestProductMock = true;
+  }
+  return url;
+}
+
+export async function refreshSessionTestProductMock(st, viewKey, { colorKey } = {}) {
+  const sd = st?.sessionTestDesign;
+  const rowId = Number(sd?.testProductRowId);
+  if (!rowId) return null;
+
+  const vk = normViewKey(viewKey || st.activeView || "front");
+  let preview = sd.previewCache;
+  if (!preview || preview._viewKey !== vk) {
+    const res = await fetchTestPrintifyProductPreview(rowId, { view_key: vk });
+    if (!res?.ok) return null;
+    preview = { ...res, _viewKey: vk };
+    previewCache.set(String(rowId), preview);
+    if (sd) sd.previewCache = preview;
+  }
+
+  const url = mockUrlFromPreview(preview, vk, colorKey);
+  applySessionTestProductMockToState(st, preview, vk);
+  return url;
+}
+
+export async function applySessionDesignToPrintify(ctx, st, { onStatus, viewKey } = {}) {
+  const sd = st?.sessionTestDesign;
+  const rowId = Number(sd?.testProductRowId);
+  if (!rowId) throw new Error("No test product — choose a design first.");
+  if (!isSessionDesignDirty(st)) return null;
+
+  const placement = getSessionDesignPlacementForApi(st);
+  if (!placement) throw new Error("No design placement to apply.");
+
+  onStatus?.("Applying design to Printify…");
+  const vk = normViewKey(viewKey || st.activeView || placement.view_key || "front");
+  const res = await updateTestPrintifyProductPlacement({
+    id: rowId,
+    design_session_placement: placement,
+    view_key: vk,
+  });
+  if (!res?.ok) {
+    throw new Error(res?.message || res?.error || "Apply failed");
+  }
+
+  previewCache.set(String(rowId), { ...res, _viewKey: vk });
+  if (sd) sd.previewCache = previewCache.get(String(rowId));
+  markSessionDesignSaved(st);
+  applySessionTestProductMockToState(st, res, vk);
+  onStatus?.("Design applied to Printify.");
+  return res;
 }
 
 function placementBadgesHtml(placementModes) {
@@ -397,7 +487,11 @@ export async function openTestProductsModal(ctx) {
   await loadTestProductsGrid(ctx);
 }
 
-export async function createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign = true, designId } = {}) {
+export async function createTestProductFromPrintArea(
+  ctx,
+  st,
+  { onStatus, randomDesign = true, designId, keepSession = false } = {}
+) {
   if (!ctx?.productKey || !ctx?.selectedPrintProviderId) {
     throw new Error("Select a print provider first.");
   }
@@ -416,7 +510,13 @@ export async function createTestProductFromPrintArea(ctx, st, { onStatus, random
     throw new Error(res?.message || res?.error || "Create failed");
   }
   onStatus?.(`Created: ${res.printify_product_id || "OK"}`);
-  clearSessionTestDesign(st);
+  if (!keepSession) {
+    clearSessionTestDesign(st);
+  } else if (st.sessionTestDesign && res.id) {
+    st.sessionTestDesign.testProductRowId = Number(res.id);
+    st.sessionTestDesign.testProductCreating = false;
+    markSessionDesignSaved(st);
+  }
   return res;
 }
 
@@ -533,33 +633,62 @@ function closeDesignPickerModal() {
 }
 
 async function runCreateWithRandom() {
-  const { ctx, st, onStatus } = createChooserCallbacks || {};
+  const { ctx, st, onStatus, onMockReady } = createChooserCallbacks || {};
   if (!ctx || !st) return;
   closeDesignPickerModal();
   closeCreateChooserModal();
   try {
     onStatus?.("Working…");
-    await createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign: true });
+    const res = await createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign: true });
     onStatus?.("Test product created.");
+    if (res?.id) {
+      const preview = await fetchTestPrintifyProductPreview(res.id, { view_key: st.activeView });
+      if (preview?.ok) onMockReady?.(preview);
+    }
   } catch (e) {
     onStatus?.(e?.message || "Create failed");
   }
 }
 
 async function runPlaceDesign(designId, designRow) {
-  const { ctx, st, onStatus, onDesignPlaced, data, brandAssets } = createChooserCallbacks || {};
+  const { ctx, st, onStatus, onDesignPlaced, onMockReady, data, brandAssets } = createChooserCallbacks || {};
   if (!ctx || !st || !designId) return;
   const row = designRow || { id: designId };
   closeDesignPickerModal();
   closeCreateChooserModal();
+
   const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
     onPlaced: () => {
       onDesignPlaced?.();
-      onStatus?.(`Design #${designId} placed on print area. Adjust position, then click Create Test Product.`);
     },
   });
   if (!placed) {
     onStatus?.("Could not place design on print area.");
+    return;
+  }
+
+  onStatus?.(`Design #${designId} placed — creating test product…`);
+  if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = true;
+
+  try {
+    const res = await createTestProductFromPrintArea(ctx, st, {
+      onStatus,
+      randomDesign: false,
+      designId,
+      keepSession: true,
+    });
+    const rowId = Number(res?.id || st.sessionTestDesign?.testProductRowId);
+    if (rowId) {
+      const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
+      if (preview?.ok) {
+        applySessionTestProductMockToState(st, preview, st.activeView);
+        onMockReady?.(preview);
+      }
+    }
+    onStatus?.("Test product ready — adjust design, then click ✓ to apply changes.");
+  } catch (e) {
+    if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
+    onStatus?.(e?.message || "Background create failed");
   }
 }
 
@@ -631,6 +760,7 @@ export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
     st,
     onStatus: callbacks.onStatus || null,
     onDesignPlaced: callbacks.onDesignPlaced || null,
+    onMockReady: callbacks.onMockReady || null,
     data: callbacks.data || ctx?.printAreaData || null,
     brandAssets: callbacks.brandAssets || null,
   };
@@ -638,20 +768,58 @@ export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
   setModalOpen(el, true);
 }
 
-export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced } = {}) {
+export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady } = {}) {
   if (!hasSessionTestDesign(st)) {
-    openCreateTestProductChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced });
+    openCreateTestProductChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady });
     return;
   }
+
+  const sd = st.sessionTestDesign;
+  if (sd?.testProductRowId) {
+    if (isSessionDesignDirty(st)) {
+      try {
+        onStatus?.("Applying pending changes…");
+        await applySessionDesignToPrintify(ctx, st, { onStatus });
+        onMockReady?.(sd.previewCache);
+      } catch (e) {
+        onStatus?.(e?.message || "Apply failed");
+      }
+      return;
+    }
+    openTestProductsModal(ctx);
+    onStatus?.("Test product already exists — opened list.");
+    return;
+  }
+
   try {
     onStatus?.("Working…");
     await createTestProductFromPrintArea(ctx, st, {
       onStatus,
       randomDesign: false,
       designId: st.sessionTestDesign.designId,
+      keepSession: true,
     });
     onStatus?.("Test product created.");
   } catch (e) {
     onStatus?.(e?.message || "Create failed");
   }
+}
+
+export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
+  const { onStatus, onMockReady, onDesignPlaced, onDirtyChange } = callbacks;
+  return {
+    async onSave() {
+      try {
+        await applySessionDesignToPrintify(ctx, st, {
+          onStatus,
+          viewKey: st.activeView,
+        });
+        onMockReady?.(st.sessionTestDesign?.previewCache);
+        onDesignPlaced?.();
+      } catch (e) {
+        onStatus?.(e?.message || "Apply failed");
+      }
+    },
+    onDirtyChange,
+  };
 }

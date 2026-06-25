@@ -338,9 +338,13 @@ export async function deleteTestPrintifyProducts(ids) {
   });
 }
 
-export async function fetchTestPrintifyProductPreview(id) {
+export async function fetchTestPrintifyProductPreview(id, { view_key } = {}) {
   return partnerFetch("admin-eazpire-test-printify-preview", {
     method: "POST",
-    body: { id },
+    body: { id, view_key: view_key || undefined },
   });
+}
+
+export async function updateTestPrintifyProductPlacement(body) {
+  return partnerFetch("admin-eazpire-test-printify-placement-update", { method: "POST", body });
 }

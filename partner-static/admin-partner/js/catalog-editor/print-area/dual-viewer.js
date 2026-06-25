@@ -175,7 +175,7 @@ export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
 }
 
 function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange } = callbacks;
+  const { onStateChange, onSessionDesignSave } = callbacks;
   let brandAssets = callbacks.brandAssets;
 
   let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
@@ -398,7 +398,10 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   bindRect(rectRed, "red");
   bindRect(rectGreen, "green");
 
-  const sessionDesignHandle = mountSessionDesignLayer(stageInner, st, { onChange: onStateChange });
+  const sessionDesignHandle = mountSessionDesignLayer(stageInner, st, {
+    onChange: onStateChange,
+    onSave: callbacks.onSessionDesignSave,
+  });
 
   root.querySelectorAll('[data-rect="red"] .ce-pa-rotate-handle, [data-rect="green"] .ce-pa-rotate-handle').forEach((handle) => {
     handle.addEventListener("mousedown", (ev) => {

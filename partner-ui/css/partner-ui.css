@@ -5270,6 +5270,43 @@ a.ce-tpl-draft-head__id:hover {
   display: block;
 }
 
+.ce-pa-session-design-toolbar {
+  position: absolute;
+  pointer-events: none;
+  z-index: 9;
+  transform-origin: center center;
+}
+.ce-pa-session-align-btn {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  white-space: nowrap;
+  max-width: 140px;
+  font-size: 0.68rem;
+  padding: 2px 6px;
+}
+.ce-pa-session-save-btn {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.ce-pa-session-save-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.ce-pa-session-save-btn.is-dirty:not(:disabled) {
+  box-shadow: 0 0 0 2px color-mix(in srgb, #7c4dff 35%, transparent);
+}
+
 .ce-pa-tp-modal,
 .ce-pa-tp-viewer {
   position: fixed;
