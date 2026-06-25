@@ -5299,6 +5299,14 @@ a.ce-tpl-draft-head__id:hover {
   border-radius: 999px;
   font-weight: 700;
 }
+.ce-pa-session-save-btn:hover,
+.ce-pa-session-save-btn:focus-visible {
+  transform: translateX(-50%);
+}
+.ce-pa-session-align-btn:hover,
+.ce-pa-session-align-btn:focus-visible {
+  transform: translateY(-50%);
+}
 .ce-pa-session-save-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;

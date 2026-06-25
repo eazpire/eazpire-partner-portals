@@ -23,8 +23,40 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+export function normSessionViewKey(viewKey) {
+  return String(viewKey || "front")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+}
+
 function sessionKey(st) {
-  return `${st.activeDesignType || "classic"}::${st.activeView || "front"}`;
+  return `${st.activeDesignType || "classic"}::${normSessionViewKey(st.activeView)}`;
+}
+
+function rectCenteredInBounds(bounds, aspect, fill = 0.7) {
+  if (!bounds) return null;
+  const bw = bounds.w;
+  const bh = bounds.h;
+  if (!(bw > 0 && bh > 0)) return null;
+  const ar = aspect > 0 ? aspect : 1;
+  let w;
+  let h;
+  if (ar >= bw / bh) {
+    w = bw * fill;
+    h = w / ar;
+  } else {
+    h = bh * fill;
+    w = h * ar;
+  }
+  return clampRectToStage({
+    x: bounds.x + (bw - w) / 2,
+    y: bounds.y + (bh - h) / 2,
+    w,
+    h,
+    angle: 0,
+  });
 }
 
 function snapshotRect(rect) {
@@ -46,8 +78,10 @@ export function hasSessionTestDesign(st) {
 export function getSessionDesignPlacementForApi(st) {
   const sd = st?.sessionTestDesign;
   if (!sd?.rect) return null;
+  const view_key = normSessionViewKey(st.activeView || sd.viewKey || "front");
+  sd.viewKey = view_key;
   return {
-    view_key: sd.viewKey || st.activeView || "front",
+    view_key,
     rect: snapshotRect(sd.rect),
   };
 }
@@ -134,6 +168,9 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
   }
   const md = getMockupDefaultForView(data?.mockup_defaults, st.activeView);
   const aspect = aspectRatioFromDefault(md, data, st.activeView);
+  const bounds = st.greenRect || st.redRect;
+  const inBounds = rectCenteredInBounds(bounds, aspect > 0 ? aspect : 1);
+  if (inBounds) return inBounds;
   return defaultCenteredRect(aspect > 0 ? aspect : 1, 0.45);
 }
 
@@ -148,7 +185,7 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     designId: Number(designRow.id),
     previewUrl: designRow.preview_url || "",
     title: designRow.design_title || `Design ${designRow.id}`,
-    viewKey: st.activeView || "front",
+    viewKey: normSessionViewKey(st.activeView),
     designType: st.activeDesignType || "classic",
     sessionKey: sessionKey(st),
     rect: normalized,

@@ -128,8 +128,8 @@ export async function applySessionDesignToPrintify(ctx, st, { onStatus, viewKey 
   const placement = getSessionDesignPlacementForApi(st);
   if (!placement) throw new Error("No design placement to apply.");
 
-  onStatus?.("Applying design to Printify…");
-  const vk = normViewKey(viewKey || st.activeView || placement.view_key || "front");
+  onStatus?.("Updating product…");
+  const vk = normViewKey(viewKey || placement.view_key || st.activeView || "front");
   const res = await updateTestPrintifyProductPlacement({
     id: rowId,
     design_session_placement: placement,
@@ -140,10 +140,13 @@ export async function applySessionDesignToPrintify(ctx, st, { onStatus, viewKey 
   }
 
   previewCache.set(String(rowId), { ...res, _viewKey: vk });
-  if (sd) sd.previewCache = previewCache.get(String(rowId));
+  if (sd) {
+    sd.previewCache = previewCache.get(String(rowId));
+    sd.viewKey = vk;
+  }
   markSessionDesignSaved(st);
   applySessionTestProductMockToState(st, res, vk);
-  onStatus?.("Design applied to Printify.");
+  onStatus?.("Product updated");
   return res;
 }
 
@@ -816,6 +819,7 @@ export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
         });
         onMockReady?.(st.sessionTestDesign?.previewCache);
         onDesignPlaced?.();
+        onDirtyChange?.(false);
       } catch (e) {
         onStatus?.(e?.message || "Apply failed");
       }

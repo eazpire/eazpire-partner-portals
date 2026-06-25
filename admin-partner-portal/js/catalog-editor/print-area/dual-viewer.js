@@ -638,7 +638,11 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
 
   main.innerHTML = renderDualViewer(st, data, ctx, brandAssets);
 
-  const stageHandle = bindStageInteractions(main, ctx, st, data, { onStateChange, brandAssets });
+  const stageHandle = bindStageInteractions(main, ctx, st, data, {
+    onStateChange,
+    brandAssets,
+    onSessionDesignSave: callbacks.onSessionDesignSave,
+  });
 
   const refreshPatternLayer = () => stageHandle.refreshPattern?.();
 

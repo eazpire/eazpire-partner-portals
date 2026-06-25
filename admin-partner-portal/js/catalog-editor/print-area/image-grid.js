@@ -157,8 +157,18 @@ export function resolveLeftViewerImage(st, data, viewKey) {
   return printAreaTemplateImageUrl(md);
 }
 
+function normViewLookupKey(viewKey) {
+  return String(viewKey || "front")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+}
+
 export function resolvePrintifyMockUrl(st, viewKey) {
-  if (st.mockUrlsByView?.[viewKey]) return st.mockUrlsByView[viewKey];
+  const vk = normViewLookupKey(viewKey || st.activeView);
+  if (st.mockUrlsByView?.[vk]) return st.mockUrlsByView[vk];
+  if (viewKey && st.mockUrlsByView?.[viewKey]) return st.mockUrlsByView[viewKey];
   const group = st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId);
-  return pickMockUrlForView(st.mockupImagesByView, viewKey, group?.title);
+  return pickMockUrlForView(st.mockupImagesByView, vk, group?.title);
 }
