@@ -392,6 +392,10 @@ export function bindPrintAreaTab(ctx, root) {
       notifyPrintAreaDirty(ctx);
     },
     onPrintAreaRefresh: refreshPrintAreaViewer,
+    onSessionDesignPlaced: () => {
+      ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+      ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+    },
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, data, dt);
       applyPrintAreaInheritanceToState(st, ctx, data, printAreaMainSourceContext(ctx));
@@ -469,6 +473,7 @@ export function bindPrintAreaTab(ctx, root) {
         notifyPrintAreaDirty(ctx);
       });
     });
+    ctx.printAreaViewerHandle?.refreshSessionDesign?.();
     refreshPrintAreaViewer();
   };
 

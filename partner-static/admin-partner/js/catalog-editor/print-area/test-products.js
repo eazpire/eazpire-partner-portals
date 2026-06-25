@@ -12,6 +12,12 @@ import {
   resolvePrintAreaTemplateId,
   resolvePrintAreaVersion,
 } from "./helpers.js";
+import {
+  hasSessionTestDesign,
+  getSessionDesignPlacementForApi,
+  placeSessionTestDesign,
+  clearSessionTestDesign,
+} from "./design-session-overlay.js";
 
 const previewCache = new Map();
 
@@ -41,6 +47,12 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = t
   };
   if (!randomDesign && designId != null) {
     body.design_id = Number(designId);
+  } else if (!randomDesign && st.sessionTestDesign?.designId) {
+    body.design_id = Number(st.sessionTestDesign.designId);
+  }
+  const sessionPlacement = getSessionDesignPlacementForApi(st);
+  if (!randomDesign && sessionPlacement) {
+    body.design_session_placement = sessionPlacement;
   }
   return body;
 }
@@ -404,12 +416,11 @@ export async function createTestProductFromPrintArea(ctx, st, { onStatus, random
     throw new Error(res?.message || res?.error || "Create failed");
   }
   onStatus?.(`Created: ${res.printify_product_id || "OK"}`);
+  clearSessionTestDesign(st);
   return res;
 }
 
-let createChooserCtx = null;
-let createChooserSt = null;
-let createChooserOnStatus = null;
+let createChooserCallbacks = null;
 let designsCursor = null;
 let designsLoading = false;
 
@@ -500,15 +511,16 @@ function ensureDesignPickerModal() {
     const btn = e.target.closest("[data-design-id]");
     if (!btn || btn.disabled) return;
     const id = Number(btn.dataset.designId);
-    if (id) void runCreateWithDesign(id);
+    if (!id) return;
+    const title = btn.querySelector(".ce-pa-tp-design-card__title")?.textContent || "";
+    const previewUrl = btn.querySelector("img")?.getAttribute("src") || "";
+    void runPlaceDesign(id, { id, design_title: title, preview_url: previewUrl });
   });
   return el;
 }
 
 function closeCreateChooserModal() {
-  createChooserCtx = null;
-  createChooserSt = null;
-  createChooserOnStatus = null;
+  createChooserCallbacks = null;
   setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
 }
 
@@ -521,9 +533,7 @@ function closeDesignPickerModal() {
 }
 
 async function runCreateWithRandom() {
-  const ctx = createChooserCtx;
-  const st = createChooserSt;
-  const onStatus = createChooserOnStatus;
+  const { ctx, st, onStatus } = createChooserCallbacks || {};
   if (!ctx || !st) return;
   closeDesignPickerModal();
   closeCreateChooserModal();
@@ -536,34 +546,20 @@ async function runCreateWithRandom() {
   }
 }
 
-async function runCreateWithDesign(designId) {
-  const ctx = createChooserCtx;
-  const st = createChooserSt;
-  const onStatus = createChooserOnStatus;
+async function runPlaceDesign(designId, designRow) {
+  const { ctx, st, onStatus, onDesignPlaced, data, brandAssets } = createChooserCallbacks || {};
   if (!ctx || !st || !designId) return;
-  const grid = document.querySelector("[data-ce-pa-design-grid]");
-  grid?.querySelectorAll("button").forEach((b) => {
-    b.disabled = true;
+  const row = designRow || { id: designId };
+  closeDesignPickerModal();
+  closeCreateChooserModal();
+  const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
+    onPlaced: () => {
+      onDesignPlaced?.();
+      onStatus?.(`Design #${designId} placed on print area. Adjust position, then click Create Test Product.`);
+    },
   });
-  try {
-    onStatus?.("Working…");
-    await createTestProductFromPrintArea(ctx, st, {
-      onStatus,
-      randomDesign: false,
-      designId,
-    });
-    onStatus?.("Test product created.");
-    closeDesignPickerModal();
-  } catch (e) {
-    onStatus?.(e?.message || "Create failed");
-    const err = document.querySelector("[data-ce-pa-design-err]");
-    if (err) {
-      err.hidden = false;
-      err.textContent = e?.message || "Create failed";
-    }
-    grid?.querySelectorAll("button").forEach((b) => {
-      b.disabled = false;
-    });
+  if (!placed) {
+    onStatus?.("Could not place design on print area.");
   }
 }
 
@@ -586,7 +582,7 @@ async function loadDesignGrid(append = false) {
   const empty = el.querySelector("[data-ce-pa-design-empty]");
   const err = el.querySelector("[data-ce-pa-design-err]");
   const hint = el.querySelector("[data-ce-pa-design-hint]");
-  if (!grid || !createChooserSt) return;
+  if (!grid || !createChooserCallbacks?.st) return;
   if (designsLoading) return;
   designsLoading = true;
   err.hidden = true;
@@ -594,11 +590,11 @@ async function loadDesignGrid(append = false) {
     grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
     designsCursor = null;
   }
-  hint.textContent = `Design type: ${createChooserSt.activeDesignType || "classic"}`;
+  hint.textContent = `Design type: ${createChooserCallbacks.st.activeDesignType || "classic"}`;
 
   try {
     const res = await fetchTestPrintifyCreations({
-      design_type: createChooserSt.activeDesignType || "classic",
+      design_type: createChooserCallbacks.st.activeDesignType || "classic",
       cursor: append ? designsCursor : undefined,
       limit: 40,
     });
@@ -629,10 +625,33 @@ function openDesignPickerModal() {
   void loadDesignGrid(false);
 }
 
-export function openCreateTestProductChooser(ctx, st, { onStatus } = {}) {
-  createChooserCtx = ctx;
-  createChooserSt = st;
-  createChooserOnStatus = onStatus || null;
+export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
+  createChooserCallbacks = {
+    ctx,
+    st,
+    onStatus: callbacks.onStatus || null,
+    onDesignPlaced: callbacks.onDesignPlaced || null,
+    data: callbacks.data || ctx?.printAreaData || null,
+    brandAssets: callbacks.brandAssets || null,
+  };
   const el = ensureCreateChooserModal();
   setModalOpen(el, true);
+}
+
+export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced } = {}) {
+  if (!hasSessionTestDesign(st)) {
+    openCreateTestProductChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced });
+    return;
+  }
+  try {
+    onStatus?.("Working…");
+    await createTestProductFromPrintArea(ctx, st, {
+      onStatus,
+      randomDesign: false,
+      designId: st.sessionTestDesign.designId,
+    });
+    onStatus?.("Test product created.");
+  } catch (e) {
+    onStatus?.(e?.message || "Create failed");
+  }
 }

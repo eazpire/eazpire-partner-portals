@@ -13,6 +13,7 @@ import {
 import { resolveLeftViewerImage, resolvePrintifyMockUrl } from "./image-grid.js";
 import { renderPatternOverlayHtml } from "./pattern-preview.js";
 import { resolvePlacementOverlays, refreshPlacementOverlayLayer, renderPlacementOverlaysHtml } from "./placement-overlays.js";
+import { mountSessionDesignLayer } from "./design-session-overlay.js";
 import {
   rectHandlesHtml,
   resizeRectByCorner,
@@ -97,6 +98,7 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
           </div>
           <div class="ce-pa-pattern-layer" data-pattern-layer>${renderPatternOverlayHtml(st)}</div>
           <div class="ce-pa-placement-layer" data-placement-layer>${overlays || ""}</div>
+          <div class="ce-pa-session-design-layer" data-session-design-layer hidden></div>
           ${
             showGreenRect
               ? `<div class="ce-pa-rect ce-pa-rect--placement ${st.activeLayer === "green" ? "is-active" : ""}" data-rect="green" title="Creator placement">
@@ -229,6 +231,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     const patternLayer = root.querySelector("[data-pattern-layer]");
     if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
     refreshOverlays();
+    sessionDesignHandle.refresh?.();
   };
 
   const refresh = (nextSt = st, nextData = data) => {
@@ -394,6 +397,8 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 
   bindRect(rectRed, "red");
   bindRect(rectGreen, "green");
+
+  const sessionDesignHandle = mountSessionDesignLayer(stageInner, st, { onChange: onStateChange });
 
   root.querySelectorAll('[data-rect="red"] .ce-pa-rotate-handle, [data-rect="green"] .ce-pa-rotate-handle').forEach((handle) => {
     handle.addEventListener("mousedown", (ev) => {
@@ -605,12 +610,18 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
       const patternLayer = root.querySelector("[data-pattern-layer]");
       if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
     },
-    refreshOverlays,
+    refreshOverlays: () => {
+      refreshOverlays();
+      sessionDesignHandle.refresh?.();
+    },
+    refreshSessionDesign: () => sessionDesignHandle.refresh?.(),
     setBrandAssets(next) {
       brandAssets = next;
       refreshOverlays();
+      sessionDesignHandle.refresh?.();
     },
     destroy() {
+      sessionDesignHandle.destroy?.();
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     },
@@ -660,6 +671,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     redraw: () => stageHandle.redraw?.(),
     redrawStageRects: () => stageHandle.redrawStageRects?.(),
     refreshOverlays: () => stageHandle.refreshOverlays?.(),
+    refreshSessionDesign: () => stageHandle.refreshSessionDesign?.(),
     setBrandAssets: (next) => stageHandle.setBrandAssets?.(next),
     destroy() {
       stageHandle.destroy?.();

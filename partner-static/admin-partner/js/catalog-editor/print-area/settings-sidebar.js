@@ -18,7 +18,7 @@ import {
 } from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
-import { openCreateTestProductChooser, openTestProductsModal } from "./test-products.js";
+import { openTestProductsModal, createTestProductWithSessionDesign } from "./test-products.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -172,15 +172,18 @@ function renderPlacementSection(st, data, ctx, msCtx) {
 
 function renderTestProductsSection() {
   return `
-    <div class="ce-pa-test-products">
-      <button type="button" class="btn btn-secondary btn-sm ce-pa-open-test-products" id="ce-pa-open-test-products">
-        Test Products
-      </button>
-      <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
-        Create Test Product
-      </button>
-      <p class="ce-hint ce-pa-test-products-hint" id="ce-pa-test-products-status" hidden></p>
-    </div>`;
+    <details class="ce-pa-acc ce-pa-acc--test-products">
+      <summary class="ce-pa-acc-summary-row"><span>Test Products</span></summary>
+      <div class="ce-pa-acc-body ce-pa-test-products">
+        <button type="button" class="btn btn-secondary btn-sm ce-pa-open-test-products" id="ce-pa-open-test-products">
+          Test Products
+        </button>
+        <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
+          Create Test Product
+        </button>
+        <p class="ce-hint ce-pa-test-products-hint" id="ce-pa-test-products-status" hidden></p>
+      </div>
+    </details>`;
 }
 
 function renderImagesSection(st, data, msCtx) {
@@ -431,12 +434,19 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
   root.querySelector("#ce-pa-create-test-product")?.addEventListener("click", () => {
     if (!ctx || !st) return;
     root.querySelector("#ce-pa-create-test-product")?.blur();
-    openCreateTestProductChooser(ctx, st, {
+    const brandAssets =
+      callbacks.globalBrandAssetsRef?.current || { qr: {}, logo: {} };
+    void createTestProductWithSessionDesign(ctx, st, {
+      data,
+      brandAssets,
       onStatus: (msg) => {
         if (statusEl) {
           statusEl.hidden = false;
           statusEl.textContent = msg;
         }
+      },
+      onDesignPlaced: () => {
+        callbacks.onSessionDesignPlaced?.();
       },
     });
   });

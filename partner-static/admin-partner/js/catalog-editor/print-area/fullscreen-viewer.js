@@ -51,6 +51,7 @@ export function openPrintAreaFullscreen(ctx, st, data, callbacks = {}) {
     refresh: (nextSt = st, nextData = data) => stageHandle?.refresh?.(nextSt, nextData),
     redraw: () => stageHandle?.redraw?.(),
     redrawStageRects: () => stageHandle?.redrawStageRects?.(),
+    refreshSessionDesign: () => stageHandle?.refreshSessionDesign?.(),
     setBrandAssets: (next) => stageHandle?.setBrandAssets?.(next),
   };
 }
