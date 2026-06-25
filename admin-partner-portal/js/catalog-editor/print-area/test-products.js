@@ -5,6 +5,7 @@ import {
   deleteTestPrintifyProducts,
   fetchTestPrintifyProducts,
   fetchTestPrintifyProductPreview,
+  fetchTestPrintifyCreations,
 } from "../api.js";
 import {
   printAreaVersionSlug,
@@ -21,13 +22,13 @@ function capitalizeMode(m) {
   return "Calculated";
 }
 
-function buildTestContext(ctx, st, data = ctx?.printAreaData) {
+function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = true, designId } = {}) {
   const version = resolvePrintAreaVersion(ctx, data);
   const pid = Number(ctx.selectedPrintProviderId);
   const profile = (ctx.bundle?.publish_profiles || []).find((p) => Number(p.print_provider_id) === pid);
   const regions = ctx.bundle?.product?.regions;
   const regionCode = Array.isArray(regions) && regions.length ? regions[0] : "EU";
-  return {
+  const body = {
     product_key: ctx.productKey,
     print_provider_id: pid,
     print_area_template_id: resolvePrintAreaTemplateId(ctx, data),
@@ -36,8 +37,12 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData) {
     publish_profile_id: profile?.id ? Number(profile.id) : undefined,
     region_code: regionCode,
     placement_modes: { ...(st.publishLogicByPh || {}) },
-    random_design: true,
+    random_design: !!randomDesign,
   };
+  if (!randomDesign && designId != null) {
+    body.design_id = Number(designId);
+  }
+  return body;
 }
 
 function placementBadgesHtml(placementModes) {
@@ -380,7 +385,7 @@ export async function openTestProductsModal(ctx) {
   await loadTestProductsGrid(ctx);
 }
 
-export async function createTestProductFromPrintArea(ctx, st, { onStatus } = {}) {
+export async function createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign = true, designId } = {}) {
   if (!ctx?.productKey || !ctx?.selectedPrintProviderId) {
     throw new Error("Select a print provider first.");
   }
@@ -388,12 +393,246 @@ export async function createTestProductFromPrintArea(ctx, st, { onStatus } = {})
   const { savePrintAreaTab } = await import("../tabs/print-area.js");
   await savePrintAreaTab(ctx);
 
-  const body = buildTestContext(ctx, st);
-  onStatus?.("Creating test product with random design…");
+  const body = buildTestContext(ctx, st, undefined, { randomDesign, designId });
+  onStatus?.(
+    randomDesign
+      ? "Creating test product with random design…"
+      : `Creating test product with design #${body.design_id}…`
+  );
   const res = await createTestPrintifyProduct(body);
   if (!res?.ok) {
     throw new Error(res?.message || res?.error || "Create failed");
   }
   onStatus?.(`Created: ${res.printify_product_id || "OK"}`);
   return res;
+}
+
+let createChooserCtx = null;
+let createChooserSt = null;
+let createChooserOnStatus = null;
+let designsCursor = null;
+let designsLoading = false;
+
+function setModalOpen(el, open) {
+  if (!el) return;
+  if (open) {
+    el.classList.add("is-open");
+    el.setAttribute("aria-hidden", "false");
+    el.removeAttribute("inert");
+  } else {
+    blurModalFocus(el);
+    el.classList.remove("is-open");
+    el.setAttribute("aria-hidden", "true");
+    el.setAttribute("inert", "");
+  }
+}
+
+function ensureCreateChooserModal() {
+  let el = document.getElementById("ce-pa-tp-create-chooser");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "ce-pa-tp-create-chooser";
+  el.className = "ce-pa-tp-modal ce-pa-tp-create-chooser";
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
+  el.innerHTML = `
+    <div class="ce-pa-tp-modal__backdrop" data-ce-pa-create-close></div>
+    <div class="ce-pa-tp-modal__dialog ce-pa-tp-create-chooser__dialog" role="dialog" aria-modal="true">
+      <header class="ce-pa-tp-modal__header">
+        <h2 class="ce-pa-tp-modal__title">Create Test Product</h2>
+        <button type="button" class="btn btn-ghost btn-xs ce-pa-tp-modal__close" data-ce-pa-create-close aria-label="Close">×</button>
+      </header>
+      <div class="ce-pa-tp-modal__body ce-pa-tp-create-chooser__body">
+        <p class="ce-hint">How should we pick the design?</p>
+        <div class="ce-pa-tp-create-chooser__actions">
+          <button type="button" class="btn btn-primary" data-ce-pa-create-random>Random</button>
+          <button type="button" class="btn btn-secondary" data-ce-pa-create-choose>Choose design</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  el.querySelectorAll("[data-ce-pa-create-close]").forEach((btn) => {
+    btn.addEventListener("click", () => closeCreateChooserModal());
+  });
+  el.querySelector("[data-ce-pa-create-random]")?.addEventListener("click", () => {
+    void runCreateWithRandom();
+  });
+  el.querySelector("[data-ce-pa-create-choose]")?.addEventListener("click", () => {
+    openDesignPickerModal();
+  });
+  return el;
+}
+
+function ensureDesignPickerModal() {
+  let el = document.getElementById("ce-pa-tp-design-picker");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "ce-pa-tp-design-picker";
+  el.className = "ce-pa-tp-modal ce-pa-tp-design-picker";
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
+  el.innerHTML = `
+    <div class="ce-pa-tp-modal__backdrop" data-ce-pa-design-close></div>
+    <div class="ce-pa-tp-modal__dialog ce-pa-tp-design-picker__dialog" role="dialog" aria-modal="true">
+      <header class="ce-pa-tp-modal__header">
+        <h2 class="ce-pa-tp-modal__title">Choose design</h2>
+        <button type="button" class="btn btn-ghost btn-xs" data-ce-pa-design-close aria-label="Close">×</button>
+      </header>
+      <div class="ce-pa-tp-modal__body ce-pa-tp-design-picker__body">
+        <p class="ce-hint ce-pa-tp-design-picker__hint" data-ce-pa-design-hint></p>
+        <div class="ce-pa-tp-design-grid" data-ce-pa-design-grid></div>
+        <p class="ce-pa-tp-empty" data-ce-pa-design-empty hidden>No active designs found.</p>
+        <p class="ce-pa-tp-err" data-ce-pa-design-err hidden></p>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  el.querySelectorAll("[data-ce-pa-design-close]").forEach((btn) => {
+    btn.addEventListener("click", () => closeDesignPickerModal());
+  });
+  const grid = el.querySelector("[data-ce-pa-design-grid]");
+  grid?.addEventListener("scroll", () => {
+    if (!grid || designsLoading || !designsCursor) return;
+    if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 80) {
+      void loadDesignGrid(true);
+    }
+  });
+  grid?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-design-id]");
+    if (!btn || btn.disabled) return;
+    const id = Number(btn.dataset.designId);
+    if (id) void runCreateWithDesign(id);
+  });
+  return el;
+}
+
+function closeCreateChooserModal() {
+  createChooserCtx = null;
+  createChooserSt = null;
+  createChooserOnStatus = null;
+  setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
+}
+
+function closeDesignPickerModal() {
+  designsCursor = null;
+  designsLoading = false;
+  setModalOpen(document.getElementById("ce-pa-tp-design-picker"), false);
+  setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
+  closeCreateChooserModal();
+}
+
+async function runCreateWithRandom() {
+  const ctx = createChooserCtx;
+  const st = createChooserSt;
+  const onStatus = createChooserOnStatus;
+  if (!ctx || !st) return;
+  closeDesignPickerModal();
+  closeCreateChooserModal();
+  try {
+    onStatus?.("Working…");
+    await createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign: true });
+    onStatus?.("Test product created.");
+  } catch (e) {
+    onStatus?.(e?.message || "Create failed");
+  }
+}
+
+async function runCreateWithDesign(designId) {
+  const ctx = createChooserCtx;
+  const st = createChooserSt;
+  const onStatus = createChooserOnStatus;
+  if (!ctx || !st || !designId) return;
+  const grid = document.querySelector("[data-ce-pa-design-grid]");
+  grid?.querySelectorAll("button").forEach((b) => {
+    b.disabled = true;
+  });
+  try {
+    onStatus?.("Working…");
+    await createTestProductFromPrintArea(ctx, st, {
+      onStatus,
+      randomDesign: false,
+      designId,
+    });
+    onStatus?.("Test product created.");
+    closeDesignPickerModal();
+  } catch (e) {
+    onStatus?.(e?.message || "Create failed");
+    const err = document.querySelector("[data-ce-pa-design-err]");
+    if (err) {
+      err.hidden = false;
+      err.textContent = e?.message || "Create failed";
+    }
+    grid?.querySelectorAll("button").forEach((b) => {
+      b.disabled = false;
+    });
+  }
+}
+
+function renderDesignCard(row) {
+  const title = row.design_title || `Design ${row.id}`;
+  const thumb = row.preview_url
+    ? `<img src="${escapeHtml(row.preview_url)}" alt="" loading="lazy" />`
+    : `<span class="ce-pa-tp-design-card__placeholder">#${escapeHtml(String(row.id))}</span>`;
+  return `
+    <button type="button" class="ce-pa-tp-design-card" data-design-id="${row.id}" title="${escapeHtml(title)}">
+      <span class="ce-pa-tp-design-card__thumb">${thumb}</span>
+      <span class="ce-pa-tp-design-card__title">${escapeHtml(title)}</span>
+      <span class="ce-pa-tp-design-card__meta">#${escapeHtml(String(row.id))}</span>
+    </button>`;
+}
+
+async function loadDesignGrid(append = false) {
+  const el = ensureDesignPickerModal();
+  const grid = el.querySelector("[data-ce-pa-design-grid]");
+  const empty = el.querySelector("[data-ce-pa-design-empty]");
+  const err = el.querySelector("[data-ce-pa-design-err]");
+  const hint = el.querySelector("[data-ce-pa-design-hint]");
+  if (!grid || !createChooserSt) return;
+  if (designsLoading) return;
+  designsLoading = true;
+  err.hidden = true;
+  if (!append) {
+    grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
+    designsCursor = null;
+  }
+  hint.textContent = `Design type: ${createChooserSt.activeDesignType || "classic"}`;
+
+  try {
+    const res = await fetchTestPrintifyCreations({
+      design_type: createChooserSt.activeDesignType || "classic",
+      cursor: append ? designsCursor : undefined,
+      limit: 40,
+    });
+    if (!res?.ok) throw new Error(res?.error || "load_failed");
+    const items = res.items || [];
+    designsCursor = res.next_cursor || null;
+    if (!append) grid.innerHTML = "";
+    if (!append && !items.length) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    const frag = items.map((row) => renderDesignCard(row)).join("");
+    if (append) grid.insertAdjacentHTML("beforeend", frag);
+    else grid.innerHTML = frag;
+  } catch (e) {
+    if (!append) grid.innerHTML = "";
+    err.hidden = false;
+    err.textContent = e?.message || "Failed to load designs";
+  } finally {
+    designsLoading = false;
+  }
+}
+
+function openDesignPickerModal() {
+  const el = ensureDesignPickerModal();
+  setModalOpen(el, true);
+  void loadDesignGrid(false);
+}
+
+export function openCreateTestProductChooser(ctx, st, { onStatus } = {}) {
+  createChooserCtx = ctx;
+  createChooserSt = st;
+  createChooserOnStatus = onStatus || null;
+  const el = ensureCreateChooserModal();
+  setModalOpen(el, true);
 }

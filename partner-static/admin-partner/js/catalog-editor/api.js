@@ -310,6 +310,17 @@ export async function createTestPrintifyProduct(body) {
   return partnerFetch("admin-eazpire-test-printify-create", { method: "POST", body });
 }
 
+export async function fetchTestPrintifyCreations({ design_type, cursor, limit } = {}) {
+  return partnerFetch("admin-eazpire-test-printify-creations", {
+    method: "POST",
+    body: {
+      design_type: design_type || "classic",
+      cursor: cursor || undefined,
+      limit: limit || 40,
+    },
+  });
+}
+
 export async function fetchTestPrintifyProducts(productKey, printProviderId) {
   return partnerFetch("admin-eazpire-test-printify-list", {
     method: "POST",

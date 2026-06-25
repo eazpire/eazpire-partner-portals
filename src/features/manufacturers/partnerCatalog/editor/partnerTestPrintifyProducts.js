@@ -8,6 +8,7 @@ import {
   createTestPrintifyProduct,
   ensureTestPrintifyTable,
   buildPrintifyProductPreviewPayload,
+  listTestPrintifyCreations,
 } from "../../../admin/adminTestPrintifyProducts.js";
 import { getPrintifyProduct } from "../../../../utils/printify.js";
 import { resolvePreviewMockupPreference } from "../../../mockup/resolvePreviewMockupPreference.js";
@@ -79,12 +80,35 @@ export async function handlePartnerTestPrintifyCreate(request, env) {
 
   const body = await request.json().catch(() => ({}));
   const actor = auth.session?.email || auth.email || "partner-admin";
+  const randomDesign = body.random_design === true || body.design_id == null;
   return createTestPrintifyProduct(
     env,
-    { ...body, random_design: body.random_design !== false },
+    { ...body, random_design: randomDesign },
     actor,
     cors
   );
+}
+
+export async function handlePartnerTestPrintifyCreations(request, env) {
+  const cors = getCorsHeaders(request);
+  const auth = await requireAdminPartnerSession(request, env);
+  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+
+  const url = new URL(request.url);
+  let body = {};
+  if (request.method === "POST") {
+    body = await request.json().catch(() => ({}));
+  }
+  const result = await listTestPrintifyCreations(env, {
+    designType: body.design_type || url.searchParams.get("design_type") || "classic",
+    cursor: body.cursor || url.searchParams.get("cursor"),
+    limit: body.limit || url.searchParams.get("limit"),
+    activeOnly: true,
+  });
+  if (!result.ok) {
+    return json(result, 500, cors);
+  }
+  return json(result, 200, cors);
 }
 
 export async function handlePartnerTestPrintifyList(request, env) {

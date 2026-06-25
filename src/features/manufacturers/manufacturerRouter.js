@@ -230,6 +230,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-brand-asset-upload",
   "admin-eazpire-product-brand-asset-upload",
   "admin-eazpire-test-printify-create",
+  "admin-eazpire-test-printify-creations",
   "admin-eazpire-test-printify-list",
   "admin-eazpire-test-printify-delete",
   "admin-eazpire-test-printify-preview",
@@ -1001,6 +1002,10 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-eazpire-test-printify-create" && request.method === "POST") {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
       return tp.handlePartnerTestPrintifyCreate(request, env);
+    }
+    if (op === "admin-eazpire-test-printify-creations" && (request.method === "GET" || request.method === "POST")) {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyCreations(request, env);
     }
     if (op === "admin-eazpire-test-printify-list" && (request.method === "GET" || request.method === "POST")) {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");

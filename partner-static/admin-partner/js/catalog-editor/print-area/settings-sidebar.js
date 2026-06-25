@@ -18,7 +18,7 @@ import {
 } from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
-import { createTestProductFromPrintArea, openTestProductsModal } from "./test-products.js";
+import { openCreateTestProductChooser, openTestProductsModal } from "./test-products.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -428,29 +428,17 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
   });
 
   const statusEl = root.querySelector("#ce-pa-test-products-status");
-  root.querySelector("#ce-pa-create-test-product")?.addEventListener("click", async () => {
-    const btn = root.querySelector("#ce-pa-create-test-product");
+  root.querySelector("#ce-pa-create-test-product")?.addEventListener("click", () => {
     if (!ctx || !st) return;
-    const prev = btn.textContent;
-    btn.disabled = true;
-    if (statusEl) {
-      statusEl.hidden = false;
-      statusEl.textContent = "Working…";
-    }
-    try {
-      btn.blur();
-      await createTestProductFromPrintArea(ctx, st, {
-        onStatus: (msg) => {
-          if (statusEl) statusEl.textContent = msg;
-        },
-      });
-      if (statusEl) statusEl.textContent = "Test product created.";
-    } catch (e) {
-      if (statusEl) statusEl.textContent = e?.message || "Create failed";
-    } finally {
-      btn.disabled = false;
-      btn.textContent = prev;
-    }
+    root.querySelector("#ce-pa-create-test-product")?.blur();
+    openCreateTestProductChooser(ctx, st, {
+      onStatus: (msg) => {
+        if (statusEl) {
+          statusEl.hidden = false;
+          statusEl.textContent = msg;
+        }
+      },
+    });
   });
 
   root.querySelector("#ce-pa-open-test-products")?.addEventListener("click", () => {
