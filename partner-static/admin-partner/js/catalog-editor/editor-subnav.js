@@ -26,7 +26,34 @@ export function setSubnavDrawerCollapsed(collapsed) {
 }
 
 export function getActiveProviderIds(ctx) {
-  return (ctx.bundle?.active_providers || []).map((r) => String(r.print_provider_id));
+  const normalize = (rows) =>
+    [...new Set(
+      (rows || [])
+        .map((r) => {
+          if (typeof r === "number" || typeof r === "string") return Number(r);
+          return Number(r?.print_provider_id ?? r?.provider_id ?? r?.external_provider_id);
+        })
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .map(String)
+    )];
+
+  const fromBundle = normalize(ctx.bundle?.active_providers);
+  if (fromBundle.length) return fromBundle;
+
+  if (ctx.providersTabState?.activeIds?.size) {
+    return normalize([...ctx.providersTabState.activeIds]);
+  }
+
+  const fromPlans = normalize(
+    (ctx.bundle?.publish_plans || []).map(
+      (p) => p?.profile?.print_provider_id ?? p?.print_provider_id
+    )
+  );
+  if (fromPlans.length) return fromPlans;
+
+  return normalize(
+    (ctx.bundle?.publish_profiles || []).map((p) => p?.print_provider_id)
+  );
 }
 
 export function getVersionsForProvider(ctx, printProviderId) {
@@ -65,9 +92,7 @@ export function ensureEditorSelections(ctx) {
 export function getSubnavVisibility(ctx) {
   const providerIds = getActiveProviderIds(ctx);
   const versions = getVersionsForProvider(ctx, ctx.selectedPrintProviderId);
-  const isPrintArea = ctx.activeTab === "print_area";
-  // Print area always needs the provider bar (selection + main-source toggles), even with one provider.
-  const showProviders = isPrintArea ? providerIds.length > 0 : providerIds.length > 1;
+  const showProviders = providerIds.length > 0;
   const showVersions = versions.length > 1;
   return {
     showStack: showProviders || showVersions,

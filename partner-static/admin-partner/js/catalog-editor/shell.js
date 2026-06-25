@@ -375,6 +375,7 @@ async function loadActiveTab(ctx) {
   if (editorState) editorState.printAreaUiCleanup = null;
   if (ctx.activeTab !== "print_area") removeViewDock();
   ensureEditorSelections(ctx);
+  renderSubnav(ctx);
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;
   try {
@@ -597,8 +598,7 @@ export async function openProductEditor(productKey) {
   try {
     ctx.bundle = await fetchEditorBundle(productKey);
     overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, productKey);
-    const firstVersion = ctx.bundle.versions?.[0];
-    ctx.selectedVersionId = firstVersion?.id || null;
+    ensureEditorSelections(ctx);
     initVisibilityFromBundle(ctx);
     captureVisibilityBaseline(ctx);
     bindCatalogEditorTriSwitch(ctx, () => refreshDirtyBeforeClose(ctx));

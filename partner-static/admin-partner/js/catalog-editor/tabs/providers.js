@@ -88,11 +88,6 @@ function initProvidersState(ctx, data) {
     (data.active_providers || []).map((r) => Number(r.print_provider_id)).filter((n) => Number.isFinite(n))
   );
 
-  for (const p of merged) {
-    const pid = providerId(p);
-    if (Number.isFinite(pid) && p.is_enabled) activeFromDb.add(pid);
-  }
-
   const availableCount = merged.filter((p) => !activeFromDb.has(providerId(p))).length;
   const activeCount = merged.length - availableCount;
 

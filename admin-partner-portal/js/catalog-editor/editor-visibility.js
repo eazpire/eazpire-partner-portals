@@ -60,10 +60,7 @@ export function getVisibilityForVersion(ctx, version) {
   const map = ensureVisibilityState(ctx);
   const key = versionKey(version);
   if (map.has(key)) return map.get(key);
-  const fromConfig = readCatalogStatusFromConfig(
-    version.product_version_config,
-    ctx.bundle?.product?.catalog_status || "offline"
-  );
+  const fromConfig = readCatalogStatusFromConfig(version.product_version_config, "offline");
   map.set(key, fromConfig);
   return fromConfig;
 }
@@ -173,10 +170,7 @@ export function initVisibilityFromBundle(ctx) {
   const map = ensureVisibilityState(ctx);
   map.clear();
   for (const v of ctx.bundle?.versions || []) {
-    const status = readCatalogStatusFromConfig(
-      v.product_version_config,
-      ctx.bundle?.product?.catalog_status || "offline"
-    );
+    const status = readCatalogStatusFromConfig(v.product_version_config, "offline");
     map.set(versionKey(v), status);
   }
 }
