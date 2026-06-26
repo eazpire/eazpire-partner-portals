@@ -20,14 +20,14 @@ describe("getActiveProviderIds", () => {
     expect(ids).toEqual(["99", "331"]);
   });
 
-  it("falls back to publish plan profile ids", () => {
+  it("falls back to publish plans and versions when no tab state", () => {
     const ids = getActiveProviderIds({
       bundle: {
         active_providers: [],
-        publish_plans: [{ profile: { print_provider_id: 30 } }],
+        versions: [{ external_provider_id: 99 }, { external_provider_id: 30 }],
       },
     });
-    expect(ids).toEqual(["30"]);
+    expect(ids).toEqual(["99", "30"]);
   });
 });
 

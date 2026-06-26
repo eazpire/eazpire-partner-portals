@@ -25,6 +25,7 @@ import {
 } from "../market-country-picker.js";
 import { publishPlanForProvider } from "../editor-product-title.js";
 import { mergeVisibilityIntoVersionConfig, refreshVisibilityTriSwitch } from "../editor-visibility.js";
+import { resolveActivePrintProviderIds } from "../active-provider-ids.js";
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -84,9 +85,12 @@ function buildProviderList(data) {
 
 function initProvidersState(ctx, data) {
   const merged = buildProviderList(data);
-  const activeFromDb = new Set(
-    (data.active_providers || []).map((r) => Number(r.print_provider_id)).filter((n) => Number.isFinite(n))
-  );
+  const activeFromDb = resolveActivePrintProviderIds({
+    active_providers: data.active_providers,
+    merged_providers: merged,
+    publish_plans: data.publish_plans,
+    versions: data.versions,
+  });
 
   const availableCount = merged.filter((p) => !activeFromDb.has(providerId(p))).length;
   const activeCount = merged.length - availableCount;

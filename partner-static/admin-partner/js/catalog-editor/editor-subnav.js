@@ -1,4 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
+import { resolveActivePrintProviderIds } from "./active-provider-ids.js";
 
 /** Tabs that use the shared provider / version subheader stack. */
 export const EDITOR_SUBNAV_TAB_IDS = new Set([
@@ -26,34 +27,18 @@ export function setSubnavDrawerCollapsed(collapsed) {
 }
 
 export function getActiveProviderIds(ctx) {
-  const normalize = (rows) =>
-    [...new Set(
-      (rows || [])
-        .map((r) => {
-          if (typeof r === "number" || typeof r === "string") return Number(r);
-          return Number(r?.print_provider_id ?? r?.provider_id ?? r?.external_provider_id);
-        })
-        .filter((n) => Number.isFinite(n) && n > 0)
-        .map(String)
-    )];
-
-  const fromBundle = normalize(ctx.bundle?.active_providers);
-  if (fromBundle.length) return fromBundle;
-
   if (ctx.providersTabState?.activeIds?.size) {
-    return normalize([...ctx.providersTabState.activeIds]);
+    return [...ctx.providersTabState.activeIds].map((id) => String(id));
   }
 
-  const fromPlans = normalize(
-    (ctx.bundle?.publish_plans || []).map(
-      (p) => p?.profile?.print_provider_id ?? p?.print_provider_id
-    )
-  );
-  if (fromPlans.length) return fromPlans;
+  const ids = resolveActivePrintProviderIds({
+    active_providers: ctx.bundle?.active_providers,
+    merged_providers: ctx.providersData?.merged_providers,
+    publish_plans: ctx.bundle?.publish_plans,
+    versions: ctx.bundle?.versions,
+  });
 
-  return normalize(
-    (ctx.bundle?.publish_profiles || []).map((p) => p?.print_provider_id)
-  );
+  return [...ids].map((id) => String(id));
 }
 
 export function getVersionsForProvider(ctx, printProviderId) {
