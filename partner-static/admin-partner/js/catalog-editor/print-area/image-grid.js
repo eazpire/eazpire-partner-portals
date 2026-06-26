@@ -167,8 +167,15 @@ function normViewLookupKey(viewKey) {
 
 export function resolvePrintifyMockUrl(st, viewKey) {
   const vk = normViewLookupKey(viewKey || st.activeView);
+  const useSession =
+    st.useSessionTestProductMock || Number(st.sessionTestDesign?.testProductRowId) > 0;
+  if (useSession && st.sessionMockUrlsByView) {
+    if (st.sessionMockUrlsByView[vk]) return st.sessionMockUrlsByView[vk];
+    if (viewKey && st.sessionMockUrlsByView[viewKey]) return st.sessionMockUrlsByView[viewKey];
+  }
   if (st.mockUrlsByView?.[vk]) return st.mockUrlsByView[vk];
   if (viewKey && st.mockUrlsByView?.[viewKey]) return st.mockUrlsByView[viewKey];
+  if (useSession) return "";
   const group = st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId);
   return pickMockUrlForView(st.mockupImagesByView, vk, group?.title);
 }

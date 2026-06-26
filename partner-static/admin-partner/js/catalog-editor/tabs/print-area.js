@@ -52,6 +52,8 @@ import {
   bindSessionTestProductFlow,
   refreshSessionTestProductMock,
   applySessionTestProductMockToState,
+  hasActiveSessionTestProduct,
+  refreshPrintAreaMockViewer,
 } from "../print-area/test-products.js";
 import {
   printAreaMainSourceContext,
@@ -129,7 +131,13 @@ function loadViewIntoState(st, data, viewKey) {
   }
   st.boundsLocked = true;
   st.boundsDirty = false;
-  st.mockUrlsByView[st.activeView] = pickMockUrlForView(st.mockupImagesByView, st.activeView, getActiveColorTitle(st));
+  if (!hasActiveSessionTestProduct(st)) {
+    st.mockUrlsByView[st.activeView] = pickMockUrlForView(
+      st.mockupImagesByView,
+      st.activeView,
+      getActiveColorTitle(st)
+    );
+  }
 }
 
 function getActiveColorTitle(st) {
@@ -421,9 +429,20 @@ export function bindPrintAreaTab(ctx, root) {
       refreshPlacementValues(root, st);
       refreshPrintAreaViewer();
     },
-    onVariantGroupChange: () => {
+    onVariantGroupChange: async () => {
       refreshScopeActiveStates(root, st);
       refreshPrintAreaViewer();
+      if (hasActiveSessionTestProduct(st)) {
+        try {
+          await refreshSessionTestProductMock(st, st.activeView, {
+            force: true,
+            colorKey: getActiveColorTitle(st),
+          });
+          refreshPrintifyViewer();
+        } catch (err) {
+          console.warn("Session test product mock refresh failed", err);
+        }
+      }
     },
     onCategoryInheritChange: (categoryKey, enabled) => {
       setCategoryUseMainSource(ctx, ctx.selectedPrintProviderId, categoryKey, enabled);
@@ -477,6 +496,7 @@ export function bindPrintAreaTab(ctx, root) {
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
     onSessionDesignSave: () => sessionTestFlow.onSave(),
     brandAssets: getEffectiveBrandAssets(),
+    hasSessionTestProduct: () => hasActiveSessionTestProduct(st),
     onMagnify: () => {
       ctx.printAreaFullscreenHandle = openPrintAreaFullscreen(ctx, st, data, {
         onStateChange: onPrintAreaStageChange,
@@ -506,7 +526,10 @@ export function bindPrintAreaTab(ctx, root) {
     refreshPrintAreaViewer();
     if (st.sessionTestDesign?.testProductRowId) {
       try {
-        await refreshSessionTestProductMock(st, viewKey);
+        await refreshSessionTestProductMock(st, viewKey, {
+          force: false,
+          colorKey: getActiveColorTitle(st),
+        });
         refreshPrintifyViewer();
       } catch (err) {
         console.warn("Session test product mock refresh failed", err);
@@ -530,6 +553,29 @@ export function bindPrintAreaTab(ctx, root) {
 }
 
 async function refreshPrintifyMock(ctx, refreshPrintifyViewer) {
+  const st = ctx.printAreaState;
+  if (!st) return;
+
+  if (hasActiveSessionTestProduct(st)) {
+    try {
+      await refreshPrintAreaMockViewer(ctx, { force: true });
+      refreshPrintifyViewer?.();
+      const statusEl = ctx.printAreaRoot?.querySelector("#ce-pa-test-products-status");
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Mock refreshed from test product (Printify).";
+      }
+    } catch (err) {
+      console.error("Session test product mock refresh failed", err);
+      const statusEl = ctx.printAreaRoot?.querySelector("#ce-pa-test-products-status");
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = err?.message || "Mock refresh failed";
+      }
+    }
+    return;
+  }
+
   const printifyId = await resolvePrintifyProductId(ctx);
   if (!printifyId) return;
   try {
@@ -547,7 +593,6 @@ async function refreshPrintifyMock(ctx, refreshPrintifyViewer) {
       printify_product_id: printifyId,
       auto_mirror: false,
     });
-    const st = ctx.printAreaState;
     if (mockRes?.by_view) {
       st.mockupImagesByView = mockRes.by_view;
       for (const vk of st.viewKeys) {

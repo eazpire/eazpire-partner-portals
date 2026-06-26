@@ -666,6 +666,8 @@ export function createInitialPrintAreaState(ctx, data) {
     activeVariantGroupId,
     mockupImagesByView,
     mockUrlsByView: {},
+    sessionMockUrlsByView: {},
+    useSessionTestProductMock: false,
     mockPreviewStale: false,
     perVariantProduct: productKeyExpectsPerVariantDimensions(ctx.productKey),
     brandAssetsMode: brandFromConfig.mode,

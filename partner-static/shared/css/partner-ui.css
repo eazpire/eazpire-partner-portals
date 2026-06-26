@@ -3664,6 +3664,15 @@ body.catalog-editor-open #partner-toast {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ce-pa-viewer-subtitle {
+  margin-left: 6px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #64748b);
+  vertical-align: middle;
+}
 .ce-pa-viewer-head-spacer,
 .ce-pa-viewer-head-action {
   flex: 0 0 28px;

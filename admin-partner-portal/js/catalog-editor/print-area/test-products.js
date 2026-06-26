@@ -82,41 +82,84 @@ function mockUrlFromPreview(preview, viewKey, colorKey = "default") {
   return match?.url || preview.thumbnail_url || null;
 }
 
+export function hasActiveSessionTestProduct(st) {
+  return Number(st?.sessionTestDesign?.testProductRowId) > 0;
+}
+
+function mockUrlWithCacheBust(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return raw;
+  const sep = raw.includes("?") ? "&" : "?";
+  return `${raw}${sep}t=${Date.now()}`;
+}
+
+function applyMockUrlToSessionState(st, vk, url, { cacheBust = false } = {}) {
+  if (!st || !url) return null;
+  const displayUrl = cacheBust ? mockUrlWithCacheBust(url) : url;
+  if (!st.sessionMockUrlsByView) st.sessionMockUrlsByView = {};
+  st.sessionMockUrlsByView[vk] = displayUrl;
+  if (!st.mockUrlsByView) st.mockUrlsByView = {};
+  st.mockUrlsByView[vk] = displayUrl;
+  st.useSessionTestProductMock = true;
+  return displayUrl;
+}
+
 /**
  * Apply cached test-product preview URLs to the inline Printify mock viewer.
  */
-export function applySessionTestProductMockToState(st, preview, viewKey) {
+export function applySessionTestProductMockToState(st, preview, viewKey, { cacheBust = false } = {}) {
   if (!st || !preview) return null;
   const sd = st.sessionTestDesign;
   if (sd) sd.previewCache = preview;
   const vk = normViewKey(viewKey || st.activeView || "front");
-  const url = mockUrlFromPreview(preview, vk);
-  if (url) {
-    if (!st.mockUrlsByView) st.mockUrlsByView = {};
-    st.mockUrlsByView[vk] = url;
-    st.useSessionTestProductMock = true;
-  }
-  return url;
+  const colorKey =
+    st.variantGroups?.groups?.find((g) => g.id === st.activeVariantGroupId)?.title || undefined;
+  const url = mockUrlFromPreview(preview, vk, colorKey);
+  return applyMockUrlToSessionState(st, vk, url, { cacheBust });
 }
 
-export async function refreshSessionTestProductMock(st, viewKey, { colorKey } = {}) {
+export function invalidateSessionTestProductPreviewCache(st) {
+  const sd = st?.sessionTestDesign;
+  const rowId = Number(sd?.testProductRowId);
+  if (rowId > 0) previewCache.delete(String(rowId));
+  if (sd) sd.previewCache = null;
+}
+
+export async function refreshSessionTestProductMock(st, viewKey, { colorKey, force = false } = {}) {
   const sd = st?.sessionTestDesign;
   const rowId = Number(sd?.testProductRowId);
   if (!rowId) return null;
 
   const vk = normViewKey(viewKey || st.activeView || "front");
-  let preview = sd.previewCache;
-  if (!preview || preview._viewKey !== vk) {
-    const res = await fetchTestPrintifyProductPreview(rowId, { view_key: vk });
-    if (!res?.ok) return null;
-    preview = { ...res, _viewKey: vk };
-    previewCache.set(String(rowId), preview);
-    if (sd) sd.previewCache = preview;
+  const resolvedColorKey =
+    colorKey || st.variantGroups?.groups?.find((g) => g.id === st.activeVariantGroupId)?.title || undefined;
+
+  if (!force && sd?.previewCache && normViewKey(sd.previewCache._viewKey) === vk) {
+    const cachedUrl = mockUrlFromPreview(sd.previewCache, vk, resolvedColorKey);
+    if (cachedUrl) return applyMockUrlToSessionState(st, vk, cachedUrl);
   }
 
-  const url = mockUrlFromPreview(preview, vk, colorKey);
-  applySessionTestProductMockToState(st, preview, vk);
-  return url;
+  if (force) invalidateSessionTestProductPreviewCache(st);
+
+  const res = await fetchTestPrintifyProductPreview(rowId, { view_key: vk });
+  if (!res?.ok) return null;
+  const preview = { ...res, _viewKey: vk };
+  previewCache.set(String(rowId), preview);
+  if (sd) sd.previewCache = preview;
+
+  const url = mockUrlFromPreview(preview, vk, resolvedColorKey);
+  return applySessionTestProductMockToState(st, preview, vk, { cacheBust: force });
+}
+
+/** Mock panel ↻ — test product when session active, else catalog template. */
+export async function refreshPrintAreaMockViewer(ctx, { force = false } = {}) {
+  const st = ctx?.printAreaState;
+  if (!st) return null;
+  if (hasActiveSessionTestProduct(st)) {
+    const colorKey = st.variantGroups?.groups?.find((g) => g.id === st.activeVariantGroupId)?.title;
+    return refreshSessionTestProductMock(st, st.activeView, { force: true, colorKey });
+  }
+  return null;
 }
 
 export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
@@ -145,7 +188,7 @@ export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, vi
     sd.viewKey = vk;
   }
   markSessionDesignSaved(st);
-  applySessionTestProductMockToState(st, res, vk);
+  applySessionTestProductMockToState(st, res, vk, { cacheBust: true });
   onStatus?.("Product updated");
   return res;
 }

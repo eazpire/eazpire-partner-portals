@@ -113,16 +113,20 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
 }
 
 function mockStageHtml(st, mockImg, options = {}) {
-  const { showMagnify = true } = options;
+  const { showMagnify = true, sessionTestProduct = false } = options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" data-magnify="mock" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
     : "";
+  const refreshTitle = sessionTestProduct
+    ? "Refresh test product mock from Printify"
+    : "Refresh catalog template mock from Printify";
+  const refreshLabel = sessionTestProduct ? "Test product" : "Template";
   return `
     <div class="ce-pa-viewer ce-pa-viewer--mock">
       <div class="ce-pa-viewer-head">
-        <span class="ce-pa-viewer-title">Printify Mock</span>
+        <span class="ce-pa-viewer-title">Printify Mock <span class="ce-pa-viewer-subtitle" data-mock-source-label>${escapeHtml(refreshLabel)}</span></span>
         ${magnifyBtn}
-        <button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action" id="ce-pa-mock-refresh" title="Refresh Printify mock">↻</button>
+        <button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action" id="ce-pa-mock-refresh" title="${escapeHtml(refreshTitle)}" aria-label="${escapeHtml(refreshTitle)}">↻</button>
       </div>
       <div class="ce-pa-stage" id="ce-pa-stage-mock">
         <div class="ce-pa-stage-inner ce-pa-stage-inner--mock">
@@ -142,22 +146,23 @@ function placementHtml(ctx, st, data, brandAssets) {
   return renderPlacementOverlaysHtml(overlays);
 }
 
-function stageInnerHtml(st, data, ctx, brandAssets) {
+function stageInnerHtml(st, data, ctx, brandAssets, options = {}) {
   const leftImg = resolveLeftViewerImage(st, data, st.activeView);
   const mockImg = resolvePrintifyMockUrl(st, st.activeView);
   const overlays = placementHtml(ctx, st, data, brandAssets);
   const showGreenRect = shouldShowGreenRect(ctx, st, data);
+  const sessionTestProduct = !!options.sessionTestProduct;
   return `
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
         ${printAreaStageHtml(st, data, leftImg, overlays, { showGreenRect })}
-        ${mockStageHtml(st, mockImg)}
+        ${mockStageHtml(st, mockImg, { sessionTestProduct })}
       </div>
     </div>`;
 }
 
-export function renderDualViewer(st, data, ctx, brandAssets) {
-  return stageInnerHtml(st, data, ctx, brandAssets);
+export function renderDualViewer(st, data, ctx, brandAssets, options = {}) {
+  return stageInnerHtml(st, data, ctx, brandAssets, options);
 }
 
 export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
@@ -632,11 +637,12 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 }
 
 export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange, onMockRefresh, brandAssets, onMagnify } = callbacks;
+  const { onStateChange, onMockRefresh, brandAssets, onMagnify, hasSessionTestProduct } = callbacks;
   const main = root.querySelector("#ce-pa-main");
   if (!main) return { destroy() {} };
 
-  main.innerHTML = renderDualViewer(st, data, ctx, brandAssets);
+  const sessionTestProduct = hasSessionTestProduct?.() ?? false;
+  main.innerHTML = renderDualViewer(st, data, ctx, brandAssets, { sessionTestProduct });
 
   const stageHandle = bindStageInteractions(main, ctx, st, data, {
     onStateChange,
@@ -651,6 +657,17 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   const updatePrintifyPanel = () => {
     const inner = main.querySelector(".ce-pa-stage-inner--mock");
     if (!inner) return;
+    const sessionActive = hasSessionTestProduct?.() ?? !!st.useSessionTestProductMock;
+    const label = main.querySelector("[data-mock-source-label]");
+    if (label) label.textContent = sessionActive ? "Test product" : "Template";
+    const refreshBtn = main.querySelector("#ce-pa-mock-refresh");
+    if (refreshBtn) {
+      const title = sessionActive
+        ? "Refresh test product mock from Printify"
+        : "Refresh catalog template mock from Printify";
+      refreshBtn.title = title;
+      refreshBtn.setAttribute("aria-label", title);
+    }
     const mockImg = resolvePrintifyMockUrl(st, st.activeView);
     if (mockImg) {
       inner.innerHTML = `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`;
