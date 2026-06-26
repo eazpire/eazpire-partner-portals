@@ -21,7 +21,36 @@ import {
   markSessionDesignSaved,
   isSessionDesignDirty,
   applyLivePrintifyPlacementToSessionDesign,
+  alignSessionDesignToPrintArea,
 } from "./design-session-overlay.js";
+
+/** Design rows from the picker grid (id → API row with width/height). */
+const designPickerRowsById = new Map();
+
+function loadImageNaturalDimensions(url) {
+  const src = String(url || "").trim();
+  if (!src) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      resolve(w > 0 && h > 0 ? { width: w, height: h } : null);
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+/** Ensure design pixel size for contain-fit placement (DB fields or preview image). */
+async function resolveDesignRowDimensions(row) {
+  const w = Number(row?.width);
+  const h = Number(row?.height);
+  if (w > 0 && h > 0) return { ...row, width: w, height: h };
+  const dims = await loadImageNaturalDimensions(row?.preview_url);
+  if (!dims) return row;
+  return { ...row, width: dims.width, height: dims.height };
+}
 
 const previewCache = new Map();
 
@@ -670,9 +699,12 @@ function ensureDesignPickerModal() {
     if (!btn || btn.disabled) return;
     const id = Number(btn.dataset.designId);
     if (!id) return;
-    const title = btn.querySelector(".ce-pa-tp-design-card__title")?.textContent || "";
-    const previewUrl = btn.querySelector("img")?.getAttribute("src") || "";
-    void runPlaceDesign(id, { id, design_title: title, preview_url: previewUrl });
+    const row = designPickerRowsById.get(id) || {
+      id,
+      design_title: btn.querySelector(".ce-pa-tp-design-card__title")?.textContent || "",
+      preview_url: btn.querySelector("img")?.getAttribute("src") || "",
+    };
+    void runPlaceDesign(id, row);
   });
   return el;
 }
@@ -711,7 +743,7 @@ async function runCreateWithRandom() {
 async function runPlaceDesign(designId, designRow) {
   const { ctx, st, onStatus, onDesignPlaced, onMockReady, data, brandAssets } = createChooserCallbacks || {};
   if (!ctx || !st || !designId) return;
-  const row = designRow || { id: designId };
+  const row = await resolveDesignRowDimensions(designRow || { id: designId });
   closeDesignPickerModal();
   closeCreateChooserModal();
 
@@ -739,6 +771,16 @@ async function runPlaceDesign(designId, designRow) {
     if (rowId) {
       const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
       if (preview?.ok) {
+        const sd = st.sessionTestDesign;
+        if (sd) {
+          if (preview.design_width > 0) sd.designWidth = Number(preview.design_width);
+          if (preview.design_height > 0) sd.designHeight = Number(preview.design_height);
+          if (alignSessionDesignToPrintArea(st)) onDesignPlaced?.();
+          else if (preview.design_placement) {
+            applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
+            onDesignPlaced?.();
+          }
+        }
         applySessionTestProductMockToState(st, preview, st.activeView);
         onMockReady?.(preview);
       }
@@ -773,10 +815,11 @@ async function loadDesignGrid(append = false) {
   if (designsLoading) return;
   designsLoading = true;
   err.hidden = true;
-  if (!append) {
-    grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
-    designsCursor = null;
-  }
+    if (!append) {
+      grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
+      designsCursor = null;
+      designPickerRowsById.clear();
+    }
   hint.textContent = `Design type: ${createChooserCallbacks.st.activeDesignType || "classic"}`;
 
   try {
@@ -794,6 +837,10 @@ async function loadDesignGrid(append = false) {
       return;
     }
     empty.hidden = true;
+    items.forEach((row) => {
+      const id = Number(row?.id);
+      if (id > 0) designPickerRowsById.set(id, row);
+    });
     const frag = items.map((row) => renderDesignCard(row)).join("");
     if (append) grid.insertAdjacentHTML("beforeend", frag);
     else grid.innerHTML = frag;
