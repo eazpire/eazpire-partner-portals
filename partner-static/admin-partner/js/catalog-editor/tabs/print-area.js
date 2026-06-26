@@ -440,6 +440,7 @@ export function bindPrintAreaTab(ctx, root) {
   bindPrintAreaSidebar(root, st, data, sidebarCallbacks);
 
   const sessionTestFlow = bindSessionTestProductFlow(ctx, st, {
+    data,
     onStatus: (msg) => {
       const statusEl = root.querySelector("#ce-pa-test-products-status");
       if (statusEl) {

@@ -61,7 +61,7 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = t
   } else if (!randomDesign && st.sessionTestDesign?.designId) {
     body.design_id = Number(st.sessionTestDesign.designId);
   }
-  const sessionPlacement = getSessionDesignPlacementForApi(st);
+  const sessionPlacement = getSessionDesignPlacementForApi(st, data);
   if (!randomDesign && sessionPlacement) {
     body.design_session_placement = sessionPlacement;
   }
@@ -119,13 +119,13 @@ export async function refreshSessionTestProductMock(st, viewKey, { colorKey } = 
   return url;
 }
 
-export async function applySessionDesignToPrintify(ctx, st, { onStatus, viewKey } = {}) {
+export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
   const sd = st?.sessionTestDesign;
   const rowId = Number(sd?.testProductRowId);
   if (!rowId) throw new Error("No test product — choose a design first.");
   if (!isSessionDesignDirty(st)) return null;
 
-  const placement = getSessionDesignPlacementForApi(st);
+  const placement = getSessionDesignPlacementForApi(st, data);
   if (!placement) throw new Error("No design placement to apply.");
 
   onStatus?.("Updating product…");
@@ -782,7 +782,7 @@ export async function createTestProductWithSessionDesign(ctx, st, { onStatus, da
     if (isSessionDesignDirty(st)) {
       try {
         onStatus?.("Applying pending changes…");
-        await applySessionDesignToPrintify(ctx, st, { onStatus });
+        await applySessionDesignToPrintify(ctx, st, data, { onStatus });
         onMockReady?.(sd.previewCache);
       } catch (e) {
         onStatus?.(e?.message || "Apply failed");
@@ -809,11 +809,12 @@ export async function createTestProductWithSessionDesign(ctx, st, { onStatus, da
 }
 
 export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
-  const { onStatus, onMockReady, onDesignPlaced, onDirtyChange } = callbacks;
+  const { onStatus, onMockReady, onDesignPlaced, onDirtyChange, data } = callbacks;
+  const placementData = data || ctx?.printAreaData;
   return {
     async onSave() {
       try {
-        await applySessionDesignToPrintify(ctx, st, {
+        await applySessionDesignToPrintify(ctx, st, placementData, {
           onStatus,
           viewKey: st.activeView,
         });

@@ -8,6 +8,7 @@ import {
   printAreaCatalogDetail,
   resolvePrintAreaVersion,
   rectsNearlyEqual,
+  mergePrintDimensionsForView,
 } from "./helpers.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import { resolvePlacementOverlays } from "./placement-overlays.js";
@@ -75,15 +76,32 @@ export function hasSessionTestDesign(st) {
   return !!(sd && Number(sd.designId) > 0 && sd.rect);
 }
 
-export function getSessionDesignPlacementForApi(st) {
+export function getSessionDesignPlacementForApi(st, data) {
   const sd = st?.sessionTestDesign;
   if (!sd?.rect) return null;
   const view_key = normSessionViewKey(st.activeView || sd.viewKey || "front");
   sd.viewKey = view_key;
-  return {
+  const placement = {
     view_key,
     rect: snapshotRect(sd.rect),
   };
+  if (st.redRect) {
+    placement.print_area_bounds = snapshotRect(st.redRect);
+  }
+  const dw = Number(sd.designWidth);
+  const dh = Number(sd.designHeight);
+  if (dw > 0 && dh > 0) {
+    placement.design_width = dw;
+    placement.design_height = dh;
+  }
+  if (data) {
+    const { w, h } = mergePrintDimensionsForView(data, view_key);
+    if (w > 0 && h > 0) {
+      placement.print_area_width_px = w;
+      placement.print_area_height_px = h;
+    }
+  }
+  return placement;
 }
 
 export function isSessionDesignDirty(st) {
@@ -185,6 +203,8 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     designId: Number(designRow.id),
     previewUrl: designRow.preview_url || "",
     title: designRow.design_title || `Design ${designRow.id}`,
+    designWidth: Number(designRow.width) > 0 ? Number(designRow.width) : null,
+    designHeight: Number(designRow.height) > 0 ? Number(designRow.height) : null,
     viewKey: normSessionViewKey(st.activeView),
     designType: st.activeDesignType || "classic",
     sessionKey: sessionKey(st),
