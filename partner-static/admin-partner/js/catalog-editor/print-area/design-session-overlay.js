@@ -13,6 +13,7 @@ import {
 import {
   containDesignRectInPrintAreaBounds,
   designPixelAspectFromSession,
+  designPixelAspectFromDesignRow,
   applyLivePrintifyPlacementToSessionDesign,
 } from "./placement-math.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
@@ -158,7 +159,7 @@ function placementOverlayModeActive(ctx, st, data) {
   return ["creator_design", "additional_design", "qr", "logo"].some((k) => (Number(slots[k]) || 0) > 0);
 }
 
-function resolveInitialDesignRect(ctx, st, data, brandAssets) {
+function resolveInitialDesignRect(ctx, st, data, brandAssets, designRow) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   const creatorMode = String(st.publishLogicByPh?.creator_design || "calculated").toLowerCase();
   const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
@@ -167,9 +168,14 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
   if (creatorMode === "admin" && creatorOv?.rect) {
     return { ...creatorOv.rect };
   }
-  if (creatorOv?.rect) {
-    return { ...creatorOv.rect };
+
+  const designAr = designPixelAspectFromDesignRow(designRow);
+  const printBounds = st.redRect;
+  if (printBounds && designAr) {
+    const fitted = containDesignRectInPrintAreaBounds(printBounds, designAr);
+    if (fitted) return fitted;
   }
+
   const version = resolvePrintAreaVersion(ctx, data);
   const catalogDetail = printAreaCatalogDetail(ctx, data);
   const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
@@ -177,18 +183,16 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
   if (hasCreatorSlot && !placementOverlayModeActive(ctx, st, data) && st.greenRect) {
     return { ...st.greenRect };
   }
+
   const md = getMockupDefaultForView(data?.mockup_defaults, st.activeView);
-  const aspect = aspectRatioFromDefault(md, data, st.activeView);
-  const bounds = st.greenRect || st.redRect;
-  const designAr =
-    Number(designRow.width) > 0 && Number(designRow.height) > 0
-      ? Number(designRow.width) / Number(designRow.height)
-      : null;
+  const printAspect = aspectRatioFromDefault(md, data, st.activeView);
+  const bounds = st.redRect || st.greenRect;
+  const aspectForFallback = designAr || (printAspect > 0 ? printAspect : 1);
   const inBounds = designAr
     ? containDesignRectInPrintAreaBounds(bounds, designAr)
-    : rectCenteredInBounds(bounds, aspect > 0 ? aspect : 1);
+    : rectCenteredInBounds(bounds, aspectForFallback);
   if (inBounds) return inBounds;
-  return defaultCenteredRect(aspect > 0 ? aspect : 1, 0.45);
+  return defaultCenteredRect(aspectForFallback, 0.45);
 }
 
 /**
@@ -196,7 +200,7 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
  */
 export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { onPlaced } = {}) {
   if (!designRow?.id) return false;
-  const rect = resolveInitialDesignRect(ctx, st, data, brandAssets);
+  const rect = resolveInitialDesignRect(ctx, st, data, brandAssets, designRow);
   const normalized = clampRectToStage({ ...rect, angle: Number(rect.angle) || 0 });
   st.sessionTestDesign = {
     designId: Number(designRow.id),
@@ -214,6 +218,9 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     testProductCreating: false,
     previewCache: null,
   };
+  if (designPixelAspectFromSession(st.sessionTestDesign)) {
+    alignSessionDesignToPrintArea(st);
+  }
   onPlaced?.(st.sessionTestDesign);
   return true;
 }

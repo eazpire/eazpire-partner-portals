@@ -32,6 +32,13 @@ export function designPixelAspectFromSession(sd) {
   return null;
 }
 
+export function designPixelAspectFromDesignRow(designRow) {
+  const w = Number(designRow?.width);
+  const h = Number(designRow?.height);
+  if (w > 0 && h > 0) return w / h;
+  return null;
+}
+
 /** Contain-fit using design pixel aspect inside print-area bounds on stage. */
 export function containDesignRectInPrintAreaBounds(bounds, designAspect) {
   const b = normalizeRect(bounds);
