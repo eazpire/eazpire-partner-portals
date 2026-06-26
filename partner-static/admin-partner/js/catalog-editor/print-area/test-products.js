@@ -20,6 +20,7 @@ import {
   clearSessionTestDesign,
   markSessionDesignSaved,
   isSessionDesignDirty,
+  applyLivePrintifyPlacementToSessionDesign,
 } from "./design-session-overlay.js";
 
 const previewCache = new Map();
@@ -125,7 +126,7 @@ export function invalidateSessionTestProductPreviewCache(st) {
   if (sd) sd.previewCache = null;
 }
 
-export async function refreshSessionTestProductMock(st, viewKey, { colorKey, force = false } = {}) {
+export async function refreshSessionTestProductMock(st, viewKey, { colorKey, force = false, data } = {}) {
   const sd = st?.sessionTestDesign;
   const rowId = Number(sd?.testProductRowId);
   if (!rowId) return null;
@@ -147,6 +148,11 @@ export async function refreshSessionTestProductMock(st, viewKey, { colorKey, for
   previewCache.set(String(rowId), preview);
   if (sd) sd.previewCache = preview;
 
+  const placementData = data || null;
+  if (preview.design_placement && sd) {
+    applyLivePrintifyPlacementToSessionDesign(st, placementData, preview, { markDirty: false });
+  }
+
   const url = mockUrlFromPreview(preview, vk, resolvedColorKey);
   return applySessionTestProductMockToState(st, preview, vk, { cacheBust: force });
 }
@@ -157,7 +163,11 @@ export async function refreshPrintAreaMockViewer(ctx, { force = false } = {}) {
   if (!st) return null;
   if (hasActiveSessionTestProduct(st)) {
     const colorKey = st.variantGroups?.groups?.find((g) => g.id === st.activeVariantGroupId)?.title;
-    return refreshSessionTestProductMock(st, st.activeView, { force: true, colorKey });
+    return refreshSessionTestProductMock(st, st.activeView, {
+      force: true,
+      colorKey,
+      data: ctx?.printAreaData,
+    });
   }
   return null;
 }
@@ -186,6 +196,8 @@ export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, vi
   if (sd) {
     sd.previewCache = previewCache.get(String(rowId));
     sd.viewKey = vk;
+    if (res.design_width > 0) sd.designWidth = Number(res.design_width);
+    if (res.design_height > 0) sd.designHeight = Number(res.design_height);
   }
   markSessionDesignSaved(st);
   applySessionTestProductMockToState(st, res, vk, { cacheBust: true });

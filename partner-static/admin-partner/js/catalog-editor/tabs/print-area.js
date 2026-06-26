@@ -55,6 +55,7 @@ import {
   hasActiveSessionTestProduct,
   refreshPrintAreaMockViewer,
 } from "../print-area/test-products.js";
+import { applyLivePrintifyPlacementToSessionDesign } from "../print-area/design-session-overlay.js";
 import {
   printAreaMainSourceContext,
   applyPrintAreaInheritanceToState,
@@ -385,8 +386,15 @@ export function bindPrintAreaTab(ctx, root) {
   };
 
   const onSessionTestProductMockReady = (preview) => {
-    if (preview) applySessionTestProductMockToState(st, preview, st.activeView);
+    if (preview) {
+      applySessionTestProductMockToState(st, preview, st.activeView);
+      if (preview.design_placement) {
+        applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
+      }
+    }
     refreshPrintifyViewer();
+    ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+    ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
   };
 
   const sidebarCallbacks = {
@@ -529,8 +537,10 @@ export function bindPrintAreaTab(ctx, root) {
         await refreshSessionTestProductMock(st, viewKey, {
           force: false,
           colorKey: getActiveColorTitle(st),
+          data,
         });
         refreshPrintifyViewer();
+        ctx.printAreaViewerHandle?.refreshSessionDesign?.();
       } catch (err) {
         console.warn("Session test product mock refresh failed", err);
       }
@@ -560,6 +570,8 @@ async function refreshPrintifyMock(ctx, refreshPrintifyViewer) {
     try {
       await refreshPrintAreaMockViewer(ctx, { force: true });
       refreshPrintifyViewer?.();
+      ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+      ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
       const statusEl = ctx.printAreaRoot?.querySelector("#ce-pa-test-products-status");
       if (statusEl) {
         statusEl.hidden = false;

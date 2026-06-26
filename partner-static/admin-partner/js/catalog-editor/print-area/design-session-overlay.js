@@ -10,6 +10,11 @@ import {
   rectsNearlyEqual,
   mergePrintDimensionsForView,
 } from "./helpers.js";
+import {
+  containDesignRectInPrintAreaBounds,
+  designPixelAspectFromSession,
+  applyLivePrintifyPlacementToSessionDesign,
+} from "./placement-math.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
 import { resolvePlacementOverlays } from "./placement-overlays.js";
 import {
@@ -129,29 +134,17 @@ export function markSessionDesignDirty(st) {
 }
 
 /**
- * Contain-fit design rect within print area bounds (local canvas only).
+ * Contain-fit design rect within print area bounds (design pixel aspect, not stage display aspect).
  */
 export function alignSessionDesignToPrintArea(st) {
   const sd = st?.sessionTestDesign;
   const bounds = st?.redRect;
   if (!sd?.rect || !bounds) return false;
-  const aspect = sd.rect.w / Math.max(sd.rect.h, 0.001);
-  const bw = bounds.w;
-  const bh = bounds.h;
-  let w;
-  let h;
-  if (aspect >= bw / bh) {
-    w = bw;
-    h = bw / aspect;
-  } else {
-    h = bh;
-    w = bh * aspect;
-  }
+  const aspect = designPixelAspectFromSession(sd) || sd.rect.w / Math.max(sd.rect.h, 0.001);
+  const fitted = containDesignRectInPrintAreaBounds(bounds, aspect);
+  if (!fitted) return false;
   sd.rect = clampRectToStage({
-    x: bounds.x + (bw - w) / 2,
-    y: bounds.y + (bh - h) / 2,
-    w,
-    h,
+    ...fitted,
     angle: Number(sd.rect.angle) || 0,
   });
   markSessionDesignDirty(st);
@@ -187,7 +180,13 @@ function resolveInitialDesignRect(ctx, st, data, brandAssets) {
   const md = getMockupDefaultForView(data?.mockup_defaults, st.activeView);
   const aspect = aspectRatioFromDefault(md, data, st.activeView);
   const bounds = st.greenRect || st.redRect;
-  const inBounds = rectCenteredInBounds(bounds, aspect > 0 ? aspect : 1);
+  const designAr =
+    Number(designRow.width) > 0 && Number(designRow.height) > 0
+      ? Number(designRow.width) / Number(designRow.height)
+      : null;
+  const inBounds = designAr
+    ? containDesignRectInPrintAreaBounds(bounds, designAr)
+    : rectCenteredInBounds(bounds, aspect > 0 ? aspect : 1);
   if (inBounds) return inBounds;
   return defaultCenteredRect(aspect > 0 ? aspect : 1, 0.45);
 }
@@ -222,6 +221,8 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
 export function clearSessionTestDesign(st) {
   if (st) st.sessionTestDesign = null;
 }
+
+export { applyLivePrintifyPlacementToSessionDesign };
 
 function toggleHandles(el, active) {
   if (!el) return;
