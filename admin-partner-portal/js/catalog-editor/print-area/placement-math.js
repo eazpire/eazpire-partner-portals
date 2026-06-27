@@ -39,6 +39,30 @@ export function designPixelAspectFromDesignRow(designRow) {
   return null;
 }
 
+function isWidthLimitedUniformContain(designWidth, designHeight, printAreaWidth, printAreaHeight) {
+  const dW = Number(designWidth);
+  const dH = Number(designHeight);
+  const paw = Number(printAreaWidth);
+  const pah = Number(printAreaHeight);
+  if (!(dW > 0 && dH > 0 && paw > 0 && pah > 0)) return false;
+  return paw / dW <= pah / dH;
+}
+
+function uniformContainPrintifyCenterY(ctx, scale, { verticalAlign = "top" } = {}) {
+  const dW = Number(ctx?.designWidth);
+  const dH = Number(ctx?.designHeight);
+  const paw = Number(ctx?.printAreaWidthPx);
+  const pah = Number(ctx?.printAreaHeightPx);
+  const s = Number(scale);
+  if (!(dW > 0 && dH > 0 && paw > 0 && pah > 0 && s > 0)) return 0.5;
+  const widthLimited = isWidthLimitedUniformContain(dW, dH, paw, pah);
+  if (widthLimited && verticalAlign === "top") {
+    const printedH = (s * paw * dH) / dW;
+    return clamp01(printedH / 2 / pah);
+  }
+  return 0.5;
+}
+
 /** Contain-fit using design pixel aspect inside print-area bounds on stage. */
 export function containDesignRectInPrintAreaBounds(bounds, designAspect) {
   const b = normalizeRect(bounds);
@@ -48,16 +72,19 @@ export function containDesignRectInPrintAreaBounds(bounds, designAspect) {
   const bh = b.h;
   let w;
   let h;
+  let y;
   if (ar >= bw / bh) {
     w = bw;
     h = bw / ar;
+    y = b.y;
   } else {
     h = bh;
     w = bh * ar;
+    y = b.y + (bh - h) / 2;
   }
   return normalizeRect({
     x: b.x + (bw - w) / 2,
-    y: b.y + (bh - h) / 2,
+    y,
     w,
     h,
     angle: 0,
@@ -76,8 +103,8 @@ function printifyScaleForCreatorDesign(m, designWidth, printAreaWidth) {
   return parseFloat(Math.min(Math.max(s, 1e-6), 1e3).toFixed(6));
 }
 
-/** Uniform contain in print-area px → centered Printify placement (mirrors worker). */
-export function uniformContainPrintifyPlacement(ctx = {}) {
+/** Uniform contain in print-area px → Printify placement (mirrors worker). */
+export function uniformContainPrintifyPlacement(ctx = {}, options = {}) {
   const dW = Number(ctx.designWidth);
   const dH = Number(ctx.designHeight);
   const paw = Number(ctx.printAreaWidthPx);
@@ -85,7 +112,8 @@ export function uniformContainPrintifyPlacement(ctx = {}) {
   if (!(dW > 0 && dH > 0 && paw > 0 && pah > 0)) return null;
   const m = Math.min(paw / dW, pah / dH);
   const scale = printifyScaleForCreatorDesign(m, dW, paw);
-  return { x: 0.5, y: 0.5, scale, angle: 0 };
+  const y = uniformContainPrintifyCenterY(ctx, scale, options);
+  return { x: 0.5, y: parseFloat(y.toFixed(6)), scale, angle: 0 };
 }
 
 /** Align session rect via print-px contain → Printify placement → stage bounds. */
