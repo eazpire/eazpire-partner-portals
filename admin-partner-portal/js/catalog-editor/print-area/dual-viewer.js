@@ -406,6 +406,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   const sessionDesignHandle = mountSessionDesignLayer(stageInner, st, {
     onChange: onStateChange,
     onSave: callbacks.onSessionDesignSave,
+    printAreaData: data,
   });
 
   root.querySelectorAll('[data-rect="red"] .ce-pa-rotate-handle, [data-rect="green"] .ce-pa-rotate-handle').forEach((handle) => {

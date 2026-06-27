@@ -321,6 +321,13 @@ export async function fetchTestPrintifyCreations({ design_type, cursor, limit } 
   });
 }
 
+export async function fetchTestPrintifyDesignDimensions(designId) {
+  return partnerFetch("admin-eazpire-test-printify-design-dimensions", {
+    method: "POST",
+    body: { design_id: Number(designId) },
+  });
+}
+
 export async function fetchTestPrintifyProducts(productKey, printProviderId) {
   return partnerFetch("admin-eazpire-test-printify-list", {
     method: "POST",

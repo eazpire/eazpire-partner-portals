@@ -3,10 +3,7 @@ import {
   clampRectToStage,
   defaultCenteredRect,
   aspectRatioFromDefault,
-  getDesignTypeSlice,
   getMockupDefaultForView,
-  printAreaCatalogDetail,
-  resolvePrintAreaVersion,
   rectsNearlyEqual,
   mergePrintDimensionsForView,
 } from "./helpers.js";
@@ -15,9 +12,9 @@ import {
   designPixelAspectFromSession,
   designPixelAspectFromDesignRow,
   applyLivePrintifyPlacementToSessionDesign,
+  buildPlacementCtxFromSession,
+  sessionDesignRectFromUniformContain,
 } from "./placement-math.js";
-import { getPlaceholderSlotsForView } from "../version-config-panel.js";
-import { resolvePlacementOverlays } from "./placement-overlays.js";
 import {
   rectHandlesHtml,
   resizeRectByCorner,
@@ -85,7 +82,7 @@ export function hasSessionTestDesign(st) {
 export function getSessionDesignPlacementForApi(st, data) {
   const sd = st?.sessionTestDesign;
   if (!sd?.rect) return null;
-  const view_key = normSessionViewKey(st.activeView || sd.viewKey || "front");
+  const view_key = normSessionViewKey(sd.viewKey || st.activeView || "front");
   sd.viewKey = view_key;
   const placement = {
     view_key,
@@ -135,14 +132,20 @@ export function markSessionDesignDirty(st) {
 }
 
 /**
- * Contain-fit design rect within print area bounds (design pixel aspect, not stage display aspect).
+ * Contain-fit design rect within print area — uses print-px uniform contain mapped to stage
+ * (matches Printify scale/position, not naive stage-aspect contain).
  */
-export function alignSessionDesignToPrintArea(st) {
+export function alignSessionDesignToPrintArea(st, data = null) {
   const sd = st?.sessionTestDesign;
   const bounds = st?.redRect;
   if (!sd?.rect || !bounds) return false;
-  const aspect = designPixelAspectFromSession(sd) || sd.rect.w / Math.max(sd.rect.h, 0.001);
-  const fitted = containDesignRectInPrintAreaBounds(bounds, aspect);
+
+  const ctx = buildPlacementCtxFromSession(st, data);
+  let fitted = sessionDesignRectFromUniformContain(ctx);
+  if (!fitted) {
+    const aspect = designPixelAspectFromSession(sd) || sd.rect.w / Math.max(sd.rect.h, 0.001);
+    fitted = containDesignRectInPrintAreaBounds(bounds, aspect);
+  }
   if (!fitted) return false;
   sd.rect = clampRectToStage({
     ...fitted,
@@ -152,41 +155,27 @@ export function alignSessionDesignToPrintArea(st) {
   return true;
 }
 
-function placementOverlayModeActive(ctx, st, data) {
-  const version = resolvePrintAreaVersion(ctx, data);
-  const catalogDetail = printAreaCatalogDetail(ctx, data);
-  const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
-  return ["creator_design", "additional_design", "qr", "logo"].some((k) => (Number(slots[k]) || 0) > 0);
-}
-
-function resolveInitialDesignRect(ctx, st, data, brandAssets, designRow) {
-  const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
-  const creatorMode = String(st.publishLogicByPh?.creator_design || "calculated").toLowerCase();
-  const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
-  const creatorOv = overlays.find((o) => o.type === "creator_design");
-
-  if (creatorMode === "admin" && creatorOv?.rect) {
-    return { ...creatorOv.rect };
+function resolveInitialDesignRect(_ctx, st, data, _brandAssets, designRow) {
+  const bounds = st?.redRect || st?.greenRect;
+  const dW = Number(designRow?.width);
+  const dH = Number(designRow?.height);
+  if (bounds && dW > 0 && dH > 0) {
+    const ctx = buildPlacementCtxFromSession(
+      { ...st, sessionTestDesign: { designWidth: dW, designHeight: dH } },
+      data
+    );
+    const fromPrintPx = sessionDesignRectFromUniformContain(ctx);
+    if (fromPrintPx) return fromPrintPx;
   }
 
   const designAr = designPixelAspectFromDesignRow(designRow);
-  const printBounds = st.redRect;
-  if (printBounds && designAr) {
-    const fitted = containDesignRectInPrintAreaBounds(printBounds, designAr);
+  if (bounds && designAr) {
+    const fitted = containDesignRectInPrintAreaBounds(bounds, designAr);
     if (fitted) return fitted;
-  }
-
-  const version = resolvePrintAreaVersion(ctx, data);
-  const catalogDetail = printAreaCatalogDetail(ctx, data);
-  const slots = getPlaceholderSlotsForView(version, catalogDetail, st.activeView);
-  const hasCreatorSlot = (Number(slots.creator_design) || 0) > 0;
-  if (hasCreatorSlot && !placementOverlayModeActive(ctx, st, data) && st.greenRect) {
-    return { ...st.greenRect };
   }
 
   const md = getMockupDefaultForView(data?.mockup_defaults, st.activeView);
   const printAspect = aspectRatioFromDefault(md, data, st.activeView);
-  const bounds = st.redRect || st.greenRect;
   const aspectForFallback = designAr || (printAspect > 0 ? printAspect : 1);
   const inBounds = designAr
     ? containDesignRectInPrintAreaBounds(bounds, designAr)
@@ -219,7 +208,7 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     previewCache: null,
   };
   if (designPixelAspectFromSession(st.sessionTestDesign)) {
-    alignSessionDesignToPrintArea(st);
+    alignSessionDesignToPrintArea(st, data);
   }
   onPlaced?.(st.sessionTestDesign);
   return true;
@@ -319,7 +308,7 @@ export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyCha
   return el;
 }
 
-function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign } = {}) {
+function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, printAreaData } = {}) {
   let drag = null;
   const layer = stageInner?.querySelector("[data-session-design-layer]");
 
@@ -354,7 +343,7 @@ function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign } =
       const sd = st.sessionTestDesign;
       if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
       onChange?.();
-    } else if (alignSessionDesignToPrintArea(st)) {
+    } else if (alignSessionDesignToPrintArea(st, printAreaData)) {
       const sd = st.sessionTestDesign;
       if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
       onChange?.();

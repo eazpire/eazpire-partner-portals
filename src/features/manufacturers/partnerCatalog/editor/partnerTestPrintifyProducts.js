@@ -9,6 +9,7 @@ import {
   ensureTestPrintifyTable,
   buildPrintifyProductPreviewPayload,
   listTestPrintifyCreations,
+  resolveCreationPixelDimensions,
   updateTestPrintifyProductPlacement,
 } from "../../../admin/adminTestPrintifyProducts.js";
 import { getPrintifyProduct } from "../../../../utils/printify.js";
@@ -245,4 +246,19 @@ export async function handlePartnerTestPrintifyPreview(request, env) {
   } catch (e) {
     return json({ ok: false, error: "printify_fetch_failed", detail: String(e?.message || e).slice(0, 400) }, 502, cors);
   }
+}
+
+export async function handlePartnerTestPrintifyDesignDimensions(request, env) {
+  const cors = getCorsHeaders(request);
+  const auth = await requireAdminPartnerSession(request, env);
+  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+
+  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  const url = new URL(request.url);
+  const designId = body.design_id ?? url.searchParams.get("design_id");
+  const dims = await resolveCreationPixelDimensions(env, designId);
+  if (!dims) {
+    return json({ ok: false, error: "no_dimensions", design_id: Number(designId) || null }, 404, cors);
+  }
+  return json({ ok: true, design_id: Number(designId), ...dims }, 200, cors);
 }

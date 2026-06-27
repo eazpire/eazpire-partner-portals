@@ -6,6 +6,7 @@ import {
   fetchTestPrintifyProducts,
   fetchTestPrintifyProductPreview,
   fetchTestPrintifyCreations,
+  fetchTestPrintifyDesignDimensions,
   updateTestPrintifyProductPlacement,
 } from "../api.js";
 import {
@@ -27,29 +28,25 @@ import {
 /** Design rows from the picker grid (id → API row with width/height). */
 const designPickerRowsById = new Map();
 
-function loadImageNaturalDimensions(url) {
-  const src = String(url || "").trim();
-  if (!src) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      resolve(w > 0 && h > 0 ? { width: w, height: h } : null);
-    };
-    img.onerror = () => resolve(null);
-    img.src = src;
-  });
-}
-
-/** Ensure design pixel size for contain-fit placement (DB fields or preview image). */
+/** Ensure true design pixel size (API/R2 original — not preview thumbnail). */
 async function resolveDesignRowDimensions(row) {
   const w = Number(row?.width);
   const h = Number(row?.height);
   if (w > 0 && h > 0) return { ...row, width: w, height: h };
-  const dims = await loadImageNaturalDimensions(row?.preview_url);
-  if (!dims) return row;
-  return { ...row, width: dims.width, height: dims.height };
+
+  const id = Number(row?.id);
+  if (id > 0) {
+    try {
+      const res = await fetchTestPrintifyDesignDimensions(id);
+      if (res?.ok && Number(res.width) > 0 && Number(res.height) > 0) {
+        return { ...row, width: Number(res.width), height: Number(res.height) };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  return row;
 }
 
 const previewCache = new Map();
@@ -775,8 +772,9 @@ async function runPlaceDesign(designId, designRow) {
         if (sd) {
           if (preview.design_width > 0) sd.designWidth = Number(preview.design_width);
           if (preview.design_height > 0) sd.designHeight = Number(preview.design_height);
-          if (alignSessionDesignToPrintArea(st)) onDesignPlaced?.();
-          else if (preview.design_placement) {
+          if (alignSessionDesignToPrintArea(st, data)) {
+            onDesignPlaced?.();
+          } else if (preview.design_placement) {
             applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
             onDesignPlaced?.();
           }

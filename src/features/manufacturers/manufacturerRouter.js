@@ -235,6 +235,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-test-printify-delete",
   "admin-eazpire-test-printify-preview",
   "admin-eazpire-test-printify-placement-update",
+  "admin-eazpire-test-printify-design-dimensions",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1023,6 +1024,13 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-eazpire-test-printify-placement-update" && request.method === "POST") {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
       return tp.handlePartnerTestPrintifyPlacementUpdate(request, env);
+    }
+    if (
+      op === "admin-eazpire-test-printify-design-dimensions" &&
+      (request.method === "GET" || request.method === "POST")
+    ) {
+      const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
+      return tp.handlePartnerTestPrintifyDesignDimensions(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

@@ -64,6 +64,37 @@ export function containDesignRectInPrintAreaBounds(bounds, designAspect) {
   });
 }
 
+function printifyScaleForCreatorDesign(m, designWidth, printAreaWidth) {
+  const mul = Number(m);
+  const dw = Number(designWidth);
+  const pw = Number(printAreaWidth);
+  if (!Number.isFinite(mul) || mul <= 0) return 0.95;
+  if (!Number.isFinite(dw) || dw <= 0 || !Number.isFinite(pw) || pw <= 0) {
+    return parseFloat(mul.toFixed(6));
+  }
+  const s = (mul * dw) / pw;
+  return parseFloat(Math.min(Math.max(s, 1e-6), 1e3).toFixed(6));
+}
+
+/** Uniform contain in print-area px → centered Printify placement (mirrors worker). */
+export function uniformContainPrintifyPlacement(ctx = {}) {
+  const dW = Number(ctx.designWidth);
+  const dH = Number(ctx.designHeight);
+  const paw = Number(ctx.printAreaWidthPx);
+  const pah = Number(ctx.printAreaHeightPx);
+  if (!(dW > 0 && dH > 0 && paw > 0 && pah > 0)) return null;
+  const m = Math.min(paw / dW, pah / dH);
+  const scale = printifyScaleForCreatorDesign(m, dW, paw);
+  return { x: 0.5, y: 0.5, scale, angle: 0 };
+}
+
+/** Align session rect via print-px contain → Printify placement → stage bounds. */
+export function sessionDesignRectFromUniformContain(ctx = {}) {
+  const placement = uniformContainPrintifyPlacement(ctx);
+  if (!placement) return null;
+  return printifyPlacementToSessionDesignRect(placement, ctx);
+}
+
 /** Printify placement → session design rect (inverse of worker rectToPrintifyImagePlacement). */
 export function printifyPlacementToSessionDesignRect(placement, ctx = {}) {
   if (!placement || typeof placement !== "object") return null;
