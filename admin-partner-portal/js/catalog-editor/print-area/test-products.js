@@ -574,7 +574,7 @@ export async function openTestProductsModal(ctx) {
 export async function createTestProductFromPrintArea(
   ctx,
   st,
-  { onStatus, randomDesign = true, designId, keepSession = false } = {}
+  { onStatus, randomDesign = true, designId, keepSession = false, data } = {}
 ) {
   if (!ctx?.productKey || !ctx?.selectedPrintProviderId) {
     throw new Error("Select a print provider first.");
@@ -583,7 +583,8 @@ export async function createTestProductFromPrintArea(
   const { savePrintAreaTab } = await import("../tabs/print-area.js");
   await savePrintAreaTab(ctx);
 
-  const body = buildTestContext(ctx, st, undefined, { randomDesign, designId });
+  const placementData = data ?? ctx?.printAreaData;
+  const body = buildTestContext(ctx, st, placementData, { randomDesign, designId });
   onStatus?.(
     randomDesign
       ? "Creating test product with random design…"
@@ -763,6 +764,7 @@ async function runPlaceDesign(designId, designRow) {
       randomDesign: false,
       designId,
       keepSession: true,
+      data,
     });
     const rowId = Number(res?.id || st.sessionTestDesign?.testProductRowId);
     if (rowId) {
@@ -898,6 +900,7 @@ export async function createTestProductWithSessionDesign(ctx, st, { onStatus, da
       randomDesign: false,
       designId: st.sessionTestDesign.designId,
       keepSession: true,
+      data,
     });
     onStatus?.("Test product created.");
   } catch (e) {
