@@ -775,23 +775,12 @@ async function runPlaceDesign(designId, designRow) {
           alignSessionDesignToPrintArea(st, data);
           onDesignPlaced?.();
         }
-        try {
-          const applied = await applySessionDesignToPrintify(ctx, st, data, {
-            onStatus,
-            viewKey: st.activeView,
-          });
-          const mockPayload = applied || preview;
-          applySessionTestProductMockToState(st, mockPayload, st.activeView, { cacheBust: !!applied });
-          onMockReady?.(mockPayload);
-        } catch (applyErr) {
-          applySessionTestProductMockToState(st, preview, st.activeView);
-          onMockReady?.(preview);
-          onStatus?.(applyErr?.message || "Printify placement sync failed — click ✓ to retry");
-        }
+        applySessionTestProductMockToState(st, preview, st.activeView);
+        onMockReady?.(preview);
       }
     }
     if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
-    onStatus?.("Test product ready — placement synced to Printify.");
+    onStatus?.("Test product ready — click ✓ if you adjust placement.");
   } catch (e) {
     if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
     onStatus?.(e?.message || "Background create failed");
