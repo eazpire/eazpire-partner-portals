@@ -772,18 +772,26 @@ async function runPlaceDesign(designId, designRow) {
         if (sd) {
           if (preview.design_width > 0) sd.designWidth = Number(preview.design_width);
           if (preview.design_height > 0) sd.designHeight = Number(preview.design_height);
-          if (alignSessionDesignToPrintArea(st, data)) {
-            onDesignPlaced?.();
-          } else if (preview.design_placement) {
-            applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
-            onDesignPlaced?.();
-          }
+          alignSessionDesignToPrintArea(st, data);
+          onDesignPlaced?.();
         }
-        applySessionTestProductMockToState(st, preview, st.activeView);
-        onMockReady?.(preview);
+        try {
+          const applied = await applySessionDesignToPrintify(ctx, st, data, {
+            onStatus,
+            viewKey: st.activeView,
+          });
+          const mockPayload = applied || preview;
+          applySessionTestProductMockToState(st, mockPayload, st.activeView, { cacheBust: !!applied });
+          onMockReady?.(mockPayload);
+        } catch (applyErr) {
+          applySessionTestProductMockToState(st, preview, st.activeView);
+          onMockReady?.(preview);
+          onStatus?.(applyErr?.message || "Printify placement sync failed — click ✓ to retry");
+        }
       }
     }
-    onStatus?.("Test product ready — adjust design, then click ✓ to apply changes.");
+    if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
+    onStatus?.("Test product ready — placement synced to Printify.");
   } catch (e) {
     if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
     onStatus?.(e?.message || "Background create failed");
