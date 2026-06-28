@@ -14,7 +14,7 @@ import {
   applyLivePrintifyPlacementToSessionDesign,
   buildPlacementCtxFromSession,
   sessionDesignRectFromUniformContain,
-  snapDesignRectToPrintAreaCenter,
+  snapDesignRectToPrintArea,
 } from "./placement-math.js";
 import {
   rectHandlesHtml,
@@ -271,15 +271,28 @@ function ensureSnapGuides(stageInner) {
     `<div class="ce-pa-snap-guides" data-snap-guides hidden aria-hidden="true">
       <span class="ce-pa-snap-guide ce-pa-snap-guide--h" data-snap-guide-h hidden></span>
       <span class="ce-pa-snap-guide ce-pa-snap-guide--v" data-snap-guide-v hidden></span>
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--h" data-snap-guide-top hidden></span>
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--h" data-snap-guide-bottom hidden></span>
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--v" data-snap-guide-left hidden></span>
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--v" data-snap-guide-right hidden></span>
     </div>`
   );
   return stageInner.querySelector("[data-snap-guides]");
 }
 
-function updateSnapGuides(stageInner, bounds, snapH, snapV) {
+function updateSnapGuides(stageInner, bounds, snapState = {}) {
+  const {
+    snapH = false,
+    snapV = false,
+    snapTop = false,
+    snapBottom = false,
+    snapLeft = false,
+    snapRight = false,
+  } = snapState;
   const guides = ensureSnapGuides(stageInner);
   if (!guides) return;
-  if (!bounds || (!snapH && !snapV)) {
+  const anySnap = snapH || snapV || snapTop || snapBottom || snapLeft || snapRight;
+  if (!bounds || !anySnap) {
     guides.hidden = true;
     guides.setAttribute("aria-hidden", "true");
     return;
@@ -288,8 +301,14 @@ function updateSnapGuides(stageInner, bounds, snapH, snapV) {
   guides.setAttribute("aria-hidden", "false");
   const bcx = bounds.x + bounds.w / 2;
   const bcy = bounds.y + bounds.h / 2;
+  const bRight = bounds.x + bounds.w;
+  const bBottom = bounds.y + bounds.h;
   const hLine = guides.querySelector("[data-snap-guide-h]");
   const vLine = guides.querySelector("[data-snap-guide-v]");
+  const topLine = guides.querySelector("[data-snap-guide-top]");
+  const bottomLine = guides.querySelector("[data-snap-guide-bottom]");
+  const leftLine = guides.querySelector("[data-snap-guide-left]");
+  const rightLine = guides.querySelector("[data-snap-guide-right]");
   if (hLine) {
     hLine.hidden = !snapH;
     hLine.style.top = `${bcy * 100}%`;
@@ -302,18 +321,42 @@ function updateSnapGuides(stageInner, bounds, snapH, snapV) {
     vLine.style.top = `${bounds.y * 100}%`;
     vLine.style.height = `${bounds.h * 100}%`;
   }
+  if (topLine) {
+    topLine.hidden = !snapTop;
+    topLine.style.top = `${bounds.y * 100}%`;
+    topLine.style.left = `${bounds.x * 100}%`;
+    topLine.style.width = `${bounds.w * 100}%`;
+  }
+  if (bottomLine) {
+    bottomLine.hidden = !snapBottom;
+    bottomLine.style.top = `${bBottom * 100}%`;
+    bottomLine.style.left = `${bounds.x * 100}%`;
+    bottomLine.style.width = `${bounds.w * 100}%`;
+  }
+  if (leftLine) {
+    leftLine.hidden = !snapLeft;
+    leftLine.style.left = `${bounds.x * 100}%`;
+    leftLine.style.top = `${bounds.y * 100}%`;
+    leftLine.style.height = `${bounds.h * 100}%`;
+  }
+  if (rightLine) {
+    rightLine.hidden = !snapRight;
+    rightLine.style.left = `${bRight * 100}%`;
+    rightLine.style.top = `${bounds.y * 100}%`;
+    rightLine.style.height = `${bounds.h * 100}%`;
+  }
 }
 
 function hideSnapGuides(stageInner) {
-  updateSnapGuides(stageInner, null, false, false);
+  updateSnapGuides(stageInner, null);
 }
 
-function applyCenterSnap(rect, st, stageInner, stageBox) {
+function applyPlacementSnap(rect, st, stageInner, stageBox) {
   const bounds = st?.redRect;
   if (!bounds) return rect;
-  const { rect: snapped, snapH, snapV } = snapDesignRectToPrintAreaCenter(rect, bounds, stageBox);
-  updateSnapGuides(stageInner, bounds, snapH, snapV);
-  return snapped;
+  const snapped = snapDesignRectToPrintArea(rect, bounds, stageBox);
+  updateSnapGuides(stageInner, bounds, snapped);
+  return snapped.rect;
 }
 
 function drawSessionRect(layer, el, rect, active, dirty, applying = false) {
@@ -406,7 +449,7 @@ function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, pr
     if (st.sessionTestDesign) {
       let next = { ...rect };
       if (!skipSnap && drag && (drag.type === "move" || drag.type === "resize")) {
-        next = applyCenterSnap(next, st, stageInner, getStageBox());
+        next = applyPlacementSnap(next, st, stageInner, getStageBox());
       }
       st.sessionTestDesign.rect = clampRectToStage(next);
       markSessionDesignDirty(st);

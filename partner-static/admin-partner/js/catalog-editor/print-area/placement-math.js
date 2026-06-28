@@ -287,14 +287,15 @@ export function buildPlacementCtxFromSession(st, data) {
   };
 }
 
-/** Stage px threshold for center snap while dragging session design. */
-export const CENTER_SNAP_THRESHOLD_PX = 6;
+/** Stage px threshold for snap while dragging session design. */
+export const SNAP_THRESHOLD_PX = 6;
+export const CENTER_SNAP_THRESHOLD_PX = SNAP_THRESHOLD_PX;
 
 /**
  * Snap design rect center to print-area bounds center (each axis independently).
  * @returns {{ rect: object, snapH: boolean, snapV: boolean }}
  */
-export function snapDesignRectToPrintAreaCenter(rect, bounds, stageBox, thresholdPx = CENTER_SNAP_THRESHOLD_PX) {
+export function snapDesignRectToPrintAreaCenter(rect, bounds, stageBox, thresholdPx = SNAP_THRESHOLD_PX) {
   const r = normalizeRect(rect);
   const b = normalizeRect(bounds);
   const sw = Number(stageBox?.w);
@@ -328,6 +329,118 @@ export function snapDesignRectToPrintAreaCenter(rect, bounds, stageBox, threshol
     rect: normalizeRect({ ...r, x, y }),
     snapH,
     snapV,
+  };
+}
+
+/**
+ * Snap design rect edges to print-area bounds edges (each edge independently).
+ * @returns {{ rect: object, snapLeft: boolean, snapRight: boolean, snapTop: boolean, snapBottom: boolean }}
+ */
+export function snapDesignRectToPrintAreaEdges(rect, bounds, stageBox, thresholdPx = SNAP_THRESHOLD_PX) {
+  const r = normalizeRect(rect);
+  const b = normalizeRect(bounds);
+  const sw = Number(stageBox?.w);
+  const sh = Number(stageBox?.h);
+  if (!r || !b || !(sw > 0) || !(sh > 0)) {
+    return {
+      rect: r || rect,
+      snapLeft: false,
+      snapRight: false,
+      snapTop: false,
+      snapBottom: false,
+    };
+  }
+
+  const tx = thresholdPx / sw;
+  const ty = thresholdPx / sh;
+  const bRight = b.x + b.w;
+  const bBottom = b.y + b.h;
+  const rRight = r.x + r.w;
+  const rBottom = r.y + r.h;
+
+  let snapLeft = false;
+  let snapRight = false;
+  let snapTop = false;
+  let snapBottom = false;
+  let x = r.x;
+  let y = r.y;
+
+  if (Math.abs(r.x - b.x) <= tx) {
+    x = b.x;
+    snapLeft = true;
+  }
+  if (Math.abs(rRight - bRight) <= tx) {
+    x = bRight - r.w;
+    snapRight = true;
+  }
+  if (Math.abs(r.y - b.y) <= ty) {
+    y = b.y;
+    snapTop = true;
+  }
+  if (Math.abs(rBottom - bBottom) <= ty) {
+    y = bBottom - r.h;
+    snapBottom = true;
+  }
+
+  return {
+    rect: normalizeRect({ ...r, x, y }),
+    snapLeft,
+    snapRight,
+    snapTop,
+    snapBottom,
+  };
+}
+
+/**
+ * Center + edge snap for session design drag/resize (Printify-style).
+ * Edge snaps take priority over center on each axis; all matching edge guides are shown.
+ * @returns {{ rect: object, snapH: boolean, snapV: boolean, snapLeft: boolean, snapRight: boolean, snapTop: boolean, snapBottom: boolean }}
+ */
+export function snapDesignRectToPrintArea(rect, bounds, stageBox, thresholdPx = SNAP_THRESHOLD_PX) {
+  const r = normalizeRect(rect);
+  const b = normalizeRect(bounds);
+  const sw = Number(stageBox?.w);
+  const sh = Number(stageBox?.h);
+  if (!r || !b || !(sw > 0) || !(sh > 0)) {
+    return {
+      rect: r || rect,
+      snapH: false,
+      snapV: false,
+      snapLeft: false,
+      snapRight: false,
+      snapTop: false,
+      snapBottom: false,
+    };
+  }
+
+  const edges = snapDesignRectToPrintAreaEdges(r, bounds, stageBox, thresholdPx);
+  const edgeSnapX = edges.snapLeft || edges.snapRight;
+  const edgeSnapY = edges.snapTop || edges.snapBottom;
+
+  let snapH = false;
+  let snapV = false;
+  let x = edges.rect.x;
+  let y = edges.rect.y;
+
+  if (!edgeSnapX) {
+    const center = snapDesignRectToPrintAreaCenter(r, bounds, stageBox, thresholdPx);
+    x = center.rect.x;
+    snapV = center.snapV;
+  }
+  if (!edgeSnapY) {
+    const center = snapDesignRectToPrintAreaCenter(r, bounds, stageBox, thresholdPx);
+    y = center.rect.y;
+    snapH = center.snapH;
+  }
+
+  return {
+    rect: normalizeRect({ ...r, x, y }),
+    snapH,
+    snapV,
+    snapLeft: edges.snapLeft,
+    snapRight: edges.snapRight,
+    snapTop: edges.snapTop,
+    snapBottom: edges.snapBottom,
   };
 }
 
