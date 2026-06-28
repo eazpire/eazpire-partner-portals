@@ -177,9 +177,19 @@ export function rectToPrintifyImagePlacement(rect, ctx = {}) {
     const boxH = relH * pah;
     const m = Math.min(boxW / dW, boxH / dH);
     const scale = printifyScaleForCreatorDesign(m, dW, paw);
+    let y = cy;
+    if (
+      bounds &&
+      bounds.w > 0 &&
+      bounds.h > 0 &&
+      isWidthLimitedUniformContain(dW, dH, paw, pah) &&
+      relY <= 0.004
+    ) {
+      y = uniformContainPrintifyCenterY(ctx, scale, { verticalAlign: "top" });
+    }
     return {
       x: parseFloat(cx.toFixed(4)),
-      y: parseFloat(cy.toFixed(4)),
+      y: parseFloat(y.toFixed(4)),
       scale: parseFloat(Math.min(1000, Math.max(0.001, scale)).toFixed(6)),
       angle,
     };

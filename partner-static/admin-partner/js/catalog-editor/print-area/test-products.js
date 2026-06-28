@@ -776,6 +776,18 @@ async function runPlaceDesign(designId, designRow) {
           if (preview.design_height > 0) sd.designHeight = Number(preview.design_height);
           alignSessionDesignToPrintArea(st, data);
           onDesignPlaced?.();
+          if (isSessionDesignDirty(st)) {
+            try {
+              await applySessionDesignToPrintify(
+                { ...ctx, printAreaData: data },
+                st,
+                data,
+                { onStatus, viewKey: st.activeView }
+              );
+            } catch (applyErr) {
+              onStatus?.(applyErr?.message || "Placement sync failed — click ✓ to retry.");
+            }
+          }
         }
         applySessionTestProductMockToState(st, preview, st.activeView);
         onMockReady?.(preview);
