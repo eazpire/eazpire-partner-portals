@@ -77,15 +77,19 @@ function stageInnerBox(stageInner) {
 }
 
 function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
-  const { showMagnify = true, stageId = "ce-pa-stage-left", showGreenRect = true } = options;
+  const { showMagnify = true, showSyncFromPrintify = false, stageId = "ce-pa-stage-left", showGreenRect = true } =
+    options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
+    : "";
+  const syncBtn = showSyncFromPrintify
+    ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-sync-printify-btn" data-sync-printify-placement title="Sync placement from Printify" aria-label="Sync placement from Printify">↻</button>`
     : "";
   return `
     <div class="ce-pa-viewer ce-pa-viewer--print">
       <div class="ce-pa-viewer-head">
         <span class="ce-pa-viewer-title">Print Area</span>
-        ${magnifyBtn}
+        ${magnifyBtn}${syncBtn}
         <span class="ce-pa-viewer-head-spacer" aria-hidden="true"></span>
       </div>
       <div class="ce-pa-stage" id="${escapeHtml(stageId)}" data-layer="${escapeHtml(st.activeLayer)}">
@@ -155,7 +159,7 @@ function stageInnerHtml(st, data, ctx, brandAssets, options = {}) {
   return `
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
-        ${printAreaStageHtml(st, data, leftImg, overlays, { showGreenRect })}
+        ${printAreaStageHtml(st, data, leftImg, overlays, { showGreenRect, sessionTestProduct, showSyncFromPrintify: sessionTestProduct })}
         ${mockStageHtml(st, mockImg, { sessionTestProduct })}
       </div>
     </div>`;
@@ -172,6 +176,7 @@ export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
   const showGreenRect = shouldShowGreenRect(ctx, st, data);
   container.innerHTML = printAreaStageHtml(st, data, leftImg, overlays, {
     showMagnify: false,
+    showSyncFromPrintify: !!callbacks.hasSessionTestProduct?.(),
     stageId: "ce-pa-fs-stage",
     showGreenRect,
   });
@@ -179,8 +184,14 @@ export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
   return bindStageInteractions(container, ctx, st, data, callbacks);
 }
 
+function bindSyncFromPrintifyBtn(root, callbacks = {}) {
+  root.querySelector("[data-sync-printify-placement]")?.addEventListener("click", () => {
+    callbacks.onSyncFromPrintify?.();
+  });
+}
+
 function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange, onSessionDesignSave } = callbacks;
+  const { onStateChange, onSessionDesignSave, onSyncFromPrintify } = callbacks;
   let brandAssets = callbacks.brandAssets;
 
   let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
@@ -611,6 +622,8 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     onStateChange?.();
   });
 
+  bindSyncFromPrintifyBtn(root, { onSyncFromPrintify });
+
   return {
     refresh,
     redraw,
@@ -638,7 +651,8 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
 }
 
 export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
-  const { onStateChange, onMockRefresh, brandAssets, onMagnify, hasSessionTestProduct } = callbacks;
+  const { onStateChange, onMockRefresh, onSyncFromPrintify, brandAssets, onMagnify, hasSessionTestProduct } =
+    callbacks;
   const main = root.querySelector("#ce-pa-main");
   if (!main) return { destroy() {} };
 
@@ -681,9 +695,20 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     btn.addEventListener("click", () => onMagnify?.());
   });
 
+  main.querySelector("[data-sync-printify-placement]")?.addEventListener("click", () => {
+    onSyncFromPrintify?.();
+  });
+
   main.querySelector("#ce-pa-mock-refresh")?.addEventListener("click", () => {
     onMockRefresh?.();
   });
+
+  const updateSyncFromPrintifyBtn = () => {
+    const sessionActive = hasSessionTestProduct?.() ?? !!st.useSessionTestProductMock;
+    const syncBtn = main.querySelector("[data-sync-printify-placement]");
+    if (syncBtn) syncBtn.hidden = !sessionActive;
+  };
+  updateSyncFromPrintifyBtn();
 
   return {
     refreshPattern: refreshPatternLayer,
@@ -691,8 +716,12 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
       Object.assign(st, nextSt);
       stageHandle.refresh?.(st, nextData);
       updatePrintAreaImage();
+      updateSyncFromPrintifyBtn();
     },
-    refreshPrintify: () => updatePrintifyPanel(),
+    refreshPrintify: () => {
+      updatePrintifyPanel();
+      updateSyncFromPrintifyBtn();
+    },
     redraw: () => stageHandle.redraw?.(),
     redrawStageRects: () => stageHandle.redrawStageRects?.(),
     refreshOverlays: () => stageHandle.refreshOverlays?.(),

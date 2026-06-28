@@ -287,16 +287,61 @@ export function buildPlacementCtxFromSession(st, data) {
   };
 }
 
+/** Stage px threshold for center snap while dragging session design. */
+export const CENTER_SNAP_THRESHOLD_PX = 6;
+
+/**
+ * Snap design rect center to print-area bounds center (each axis independently).
+ * @returns {{ rect: object, snapH: boolean, snapV: boolean }}
+ */
+export function snapDesignRectToPrintAreaCenter(rect, bounds, stageBox, thresholdPx = CENTER_SNAP_THRESHOLD_PX) {
+  const r = normalizeRect(rect);
+  const b = normalizeRect(bounds);
+  const sw = Number(stageBox?.w);
+  const sh = Number(stageBox?.h);
+  if (!r || !b || !(sw > 0) || !(sh > 0)) {
+    return { rect: r || rect, snapH: false, snapV: false };
+  }
+
+  const tx = thresholdPx / sw;
+  const ty = thresholdPx / sh;
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const bcx = b.x + b.w / 2;
+  const bcy = b.y + b.h / 2;
+
+  let snapH = false;
+  let snapV = false;
+  let x = r.x;
+  let y = r.y;
+
+  if (Math.abs(cx - bcx) <= tx) {
+    x = bcx - r.w / 2;
+    snapV = true;
+  }
+  if (Math.abs(cy - bcy) <= ty) {
+    y = bcy - r.h / 2;
+    snapH = true;
+  }
+
+  return {
+    rect: normalizeRect({ ...r, x, y }),
+    snapH,
+    snapV,
+  };
+}
+
 /**
  * Apply live Printify design placement from preview API onto session overlay rect.
  */
 export function applyLivePrintifyPlacementToSessionDesign(st, data, live, { markDirty = false } = {}) {
   const sd = st?.sessionTestDesign;
-  if (!sd?.rect || !live?.placement) return false;
+  const placement = live?.placement || live?.design_placement;
+  if (!sd?.rect || !placement) return false;
   if (live.design_width > 0) sd.designWidth = Number(live.design_width);
   if (live.design_height > 0) sd.designHeight = Number(live.design_height);
   const ctx = buildPlacementCtxFromSession(st, data);
-  const rect = printifyPlacementToSessionDesignRect(live.placement, ctx);
+  const rect = printifyPlacementToSessionDesignRect(placement, ctx);
   if (!rect) return false;
   sd.rect = rect;
   if (markDirty) {

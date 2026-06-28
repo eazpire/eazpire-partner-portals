@@ -14,6 +14,7 @@ import {
   applyLivePrintifyPlacementToSessionDesign,
   buildPlacementCtxFromSession,
   sessionDesignRectFromUniformContain,
+  snapDesignRectToPrintAreaCenter,
 } from "./placement-math.js";
 import {
   rectHandlesHtml,
@@ -227,7 +228,7 @@ function toggleHandles(el, active) {
   });
 }
 
-function updateSessionToolbar(layer, el, rect, dirty) {
+function updateSessionToolbar(layer, el, rect, dirty, applying = false) {
   const toolbar = layer?.querySelector("[data-session-toolbar]");
   if (!toolbar || !rect) return;
   toolbar.style.left = `${rect.x * 100}%`;
@@ -238,12 +239,68 @@ function updateSessionToolbar(layer, el, rect, dirty) {
   toolbar.style.transform = angle ? `rotate(${angle}deg)` : "";
   const saveBtn = toolbar.querySelector("[data-session-save]");
   if (saveBtn) {
-    saveBtn.disabled = !dirty;
-    saveBtn.classList.toggle("is-dirty", !!dirty);
+    saveBtn.disabled = applying || !dirty;
+    saveBtn.classList.toggle("is-dirty", !!dirty && !applying);
+    saveBtn.classList.toggle("is-applying", applying);
+    saveBtn.textContent = applying ? "…" : "✓";
+    saveBtn.setAttribute("aria-busy", applying ? "true" : "false");
   }
 }
 
-function drawSessionRect(layer, el, rect, active, dirty) {
+function ensureSnapGuides(stageInner) {
+  let guides = stageInner?.querySelector?.("[data-snap-guides]");
+  if (guides || !stageInner) return guides;
+  stageInner.insertAdjacentHTML(
+    "beforeend",
+    `<div class="ce-pa-snap-guides" data-snap-guides hidden aria-hidden="true">
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--h" data-snap-guide-h hidden></span>
+      <span class="ce-pa-snap-guide ce-pa-snap-guide--v" data-snap-guide-v hidden></span>
+    </div>`
+  );
+  return stageInner.querySelector("[data-snap-guides]");
+}
+
+function updateSnapGuides(stageInner, bounds, snapH, snapV) {
+  const guides = ensureSnapGuides(stageInner);
+  if (!guides) return;
+  if (!bounds || (!snapH && !snapV)) {
+    guides.hidden = true;
+    guides.setAttribute("aria-hidden", "true");
+    return;
+  }
+  guides.hidden = false;
+  guides.setAttribute("aria-hidden", "false");
+  const bcx = bounds.x + bounds.w / 2;
+  const bcy = bounds.y + bounds.h / 2;
+  const hLine = guides.querySelector("[data-snap-guide-h]");
+  const vLine = guides.querySelector("[data-snap-guide-v]");
+  if (hLine) {
+    hLine.hidden = !snapH;
+    hLine.style.top = `${bcy * 100}%`;
+    hLine.style.left = `${bounds.x * 100}%`;
+    hLine.style.width = `${bounds.w * 100}%`;
+  }
+  if (vLine) {
+    vLine.hidden = !snapV;
+    vLine.style.left = `${bcx * 100}%`;
+    vLine.style.top = `${bounds.y * 100}%`;
+    vLine.style.height = `${bounds.h * 100}%`;
+  }
+}
+
+function hideSnapGuides(stageInner) {
+  updateSnapGuides(stageInner, null, false, false);
+}
+
+function applyCenterSnap(rect, st, stageInner, stageBox) {
+  const bounds = st?.redRect;
+  if (!bounds) return rect;
+  const { rect: snapped, snapH, snapV } = snapDesignRectToPrintAreaCenter(rect, bounds, stageBox);
+  updateSnapGuides(stageInner, bounds, snapH, snapV);
+  return snapped;
+}
+
+function drawSessionRect(layer, el, rect, active, dirty, applying = false) {
   if (!el || !rect) return;
   el.style.left = `${rect.x * 100}%`;
   el.style.top = `${rect.y * 100}%`;
@@ -251,9 +308,9 @@ function drawSessionRect(layer, el, rect, active, dirty) {
   el.style.height = `${rect.h * 100}%`;
   const angle = Number(rect.angle) || 0;
   el.style.transform = angle ? `rotate(${angle}deg)` : "";
-  toggleHandles(el, active);
+  toggleHandles(el, active && !applying);
   updateResizeHandleCursors(el, rect);
-  updateSessionToolbar(layer, el, rect, dirty);
+  updateSessionToolbar(layer, el, rect, dirty, applying);
 }
 
 function sessionDesignHtml(sd) {
@@ -310,6 +367,7 @@ export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyCha
 
 function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, printAreaData } = {}) {
   let drag = null;
+  let applying = false;
   const layer = stageInner?.querySelector("[data-session-design-layer]");
 
   const getStageBox = () => {
@@ -328,32 +386,63 @@ function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, pr
     };
   };
 
-  const syncRect = (rect) => {
+  const syncRect = (rect, { skipSnap = false } = {}) => {
     if (st.sessionTestDesign) {
-      st.sessionTestDesign.rect = { ...rect };
+      let next = { ...rect };
+      if (!skipSnap && drag && (drag.type === "move" || drag.type === "resize")) {
+        next = applyCenterSnap(next, st, stageInner, getStageBox());
+      }
+      st.sessionTestDesign.rect = clampRectToStage(next);
       markSessionDesignDirty(st);
     }
-    drawSessionRect(layer, el, rect, true, isSessionDesignDirty(st));
+    const sd = st.sessionTestDesign;
+    if (sd?.rect) {
+      drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st), applying);
+    }
     onChange?.();
   };
 
   layer?.querySelector("[data-session-align]")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    hideSnapGuides(stageInner);
     if (onAlign?.()) {
       const sd = st.sessionTestDesign;
-      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
+      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st), applying);
       onChange?.();
     } else if (alignSessionDesignToPrintArea(st, printAreaData)) {
       const sd = st.sessionTestDesign;
-      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st));
+      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, isSessionDesignDirty(st), applying);
       onChange?.();
     }
   });
 
-  layer?.querySelector("[data-session-save]")?.addEventListener("click", (ev) => {
+  layer?.querySelector("[data-session-save]")?.addEventListener("click", async (ev) => {
     ev.stopPropagation();
-    if (!isSessionDesignDirty(st)) return;
-    void onSave?.();
+    if (applying || !isSessionDesignDirty(st)) return;
+    const saveBtn = layer.querySelector("[data-session-save]");
+    applying = true;
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.classList.add("is-applying");
+      saveBtn.textContent = "…";
+      saveBtn.setAttribute("aria-busy", "true");
+    }
+    toggleHandles(el, false);
+    try {
+      await onSave?.();
+    } finally {
+      applying = false;
+      const dirty = isSessionDesignDirty(st);
+      if (saveBtn) {
+        saveBtn.disabled = !dirty;
+        saveBtn.classList.toggle("is-dirty", dirty);
+        saveBtn.classList.remove("is-applying");
+        saveBtn.textContent = "✓";
+        saveBtn.setAttribute("aria-busy", "false");
+      }
+      const sd = st.sessionTestDesign;
+      if (sd?.rect) drawSessionRect(layer, el, sd.rect, true, dirty, false);
+    }
   });
 
   el.querySelectorAll("[data-resize]").forEach((handle) => {
@@ -440,6 +529,7 @@ function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, pr
   };
 
   const onMouseUp = () => {
+    hideSnapGuides(stageInner);
     drag = null;
   };
 

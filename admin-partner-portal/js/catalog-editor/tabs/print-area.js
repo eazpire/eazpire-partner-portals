@@ -54,6 +54,7 @@ import {
   applySessionTestProductMockToState,
   hasActiveSessionTestProduct,
   refreshPrintAreaMockViewer,
+  syncSessionDesignFromPrintify,
 } from "../print-area/test-products.js";
 import { applyLivePrintifyPlacementToSessionDesign } from "../print-area/design-session-overlay.js";
 import {
@@ -499,9 +500,31 @@ export function bindPrintAreaTab(ctx, root) {
     notifyPrintAreaDirty(ctx);
   };
 
+  const onSyncFromPrintify = async () => {
+    if (!hasActiveSessionTestProduct(st)) return;
+    const statusEl = root.querySelector("#ce-pa-test-products-status");
+    try {
+      if (statusEl) statusEl.hidden = false;
+      await syncSessionDesignFromPrintify(ctx, st, data, {
+        viewKey: st.activeView,
+        onStatus: (msg) => {
+          if (statusEl) statusEl.textContent = msg;
+        },
+      });
+      ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+      ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+    } catch (err) {
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = err?.message || "Sync from Printify failed";
+      }
+    }
+  };
+
   ctx.printAreaViewerHandle = mountDualViewer(root, ctx, st, data, {
     onStateChange: onPrintAreaStageChange,
     onMockRefresh: () => refreshPrintifyMock(ctx, refreshPrintifyViewer),
+    onSyncFromPrintify,
     onSessionDesignSave: () => sessionTestFlow.onSave(),
     brandAssets: getEffectiveBrandAssets(),
     hasSessionTestProduct: () => hasActiveSessionTestProduct(st),
@@ -509,6 +532,8 @@ export function bindPrintAreaTab(ctx, root) {
       ctx.printAreaFullscreenHandle = openPrintAreaFullscreen(ctx, st, data, {
         onStateChange: onPrintAreaStageChange,
         onSessionDesignSave: () => sessionTestFlow.onSave(),
+        onSyncFromPrintify,
+        hasSessionTestProduct: () => hasActiveSessionTestProduct(st),
         onClose: () => {
           syncMainPrintAreaStage(true);
           ctx.printAreaFullscreenHandle = null;

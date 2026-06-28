@@ -204,6 +204,33 @@ export async function refreshPrintAreaMockViewer(ctx, { force = false } = {}) {
   return null;
 }
 
+export async function syncSessionDesignFromPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
+  const sd = st?.sessionTestDesign;
+  const rowId = Number(sd?.testProductRowId);
+  if (!rowId) {
+    onStatus?.("No test product — choose a design first.");
+    return null;
+  }
+
+  onStatus?.("Syncing placement from Printify…");
+  invalidateSessionTestProductPreviewCache(st);
+  const vk = normViewKey(viewKey || st.activeView || "front");
+  const res = await fetchTestPrintifyProductPreview(rowId, { view_key: vk });
+  if (!res?.ok) {
+    throw new Error(res?.message || res?.error || res?.detail || "Sync failed");
+  }
+
+  const placementData = data || ctx?.printAreaData || null;
+  if (res.design_placement && sd) {
+    applyLivePrintifyPlacementToSessionDesign(st, placementData, res, { markDirty: false });
+  }
+
+  previewCache.set(String(rowId), { ...res, _viewKey: vk });
+  sd.previewCache = previewCache.get(String(rowId));
+  onStatus?.("Placement synced from Printify.");
+  return res;
+}
+
 export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
   const sd = st?.sessionTestDesign;
   const rowId = Number(sd?.testProductRowId);
@@ -1070,15 +1097,18 @@ export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
   return {
     async onSave() {
       try {
-        await applySessionDesignToPrintify(ctx, st, placementData, {
+        const res = await applySessionDesignToPrintify(ctx, st, placementData, {
           onStatus,
           viewKey: st.activeView,
         });
-        onMockReady?.(st.sessionTestDesign?.previewCache);
+        if (res) {
+          onMockReady?.(st.sessionTestDesign?.previewCache || res);
+        }
         onDesignPlaced?.();
         onDirtyChange?.(false);
       } catch (e) {
         onStatus?.(e?.message || "Apply failed");
+        throw e;
       }
     },
     onDirtyChange,

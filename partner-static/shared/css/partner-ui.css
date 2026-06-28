@@ -5325,6 +5325,35 @@ a.ce-tpl-draft-head__id:hover {
 .ce-pa-session-save-btn.is-dirty:not(:disabled) {
   box-shadow: 0 0 0 2px color-mix(in srgb, #7c4dff 35%, transparent);
 }
+.ce-pa-session-save-btn.is-applying {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+/* Center snap guides (Printify-style) while dragging session design */
+.ce-pa-snap-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+.ce-pa-snap-guide {
+  position: absolute;
+  background: #ef4444;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ef4444 40%, transparent);
+}
+.ce-pa-snap-guide--h {
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+.ce-pa-snap-guide--v {
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+.ce-pa-sync-printify-btn.is-syncing {
+  opacity: 0.55;
+  cursor: wait;
+}
 
 .ce-pa-tp-modal,
 .ce-pa-tp-viewer {
