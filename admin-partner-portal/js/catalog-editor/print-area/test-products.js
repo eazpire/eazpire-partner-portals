@@ -346,6 +346,33 @@ function bulkDeleteConfirmMessage(count) {
   return `Delete ${count} test products?`;
 }
 
+function setBulkDeleteLoading(loading) {
+  const el = document.getElementById("ce-pa-tp-modal");
+  if (!el) return;
+  el.classList.toggle("is-bulk-deleting", loading);
+  const deleteBtn = el.querySelector("[data-ce-pa-tp-bulk-delete]");
+  const selectAllBtn = el.querySelector("[data-ce-pa-tp-select-all]");
+  if (deleteBtn) {
+    deleteBtn.disabled = loading;
+    deleteBtn.innerHTML = loading
+      ? '<span class="ce-pa-tp-btn-spinner" aria-hidden="true"></span> Deleting…'
+      : "Delete";
+  }
+  if (selectAllBtn) selectAllBtn.disabled = loading;
+  el.querySelectorAll("[data-ce-pa-tp-close]").forEach((btn) => {
+    btn.disabled = loading;
+  });
+}
+
+async function animateRemovedTestProductCards(ids) {
+  const el = document.getElementById("ce-pa-tp-modal");
+  if (!el || !ids.length) return;
+  ids.forEach((id) => {
+    el.querySelector(`.ce-pa-tp-card[data-row-id="${id}"]`)?.classList.add("is-removing");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 340));
+}
+
 async function bulkDeleteSelectedTestProducts(ctx) {
   const ids = [...selectedTestProductIds];
   if (!ids.length) return;
@@ -357,14 +384,7 @@ async function bulkDeleteSelectedTestProducts(ctx) {
     cancelLabel: "No",
     confirmClass: "btn-danger",
     onConfirm: async () => {
-      const el = document.getElementById("ce-pa-tp-modal");
-      const deleteBtn = el?.querySelector("[data-ce-pa-tp-bulk-delete]");
-      const selectAllBtn = el?.querySelector("[data-ce-pa-tp-select-all]");
-      if (deleteBtn) {
-        deleteBtn.disabled = true;
-        deleteBtn.textContent = "Deleting…";
-      }
-      if (selectAllBtn) selectAllBtn.disabled = true;
+      setBulkDeleteLoading(true);
       try {
         const res = await deleteTestPrintifyProducts(ids);
         if (!res?.ok && !(Number(res?.deleted_count) > 0)) {
@@ -373,17 +393,15 @@ async function bulkDeleteSelectedTestProducts(ctx) {
         if (res?.failed?.length) {
           alert(`Some products could not be deleted (${res.failed.length}).`);
         }
+        const removedIds = ids.filter((id) => !res?.failed?.some((f) => Number(f?.id) === Number(id)));
+        await animateRemovedTestProductCards(removedIds.length ? removedIds : ids);
         selectedTestProductIds.clear();
         await loadTestProductsGrid(ctx);
       } catch (e) {
         alert(e?.message || "Delete failed");
         updateBulkSelectionUi();
       } finally {
-        if (deleteBtn) {
-          deleteBtn.disabled = false;
-          deleteBtn.textContent = "Delete";
-        }
-        if (selectAllBtn) selectAllBtn.disabled = false;
+        setBulkDeleteLoading(false);
       }
     },
   });
@@ -627,48 +645,36 @@ async function loadTestProductsGrid(ctx) {
         return `
       <article class="ce-pa-tp-card${isSelected ? " is-selected" : ""}" data-row-id="${row.id}">
         <div class="ce-pa-tp-card__badges">${badges}</div>
-        <label class="ce-pa-tp-card__select" title="Select product">
-          <input type="checkbox" class="ce-pa-tp-card__checkbox" data-select-id="${row.id}" aria-label="Select product"${isSelected ? " checked" : ""} />
-        </label>
-        <button type="button" class="ce-pa-tp-card__open" data-open-id="${row.id}">
-          ${thumb}
-          <span class="ce-pa-tp-card__title">${escapeHtml(title)}</span>
-          <span class="ce-pa-tp-card__meta">Design #${row.design_id || "—"}</span>
-        </button>
-        <button type="button" class="btn btn-ghost btn-xs ce-pa-tp-card__delete" data-delete-id="${row.id}" title="Delete">🗑</button>
+        <div class="ce-pa-tp-card__thumb-area">
+          <div class="ce-pa-tp-card__open">
+            ${thumb}
+          </div>
+          <label class="ce-pa-tp-card__select" title="Select product">
+            <input type="checkbox" class="ce-pa-tp-card__checkbox" data-select-id="${row.id}" aria-label="Select product"${isSelected ? " checked" : ""} />
+          </label>
+        </div>
+        <span class="ce-pa-tp-card__title">${escapeHtml(title)}</span>
+        <span class="ce-pa-tp-card__meta">Design #${row.design_id || "—"}</span>
       </article>`;
       })
       .join("");
 
-    grid.querySelectorAll("[data-open-id]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = Number(btn.dataset.openId);
+    grid.querySelectorAll(".ce-pa-tp-card").forEach((card) => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".ce-pa-tp-card__select, [data-select-id]")) return;
+        const id = Number(card.dataset.rowId);
         const row = items.find((r) => Number(r.id) === id);
         if (row) openViewer(row);
       });
     });
 
+    grid.querySelectorAll(".ce-pa-tp-card__select").forEach((label) => {
+      label.addEventListener("click", (e) => e.stopPropagation());
+    });
     grid.querySelectorAll("[data-select-id]").forEach((cb) => {
       cb.addEventListener("click", (e) => e.stopPropagation());
       cb.addEventListener("change", () => {
         toggleTestProductSelection(cb.dataset.selectId, cb.checked);
-      });
-    });
-
-    grid.querySelectorAll("[data-delete-id]").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const id = Number(btn.dataset.deleteId);
-        if (!id || !window.confirm("Delete this test product from Printify?")) return;
-        btn.disabled = true;
-        try {
-          await deleteTestPrintifyProducts([id]);
-          selectedTestProductIds.delete(id);
-          await loadTestProductsGrid(ctx);
-        } catch (errDel) {
-          alert(errDel?.message || "Delete failed");
-          btn.disabled = false;
-        }
       });
     });
 
