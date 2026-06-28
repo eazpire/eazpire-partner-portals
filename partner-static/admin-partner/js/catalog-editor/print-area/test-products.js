@@ -1,4 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
+import { confirmAction } from "/partner/shared/js/partner-shell.js";
 import { PH_TYPES } from "../provider-print-technical.js";
 import {
   createTestPrintifyProduct,
@@ -50,6 +51,11 @@ async function resolveDesignRowDimensions(row) {
 }
 
 const previewCache = new Map();
+
+/** Visible rows + selection for bulk delete in the list modal. */
+let listModalCtxRef = null;
+let listModalItems = [];
+const selectedTestProductIds = new Set();
 
 function capitalizeMode(m) {
   const s = String(m || "calculated").toLowerCase();
@@ -263,12 +269,124 @@ function ensureListModal() {
         <p class="ce-pa-tp-empty" data-ce-pa-tp-empty hidden>No test products yet.</p>
         <p class="ce-pa-tp-err" data-ce-pa-tp-err hidden></p>
       </div>
+      <footer class="ce-pa-tp-bulk-bar" data-ce-pa-tp-bulk-bar hidden>
+        <span class="ce-pa-tp-bulk-bar__count" data-ce-pa-tp-bulk-count></span>
+        <div class="ce-pa-tp-bulk-bar__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-ce-pa-tp-select-all>Select all</button>
+          <button type="button" class="btn btn-danger btn-sm" data-ce-pa-tp-bulk-delete>Delete</button>
+        </div>
+      </footer>
     </div>`;
   document.body.appendChild(el);
   el.querySelectorAll("[data-ce-pa-tp-close]").forEach((btn) => {
     btn.addEventListener("click", () => closeListModal());
   });
+  el.querySelector("[data-ce-pa-tp-select-all]")?.addEventListener("click", () => {
+    selectAllVisibleTestProducts();
+  });
+  el.querySelector("[data-ce-pa-tp-bulk-delete]")?.addEventListener("click", () => {
+    if (listModalCtxRef) void bulkDeleteSelectedTestProducts(listModalCtxRef);
+  });
   return el;
+}
+
+function clearTestProductSelection() {
+  selectedTestProductIds.clear();
+  updateBulkSelectionUi();
+}
+
+function toggleTestProductSelection(id, selected) {
+  const n = Number(id);
+  if (!n) return;
+  if (selected) selectedTestProductIds.add(n);
+  else selectedTestProductIds.delete(n);
+  updateBulkSelectionUi();
+}
+
+function updateBulkSelectionUi() {
+  const el = document.getElementById("ce-pa-tp-modal");
+  if (!el) return;
+  const bar = el.querySelector("[data-ce-pa-tp-bulk-bar]");
+  const countEl = el.querySelector("[data-ce-pa-tp-bulk-count]");
+  const selectAllBtn = el.querySelector("[data-ce-pa-tp-select-all]");
+  const n = selectedTestProductIds.size;
+
+  if (bar) bar.hidden = n === 0;
+  if (countEl) {
+    countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
+  }
+
+  el.querySelectorAll(".ce-pa-tp-card").forEach((card) => {
+    const id = Number(card.dataset.rowId);
+    const isSel = selectedTestProductIds.has(id);
+    card.classList.toggle("is-selected", isSel);
+    const cb = card.querySelector("[data-select-id]");
+    if (cb) cb.checked = isSel;
+  });
+
+  if (selectAllBtn && listModalItems.length) {
+    const allSelected = listModalItems.every((row) => selectedTestProductIds.has(Number(row.id)));
+    selectAllBtn.textContent = allSelected ? "Deselect all" : "Select all";
+  }
+}
+
+function selectAllVisibleTestProducts() {
+  if (!listModalItems.length) return;
+  const allSelected = listModalItems.every((row) => selectedTestProductIds.has(Number(row.id)));
+  if (allSelected) {
+    listModalItems.forEach((row) => selectedTestProductIds.delete(Number(row.id)));
+  } else {
+    listModalItems.forEach((row) => selectedTestProductIds.add(Number(row.id)));
+  }
+  updateBulkSelectionUi();
+}
+
+function bulkDeleteConfirmMessage(count) {
+  if (count === 1) return "Delete 1 test product?";
+  return `Delete ${count} test products?`;
+}
+
+async function bulkDeleteSelectedTestProducts(ctx) {
+  const ids = [...selectedTestProductIds];
+  if (!ids.length) return;
+
+  confirmAction({
+    title: "Delete test products?",
+    message: bulkDeleteConfirmMessage(ids.length),
+    confirmLabel: "Yes",
+    cancelLabel: "No",
+    confirmClass: "btn-danger",
+    onConfirm: async () => {
+      const el = document.getElementById("ce-pa-tp-modal");
+      const deleteBtn = el?.querySelector("[data-ce-pa-tp-bulk-delete]");
+      const selectAllBtn = el?.querySelector("[data-ce-pa-tp-select-all]");
+      if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "Deleting…";
+      }
+      if (selectAllBtn) selectAllBtn.disabled = true;
+      try {
+        const res = await deleteTestPrintifyProducts(ids);
+        if (!res?.ok && !(Number(res?.deleted_count) > 0)) {
+          throw new Error(res?.error || res?.message || "Delete failed");
+        }
+        if (res?.failed?.length) {
+          alert(`Some products could not be deleted (${res.failed.length}).`);
+        }
+        selectedTestProductIds.clear();
+        await loadTestProductsGrid(ctx);
+      } catch (e) {
+        alert(e?.message || "Delete failed");
+        updateBulkSelectionUi();
+      } finally {
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = "Delete";
+        }
+        if (selectAllBtn) selectAllBtn.disabled = false;
+      }
+    },
+  });
 }
 
 function ensureViewerModal() {
@@ -468,9 +586,13 @@ function closeListModal() {
     el.setAttribute("aria-hidden", "true");
     el.setAttribute("inert", "");
   }
+  clearTestProductSelection();
+  listModalItems = [];
+  listModalCtxRef = null;
 }
 
 async function loadTestProductsGrid(ctx) {
+  listModalCtxRef = ctx;
   const el = ensureListModal();
   const grid = el.querySelector("[data-ce-pa-tp-grid]");
   const empty = el.querySelector("[data-ce-pa-tp-empty]");
@@ -485,10 +607,12 @@ async function loadTestProductsGrid(ctx) {
     const res = await fetchTestPrintifyProducts(ctx.productKey, ctx.selectedPrintProviderId);
     if (!res?.ok) throw new Error(res?.error || "load_failed");
     const items = res.items || [];
+    listModalItems = items;
     previewCache.clear();
     if (!items.length) {
       grid.innerHTML = "";
       empty.hidden = false;
+      updateBulkSelectionUi();
       return;
     }
     empty.hidden = true;
@@ -499,9 +623,13 @@ async function loadTestProductsGrid(ctx) {
         const thumb = row.printify_product_id
           ? `<div class="ce-pa-tp-card__thumb ce-pa-tp-card__thumb--loading" data-thumb-id="${row.id}"></div>`
           : `<div class="ce-pa-tp-card__thumb ce-pa-tp-card__thumb--empty">No preview</div>`;
+        const isSelected = selectedTestProductIds.has(Number(row.id));
         return `
-      <article class="ce-pa-tp-card" data-row-id="${row.id}">
+      <article class="ce-pa-tp-card${isSelected ? " is-selected" : ""}" data-row-id="${row.id}">
         <div class="ce-pa-tp-card__badges">${badges}</div>
+        <label class="ce-pa-tp-card__select" title="Select product">
+          <input type="checkbox" class="ce-pa-tp-card__checkbox" data-select-id="${row.id}" aria-label="Select product"${isSelected ? " checked" : ""} />
+        </label>
         <button type="button" class="ce-pa-tp-card__open" data-open-id="${row.id}">
           ${thumb}
           <span class="ce-pa-tp-card__title">${escapeHtml(title)}</span>
@@ -520,6 +648,13 @@ async function loadTestProductsGrid(ctx) {
       });
     });
 
+    grid.querySelectorAll("[data-select-id]").forEach((cb) => {
+      cb.addEventListener("click", (e) => e.stopPropagation());
+      cb.addEventListener("change", () => {
+        toggleTestProductSelection(cb.dataset.selectId, cb.checked);
+      });
+    });
+
     grid.querySelectorAll("[data-delete-id]").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -528,6 +663,7 @@ async function loadTestProductsGrid(ctx) {
         btn.disabled = true;
         try {
           await deleteTestPrintifyProducts([id]);
+          selectedTestProductIds.delete(id);
           await loadTestProductsGrid(ctx);
         } catch (errDel) {
           alert(errDel?.message || "Delete failed");
@@ -535,6 +671,8 @@ async function loadTestProductsGrid(ctx) {
         }
       });
     });
+
+    updateBulkSelectionUi();
 
     for (const row of items) {
       const thumbEl = grid.querySelector(`[data-thumb-id="${row.id}"]`);
