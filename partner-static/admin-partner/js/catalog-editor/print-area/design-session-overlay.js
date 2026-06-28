@@ -80,6 +80,79 @@ export function hasSessionTestDesign(st) {
   return !!(sd && Number(sd.designId) > 0 && sd.rect);
 }
 
+export function getActiveTestProductRowId(st) {
+  return Number(st?.activeTestProductRowId) || Number(st?.sessionTestDesign?.testProductRowId) || 0;
+}
+
+export function ensureSessionDesignsMap(st) {
+  if (!st.sessionDesignsByKey || typeof st.sessionDesignsByKey !== "object") {
+    st.sessionDesignsByKey = {};
+  }
+  return st.sessionDesignsByKey;
+}
+
+export function persistSessionDesignToMap(st) {
+  const sd = st?.sessionTestDesign;
+  if (!sd?.rect || !(Number(sd.designId) > 0)) return;
+  const key = sd.sessionKey || sessionKey(st);
+  ensureSessionDesignsMap(st)[key] = {
+    designId: sd.designId,
+    previewUrl: sd.previewUrl || "",
+    title: sd.title || "",
+    designWidth: sd.designWidth,
+    designHeight: sd.designHeight,
+    viewKey: sd.viewKey || normSessionViewKey(st.activeView),
+    designType: sd.designType || st.activeDesignType || "classic",
+    sessionKey: key,
+    rect: snapshotRect(sd.rect),
+    savedRect: sd.savedRect ? snapshotRect(sd.savedRect) : null,
+    dirty: !!sd.dirty,
+    testProductRowId: sd.testProductRowId,
+    previewCache: sd.previewCache,
+  };
+}
+
+export function activateSessionDesignForView(st, data = null) {
+  persistSessionDesignToMap(st);
+  const key = sessionKey(st);
+  const entry = ensureSessionDesignsMap(st)[key];
+  if (!entry?.rect) {
+    if (st.sessionTestDesign?.sessionKey !== key) st.sessionTestDesign = null;
+    return false;
+  }
+  st.sessionTestDesign = {
+    ...entry,
+    sessionKey: key,
+    viewKey: normSessionViewKey(st.activeView),
+    testProductRowId: getActiveTestProductRowId(st) || entry.testProductRowId || null,
+    rect: { ...entry.rect },
+    savedRect: entry.savedRect ? { ...entry.savedRect } : null,
+  };
+  if (data && designPixelAspectFromSession(st.sessionTestDesign)) {
+    alignSessionDesignToPrintArea(st, data);
+  }
+  return true;
+}
+
+export function removeSessionDesignForView(st, viewKey) {
+  const vk = normSessionViewKey(viewKey || st.activeView);
+  const key = `${st.activeDesignType || "classic"}::${vk}`;
+  delete ensureSessionDesignsMap(st)[key];
+  if (st.sessionTestDesign?.sessionKey === key) {
+    st.sessionTestDesign = null;
+  }
+}
+
+export function listSessionDesignsForActiveView(st) {
+  const key = sessionKey(st);
+  const entry = ensureSessionDesignsMap(st)[key];
+  if (entry?.designId) return [entry];
+  if (st.sessionTestDesign?.sessionKey === key && Number(st.sessionTestDesign.designId) > 0) {
+    return [st.sessionTestDesign];
+  }
+  return [];
+}
+
 export function getSessionDesignPlacementForApi(st, data) {
   const sd = st?.sessionTestDesign;
   if (!sd?.rect) return null;
@@ -137,6 +210,7 @@ export function markSessionDesignDirty(st) {
  * (same design id, realigned to that view's print bounds) so back/sleeve/neck apply like front.
  */
 export function adaptSessionDesignToActiveView(st, data) {
+  if (activateSessionDesignForView(st, data)) return true;
   const sd = st?.sessionTestDesign;
   if (!sd?.rect || !(Number(sd.designId) > 0)) return false;
   const key = sessionKey(st);
@@ -145,6 +219,7 @@ export function adaptSessionDesignToActiveView(st, data) {
   sd.sessionKey = key;
   alignSessionDesignToPrintArea(st, data);
   markSessionDesignDirty(st);
+  persistSessionDesignToMap(st);
   return true;
 }
 
@@ -220,19 +295,26 @@ export function placeSessionTestDesign(ctx, st, data, brandAssets, designRow, { 
     rect: normalized,
     savedRect: null,
     dirty: true,
-    testProductRowId: null,
+    testProductRowId: getActiveTestProductRowId(st) || null,
     testProductCreating: false,
     previewCache: null,
   };
   if (designPixelAspectFromSession(st.sessionTestDesign)) {
     alignSessionDesignToPrintArea(st, data);
   }
+  persistSessionDesignToMap(st);
   onPlaced?.(st.sessionTestDesign);
   return true;
 }
 
-export function clearSessionTestDesign(st) {
-  if (st) st.sessionTestDesign = null;
+export function clearSessionTestDesign(st, { viewKey } = {}) {
+  if (!st) return;
+  if (viewKey) {
+    removeSessionDesignForView(st, viewKey);
+    return;
+  }
+  st.sessionTestDesign = null;
+  if (st.sessionDesignsByKey) st.sessionDesignsByKey = {};
 }
 
 export { applyLivePrintifyPlacementToSessionDesign };

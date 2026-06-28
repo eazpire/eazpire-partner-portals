@@ -46,6 +46,7 @@ import {
 } from "../print-area/settings-sidebar.js";
 import { mountDualViewer, applyGreenRectToSlice, isPlacementOverlayMode } from "../print-area/dual-viewer.js";
 import { mountViewDock, removeViewDock, remountViewDock, updateViewDockActive } from "../print-area/view-dock.js";
+import { mountDesignDock, removeDesignDock } from "../print-area/design-dock.js";
 import { openPrintAreaFullscreen, closePrintAreaFullscreen } from "../print-area/fullscreen-viewer.js";
 import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import {
@@ -55,8 +56,10 @@ import {
   hasActiveSessionTestProduct,
   refreshPrintAreaMockViewer,
   syncSessionDesignFromPrintify,
+  loadSidebarTestProductsGrid,
+  removeDesignFromActiveView,
 } from "../print-area/test-products.js";
-import { applyLivePrintifyPlacementToSessionDesign, adaptSessionDesignToActiveView } from "../print-area/design-session-overlay.js";
+import { applyLivePrintifyPlacementToSessionDesign, adaptSessionDesignToActiveView, activateSessionDesignForView } from "../print-area/design-session-overlay.js";
 import {
   printAreaMainSourceContext,
   applyPrintAreaInheritanceToState,
@@ -71,9 +74,12 @@ export function teardownPrintAreaUi(ctx) {
   closePrintAreaFullscreen();
   ctx.printAreaFullscreenHandle = null;
   ctx.printAreaViewerHandle?.destroy?.();
+  ctx.printAreaDesignDockHandle?.destroy?.();
   ctx.printAreaViewDockHandle?.destroy?.();
+  removeDesignDock();
   removeViewDock();
   ctx.printAreaViewerHandle = null;
+  ctx.printAreaDesignDockHandle = null;
   ctx.printAreaViewDockHandle = null;
 }
 
@@ -426,8 +432,10 @@ export function bindPrintAreaTab(ctx, root) {
     onSessionDesignPlaced: () => {
       ctx.printAreaViewerHandle?.refreshSessionDesign?.();
       ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+      ctx.printAreaDesignDockHandle?.refresh?.();
     },
     onMockReady: onSessionTestProductMockReady,
+    onDesignDockRefresh: () => ctx.printAreaDesignDockHandle?.refresh?.(),
     onDesignTypeChange: (dt) => {
       loadDesignTypeIntoState(st, data, dt);
       applyPrintAreaInheritanceToState(st, ctx, data, printAreaMainSourceContext(ctx));
@@ -466,6 +474,14 @@ export function bindPrintAreaTab(ctx, root) {
   };
 
   bindPrintAreaSidebar(root, st, data, sidebarCallbacks);
+
+  void loadSidebarTestProductsGrid(ctx, root, {
+    ...sidebarCallbacks,
+    root,
+    data,
+    brandAssets: getEffectiveBrandAssets(),
+    onDesignPlaced: sidebarCallbacks.onSessionDesignPlaced,
+  });
 
   const sessionTestFlow = bindSessionTestProductFlow(ctx, st, {
     data,
@@ -546,9 +562,11 @@ export function bindPrintAreaTab(ctx, root) {
   const onViewDockChange = async (viewKey) => {
     loadViewIntoState(st, data, viewKey);
     if (hasActiveSessionTestProduct(st)) {
+      activateSessionDesignForView(st, data);
       adaptSessionDesignToActiveView(st, data);
     }
     updateViewDockActive(st);
+    ctx.printAreaDesignDockHandle?.refresh?.();
     refreshPlacementSummary(root, st);
     refreshPlacementSection(root, st, data, ctx, printAreaMainSourceContext(ctx));
     root.querySelectorAll(".ce-pa-pl-mode").forEach((sel) => {
@@ -577,10 +595,46 @@ export function bindPrintAreaTab(ctx, root) {
 
   const mountOrRefreshViewDock = () => {
     if (ctx.activeTab !== "print_area" || !editorMain) {
+      removeDesignDock();
       removeViewDock();
+      ctx.printAreaDesignDockHandle = null;
       ctx.printAreaViewDockHandle = null;
       return;
     }
+    ctx.printAreaDesignDockHandle?.destroy?.();
+    ctx.printAreaViewDockHandle?.destroy?.();
+    removeDesignDock();
+    removeViewDock();
+    ctx.printAreaDesignDockHandle = mountDesignDock(editorMain, st, {
+      onRemoveDesign: async () => {
+        const statusEl = root.querySelector("#ce-pa-test-products-status");
+        try {
+          await removeDesignFromActiveView(ctx, st, {
+            root,
+            onStatus: (msg) => {
+              if (statusEl) {
+                statusEl.hidden = false;
+                statusEl.textContent = msg;
+              }
+            },
+            onMockReady: onSessionTestProductMockReady,
+            onDesignPlaced: () => {
+              ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+              ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+            },
+            onDesignDockRefresh: () => ctx.printAreaDesignDockHandle?.refresh?.(),
+          });
+          refreshPrintifyViewer();
+          ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+          ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+        } catch (err) {
+          if (statusEl) {
+            statusEl.hidden = false;
+            statusEl.textContent = err?.message || "Remove design failed";
+          }
+        }
+      },
+    });
     ctx.printAreaViewDockHandle = remountViewDock(editorMain, st, onViewDockChange);
   };
 

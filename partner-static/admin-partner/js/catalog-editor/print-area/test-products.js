@@ -1,6 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { confirmAction } from "/partner/shared/js/partner-shell.js";
-import { PH_TYPES } from "../provider-print-technical.js";
 import {
   createTestPrintifyProduct,
   deleteTestPrintifyProducts,
@@ -16,7 +15,6 @@ import {
   resolvePrintAreaVersion,
 } from "./helpers.js";
 import {
-  hasSessionTestDesign,
   getSessionDesignPlacementForApi,
   placeSessionTestDesign,
   clearSessionTestDesign,
@@ -24,6 +22,10 @@ import {
   isSessionDesignDirty,
   applyLivePrintifyPlacementToSessionDesign,
   alignSessionDesignToPrintArea,
+  getActiveTestProductRowId,
+  activateSessionDesignForView,
+  persistSessionDesignToMap,
+  removeSessionDesignForView,
 } from "./design-session-overlay.js";
 
 /** Design rows from the picker grid (id → API row with width/height). */
@@ -52,16 +54,153 @@ async function resolveDesignRowDimensions(row) {
 
 const previewCache = new Map();
 
-/** Visible rows + selection for bulk delete in the list modal. */
-let listModalCtxRef = null;
-let listModalItems = [];
-const selectedTestProductIds = new Set();
+/** Sidebar test product grid state */
+let sidebarItems = [];
+let sidebarCallbacksRef = null;
 
-function capitalizeMode(m) {
-  const s = String(m || "calculated").toLowerCase();
-  if (s === "template") return "Template";
-  if (s === "admin") return "Admin";
-  return "Calculated";
+function renderSidebarTestProductCard(row, activeId) {
+  const title = row.printify?.title || row.printify_title || `Test #${row.id}`;
+  const isActive = Number(row.id) === Number(activeId);
+  const thumb = row.printify_product_id
+    ? `<div class="ce-pa-tp-sidebar-card__thumb ce-pa-tp-card__thumb--loading" data-thumb-id="${row.id}"></div>`
+    : `<div class="ce-pa-tp-sidebar-card__thumb ce-pa-tp-card__thumb--empty">—</div>`;
+  return `
+    <article class="ce-pa-tp-sidebar-card${isActive ? " is-active" : ""}" data-row-id="${row.id}">
+      <button type="button" class="ce-pa-tp-sidebar-card__delete" data-delete-id="${row.id}" aria-label="Delete test product" title="Delete">×</button>
+      <div class="ce-pa-tp-sidebar-card__open">${thumb}</div>
+      <span class="ce-pa-tp-sidebar-card__title">${escapeHtml(title)}</span>
+      <span class="ce-pa-tp-sidebar-card__meta">${Number(row.design_id) > 0 ? `Design #${row.design_id}` : "Brand only"}</span>
+    </article>`;
+}
+
+async function activateTestProduct(ctx, st, row, callbacks = {}) {
+  const rowId = Number(row.id);
+  st.activeTestProductRowId = rowId;
+  st.sessionDesignsByKey = {};
+  st.sessionTestDesign = null;
+  const data = callbacks.data || ctx?.printAreaData;
+  activateSessionDesignForView(st, data);
+  invalidateSessionTestProductPreviewCache(st);
+  st.useSessionTestProductMock = true;
+  try {
+    const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
+    if (preview?.ok) {
+      applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
+      if (preview.design_placement && data) {
+        applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
+        persistSessionDesignToMap(st);
+      }
+      callbacks.onMockReady?.(preview);
+    }
+  } catch (_) {
+    /* preview optional */
+  }
+  callbacks.onDesignPlaced?.();
+  callbacks.onDesignDockRefresh?.();
+}
+
+export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
+  sidebarCallbacksRef = { ctx, root, ...callbacks };
+  const grid = root?.querySelector("[data-ce-pa-sidebar-tp-grid]");
+  const empty = root?.querySelector("[data-ce-pa-sidebar-tp-empty]");
+  const err = root?.querySelector("[data-ce-pa-sidebar-tp-err]");
+  if (!grid) return;
+  if (err) err.hidden = true;
+  grid.innerHTML = `<p class="ce-hint">Loading…</p>`;
+  if (empty) empty.hidden = true;
+
+  try {
+    const res = await fetchTestPrintifyProducts(ctx.productKey, ctx.selectedPrintProviderId);
+    if (!res?.ok) throw new Error(res?.error || "load_failed");
+    const items = res.items || [];
+    sidebarItems = items;
+    const activeId = ctx.printAreaState?.activeTestProductRowId;
+
+    if (!items.length) {
+      grid.innerHTML = "";
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    grid.innerHTML = items.map((row) => renderSidebarTestProductCard(row, activeId)).join("");
+
+    grid.querySelectorAll(".ce-pa-tp-sidebar-card").forEach((card) => {
+      card.querySelector(".ce-pa-tp-sidebar-card__open")?.addEventListener("click", async () => {
+        const id = Number(card.dataset.rowId);
+        const row = items.find((r) => Number(r.id) === id);
+        if (!row) return;
+        await activateTestProduct(ctx, ctx.printAreaState, row, sidebarCallbacksRef);
+        grid.querySelectorAll(".ce-pa-tp-sidebar-card").forEach((c) => {
+          c.classList.toggle("is-active", Number(c.dataset.rowId) === id);
+        });
+        openPlaceDesignChooser(ctx, ctx.printAreaState, sidebarCallbacksRef);
+      });
+    });
+
+    grid.querySelectorAll("[data-delete-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.deleteId);
+        if (!id) return;
+        confirmAction({
+          title: "Delete test product?",
+          message: "Delete this test product?",
+          confirmLabel: "Yes",
+          cancelLabel: "No",
+          confirmClass: "btn-danger",
+          onConfirm: async () => {
+            try {
+              const delRes = await deleteTestPrintifyProducts([id]);
+              if (!delRes?.ok && !(Number(delRes?.deleted_count) > 0)) {
+                throw new Error(delRes?.error || delRes?.message || "Delete failed");
+              }
+              const st = ctx.printAreaState;
+              if (Number(st?.activeTestProductRowId) === id) {
+                st.activeTestProductRowId = null;
+                clearSessionTestDesign(st);
+              }
+              await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef);
+            } catch (ex) {
+              alert(ex?.message || "Delete failed");
+            }
+          },
+        });
+      });
+    });
+
+    for (const row of items) {
+      const thumbEl = grid.querySelector(`[data-thumb-id="${row.id}"]`);
+      if (!thumbEl) continue;
+      fetchTestPrintifyProductPreview(row.id)
+        .then((data) => {
+          if (!data?.ok || !data.thumbnail_url) {
+            thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
+            thumbEl.classList.add("ce-pa-tp-card__thumb--empty");
+            thumbEl.textContent = "—";
+            return;
+          }
+          previewCache.set(String(row.id), data);
+          thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
+          thumbEl.innerHTML = `<img src="${escapeHtml(data.thumbnail_url)}" alt="" loading="lazy" />`;
+        })
+        .catch(() => {
+          thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
+          thumbEl.classList.add("ce-pa-tp-card__thumb--empty");
+        });
+    }
+  } catch (e) {
+    grid.innerHTML = "";
+    if (err) {
+      err.hidden = false;
+      err.textContent = e?.message || "Failed to load test products";
+    }
+  }
+}
+
+/** @deprecated — list modal removed; refreshes sidebar grid if mounted */
+export async function openTestProductsModal(ctx) {
+  const root = ctx?.printAreaRoot;
+  if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || {});
 }
 
 function normViewKey(viewKey) {
@@ -72,7 +211,7 @@ function normViewKey(viewKey) {
     .replace(/-/g, "_");
 }
 
-function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = true, designId } = {}) {
+function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = false, designId, brandAssetsOnly = false } = {}) {
   const version = resolvePrintAreaVersion(ctx, data);
   const pid = Number(ctx.selectedPrintProviderId);
   const profile = (ctx.bundle?.publish_profiles || []).find((p) => Number(p.print_provider_id) === pid);
@@ -87,8 +226,12 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = t
     publish_profile_id: profile?.id ? Number(profile.id) : undefined,
     region_code: regionCode,
     placement_modes: { ...(st.publishLogicByPh || {}) },
-    random_design: !!randomDesign,
   };
+  if (brandAssetsOnly) {
+    body.brand_assets_only = true;
+    return body;
+  }
+  body.random_design = !!randomDesign;
   if (!randomDesign && designId != null) {
     body.design_id = Number(designId);
   } else if (!randomDesign && st.sessionTestDesign?.designId) {
@@ -116,7 +259,7 @@ function mockUrlFromPreview(preview, viewKey, colorKey = "default") {
 }
 
 export function hasActiveSessionTestProduct(st) {
-  return Number(st?.sessionTestDesign?.testProductRowId) > 0;
+  return getActiveTestProductRowId(st) > 0;
 }
 
 function mockUrlWithCacheBust(url) {
@@ -159,9 +302,10 @@ export function invalidateSessionTestProductPreviewCache(st) {
 }
 
 export async function refreshSessionTestProductMock(st, viewKey, { colorKey, force = false, data } = {}) {
-  const sd = st?.sessionTestDesign;
-  const rowId = Number(sd?.testProductRowId);
+  const rowId = getActiveTestProductRowId(st);
   if (!rowId) return null;
+  const sd = st?.sessionTestDesign;
+  if (sd && !sd.testProductRowId) sd.testProductRowId = rowId;
 
   const vk = normViewKey(viewKey || st.activeView || "front");
   const resolvedColorKey =
@@ -208,12 +352,13 @@ export async function refreshPrintAreaMockViewer(ctx, { force = false } = {}) {
 }
 
 export async function syncSessionDesignFromPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
-  const sd = st?.sessionTestDesign;
-  const rowId = Number(sd?.testProductRowId);
+  const rowId = getActiveTestProductRowId(st);
   if (!rowId) {
     onStatus?.("No test product — choose a design first.");
     return null;
   }
+  const sd = st?.sessionTestDesign;
+  if (sd && !sd.testProductRowId) sd.testProductRowId = rowId;
 
   onStatus?.("Syncing placement from Printify…");
   invalidateSessionTestProductPreviewCache(st);
@@ -229,15 +374,16 @@ export async function syncSessionDesignFromPrintify(ctx, st, data, { onStatus, v
   }
 
   previewCache.set(String(rowId), { ...res, _viewKey: vk });
-  sd.previewCache = previewCache.get(String(rowId));
+  if (sd) sd.previewCache = previewCache.get(String(rowId));
   onStatus?.("Placement synced from Printify.");
   return res;
 }
 
 export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, viewKey } = {}) {
+  const rowId = getActiveTestProductRowId(st);
   const sd = st?.sessionTestDesign;
-  const rowId = Number(sd?.testProductRowId);
-  if (!rowId) throw new Error("No test product — choose a design first.");
+  if (!rowId) throw new Error("No test product selected.");
+  if (!sd?.rect || !Number(sd.designId)) throw new Error("No design to apply.");
   if (!isSessionDesignDirty(st)) return null;
 
   const placement = getSessionDesignPlacementForApi(st, data);
@@ -247,6 +393,7 @@ export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, vi
   const vk = normViewKey(viewKey || placement.view_key || st.activeView || "front");
   const res = await updateTestPrintifyProductPlacement({
     id: rowId,
+    design_id: Number(sd.designId),
     design_session_placement: placement,
     view_key: vk,
   });
@@ -267,488 +414,10 @@ export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, vi
   return res;
 }
 
-function placementBadgesHtml(placementModes) {
-  if (!placementModes || typeof placementModes !== "object") return "";
-  return PH_TYPES.map((ph) => {
-    const mode = placementModes[ph.key];
-    if (!mode) return "";
-    return `<span class="ce-pa-tp-badge">${escapeHtml(ph.label)}: ${escapeHtml(capitalizeMode(mode))}</span>`;
-  })
-    .filter(Boolean)
-    .join("");
-}
-
-function ensureListModal() {
-  let el = document.getElementById("ce-pa-tp-modal");
-  if (el) return el;
-  el = document.createElement("div");
-  el.id = "ce-pa-tp-modal";
-  el.className = "ce-pa-tp-modal";
-  el.setAttribute("aria-hidden", "true");
-  el.setAttribute("inert", "");
-  el.innerHTML = `
-    <div class="ce-pa-tp-modal__backdrop" data-ce-pa-tp-close></div>
-    <div class="ce-pa-tp-modal__dialog" role="dialog" aria-modal="true">
-      <header class="ce-pa-tp-modal__header">
-        <h2 class="ce-pa-tp-modal__title">Test Products</h2>
-        <button type="button" class="btn btn-ghost btn-xs ce-pa-tp-modal__close" data-ce-pa-tp-close aria-label="Close">×</button>
-      </header>
-      <div class="ce-pa-tp-modal__body">
-        <p class="ce-hint ce-pa-tp-modal__hint" data-ce-pa-tp-hint></p>
-        <div class="ce-pa-tp-grid" data-ce-pa-tp-grid></div>
-        <p class="ce-pa-tp-empty" data-ce-pa-tp-empty hidden>No test products yet.</p>
-        <p class="ce-pa-tp-err" data-ce-pa-tp-err hidden></p>
-      </div>
-      <footer class="ce-pa-tp-bulk-bar" data-ce-pa-tp-bulk-bar hidden>
-        <span class="ce-pa-tp-bulk-bar__count" data-ce-pa-tp-bulk-count></span>
-        <div class="ce-pa-tp-bulk-bar__actions">
-          <button type="button" class="btn btn-ghost btn-sm" data-ce-pa-tp-select-all>Select all</button>
-          <button type="button" class="btn btn-danger btn-sm" data-ce-pa-tp-bulk-delete>Delete</button>
-        </div>
-      </footer>
-    </div>`;
-  document.body.appendChild(el);
-  el.querySelectorAll("[data-ce-pa-tp-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closeListModal());
-  });
-  el.querySelector("[data-ce-pa-tp-select-all]")?.addEventListener("click", () => {
-    selectAllVisibleTestProducts();
-  });
-  el.querySelector("[data-ce-pa-tp-bulk-delete]")?.addEventListener("click", () => {
-    if (listModalCtxRef) void bulkDeleteSelectedTestProducts(listModalCtxRef);
-  });
-  return el;
-}
-
-function clearTestProductSelection() {
-  selectedTestProductIds.clear();
-  updateBulkSelectionUi();
-}
-
-function toggleTestProductSelection(id, selected) {
-  const n = Number(id);
-  if (!n) return;
-  if (selected) selectedTestProductIds.add(n);
-  else selectedTestProductIds.delete(n);
-  updateBulkSelectionUi();
-}
-
-function updateBulkSelectionUi() {
-  const el = document.getElementById("ce-pa-tp-modal");
-  if (!el) return;
-  const bar = el.querySelector("[data-ce-pa-tp-bulk-bar]");
-  const countEl = el.querySelector("[data-ce-pa-tp-bulk-count]");
-  const selectAllBtn = el.querySelector("[data-ce-pa-tp-select-all]");
-  const n = selectedTestProductIds.size;
-
-  if (bar) bar.hidden = n === 0;
-  if (countEl) {
-    countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
-  }
-
-  el.querySelectorAll(".ce-pa-tp-card").forEach((card) => {
-    const id = Number(card.dataset.rowId);
-    const isSel = selectedTestProductIds.has(id);
-    card.classList.toggle("is-selected", isSel);
-    const cb = card.querySelector("[data-select-id]");
-    if (cb) cb.checked = isSel;
-  });
-
-  if (selectAllBtn && listModalItems.length) {
-    const allSelected = listModalItems.every((row) => selectedTestProductIds.has(Number(row.id)));
-    selectAllBtn.textContent = allSelected ? "Deselect all" : "Select all";
-  }
-}
-
-function selectAllVisibleTestProducts() {
-  if (!listModalItems.length) return;
-  const allSelected = listModalItems.every((row) => selectedTestProductIds.has(Number(row.id)));
-  if (allSelected) {
-    listModalItems.forEach((row) => selectedTestProductIds.delete(Number(row.id)));
-  } else {
-    listModalItems.forEach((row) => selectedTestProductIds.add(Number(row.id)));
-  }
-  updateBulkSelectionUi();
-}
-
-function bulkDeleteConfirmMessage(count) {
-  if (count === 1) return "Delete 1 test product?";
-  return `Delete ${count} test products?`;
-}
-
-function setBulkDeleteLoading(loading) {
-  const el = document.getElementById("ce-pa-tp-modal");
-  if (!el) return;
-  el.classList.toggle("is-bulk-deleting", loading);
-  const deleteBtn = el.querySelector("[data-ce-pa-tp-bulk-delete]");
-  const selectAllBtn = el.querySelector("[data-ce-pa-tp-select-all]");
-  if (deleteBtn) {
-    deleteBtn.disabled = loading;
-    deleteBtn.innerHTML = loading
-      ? '<span class="ce-pa-tp-btn-spinner" aria-hidden="true"></span> Deleting…'
-      : "Delete";
-  }
-  if (selectAllBtn) selectAllBtn.disabled = loading;
-  el.querySelectorAll("[data-ce-pa-tp-close]").forEach((btn) => {
-    btn.disabled = loading;
-  });
-}
-
-async function animateRemovedTestProductCards(ids) {
-  const el = document.getElementById("ce-pa-tp-modal");
-  if (!el || !ids.length) return;
-  ids.forEach((id) => {
-    el.querySelector(`.ce-pa-tp-card[data-row-id="${id}"]`)?.classList.add("is-removing");
-  });
-  await new Promise((resolve) => setTimeout(resolve, 340));
-}
-
-async function bulkDeleteSelectedTestProducts(ctx) {
-  const ids = [...selectedTestProductIds];
-  if (!ids.length) return;
-
-  confirmAction({
-    title: "Delete test products?",
-    message: bulkDeleteConfirmMessage(ids.length),
-    confirmLabel: "Yes",
-    cancelLabel: "No",
-    confirmClass: "btn-danger",
-    onConfirm: async () => {
-      setBulkDeleteLoading(true);
-      try {
-        const res = await deleteTestPrintifyProducts(ids);
-        if (!res?.ok && !(Number(res?.deleted_count) > 0)) {
-          throw new Error(res?.error || res?.message || "Delete failed");
-        }
-        if (res?.failed?.length) {
-          alert(`Some products could not be deleted (${res.failed.length}).`);
-        }
-        const removedIds = ids.filter((id) => !res?.failed?.some((f) => Number(f?.id) === Number(id)));
-        await animateRemovedTestProductCards(removedIds.length ? removedIds : ids);
-        selectedTestProductIds.clear();
-        await loadTestProductsGrid(ctx);
-      } catch (e) {
-        alert(e?.message || "Delete failed");
-        updateBulkSelectionUi();
-      } finally {
-        setBulkDeleteLoading(false);
-      }
-    },
-  });
-}
-
-function ensureViewerModal() {
-  let el = document.getElementById("ce-pa-tp-viewer");
-  if (el) return el;
-  el = document.createElement("div");
-  el.id = "ce-pa-tp-viewer";
-  el.className = "ce-pa-tp-viewer";
-  el.setAttribute("aria-hidden", "true");
-  el.setAttribute("inert", "");
-  el.innerHTML = `
-    <div class="ce-pa-tp-viewer__backdrop" data-ce-pa-tp-viewer-close></div>
-    <div class="ce-pa-tp-viewer__dialog" role="dialog" aria-modal="true">
-      <header class="ce-pa-tp-viewer__header">
-        <h2 class="ce-pa-tp-viewer__title" data-ce-pa-tp-viewer-title>Preview</h2>
-        <button type="button" class="btn btn-ghost btn-xs" data-ce-pa-tp-viewer-close aria-label="Close">×</button>
-      </header>
-      <div class="ce-pa-tp-viewer__body">
-        <div class="ce-pa-tp-viewer__thumbs" data-ce-pa-tp-viewer-thumbs></div>
-        <div class="ce-pa-tp-viewer__main">
-          <button type="button" class="ce-pa-tp-viewer__nav ce-pa-tp-viewer__nav--prev" data-ce-pa-tp-variant-prev aria-label="Previous variant">‹</button>
-          <div class="ce-pa-tp-viewer__stage">
-            <img class="ce-pa-tp-viewer__img" data-ce-pa-tp-viewer-img alt="" />
-            <p class="ce-pa-tp-viewer__view-label" data-ce-pa-tp-viewer-view-label></p>
-            <p class="ce-pa-tp-viewer__variant-label" data-ce-pa-tp-viewer-variant-label></p>
-          </div>
-          <button type="button" class="ce-pa-tp-viewer__nav ce-pa-tp-viewer__nav--next" data-ce-pa-tp-variant-next aria-label="Next variant">›</button>
-        </div>
-      </div>
-    </div>`;
-  document.body.appendChild(el);
-  el.querySelectorAll("[data-ce-pa-tp-viewer-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closeViewer());
-  });
-  el.querySelector("[data-ce-pa-tp-variant-prev]")?.addEventListener("click", () => stepViewerVariant(-1));
-  el.querySelector("[data-ce-pa-tp-variant-next]")?.addEventListener("click", () => stepViewerVariant(1));
-  return el;
-}
-
-let viewerState = null;
-
-function blurModalFocus(el) {
-  if (el?.contains(document.activeElement)) {
-    document.activeElement?.blur();
-  }
-}
-
-function closeViewer() {
-  viewerState = null;
-  const el = document.getElementById("ce-pa-tp-viewer");
-  if (el) {
-    blurModalFocus(el);
-    el.classList.remove("is-open");
-    el.setAttribute("aria-hidden", "true");
-    el.setAttribute("inert", "");
-  }
-  document.removeEventListener("keydown", onViewerKeydown);
-  setListModalAssistiveHidden(false);
-}
-
-function onViewerKeydown(e) {
-  if (!viewerState) return;
-  if (e.key === "Escape") closeViewer();
-  if (e.key === "ArrowLeft") stepViewerVariant(-1);
-  if (e.key === "ArrowRight") stepViewerVariant(1);
-}
-
-function currentViews() {
-  if (!viewerState?.data) return [];
-  const colorKey = viewerState.colorKey;
-  const byColor = viewerState.data.views_by_color || {};
-  return byColor[colorKey] || byColor.default || [];
-}
-
-function renderViewer() {
-  const el = document.getElementById("ce-pa-tp-viewer");
-  if (!el || !viewerState?.data) return;
-  const colors = viewerState.data.colors || [];
-  if (!colors.length) colors.push({ color_key: "default", label: "Default" });
-
-  let colorIdx = colors.findIndex((c) => c.color_key === viewerState.colorKey);
-  if (colorIdx < 0) colorIdx = 0;
-  viewerState.colorKey = colors[colorIdx].color_key;
-
-  const views = currentViews();
-  let viewIdx = viewerState.viewIndex;
-  if (viewIdx < 0) viewIdx = 0;
-  if (viewIdx >= views.length) viewIdx = Math.max(0, views.length - 1);
-  viewerState.viewIndex = viewIdx;
-
-  const thumbs = el.querySelector("[data-ce-pa-tp-viewer-thumbs]");
-  const img = el.querySelector("[data-ce-pa-tp-viewer-img]");
-  const viewLabel = el.querySelector("[data-ce-pa-tp-viewer-view-label]");
-  const variantLabel = el.querySelector("[data-ce-pa-tp-viewer-variant-label]");
-  const title = el.querySelector("[data-ce-pa-tp-viewer-title]");
-
-  title.textContent = viewerState.data.title || viewerState.rowTitle || "Preview";
-  variantLabel.textContent = colors[colorIdx]?.label || colors[colorIdx]?.color_key || "";
-
-  thumbs.innerHTML = views
-    .map(
-      (v, i) => `
-    <button type="button" class="ce-pa-tp-viewer__thumb ${i === viewIdx ? "is-active" : ""}" data-view-idx="${i}">
-      <img src="${escapeHtml(v.url)}" alt="${escapeHtml(v.label || v.view_key || "")}" loading="lazy" />
-      <span>${escapeHtml(v.label || v.view_key || "")}</span>
-    </button>`
-    )
-    .join("");
-
-  thumbs.querySelectorAll("[data-view-idx]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      viewerState.viewIndex = Number(btn.dataset.viewIdx) || 0;
-      renderViewer();
-    });
-  });
-
-  const view = views[viewIdx];
-  if (view?.url) {
-    img.src = view.url;
-    img.hidden = false;
-    viewLabel.textContent = view.label || view.view_key || "";
-    viewLabel.hidden = false;
-  } else {
-    img.hidden = true;
-    viewLabel.textContent = "No mockup image";
-    viewLabel.hidden = false;
-  }
-
-  const prev = el.querySelector("[data-ce-pa-tp-variant-prev]");
-  const next = el.querySelector("[data-ce-pa-tp-variant-next]");
-  if (prev) prev.disabled = colors.length < 2;
-  if (next) next.disabled = colors.length < 2;
-}
-
-function stepViewerVariant(delta) {
-  if (!viewerState?.data) return;
-  const colors = viewerState.data.colors || [];
-  if (colors.length < 2) return;
-  let idx = colors.findIndex((c) => c.color_key === viewerState.colorKey);
-  if (idx < 0) idx = 0;
-  idx = (idx + delta + colors.length) % colors.length;
-  viewerState.colorKey = colors[idx].color_key;
-  viewerState.viewIndex = 0;
-  renderViewer();
-}
-
-function setListModalAssistiveHidden(hidden) {
-  const listEl = document.getElementById("ce-pa-tp-modal");
-  if (!listEl?.classList.contains("is-open")) return;
-  if (hidden) {
-    blurModalFocus(listEl);
-    listEl.setAttribute("aria-hidden", "true");
-    listEl.setAttribute("inert", "");
-  } else {
-    listEl.setAttribute("aria-hidden", "false");
-    listEl.removeAttribute("inert");
-  }
-}
-
-async function openViewer(row) {
-  setListModalAssistiveHidden(true);
-  const el = ensureViewerModal();
-  el.classList.add("is-open");
-  el.setAttribute("aria-hidden", "false");
-  el.removeAttribute("inert");
-  document.addEventListener("keydown", onViewerKeydown);
-
-  const cacheKey = String(row.id);
-  let data = previewCache.get(cacheKey);
-  if (!data) {
-    const res = await fetchTestPrintifyProductPreview(row.id);
-    if (!res?.ok) {
-      viewerState = null;
-      alert(res?.message || res?.error || res?.detail || "Preview failed");
-      closeViewer();
-      return;
-    }
-    data = res;
-    previewCache.set(cacheKey, data);
-  }
-
-  viewerState = {
-    rowId: row.id,
-    rowTitle: row.printify?.title || row.printify_title,
-    data,
-    colorKey: (data.colors && data.colors[0] && data.colors[0].color_key) || "default",
-    viewIndex: Number.isFinite(Number(data.preferred_view_index)) ? Number(data.preferred_view_index) : 0,
-  };
-  renderViewer();
-}
-
-function closeListModal() {
-  const el = document.getElementById("ce-pa-tp-modal");
-  if (el) {
-    blurModalFocus(el);
-    el.classList.remove("is-open");
-    el.setAttribute("aria-hidden", "true");
-    el.setAttribute("inert", "");
-  }
-  clearTestProductSelection();
-  listModalItems = [];
-  listModalCtxRef = null;
-}
-
-async function loadTestProductsGrid(ctx) {
-  listModalCtxRef = ctx;
-  const el = ensureListModal();
-  const grid = el.querySelector("[data-ce-pa-tp-grid]");
-  const empty = el.querySelector("[data-ce-pa-tp-empty]");
-  const err = el.querySelector("[data-ce-pa-tp-err]");
-  const hint = el.querySelector("[data-ce-pa-tp-hint]");
-  err.hidden = true;
-  grid.innerHTML = `<p class="ce-hint">Loading…</p>`;
-  empty.hidden = true;
-  hint.textContent = `${ctx.productKey} · provider ${ctx.selectedPrintProviderId || "—"}`;
-
-  try {
-    const res = await fetchTestPrintifyProducts(ctx.productKey, ctx.selectedPrintProviderId);
-    if (!res?.ok) throw new Error(res?.error || "load_failed");
-    const items = res.items || [];
-    listModalItems = items;
-    previewCache.clear();
-    if (!items.length) {
-      grid.innerHTML = "";
-      empty.hidden = false;
-      updateBulkSelectionUi();
-      return;
-    }
-    empty.hidden = true;
-    grid.innerHTML = items
-      .map((row) => {
-        const title = row.printify?.title || row.printify_title || `Test #${row.id}`;
-        const badges = placementBadgesHtml(row.placement_modes);
-        const thumb = row.printify_product_id
-          ? `<div class="ce-pa-tp-card__thumb ce-pa-tp-card__thumb--loading" data-thumb-id="${row.id}"></div>`
-          : `<div class="ce-pa-tp-card__thumb ce-pa-tp-card__thumb--empty">No preview</div>`;
-        const isSelected = selectedTestProductIds.has(Number(row.id));
-        return `
-      <article class="ce-pa-tp-card${isSelected ? " is-selected" : ""}" data-row-id="${row.id}">
-        <div class="ce-pa-tp-card__badges">${badges}</div>
-        <div class="ce-pa-tp-card__thumb-area">
-          <div class="ce-pa-tp-card__open">
-            ${thumb}
-          </div>
-          <label class="ce-pa-tp-card__select" title="Select product">
-            <input type="checkbox" class="ce-pa-tp-card__checkbox" data-select-id="${row.id}" aria-label="Select product"${isSelected ? " checked" : ""} />
-          </label>
-        </div>
-        <span class="ce-pa-tp-card__title">${escapeHtml(title)}</span>
-        <span class="ce-pa-tp-card__meta">Design #${row.design_id || "—"}</span>
-      </article>`;
-      })
-      .join("");
-
-    grid.querySelectorAll(".ce-pa-tp-card").forEach((card) => {
-      card.addEventListener("click", (e) => {
-        if (e.target.closest(".ce-pa-tp-card__select, [data-select-id]")) return;
-        const id = Number(card.dataset.rowId);
-        const row = items.find((r) => Number(r.id) === id);
-        if (row) openViewer(row);
-      });
-    });
-
-    grid.querySelectorAll(".ce-pa-tp-card__select").forEach((label) => {
-      label.addEventListener("click", (e) => e.stopPropagation());
-    });
-    grid.querySelectorAll("[data-select-id]").forEach((cb) => {
-      cb.addEventListener("click", (e) => e.stopPropagation());
-      cb.addEventListener("change", () => {
-        toggleTestProductSelection(cb.dataset.selectId, cb.checked);
-      });
-    });
-
-    updateBulkSelectionUi();
-
-    for (const row of items) {
-      const thumbEl = grid.querySelector(`[data-thumb-id="${row.id}"]`);
-      if (!thumbEl) continue;
-      fetchTestPrintifyProductPreview(row.id)
-        .then((data) => {
-          if (!data?.ok || !data.thumbnail_url) {
-            thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
-            thumbEl.classList.add("ce-pa-tp-card__thumb--empty");
-            thumbEl.textContent = "—";
-            return;
-          }
-          previewCache.set(String(row.id), data);
-          thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
-          thumbEl.innerHTML = `<img src="${escapeHtml(data.thumbnail_url)}" alt="" loading="lazy" />`;
-        })
-        .catch(() => {
-          thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
-          thumbEl.classList.add("ce-pa-tp-card__thumb--empty");
-        });
-    }
-  } catch (e) {
-    grid.innerHTML = "";
-    err.hidden = false;
-    err.textContent = e?.message || "Failed to load test products";
-  }
-}
-
-export async function openTestProductsModal(ctx) {
-  const el = ensureListModal();
-  el.classList.add("is-open");
-  el.setAttribute("aria-hidden", "false");
-  el.removeAttribute("inert");
-  await loadTestProductsGrid(ctx);
-}
-
 export async function createTestProductFromPrintArea(
   ctx,
   st,
-  { onStatus, randomDesign = true, designId, keepSession = false, data } = {}
+  { onStatus, randomDesign = true, designId, keepSession = false, data, brandAssetsOnly = false } = {}
 ) {
   if (!ctx?.productKey || !ctx?.selectedPrintProviderId) {
     throw new Error("Select a print provider first.");
@@ -758,30 +427,73 @@ export async function createTestProductFromPrintArea(
   await savePrintAreaTab(ctx);
 
   const placementData = data ?? ctx?.printAreaData;
-  const body = buildTestContext(ctx, st, placementData, { randomDesign, designId });
-  onStatus?.(
-    randomDesign
-      ? "Creating test product with random design…"
-      : `Creating test product with design #${body.design_id}…`
-  );
+  const body = buildTestContext(ctx, st, placementData, { randomDesign, designId, brandAssetsOnly });
+  if (brandAssetsOnly) {
+    onStatus?.("Creating test product (brand assets only)…");
+  } else {
+    onStatus?.(
+      randomDesign
+        ? "Creating test product with random design…"
+        : `Creating test product with design #${body.design_id}…`
+    );
+  }
   const res = await createTestPrintifyProduct(body);
   if (!res?.ok) {
     throw new Error(res?.message || res?.error || "Create failed");
   }
   onStatus?.(`Created: ${res.printify_product_id || "OK"}`);
-  if (!keepSession) {
+  if (brandAssetsOnly && res.id) {
+    st.activeTestProductRowId = Number(res.id);
+    st.useSessionTestProductMock = true;
+    clearSessionTestDesign(st);
+  } else if (!keepSession) {
     clearSessionTestDesign(st);
   } else if (st.sessionTestDesign && res.id) {
     st.sessionTestDesign.testProductRowId = Number(res.id);
+    st.activeTestProductRowId = Number(res.id);
     st.sessionTestDesign.testProductCreating = false;
     markSessionDesignSaved(st);
+    persistSessionDesignToMap(st);
   }
+  return res;
+}
+
+export async function createBrandOnlyTestProduct(ctx, st, callbacks = {}) {
+  const { root, onStatus, onMockReady, onDesignPlaced, onDesignDockRefresh } = callbacks;
+  const res = await createTestProductFromPrintArea(ctx, st, {
+    onStatus,
+    brandAssetsOnly: true,
+    data: callbacks.data,
+  });
+  if (res?.id) {
+    st.activeTestProductRowId = Number(res.id);
+    st.useSessionTestProductMock = true;
+    try {
+      const preview = await fetchTestPrintifyProductPreview(res.id, { view_key: st.activeView });
+      if (preview?.ok) {
+        applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
+        onMockReady?.(preview);
+      }
+    } catch {
+      /* preview optional */
+    }
+  }
+  if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || callbacks);
+  onDesignPlaced?.();
+  onDesignDockRefresh?.();
+  onStatus?.("Test product created (brand assets only).");
   return res;
 }
 
 let createChooserCallbacks = null;
 let designsCursor = null;
 let designsLoading = false;
+
+function blurModalFocus(el) {
+  if (el?.contains(document.activeElement)) {
+    document.activeElement?.blur();
+  }
+}
 
 function setModalOpen(el, open) {
   if (!el) return;
@@ -797,7 +509,7 @@ function setModalOpen(el, open) {
   }
 }
 
-function ensureCreateChooserModal() {
+function ensurePlaceDesignChooserModal() {
   let el = document.getElementById("ce-pa-tp-create-chooser");
   if (el) return el;
   el = document.createElement("div");
@@ -809,7 +521,7 @@ function ensureCreateChooserModal() {
     <div class="ce-pa-tp-modal__backdrop" data-ce-pa-create-close></div>
     <div class="ce-pa-tp-modal__dialog ce-pa-tp-create-chooser__dialog" role="dialog" aria-modal="true">
       <header class="ce-pa-tp-modal__header">
-        <h2 class="ce-pa-tp-modal__title">Create Test Product</h2>
+        <h2 class="ce-pa-tp-modal__title">Add design</h2>
         <button type="button" class="btn btn-ghost btn-xs ce-pa-tp-modal__close" data-ce-pa-create-close aria-label="Close">×</button>
       </header>
       <div class="ce-pa-tp-modal__body ce-pa-tp-create-chooser__body">
@@ -822,10 +534,10 @@ function ensureCreateChooserModal() {
     </div>`;
   document.body.appendChild(el);
   el.querySelectorAll("[data-ce-pa-create-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closeCreateChooserModal());
+    btn.addEventListener("click", () => closePlaceDesignChooser());
   });
   el.querySelector("[data-ce-pa-create-random]")?.addEventListener("click", () => {
-    void runCreateWithRandom();
+    void runPlaceRandom();
   });
   el.querySelector("[data-ce-pa-create-choose]")?.addEventListener("click", () => {
     openDesignPickerModal();
@@ -881,7 +593,7 @@ function ensureDesignPickerModal() {
   return el;
 }
 
-function closeCreateChooserModal() {
+function closePlaceDesignChooser() {
   createChooserCallbacks = null;
   setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
 }
@@ -891,87 +603,89 @@ function closeDesignPickerModal() {
   designsLoading = false;
   setModalOpen(document.getElementById("ce-pa-tp-design-picker"), false);
   setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
-  closeCreateChooserModal();
+  closePlaceDesignChooser();
 }
 
-async function runCreateWithRandom() {
-  const { ctx, st, onStatus, onMockReady } = createChooserCallbacks || {};
+function requireActiveTestProduct(st) {
+  const rowId = getActiveTestProductRowId(st);
+  if (!rowId) throw new Error("Select or create a test product first.");
+  return rowId;
+}
+
+async function runPlaceRandom() {
+  const callbacks = createChooserCallbacks || {};
+  const { ctx, st, onStatus } = callbacks;
   if (!ctx || !st) return;
   closeDesignPickerModal();
-  closeCreateChooserModal();
+  closePlaceDesignChooser();
+
   try {
-    onStatus?.("Working…");
-    const res = await createTestProductFromPrintArea(ctx, st, { onStatus, randomDesign: true });
-    onStatus?.("Test product created.");
-    if (res?.id) {
-      const preview = await fetchTestPrintifyProductPreview(res.id, { view_key: st.activeView });
-      if (preview?.ok) onMockReady?.(preview);
-    }
+    requireActiveTestProduct(st);
+    onStatus?.("Picking random design…");
+    const res = await fetchTestPrintifyCreations({
+      design_type: st.activeDesignType || "classic",
+      limit: 40,
+    });
+    if (!res?.ok) throw new Error(res?.error || "load_failed");
+    const items = res.items || [];
+    if (!items.length) throw new Error("No designs found for this design type.");
+    const pick = items[Math.floor(Math.random() * items.length)];
+    const designId = Number(pick?.id);
+    if (!designId) throw new Error("No design found for this design type.");
+    createChooserCallbacks = callbacks;
+    await runPlaceDesign(designId, pick);
   } catch (e) {
-    onStatus?.(e?.message || "Create failed");
+    onStatus?.(e?.message || "Place failed");
   }
 }
 
 async function runPlaceDesign(designId, designRow) {
-  const { ctx, st, onStatus, onDesignPlaced, onMockReady, data, brandAssets } = createChooserCallbacks || {};
+  const { ctx, st, onStatus, onDesignPlaced, onMockReady, onDesignDockRefresh, data, brandAssets, root } =
+    createChooserCallbacks || {};
   if (!ctx || !st || !designId) return;
   const row = await resolveDesignRowDimensions(designRow || { id: designId });
   closeDesignPickerModal();
-  closeCreateChooserModal();
-
-  const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
-    onPlaced: () => {
-      onDesignPlaced?.();
-    },
-  });
-  if (!placed) {
-    onStatus?.("Could not place design on print area.");
-    return;
-  }
-
-  onStatus?.(`Design #${designId} placed — creating test product…`);
-  if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = true;
+  closePlaceDesignChooser();
 
   try {
-    const res = await createTestProductFromPrintArea(ctx, st, {
-      onStatus,
-      randomDesign: false,
-      designId,
-      keepSession: true,
-      data,
+    const rowId = requireActiveTestProduct(st);
+    if (!st.sessionTestDesign?.testProductRowId) {
+      st.sessionTestDesign = st.sessionTestDesign || {};
+      st.sessionTestDesign.testProductRowId = rowId;
+    }
+
+    const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
+      onPlaced: () => {
+        onDesignPlaced?.();
+      },
     });
-    const rowId = Number(res?.id || st.sessionTestDesign?.testProductRowId);
-    if (rowId) {
+    if (!placed) {
+      onStatus?.("Could not place design on print area.");
+      return;
+    }
+
+    onStatus?.(`Applying design #${designId}…`);
+    const applyRes = await applySessionDesignToPrintify(
+      { ...ctx, printAreaData: data },
+      st,
+      data,
+      { onStatus, viewKey: st.activeView }
+    );
+    if (applyRes) {
+      onMockReady?.(applyRes);
+    } else {
       const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
       if (preview?.ok) {
-        const sd = st.sessionTestDesign;
-        if (sd) {
-          if (preview.design_width > 0) sd.designWidth = Number(preview.design_width);
-          if (preview.design_height > 0) sd.designHeight = Number(preview.design_height);
-          alignSessionDesignToPrintArea(st, data);
-          onDesignPlaced?.();
-          if (isSessionDesignDirty(st)) {
-            try {
-              await applySessionDesignToPrintify(
-                { ...ctx, printAreaData: data },
-                st,
-                data,
-                { onStatus, viewKey: st.activeView }
-              );
-            } catch (applyErr) {
-              onStatus?.(applyErr?.message || "Placement sync failed — click ✓ to retry.");
-            }
-          }
-        }
-        applySessionTestProductMockToState(st, preview, st.activeView);
+        applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
         onMockReady?.(preview);
       }
     }
-    if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
-    onStatus?.("Test product ready — click ✓ if you adjust placement.");
+    if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || createChooserCallbacks);
+    onDesignPlaced?.();
+    onDesignDockRefresh?.();
+    onStatus?.("Design applied — adjust placement and click ✓ to save.");
   } catch (e) {
-    if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
-    onStatus?.(e?.message || "Background create failed");
+    onStatus?.(e?.message || "Apply failed");
   }
 }
 
@@ -998,11 +712,11 @@ async function loadDesignGrid(append = false) {
   if (designsLoading) return;
   designsLoading = true;
   err.hidden = true;
-    if (!append) {
-      grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
-      designsCursor = null;
-      designPickerRowsById.clear();
-    }
+  if (!append) {
+    grid.innerHTML = `<p class="ce-hint">Loading designs…</p>`;
+    designsCursor = null;
+    designPickerRowsById.clear();
+  }
   hint.textContent = `Design type: ${createChooserCallbacks.st.activeDesignType || "classic"}`;
 
   try {
@@ -1042,56 +756,81 @@ function openDesignPickerModal() {
   void loadDesignGrid(false);
 }
 
-export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
+export function openPlaceDesignChooser(ctx, st, callbacks = {}) {
+  if (!getActiveTestProductRowId(st)) {
+    callbacks.onStatus?.("Select or create a test product first.");
+    return;
+  }
   createChooserCallbacks = {
     ctx,
     st,
+    root: callbacks.root || ctx?.printAreaRoot || null,
     onStatus: callbacks.onStatus || null,
-    onDesignPlaced: callbacks.onDesignPlaced || null,
+    onDesignPlaced: callbacks.onDesignPlaced || callbacks.onSessionDesignPlaced || null,
     onMockReady: callbacks.onMockReady || null,
+    onDesignDockRefresh: callbacks.onDesignDockRefresh || null,
     data: callbacks.data || ctx?.printAreaData || null,
     brandAssets: callbacks.brandAssets || null,
   };
-  const el = ensureCreateChooserModal();
+  const el = ensurePlaceDesignChooserModal();
   setModalOpen(el, true);
 }
 
-export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady } = {}) {
-  if (!hasSessionTestDesign(st)) {
-    openCreateTestProductChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady });
+/** @deprecated — use openPlaceDesignChooser */
+export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
+  openPlaceDesignChooser(ctx, st, callbacks);
+}
+
+export async function removeDesignFromActiveView(ctx, st, callbacks = {}) {
+  const rowId = getActiveTestProductRowId(st);
+  if (!rowId) throw new Error("No test product selected.");
+  const vk = normViewKey(st.activeView || "front");
+  const { onStatus, onMockReady, onDesignPlaced, onDesignDockRefresh, root } = callbacks;
+
+  onStatus?.("Removing design…");
+  const res = await updateTestPrintifyProductPlacement({
+    id: rowId,
+    remove_design: true,
+    view_key: vk,
+  });
+  if (!res?.ok) {
+    throw new Error(res?.message || res?.error || "Remove failed");
+  }
+
+  removeSessionDesignForView(st, vk);
+  if (!st.sessionTestDesign?.designId) {
+    clearSessionTestDesign(st);
+  }
+  invalidateSessionTestProductPreviewCache(st);
+  applySessionTestProductMockToState(st, res, vk, { cacheBust: true });
+  if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || callbacks);
+  onMockReady?.(res);
+  onDesignPlaced?.();
+  onDesignDockRefresh?.();
+  onStatus?.("Design removed.");
+  return res;
+}
+
+export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root } = {}) {
+  if (!getActiveTestProductRowId(st)) {
+    openPlaceDesignChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root });
     return;
   }
 
   const sd = st.sessionTestDesign;
-  if (sd?.testProductRowId) {
-    if (isSessionDesignDirty(st)) {
-      try {
-        onStatus?.("Applying pending changes…");
-        await applySessionDesignToPrintify(ctx, st, data, { onStatus });
-        onMockReady?.(sd.previewCache);
-      } catch (e) {
-        onStatus?.(e?.message || "Apply failed");
-      }
-      return;
+  if (sd?.testProductRowId && isSessionDesignDirty(st)) {
+    try {
+      onStatus?.("Applying pending changes…");
+      await applySessionDesignToPrintify(ctx, st, data, { onStatus });
+      onMockReady?.(sd.previewCache);
+      onDesignDockRefresh?.();
+    } catch (e) {
+      onStatus?.(e?.message || "Apply failed");
     }
-    openTestProductsModal(ctx);
-    onStatus?.("Test product already exists — opened list.");
     return;
   }
 
-  try {
-    onStatus?.("Working…");
-    await createTestProductFromPrintArea(ctx, st, {
-      onStatus,
-      randomDesign: false,
-      designId: st.sessionTestDesign.designId,
-      keepSession: true,
-      data,
-    });
-    onStatus?.("Test product created.");
-  } catch (e) {
-    onStatus?.(e?.message || "Create failed");
-  }
+  openPlaceDesignChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root });
 }
 
 export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {

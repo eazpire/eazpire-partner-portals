@@ -18,7 +18,7 @@ import {
 } from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
-import { openTestProductsModal, createTestProductWithSessionDesign } from "./test-products.js";
+import { loadSidebarTestProductsGrid, createBrandOnlyTestProduct } from "./test-products.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -172,16 +172,16 @@ function renderPlacementSection(st, data, ctx, msCtx) {
 
 function renderTestProductsSection() {
   return `
-    <details class="ce-pa-acc ce-pa-acc--test-products">
+    <details class="ce-pa-acc ce-pa-acc--test-products" open>
       <summary class="ce-pa-acc-summary-row"><span>Test Products</span></summary>
       <div class="ce-pa-acc-body ce-pa-test-products">
-        <button type="button" class="btn btn-secondary btn-sm ce-pa-open-test-products" id="ce-pa-open-test-products">
-          Test Products
-        </button>
         <button type="button" class="btn btn-primary btn-sm ce-pa-create-test-product" id="ce-pa-create-test-product">
           Create Test Product
         </button>
         <p class="ce-hint ce-pa-test-products-hint" id="ce-pa-test-products-status" hidden></p>
+        <div class="ce-pa-tp-sidebar-grid" data-ce-pa-sidebar-tp-grid></div>
+        <p class="ce-pa-tp-sidebar-empty ce-hint" data-ce-pa-sidebar-tp-empty hidden>No test products yet.</p>
+        <p class="ce-pa-tp-err" data-ce-pa-sidebar-tp-err hidden></p>
       </div>
     </details>`;
 }
@@ -436,7 +436,8 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     root.querySelector("#ce-pa-create-test-product")?.blur();
     const brandAssets =
       callbacks.globalBrandAssetsRef?.current || { qr: {}, logo: {} };
-    void createTestProductWithSessionDesign(ctx, st, {
+    void createBrandOnlyTestProduct(ctx, st, {
+      root,
       data,
       brandAssets,
       onStatus: (msg) => {
@@ -448,12 +449,26 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
       onDesignPlaced: () => {
         callbacks.onSessionDesignPlaced?.();
       },
+      onDesignDockRefresh: callbacks.onDesignDockRefresh,
       onMockReady: callbacks.onMockReady,
     });
   });
 
-  root.querySelector("#ce-pa-open-test-products")?.addEventListener("click", () => {
-    if (ctx) openTestProductsModal(ctx);
+  void loadSidebarTestProductsGrid(ctx, root, {
+    ctx,
+    root,
+    data,
+    brandAssets: callbacks.globalBrandAssetsRef?.current || { qr: {}, logo: {} },
+    onStatus: (msg) => {
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = msg;
+      }
+    },
+    onSessionDesignPlaced: callbacks.onSessionDesignPlaced,
+    onDesignPlaced: callbacks.onSessionDesignPlaced,
+    onDesignDockRefresh: callbacks.onDesignDockRefresh,
+    onMockReady: callbacks.onMockReady,
   });
 
   root.querySelector("#ce-pa-dt-all")?.addEventListener("click", () => {
