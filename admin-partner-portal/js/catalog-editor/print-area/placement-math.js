@@ -123,6 +123,88 @@ export function sessionDesignRectFromUniformContain(ctx = {}) {
   return printifyPlacementToSessionDesignRect(placement, ctx);
 }
 
+function sessionRectsNearlyEqual(a, b, tolerance = 0.015) {
+  const r1 = normalizeRect(a);
+  const r2 = normalizeRect(b);
+  if (!r1 || !r2) return false;
+  return ["x", "y", "w", "h"].every((k) => Math.abs(r1[k] - r2[k]) <= tolerance);
+}
+
+export function printifyPlacementsNearlyEqual(a, b, tolerance = 0.003) {
+  if (!a || !b) return false;
+  const xOk = Math.abs(Number(a.x) - Number(b.x)) <= tolerance;
+  const yOk = Math.abs(Number(a.y) - Number(b.y)) <= tolerance;
+  const scaleTol = Math.max(tolerance * 5, 0.002);
+  const scaleOk = Math.abs(Number(a.scale) - Number(b.scale)) <= scaleTol;
+  return xOk && yOk && scaleOk;
+}
+
+/** Stage rect → Printify placement (mirrors worker rectToPrintifyImagePlacement). */
+export function rectToPrintifyImagePlacement(rect, ctx = {}) {
+  const norm = normalizeRect(rect);
+  if (!norm) {
+    return { x: 0.5, y: 0.5, scale: 0.5, angle: 0 };
+  }
+
+  const bounds = normalizeRect(ctx.printAreaBounds);
+  let relX;
+  let relY;
+  let relW;
+  let relH;
+  if (bounds && bounds.w > 0 && bounds.h > 0) {
+    relW = norm.w / bounds.w;
+    relH = norm.h / bounds.h;
+    relX = (norm.x - bounds.x) / bounds.w;
+    relY = (norm.y - bounds.y) / bounds.h;
+  } else {
+    relX = norm.x;
+    relY = norm.y;
+    relW = norm.w;
+    relH = norm.h;
+  }
+
+  const cx = clamp01(relX + relW / 2);
+  const cy = clamp01(relY + relH / 2);
+  const angle = Number.isFinite(Number(norm.angle)) ? Number(norm.angle) : 0;
+
+  const dW = Number(ctx.designWidth);
+  const dH = Number(ctx.designHeight);
+  const paw = Number(ctx.printAreaWidthPx);
+  const pah = Number(ctx.printAreaHeightPx);
+
+  if (dW > 0 && dH > 0 && paw > 0 && pah > 0) {
+    const boxW = relW * paw;
+    const boxH = relH * pah;
+    const m = Math.min(boxW / dW, boxH / dH);
+    const scale = printifyScaleForCreatorDesign(m, dW, paw);
+    return {
+      x: parseFloat(cx.toFixed(4)),
+      y: parseFloat(cy.toFixed(4)),
+      scale: parseFloat(Math.min(1000, Math.max(0.001, scale)).toFixed(6)),
+      angle,
+    };
+  }
+
+  const scale = Math.max(0.05, Math.min(0.98, Math.max(relW, relH)));
+  return {
+    x: parseFloat(cx.toFixed(4)),
+    y: parseFloat(cy.toFixed(4)),
+    scale: parseFloat(scale.toFixed(4)),
+    angle,
+  };
+}
+
+/** Session rect → Printify placement; rect-derived values are authoritative (mirrors worker). */
+export function resolveSessionDesignPrintifyPlacement(sessionRect, ctx = {}, { uniformTolerance = 0.003 } = {}) {
+  const fromRect = rectToPrintifyImagePlacement(sessionRect, ctx);
+  const uniform = uniformContainPrintifyPlacement(ctx);
+  if (!uniform) return fromRect;
+  if (printifyPlacementsNearlyEqual(fromRect, uniform, uniformTolerance)) {
+    return uniform;
+  }
+  return fromRect;
+}
+
 /** Printify placement → session design rect (inverse of worker rectToPrintifyImagePlacement). */
 export function printifyPlacementToSessionDesignRect(placement, ctx = {}) {
   if (!placement || typeof placement !== "object") return null;

@@ -82,7 +82,7 @@ export function hasSessionTestDesign(st) {
 export function getSessionDesignPlacementForApi(st, data) {
   const sd = st?.sessionTestDesign;
   if (!sd?.rect) return null;
-  const view_key = normSessionViewKey(sd.viewKey || st.activeView || "front");
+  const view_key = normSessionViewKey(st.activeView || sd.viewKey || "front");
   sd.viewKey = view_key;
   const placement = {
     view_key,
