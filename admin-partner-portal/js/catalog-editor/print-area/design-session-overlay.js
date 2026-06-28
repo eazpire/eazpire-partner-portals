@@ -133,6 +133,22 @@ export function markSessionDesignDirty(st) {
 }
 
 /**
+ * When switching print-area views with an active session test design, rebind overlay to the new view
+ * (same design id, realigned to that view's print bounds) so back/sleeve/neck apply like front.
+ */
+export function adaptSessionDesignToActiveView(st, data) {
+  const sd = st?.sessionTestDesign;
+  if (!sd?.rect || !(Number(sd.designId) > 0)) return false;
+  const key = sessionKey(st);
+  if (sd.sessionKey === key) return false;
+  sd.viewKey = normSessionViewKey(st.activeView);
+  sd.sessionKey = key;
+  alignSessionDesignToPrintArea(st, data);
+  markSessionDesignDirty(st);
+  return true;
+}
+
+/**
  * Contain-fit design rect within print area — uses print-px uniform contain mapped to stage
  * (matches Printify scale/position, not naive stage-aspect contain).
  */

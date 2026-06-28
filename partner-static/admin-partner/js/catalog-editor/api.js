@@ -345,10 +345,14 @@ export async function deleteTestPrintifyProducts(ids) {
   });
 }
 
-export async function fetchTestPrintifyProductPreview(id, { view_key } = {}) {
+export async function fetchTestPrintifyProductPreview(id, { view_key, regenerate_mockups } = {}) {
   return partnerFetch("admin-eazpire-test-printify-preview", {
     method: "POST",
-    body: { id, view_key: view_key || undefined },
+    body: {
+      id,
+      view_key: view_key || undefined,
+      regenerate_mockups: regenerate_mockups === true ? true : undefined,
+    },
   });
 }
 

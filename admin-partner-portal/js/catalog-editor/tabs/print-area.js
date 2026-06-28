@@ -56,7 +56,7 @@ import {
   refreshPrintAreaMockViewer,
   syncSessionDesignFromPrintify,
 } from "../print-area/test-products.js";
-import { applyLivePrintifyPlacementToSessionDesign } from "../print-area/design-session-overlay.js";
+import { applyLivePrintifyPlacementToSessionDesign, adaptSessionDesignToActiveView } from "../print-area/design-session-overlay.js";
 import {
   printAreaMainSourceContext,
   applyPrintAreaInheritanceToState,
@@ -545,6 +545,9 @@ export function bindPrintAreaTab(ctx, root) {
 
   const onViewDockChange = async (viewKey) => {
     loadViewIntoState(st, data, viewKey);
+    if (hasActiveSessionTestProduct(st)) {
+      adaptSessionDesignToActiveView(st, data);
+    }
     updateViewDockActive(st);
     refreshPlacementSummary(root, st);
     refreshPlacementSection(root, st, data, ctx, printAreaMainSourceContext(ctx));

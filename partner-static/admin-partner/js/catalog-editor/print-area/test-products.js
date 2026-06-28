@@ -174,7 +174,10 @@ export async function refreshSessionTestProductMock(st, viewKey, { colorKey, for
 
   if (force) invalidateSessionTestProductPreviewCache(st);
 
-  const res = await fetchTestPrintifyProductPreview(rowId, { view_key: vk });
+  const res = await fetchTestPrintifyProductPreview(rowId, {
+    view_key: vk,
+    regenerate_mockups: force,
+  });
   if (!res?.ok) return null;
   const preview = { ...res, _viewKey: vk };
   previewCache.set(String(rowId), preview);
