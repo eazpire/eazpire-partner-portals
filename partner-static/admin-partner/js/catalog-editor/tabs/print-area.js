@@ -58,8 +58,9 @@ import {
   syncSessionDesignFromPrintify,
   loadSidebarTestProductsGrid,
   removeDesignFromActiveView,
+  syncActiveTestProductViewSession,
 } from "../print-area/test-products.js";
-import { applyLivePrintifyPlacementToSessionDesign, adaptSessionDesignToActiveView, activateSessionDesignForView } from "../print-area/design-session-overlay.js";
+import { applyLivePrintifyPlacementToSessionDesign } from "../print-area/design-session-overlay.js";
 import {
   printAreaMainSourceContext,
   applyPrintAreaInheritanceToState,
@@ -562,8 +563,13 @@ export function bindPrintAreaTab(ctx, root) {
   const onViewDockChange = async (viewKey) => {
     loadViewIntoState(st, data, viewKey);
     if (hasActiveSessionTestProduct(st)) {
-      activateSessionDesignForView(st, data);
-      adaptSessionDesignToActiveView(st, data);
+      await syncActiveTestProductViewSession(ctx, st, data, viewKey, {
+        onDesignPlaced: () => {
+          ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+          ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
+        },
+        onDesignDockRefresh: () => ctx.printAreaDesignDockHandle?.refresh?.(),
+      });
     }
     updateViewDockActive(st);
     ctx.printAreaDesignDockHandle?.refresh?.();

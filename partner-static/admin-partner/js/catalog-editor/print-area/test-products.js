@@ -26,6 +26,7 @@ import {
   activateSessionDesignForView,
   persistSessionDesignToMap,
   removeSessionDesignForView,
+  hydrateSessionDesignFromTestProductPreview,
 } from "./design-session-overlay.js";
 
 /** Design rows from the picker grid (id → API row with width/height). */
@@ -79,17 +80,13 @@ async function activateTestProduct(ctx, st, row, callbacks = {}) {
   st.sessionDesignsByKey = {};
   st.sessionTestDesign = null;
   const data = callbacks.data || ctx?.printAreaData;
-  activateSessionDesignForView(st, data);
   invalidateSessionTestProductPreviewCache(st);
   st.useSessionTestProductMock = true;
   try {
     const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
     if (preview?.ok) {
       applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
-      if (preview.design_placement && data) {
-        applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false });
-        persistSessionDesignToMap(st);
-      }
+      hydrateSessionDesignFromTestProductPreview(st, data, preview, { designRow: row });
       callbacks.onMockReady?.(preview);
     }
   } catch (_) {
@@ -97,6 +94,32 @@ async function activateTestProduct(ctx, st, row, callbacks = {}) {
   }
   callbacks.onDesignPlaced?.();
   callbacks.onDesignDockRefresh?.();
+}
+
+/** Sync session design overlay when switching views on an active test product. */
+export async function syncActiveTestProductViewSession(ctx, st, data, viewKey, callbacks = {}) {
+  const rowId = getActiveTestProductRowId(st);
+  if (!rowId) return null;
+
+  persistSessionDesignToMap(st);
+  if (activateSessionDesignForView(st, data)) {
+    callbacks.onDesignPlaced?.();
+    callbacks.onDesignDockRefresh?.();
+    return st.sessionTestDesign;
+  }
+
+  try {
+    const preview = await fetchTestPrintifyProductPreview(rowId, {
+      view_key: normViewKey(viewKey || st.activeView),
+    });
+    if (!preview?.ok) return null;
+    hydrateSessionDesignFromTestProductPreview(st, data, preview);
+    callbacks.onDesignPlaced?.();
+    callbacks.onDesignDockRefresh?.();
+    return st.sessionTestDesign;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
