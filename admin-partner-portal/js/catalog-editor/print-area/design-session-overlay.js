@@ -227,28 +227,43 @@ export function adaptSessionDesignToActiveView(st, data) {
  * Load session design overlay from a live test-product preview (Printify placement + creation meta).
  * Returns true when a creator design is shown on the active view.
  */
-export function hydrateSessionDesignFromTestProductPreview(st, data, preview, { designRow } = {}) {
+export function hydrateSessionDesignFromTestProductPreview(
+  st,
+  data,
+  preview,
+  { designRow, designMeta, allowFallbackPlacement = false } = {}
+) {
   const designId = Number(preview?.design_id ?? designRow?.design_id);
-  const placement = preview?.design_placement || preview?.placement;
   const vk = normSessionViewKey(st.activeView);
+  const placement = preview?.design_placement || preview?.placement;
 
-  if (!(designId > 0) || !placement) {
+  if (!(designId > 0)) {
     removeSessionDesignForView(st, vk);
     return false;
   }
 
-  let dW = Number(preview?.design_width);
-  let dH = Number(preview?.design_height);
+  if (!placement && !allowFallbackPlacement) {
+    removeSessionDesignForView(st, vk);
+    return false;
+  }
+
+  let dW = Number(preview?.design_width ?? designMeta?.width);
+  let dH = Number(preview?.design_height ?? designMeta?.height);
   if (!(dW > 0 && dH > 0)) {
     dW = Number(designRow?.width);
     dH = Number(designRow?.height);
   }
 
   const previewUrl = String(
-    preview?.design_preview_url || designRow?.preview_url || designRow?.image_url || ""
+    designMeta?.previewUrl ||
+      preview?.design_preview_url ||
+      designRow?.preview_url ||
+      designRow?.image_url ||
+      ""
   ).trim();
   const title =
-    String(preview?.design_title || designRow?.design_title || "").trim() || `Design ${designId}`;
+    String(designMeta?.title || preview?.design_title || designRow?.design_title || "").trim() ||
+    `Design ${designId}`;
 
   const designRowForRect = {
     id: designId,
@@ -278,7 +293,7 @@ export function hydrateSessionDesignFromTestProductPreview(st, data, preview, { 
     previewCache: preview || null,
   };
 
-  if (data && applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false })) {
+  if (placement && data && applyLivePrintifyPlacementToSessionDesign(st, data, preview, { markDirty: false })) {
     markSessionDesignSaved(st);
   } else {
     st.sessionTestDesign.savedRect = snapshotRect(st.sessionTestDesign.rect);

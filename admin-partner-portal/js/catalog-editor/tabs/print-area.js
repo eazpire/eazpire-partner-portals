@@ -432,6 +432,7 @@ export function bindPrintAreaTab(ctx, root) {
     onPrintAreaRefresh: refreshPrintAreaViewer,
     onSessionDesignPlaced: () => {
       ctx.printAreaViewerHandle?.refreshSessionDesign?.();
+      ctx.printAreaViewerHandle?.refreshOverlays?.();
       ctx.printAreaFullscreenHandle?.refreshSessionDesign?.();
       ctx.printAreaDesignDockHandle?.refresh?.();
     },

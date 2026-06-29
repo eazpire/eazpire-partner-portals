@@ -74,25 +74,82 @@ function renderSidebarTestProductCard(row, activeId) {
     </article>`;
 }
 
+async function resolveDesignMetaForHydrate(designId, preview, st) {
+  let width = Number(preview?.design_width);
+  let height = Number(preview?.design_height);
+  let previewUrl = String(preview?.design_preview_url || "").trim();
+  let title = String(preview?.design_title || "").trim();
+
+  if (!(width > 0 && height > 0)) {
+    try {
+      const dims = await fetchTestPrintifyDesignDimensions(designId);
+      if (dims?.ok) {
+        width = Number(dims.width) || width;
+        height = Number(dims.height) || height;
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  if (!previewUrl || !title) {
+    try {
+      const res = await fetchTestPrintifyCreations({
+        design_type: st.activeDesignType || "classic",
+        limit: 80,
+      });
+      const hit = (res?.items || []).find((i) => Number(i.id) === Number(designId));
+      if (hit) {
+        if (!previewUrl) previewUrl = String(hit.preview_url || "").trim();
+        if (!title) title = String(hit.design_title || "").trim();
+        if (!(width > 0)) width = Number(hit.width);
+        if (!(height > 0)) height = Number(hit.height);
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  return {
+    width,
+    height,
+    previewUrl,
+    title: title || `Design ${designId}`,
+  };
+}
+
 async function activateTestProduct(ctx, st, row, callbacks = {}) {
   const rowId = Number(row.id);
   st.activeTestProductRowId = rowId;
   st.sessionDesignsByKey = {};
   st.sessionTestDesign = null;
   const data = callbacks.data || ctx?.printAreaData;
+
+  if (row.placement_modes && typeof row.placement_modes === "object") {
+    st.publishLogicByPh = { ...row.placement_modes };
+  }
+
   invalidateSessionTestProductPreviewCache(st);
   st.useSessionTestProductMock = true;
   try {
     const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
     if (preview?.ok) {
       applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
-      hydrateSessionDesignFromTestProductPreview(st, data, preview, { designRow: row });
+      const designId = Number(preview.design_id ?? row.design_id);
+      const designMeta =
+        designId > 0 ? await resolveDesignMetaForHydrate(designId, preview, st) : null;
+      hydrateSessionDesignFromTestProductPreview(st, data, preview, {
+        designRow: row,
+        designMeta,
+        allowFallbackPlacement: true,
+      });
       callbacks.onMockReady?.(preview);
     }
   } catch (_) {
     /* preview optional */
   }
   callbacks.onDesignPlaced?.();
+  callbacks.onPrintAreaRefresh?.();
   callbacks.onDesignDockRefresh?.();
 }
 
@@ -113,8 +170,12 @@ export async function syncActiveTestProductViewSession(ctx, st, data, viewKey, c
       view_key: normViewKey(viewKey || st.activeView),
     });
     if (!preview?.ok) return null;
-    hydrateSessionDesignFromTestProductPreview(st, data, preview);
+    const designId = Number(preview.design_id);
+    const designMeta =
+      designId > 0 ? await resolveDesignMetaForHydrate(designId, preview, st) : null;
+    hydrateSessionDesignFromTestProductPreview(st, data, preview, { designMeta });
     callbacks.onDesignPlaced?.();
+    callbacks.onPrintAreaRefresh?.();
     callbacks.onDesignDockRefresh?.();
     return st.sessionTestDesign;
   } catch {
