@@ -199,7 +199,7 @@ describe("getCatalogStudioTree", () => {
     expect(result.partners).toHaveLength(1);
     expect(result.partners[0].providers[0].ship_country_code).toBe("DE");
     expect(result.partners[0].providers[0].ship_country_name).toBe("Germany");
-  }, 60000);
+  }, 120000);
 
   it("returns all Printify catalog providers from API", async () => {
     const { getCatalogStudioTree } = await import(

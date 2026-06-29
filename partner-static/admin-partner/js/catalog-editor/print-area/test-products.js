@@ -125,7 +125,8 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
     grid.innerHTML = items.map((row) => renderSidebarTestProductCard(row, activeId)).join("");
 
     grid.querySelectorAll(".ce-pa-tp-sidebar-card").forEach((card) => {
-      card.querySelector(".ce-pa-tp-sidebar-card__open")?.addEventListener("click", async () => {
+      card.addEventListener("click", async (e) => {
+        if (e.target.closest("[data-delete-id]")) return;
         const id = Number(card.dataset.rowId);
         const row = items.find((r) => Number(r.id) === id);
         if (!row) return;
@@ -133,7 +134,7 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
         grid.querySelectorAll(".ce-pa-tp-sidebar-card").forEach((c) => {
           c.classList.toggle("is-active", Number(c.dataset.rowId) === id);
         });
-        openPlaceDesignChooser(ctx, ctx.printAreaState, sidebarCallbacksRef);
+        sidebarCallbacksRef?.onStatus?.("Test product loaded for editing.");
       });
     });
 

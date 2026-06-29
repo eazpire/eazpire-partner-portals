@@ -5295,7 +5295,7 @@ a.ce-tpl-draft-head__id:hover {
   gap: 8px;
 }
 .ce-pa-acc--test-products .ce-pa-test-products {
-  padding: 0;
+  padding: 8px 12px 12px;
   border-top: none;
 }
 .ce-pa-test-products .btn {
