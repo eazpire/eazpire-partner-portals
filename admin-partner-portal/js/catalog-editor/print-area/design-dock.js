@@ -22,37 +22,35 @@ export function renderDesignDock(st) {
   </div>`;
 }
 
-export function mountDesignDock(hostEl, st, callbacks = {}) {
-  removeDesignDock();
-  if (!hostEl) return { destroy() {}, refresh() {} };
-  hostEl.insertAdjacentHTML("beforeend", renderDesignDock(st));
-  const dock = hostEl.querySelector("#ce-pa-design-dock");
-  dock?.querySelectorAll("[data-remove-design]").forEach((btn) => {
+function bindDesignDockRemove(dockEl, callbacks = {}) {
+  dockEl?.querySelectorAll("[data-remove-design]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       callbacks.onRemoveDesign?.(Number(btn.dataset.removeDesign));
     });
   });
+}
+
+export function mountDesignDock(hostEl, st, callbacks = {}) {
+  removeDesignDock();
+  if (!hostEl) return { destroy() {}, refresh() {} };
+
+  const paint = () => {
+    removeDesignDock();
+    hostEl.insertAdjacentHTML("beforeend", renderDesignDock(st));
+    const dock = hostEl.querySelector("#ce-pa-design-dock");
+    bindDesignDockRemove(dock, callbacks);
+    return dock;
+  };
+
+  paint();
+
   return {
     refresh() {
-      const next = renderDesignDock(st);
-      dock?.replaceWith(
-        (() => {
-          const wrap = document.createElement("div");
-          wrap.innerHTML = next;
-          return wrap.firstElementChild;
-        })()
-      );
-      const newDock = hostEl.querySelector("#ce-pa-design-dock");
-      newDock?.querySelectorAll("[data-remove-design]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          callbacks.onRemoveDesign?.(Number(btn.dataset.removeDesign));
-        });
-      });
+      paint();
     },
     destroy() {
-      dock?.remove();
+      removeDesignDock();
     },
   };
 }
@@ -66,8 +64,7 @@ export function updateDesignDock(st) {
   if (!dock) return;
   const parent = dock.parentElement;
   if (!parent) return;
-  const handle = mountDesignDock(parent, st, {});
-  handle.destroy();
+  mountDesignDock(parent, st, {});
 }
 
 export function removeDesignDock() {

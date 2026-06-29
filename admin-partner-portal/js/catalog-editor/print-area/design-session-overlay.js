@@ -145,10 +145,14 @@ export function removeSessionDesignForView(st, viewKey) {
 
 export function listSessionDesignsForActiveView(st) {
   const key = sessionKey(st);
+  const vk = normSessionViewKey(st.activeView);
   const entry = ensureSessionDesignsMap(st)[key];
-  if (entry?.designId) return [entry];
-  if (st.sessionTestDesign?.sessionKey === key && Number(st.sessionTestDesign.designId) > 0) {
-    return [st.sessionTestDesign];
+  if (entry && Number(entry.designId) > 0) return [entry];
+  const sd = st?.sessionTestDesign;
+  if (sd && Number(sd.designId) > 0 && sd.rect) {
+    const keyMatch = sd.sessionKey === key;
+    const viewMatch = normSessionViewKey(sd.viewKey || st.activeView) === vk;
+    if (keyMatch || viewMatch) return [sd];
   }
   return [];
 }
