@@ -1,7 +1,24 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchVariantsBundle, saveVariants } from "../api.js";
 import { buildVariantMatrixHtml, collectVariantConfigFromDom, bindVariantMatrixEvents } from "../utils/variant-matrix.js";
-import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
+import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
+import { markEditorDirty } from "../editor-dirty.js";
+
+/** Stable JSON for variant-config dirty checks (ignores visibility footer state). */
+export function stableVariantConfigJson(root) {
+  const config = collectVariantConfigFromDom(root || document);
+  const keys = Object.keys(config.variants || {}).sort((a, b) =>
+    String(a).localeCompare(String(b), undefined, { numeric: true })
+  );
+  const variants = {};
+  for (const key of keys) variants[key] = config.variants[key];
+  return JSON.stringify({ global: config.global, variants });
+}
+
+export function captureVariantsTabBaseline(ctx, root) {
+  if (!ctx) return;
+  ctx.variantsDirtyBaseline = stableVariantConfigJson(root || document);
+}
 
 export async function loadVariantsTab(ctx) {
   const pid = ctx.selectedPrintProviderId;
@@ -23,9 +40,19 @@ export function snapshotVariantsTab() {
 }
 
 export function bindVariantsTab(ctx, root) {
-  const notifyDirty = () => notifyActiveTabDirty(ctx);
+  captureVariantsTabBaseline(ctx, root);
+  const notifyDirty = () => {
+    const current = stableVariantConfigJson(root || document);
+    const variantChanged =
+      ctx?.variantsDirtyBaseline != null && current !== ctx.variantsDirtyBaseline;
+    if (variantChanged) {
+      markEditorDirty();
+      return;
+    }
+    // Reverted to loaded config — fall back to full tab snapshot (e.g. visibility-only dirty).
+    notifyActiveTabDirty(ctx);
+  };
   bindVariantMatrixEvents(root || document, notifyDirty);
-  bindTabDirtyInputs(root || document, ctx);
 }
 
 export async function saveVariantsTab(ctx) {

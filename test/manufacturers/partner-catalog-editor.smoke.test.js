@@ -112,6 +112,17 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(api).toContain('saveTemplateSectionProductId(productKey, printProviderId, "print_areas", pid)');
   });
 
+  it("variants tab marks footer save dirty after local pricing edits", () => {
+    const variants = readFileSync(join(portal, "tabs/variants.js"), "utf8");
+    const matrix = readFileSync(join(portal, "utils/variant-matrix.js"), "utf8");
+    expect(variants).toContain("markEditorDirty");
+    expect(variants).toContain("variantsDirtyBaseline");
+    expect(variants).toContain("stableVariantConfigJson");
+    expect(matrix).toContain("Set prices");
+    expect(matrix).toContain("Set branding");
+    expect(matrix).toContain("ce-vp-set-pricing");
+  });
+
   it("print-area tab persists useMockups on every save", () => {
     const tabSrc = readFileSync(join(portal, "tabs/print-area.js"), "utf8");
     expect(tabSrc).toContain("resolvePrintAreaUseMockups");
