@@ -62,7 +62,7 @@ database_id = "9c7965da-2cad-40af-a6fa-1a4ce6c4d116"
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
-run_worker_first = ["/partner", "/partner/*"]
+run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*"]
 
 [[r2_buckets]]
 binding = "R2"

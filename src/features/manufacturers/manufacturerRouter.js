@@ -236,6 +236,11 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-test-printify-preview",
   "admin-eazpire-test-printify-placement-update",
   "admin-eazpire-test-printify-design-dimensions",
+  "admin-creations-list",
+  "admin-creations-stats",
+  "admin-products-get",
+  "admin-creations-customer-products",
+  "admin-creations-shopify-products",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1031,6 +1036,30 @@ export async function handleManufacturerRouter(request, env) {
     ) {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
       return tp.handlePartnerTestPrintifyDesignDimensions(request, env);
+    }
+
+    if (op === "admin-creations-stats" && request.method === "GET") {
+      const { handleAdminCreationsStats } = await import("../admin/adminCreations.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsStats(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-creations-list" && request.method === "GET") {
+      const { handleAdminCreationsList } = await import("../admin/adminCreations.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsList(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-products-get" && request.method === "GET") {
+      const { handleAdminProductsGet } = await import("../admin/adminProducts.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminProductsGet(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-creations-customer-products" && request.method === "GET") {
+      const { handleAdminCreationsCustomerProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsCustomerProducts(request, env);
+    }
+    if (op === "admin-creations-shopify-products" && request.method === "GET") {
+      const { handleAdminCreationsShopifyProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsShopifyProducts(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

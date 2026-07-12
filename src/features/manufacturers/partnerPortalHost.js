@@ -18,6 +18,13 @@ function isPartnerHost(hostname) {
   return hostname === "partner.eazpire.com" || hostname === "partner.local.eazpire.com";
 }
 
+function isAdminCreationsHost(hostname, pathname) {
+  return (
+    (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
+    (pathname === "/creations" || pathname.startsWith("/creations/"))
+  );
+}
+
 function isAdminPartnerHost(hostname, pathname) {
   return (
     (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
@@ -47,6 +54,13 @@ function resolveAssetKey(hostname, pathname) {
     if (sub === "/" || !sub.includes(".")) return "admin-partner/index.html";
     return `admin-partner${sub}`;
   }
+  if (isAdminCreationsHost(hostname, pathname)) {
+    const sub = pathname.replace(/^\/creations\/?/, "/") || "/";
+    if (sub.startsWith("/shared/")) return `shared${sub.slice("/shared".length)}`;
+    if (sub.startsWith("/js/")) return `admin-creations${sub}`;
+    if (sub === "/" || !sub.includes(".")) return "admin-creations/index.html";
+    return `admin-creations${sub}`;
+  }
   return null;
 }
 
@@ -68,7 +82,12 @@ async function fetchAsset(env, key) {
 }
 
 export function isPartnerPortalHost(hostname, pathname) {
-  return isPartnerHost(hostname) || isAdminPartnerHost(hostname, pathname) || isAdminRootHost(hostname, pathname);
+  return (
+    isPartnerHost(hostname) ||
+    isAdminPartnerHost(hostname, pathname) ||
+    isAdminCreationsHost(hostname, pathname) ||
+    isAdminRootHost(hostname, pathname)
+  );
 }
 
 export async function handlePartnerPortalRequest(request, env) {
@@ -87,6 +106,11 @@ export async function handlePartnerPortalRequest(request, env) {
   }
 
   if (isAdminPartnerHost(url.hostname, url.pathname) && url.pathname === "/partner/auth/verify") {
+    const { handleAdminAuthVerify } = await import("./adminPartnerAuth.js");
+    return handleAdminAuthVerify(request, env);
+  }
+
+  if (isAdminCreationsHost(url.hostname, url.pathname) && url.pathname === "/creations/auth/verify") {
     const { handleAdminAuthVerify } = await import("./adminPartnerAuth.js");
     return handleAdminAuthVerify(request, env);
   }
@@ -112,6 +136,7 @@ export async function handlePartnerPortalRequest(request, env) {
     <h1>Eazpire Admin</h1>
     <p>Worker-hosted admin console. More sections will appear here over time.</p>
     <p><a href="/partner">Partner Ops →</a></p>
+    <p><a href="/creations">Creations Admin →</a></p>
   </div>
 </body>
 </html>`;

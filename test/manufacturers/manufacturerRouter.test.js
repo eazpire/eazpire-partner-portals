@@ -24,6 +24,8 @@ describe("manufacturerRouter ops", () => {
     expect(isManufacturerOp("admin-manufacturer-remove")).toBe(true);
     expect(isManufacturerOp("partner-blueprint-list")).toBe(true);
     expect(isManufacturerOp("admin-blueprint-approve")).toBe(true);
+    expect(isManufacturerOp("admin-creations-list")).toBe(true);
+    expect(isManufacturerOp("admin-creations-customer-products")).toBe(true);
     expect(isManufacturerOp("unknown-op")).toBe(false);
   });
 });

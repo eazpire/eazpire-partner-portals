@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Eazpire Partner Ops</title>
-  <link rel="icon" href="/partner/favicon.svg" type="image/svg+xml" />
+  <title>Eazpire Creations Admin</title>
+  <link rel="icon" href="/creations/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700;750;800;850&display=swap" rel="stylesheet" />
   <style>[hidden]{display:none!important}.modal-backdrop:not(.show){display:none!important}</style>
-  <link rel="stylesheet" href="/partner/shared/css/partner-ui.css" />
+  <link rel="stylesheet" href="/creations/shared/css/partner-ui.css" />
 </head>
 <body>
   <div id="app-shell" class="app-root" hidden>
@@ -19,15 +19,15 @@
           <div class="brand-block">
             <button type="button" class="app-drawer-trigger" id="app-drawer-trigger" aria-label="Eazpire apps" aria-expanded="false" aria-controls="app-drawer"></button>
             <div>
-              <div class="brand-name">Eazpire Partners</div>
+              <div class="brand-name">Eazpire Creations</div>
               <div class="brand-sub">Admin Ops</div>
             </div>
           </div>
           <div id="app-drawer" class="app-drawer" hidden></div>
           <nav id="partner-nav"></nav>
           <div class="sidebar-card">
-            <h4>Partner Network Ops</h4>
-            <p>Manufacturer onboarding, catalog QA, fulfillment monitoring, and certification reviews.</p>
+            <h4>Creator Ops</h4>
+            <p>Design library, customer products, and catalog oversight across the creator network.</p>
           </div>
         </div>
         <button type="button" class="sidebar-rail" id="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar">
@@ -43,38 +43,30 @@
     <header class="topbar">
       <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
       <div class="topbar-start">
-        <h1 class="page-title" id="page-title">Command Center</h1>
+        <h1 class="page-title" id="page-title">Designs</h1>
       </div>
       <div class="topbar-actions">
-        <div class="search-box" role="search">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" placeholder="Search manufacturers, orders, products…" aria-label="Search" />
-        </div>
         <div id="topbar-extra"></div>
         <button type="button" class="btn btn-secondary" id="btn-logout">Sign out</button>
       </div>
     </header>
     <main class="main">
-      <section class="view active layout-stage command-layout" data-route="/partner" id="view-command"></section>
-      <section class="view layout-stage studio-layout" data-route="/partner/manufacturers" id="view-manufacturers"></section>
-      <section class="view layout-stage studio-layout" data-route="/partner/catalog" id="view-catalog"></section>
-      <section class="view layout-stage ops-layout" data-route="/partner/orders" id="view-orders"></section>
-      <section class="view layout-stage api-console" data-route="/partner/api" id="view-api"></section>
-      <section class="view layout-stage cert-hq" data-route="/partner/certification" id="view-certification"></section>
-      <section class="view layout-stage" data-route="/partner/requests" id="view-requests"></section>
+      <section class="view active layout-stage creations-layout" data-route="/creations/designs" id="view-designs"></section>
+      <section class="view layout-stage creations-layout" data-route="/creations/products" id="view-products"></section>
+      <section class="view layout-stage creations-layout" data-route="/creations" id="view-creations-root"></section>
     </main>
   </div>
 
   <div id="app-login" class="partner-screen" hidden>
     <div class="login-card admin-login-card" id="login-panel">
       <div class="brand-block login-brand">
-        <div class="logo-mark">EZ</div>
+        <button type="button" class="app-drawer-trigger app-drawer-trigger--static" disabled aria-hidden="true"></button>
         <div>
-          <div class="brand-name" style="color:var(--text)">Eazpire Partners</div>
+          <div class="brand-name" style="color:var(--text)">Eazpire Creations</div>
           <div class="brand-sub" style="color:var(--muted)">Admin Ops</div>
         </div>
       </div>
-      <h1>Sign in to Partner Ops</h1>
+      <h1>Sign in to Creations Admin</h1>
       <p>Enter your authorized admin email. We will send a secure magic link — no Shopify login required.</p>
       <form id="login-form">
         <div class="field">
@@ -89,8 +81,7 @@
 
   <div id="app-loading" class="partner-screen" hidden>
     <div class="login-card admin-login-card">
-      <div class="logo-mark" style="margin-bottom:14px">EZ</div>
-      <h1>Partner Ops</h1>
+      <h1>Creations Admin</h1>
       <p>Checking admin session…</p>
     </div>
   </div>
@@ -109,7 +100,7 @@
     </div>
   </div>
   <div id="partner-toast" class="toast"><strong></strong><span></span></div>
-  <script>window.__PARTNER_API_BASE__ = window.location.origin + "/partner";</script>
-  <script type="module" src="/partner/js/app.js"></script>
+  <script>window.__PARTNER_API_BASE__ = window.location.origin + "/creations";</script>
+  <script type="module" src="/creations/js/app.js"></script>
 </body>
 </html>

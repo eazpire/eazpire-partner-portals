@@ -1,5 +1,6 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { initShell, openModal, closeModal, confirmAction, openActionModeModal, showToast, renderTable, setTopbarExtra } from "/partner/shared/js/partner-shell.js";
+import { initAdminAppDrawer } from "/partner/shared/js/admin-app-drawer.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
 import { mountCatalogStudio } from "./catalog-studio.js";
 
@@ -950,6 +951,7 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
 (async function boot() {
   if (await ensureAdminSession()) {
     showShell();
+    initAdminAppDrawer({ currentAppId: "partner", brandTitle: "Eazpire Partners" });
     initShell({
       navSections: [{ title: "Core Portal", items: NAV_CORE }],
       onRoute,
