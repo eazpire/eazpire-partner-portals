@@ -1,7 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchVariantsBundle, saveVariants } from "../api.js";
 import { buildVariantMatrixHtml, collectVariantConfigFromDom, bindVariantMatrixEvents } from "../utils/variant-matrix.js";
-import { bindTabDirtyInputs } from "../editor-tab-dirty.js";
+import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 
 export async function loadVariantsTab(ctx) {
   const pid = ctx.selectedPrintProviderId;
@@ -23,7 +23,8 @@ export function snapshotVariantsTab() {
 }
 
 export function bindVariantsTab(ctx, root) {
-  bindVariantMatrixEvents(root || document);
+  const notifyDirty = () => notifyActiveTabDirty(ctx);
+  bindVariantMatrixEvents(root || document, notifyDirty);
   bindTabDirtyInputs(root || document, ctx);
 }
 

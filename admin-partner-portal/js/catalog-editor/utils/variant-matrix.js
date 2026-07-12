@@ -312,13 +312,13 @@ export function buildVariantMatrixHtml(productData, variantConfig = null, prices
           </select>
           <input type="number" class="ce-vp__input" id="ce-vp-global-value" value="${escapeHtml(String(defaultProfitValue))}" min="0" step="1">
           <span class="ce-vp__global-vk" id="ce-vp-global-vk">→ Avg VK: —</span>
-          <button type="button" class="ce-vp__btn-save" id="ce-vp-save-pricing">Save prices</button>
+          <button type="button" class="ce-vp__btn-save" id="ce-vp-set-pricing">Set prices</button>
         </div>
         <div class="ce-vp__global-row ce-vp__global-row--with-save">
           <label class="ce-vp__global-label">Branding:</label>
           <label class="ce-vp__radio"><input type="radio" name="ce-vp-global-branding" value="black" ${defaultBrandingGlobal === "black" ? "checked" : ""}> Black</label>
           <label class="ce-vp__radio"><input type="radio" name="ce-vp-global-branding" value="white" ${defaultBrandingGlobal === "white" ? "checked" : ""}> White</label>
-          <button type="button" class="ce-vp__btn-save" id="ce-vp-save-branding">Save branding</button>
+          <button type="button" class="ce-vp__btn-save" id="ce-vp-set-branding">Set branding</button>
           <button type="button" class="ce-vp__btn-apply" id="ce-vp-apply-all">Apply margin &amp; branding to all</button>
         </div>
       </div>
@@ -411,9 +411,13 @@ function applyGlobalBranding(panel) {
   });
 }
 
-export function bindVariantMatrixEvents(root) {
+export function bindVariantMatrixEvents(root, onDirty) {
   const panel = (root || document).querySelector(".ce-vp-panel");
   if (!panel) return;
+
+  const notifyDirty = () => {
+    if (typeof onDirty === "function") onDirty();
+  };
 
   panel.querySelectorAll(".ce-vp__color-header").forEach((header) => {
     header.addEventListener("click", (e) => {
@@ -442,6 +446,7 @@ export function bindVariantMatrixEvents(root) {
       updateColorCount(card);
       updateSummary(panel);
       updateGlobalAvgVk(panel);
+      notifyDirty();
     });
   });
 
@@ -463,22 +468,49 @@ export function bindVariantMatrixEvents(root) {
       }
       updateSummary(panel);
       updateGlobalAvgVk(panel);
+      notifyDirty();
     });
   });
 
   panel.querySelectorAll("tr[data-variant-id]").forEach((row) => {
-    row.querySelector(".ce-vp-mode-select")?.addEventListener("change", () => updateRowVk(row));
-    row.querySelector(".ce-vp-value-input")?.addEventListener("input", () => updateRowVk(row));
+    row.querySelector(".ce-vp-mode-select")?.addEventListener("change", () => {
+      updateRowVk(row);
+      notifyDirty();
+    });
+    row.querySelector(".ce-vp-value-input")?.addEventListener("input", () => {
+      updateRowVk(row);
+      notifyDirty();
+    });
   });
 
-  panel.querySelector("#ce-vp-global-mode")?.addEventListener("change", () => updateGlobalAvgVk(panel));
-  panel.querySelector("#ce-vp-global-value")?.addEventListener("input", () => updateGlobalAvgVk(panel));
+  panel.querySelectorAll(".ce-vp-color-branding").forEach((radio) => {
+    radio.addEventListener("change", notifyDirty);
+  });
 
-  panel.querySelector("#ce-vp-save-pricing")?.addEventListener("click", () => applyGlobalPricing(panel));
-  panel.querySelector("#ce-vp-save-branding")?.addEventListener("click", () => applyGlobalBranding(panel));
+  panel.querySelector("#ce-vp-global-mode")?.addEventListener("change", () => {
+    updateGlobalAvgVk(panel);
+    notifyDirty();
+  });
+  panel.querySelector("#ce-vp-global-value")?.addEventListener("input", () => {
+    updateGlobalAvgVk(panel);
+    notifyDirty();
+  });
+  panel.querySelectorAll('input[name="ce-vp-global-branding"]').forEach((radio) => {
+    radio.addEventListener("change", notifyDirty);
+  });
+
+  panel.querySelector("#ce-vp-set-pricing")?.addEventListener("click", () => {
+    applyGlobalPricing(panel);
+    notifyDirty();
+  });
+  panel.querySelector("#ce-vp-set-branding")?.addEventListener("click", () => {
+    applyGlobalBranding(panel);
+    notifyDirty();
+  });
   panel.querySelector("#ce-vp-apply-all")?.addEventListener("click", () => {
     applyGlobalPricing(panel);
     applyGlobalBranding(panel);
+    notifyDirty();
   });
 
   updateGlobalAvgVk(panel);

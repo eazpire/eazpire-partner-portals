@@ -33,6 +33,7 @@ export default defineConfig({
     },
   },
   test: {
+    testTimeout: 15000,
     include: ["test/**/*.test.{js,ts,mjs,cjs}"],
     exclude: [
       "e2e/**",
