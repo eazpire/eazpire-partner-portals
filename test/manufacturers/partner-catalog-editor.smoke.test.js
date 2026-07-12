@@ -121,6 +121,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(matrix).toContain("Set prices");
     expect(matrix).toContain("Set branding");
     expect(matrix).toContain("ce-vp-set-pricing");
+    expect(matrix).toContain("calcVk(ek, profitMode, profitVal)");
+    expect(matrix).not.toMatch(/buildSizeRow[\s\S]*vkFromPublishOrCalc/);
   });
 
   it("print-area tab persists useMockups on every save", () => {

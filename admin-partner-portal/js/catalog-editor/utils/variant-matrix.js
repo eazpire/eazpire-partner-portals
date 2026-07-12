@@ -18,7 +18,8 @@ function variantCostCents(variant) {
   return 0;
 }
 
-function vkFromPublishOrCalc(prices, variantId, ek, isEnabled, profitMode, profitVal) {
+/** @internal Exported for unit tests. */
+export function vkFromPublishOrCalc(prices, variantId, ek, isEnabled, profitMode, profitVal) {
   if (!isEnabled) return 0;
   const vidKey = variantId != null ? String(variantId) : "";
   if (vidKey && prices.has(vidKey)) {
@@ -32,7 +33,8 @@ function vkFromPublishOrCalc(prices, variantId, ek, isEnabled, profitMode, profi
   return calcVk(ek, profitMode, profitVal);
 }
 
-function calcVk(ek, marginMode, marginValue) {
+/** @internal Exported for unit tests. */
+export function calcVk(ek, marginMode, marginValue) {
   if (!Number.isFinite(ek) || ek <= 0) return 0;
   const mv = Number(marginValue) || 0;
   if (marginMode === "fixed") return Math.max(0, Math.round(ek + mv * 100));
@@ -186,7 +188,7 @@ export function buildVariantGroupList(product) {
   return { mode, groups };
 }
 
-function buildSizeRow(product, variant, hasColor, savedVariants, defaultProfitMode, defaultProfitValue, prices) {
+function buildSizeRow(product, variant, hasColor, savedVariants, defaultProfitMode, defaultProfitValue) {
   const vidKey = String(variant.id ?? variant.variant_id ?? "");
   const sv = savedVariants[vidKey] || {};
   const isEnabled = sv.enabled !== false;
@@ -194,7 +196,8 @@ function buildSizeRow(product, variant, hasColor, savedVariants, defaultProfitMo
   const profitVal =
     sv.profit_value != null && Number.isFinite(Number(sv.profit_value)) ? Number(sv.profit_value) : defaultProfitValue;
   const ek = variantCostCents(variant);
-  const vk = vkFromPublishOrCalc(prices, vidKey, ek, isEnabled, profitMode, profitVal);
+  // VK column reflects margin inputs (variant_config), not stale prices_json publish prices.
+  const vk = isEnabled ? calcVk(ek, profitMode, profitVal) : 0;
   const profit = isEnabled ? vk - ek : 0;
   const label = getVariantDisplayLabel(product, variant, hasColor);
   const rowClass = isEnabled ? "" : " ce-vp__row-disabled";
@@ -224,9 +227,6 @@ export function buildVariantMatrixHtml(productData, variantConfig = null, prices
   const defaultProfitMode = savedGlobal.profit_mode || "percent";
   const defaultProfitValue = Number(savedGlobal.profit_value ?? 30);
   const defaultBrandingGlobal = savedGlobal.branding || "black";
-  const prices = new Map(
-    Array.isArray(pricesJson) ? pricesJson.map((p) => [String(p.variant_id), Number(p.price)]) : []
-  );
 
   const { hasColor, availableColors, variantsByColor, totalVariants } = groupVariants(product);
   const ppId = escapeHtml(String(printProviderId || "0"));
@@ -269,7 +269,7 @@ export function buildVariantMatrixHtml(productData, variantConfig = null, prices
     }
 
     const sizeRows = variants
-      .map((v) => buildSizeRow(product, v, hasColor, savedVariants, defaultProfitMode, defaultProfitValue, prices))
+      .map((v) => buildSizeRow(product, v, hasColor, savedVariants, defaultProfitMode, defaultProfitValue))
       .join("");
 
     colorCards += `
@@ -513,6 +513,9 @@ export function bindVariantMatrixEvents(root, onDirty) {
     notifyDirty();
   });
 
+  panel.querySelectorAll("tr[data-variant-id]").forEach((row) => {
+    if (!row.classList.contains("ce-vp__row-disabled")) updateRowVk(row);
+  });
   updateGlobalAvgVk(panel);
 }
 
