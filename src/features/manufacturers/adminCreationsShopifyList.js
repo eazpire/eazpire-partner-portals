@@ -18,6 +18,7 @@ const PRODUCTS_GQL = `
           vendor
           productType
           tags
+          isGiftCard
           featuredMedia {
             ... on MediaImage {
               image { url }
@@ -96,14 +97,34 @@ function tagsFromNode(node) {
     .filter(Boolean);
 }
 
-/** Shopify gift card product (native store offering, not Printify POD). */
+/**
+ * Shopify gift card product (native store offering, not Printify POD).
+ * This store's gift card uses productType "Gutschein", tags like giftcard/gutschein,
+ * and Shopify's built-in isGiftCard flag — not product_type "Gift Card" / tag gift-card.
+ */
 export function isGiftCardShopifyProduct(node) {
+  if (node?.isGiftCard === true) return true;
+
   const productType = String(node?.productType || "")
     .trim()
     .toLowerCase();
-  if (productType === "gift card") return true;
+  if (
+    productType === "gift card" ||
+    productType === "giftcard" ||
+    productType === "gutschein" ||
+    productType === "geschenkgutschein"
+  ) {
+    return true;
+  }
+
   const tags = tagsFromNode(node);
-  return tags.includes("gift-card") || tags.includes("gift card");
+  return (
+    tags.includes("gift-card") ||
+    tags.includes("gift card") ||
+    tags.includes("giftcard") ||
+    tags.includes("gutschein") ||
+    tags.includes("geschenkgutschein")
+  );
 }
 
 /** Shopify sample template product (`custom.sample` = yes). */
@@ -119,9 +140,12 @@ export function isNativeShopifyStoreProduct(node) {
   return isGiftCardShopifyProduct(node) || isSampleShopifyProduct(node);
 }
 
-/** Shopify Admin search hint for native store products (post-filter remains authoritative). */
+/**
+ * Shopify Admin search hint for native store products (post-filter remains authoritative).
+ * Prefer gift_card:true — matches Shopify's isGiftCard, including productType "Gutschein".
+ */
 export const NATIVE_SHOPIFY_STORE_QUERY =
-  '(product_type:"Gift Card" OR tag:gift-card OR metafields.custom.sample:yes)';
+  '(gift_card:true OR product_type:Gutschein OR product_type:"Gift Card" OR tag:giftcard OR tag:gift-card OR tag:gutschein OR metafields.custom.sample:yes)';
 
 /**
  * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.

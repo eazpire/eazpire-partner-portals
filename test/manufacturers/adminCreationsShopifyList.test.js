@@ -86,10 +86,30 @@ describe("adminCreationsShopifyList", () => {
     ).toBe(false);
   });
 
-  it("isGiftCardShopifyProduct matches product type and gift-card tag", () => {
+  it("isGiftCardShopifyProduct matches isGiftCard, Gutschein type, and giftcard tags", () => {
+    expect(isGiftCardShopifyProduct({ isGiftCard: true, productType: "" })).toBe(true);
+    expect(
+      isGiftCardShopifyProduct({
+        isGiftCard: true,
+        productType: "Gutschein",
+        tags: ["giftcard", "gutschein"],
+      })
+    ).toBe(true);
     expect(isGiftCardShopifyProduct({ productType: "Gift Card" })).toBe(true);
+    expect(isGiftCardShopifyProduct({ productType: "Gutschein" })).toBe(true);
     expect(isGiftCardShopifyProduct({ tags: ["gift-card", "featured"] })).toBe(true);
-    expect(isGiftCardShopifyProduct({ productType: "Poster", tags: [] })).toBe(false);
+    expect(isGiftCardShopifyProduct({ tags: ["giftcard"] })).toBe(true);
+    expect(isGiftCardShopifyProduct({ productType: "Poster", tags: [], isGiftCard: false })).toBe(
+      false
+    );
+    expect(
+      isGiftCardShopifyProduct({
+        title: "Unisex Hoodie",
+        productType: "Hoodie",
+        tags: ["clothing"],
+        isGiftCard: false,
+      })
+    ).toBe(false);
   });
 
   it("isSampleShopifyProduct matches custom.sample yes", () => {
@@ -100,6 +120,8 @@ describe("adminCreationsShopifyList", () => {
   });
 
   it("isNativeShopifyStoreProduct whitelists gift cards and samples only", () => {
+    expect(isNativeShopifyStoreProduct({ isGiftCard: true })).toBe(true);
+    expect(isNativeShopifyStoreProduct({ productType: "Gutschein" })).toBe(true);
     expect(isNativeShopifyStoreProduct({ productType: "Gift Card" })).toBe(true);
     expect(isNativeShopifyStoreProduct({ mfSample: { value: "yes" }, productType: "Poster" })).toBe(
       true
@@ -107,6 +129,7 @@ describe("adminCreationsShopifyList", () => {
     expect(
       isNativeShopifyStoreProduct({
         productType: "Poster",
+        isGiftCard: false,
         mfPrintifyId: { value: "pf-1" },
         mfProvider: { value: "printify" },
       })
@@ -115,6 +138,7 @@ describe("adminCreationsShopifyList", () => {
       isNativeShopifyStoreProduct({
         title: "Unisex Hoodie",
         productType: "Hoodie",
+        isGiftCard: false,
         mfProductKey: { value: "unisex-hoodie" },
       })
     ).toBe(false);
