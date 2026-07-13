@@ -36,6 +36,58 @@ function appItemHtml(app, activeId) {
   </a>`;
 }
 
+function isSidebarExpanded() {
+  const root = document.querySelector(".app-root");
+  return root && !root.classList.contains("sidebar-collapsed");
+}
+
+function positionFloatingDrawer(panel, trigger) {
+  const rect = trigger.getBoundingClientRect();
+  const margin = 8;
+  const panelWidth = panel.offsetWidth || 360;
+  let left = rect.left;
+  const maxLeft = window.innerWidth - panelWidth - margin;
+  if (left > maxLeft) left = Math.max(margin, maxLeft);
+  panel.style.top = `${rect.bottom + margin}px`;
+  panel.style.left = `${left}px`;
+}
+
+function mountFloatingDrawer(panel) {
+  if (panel.parentElement === document.body) return;
+  panel._drawerAnchor = panel.parentElement;
+  panel._drawerNext = panel.nextElementSibling;
+  document.body.appendChild(panel);
+}
+
+function restoreDrawerDom(panel) {
+  if (!panel._drawerAnchor || panel.parentElement !== document.body) return;
+  if (panel._drawerNext && panel._drawerNext.parentElement === panel._drawerAnchor) {
+    panel._drawerAnchor.insertBefore(panel, panel._drawerNext);
+  } else {
+    panel._drawerAnchor.appendChild(panel);
+  }
+}
+
+function applyDrawerLayout(panel, trigger, open) {
+  if (!open) {
+    panel.classList.remove("app-drawer--floating");
+    panel.style.top = "";
+    panel.style.left = "";
+    restoreDrawerDom(panel);
+    return;
+  }
+  if (isSidebarExpanded()) {
+    mountFloatingDrawer(panel);
+    panel.classList.add("app-drawer--floating");
+    positionFloatingDrawer(panel, trigger);
+  } else {
+    panel.classList.remove("app-drawer--floating");
+    panel.style.top = "";
+    panel.style.left = "";
+    restoreDrawerDom(panel);
+  }
+}
+
 function closeDrawer() {
   const panel = document.getElementById("app-drawer");
   const trigger = document.getElementById("app-drawer-trigger");
@@ -43,6 +95,7 @@ function closeDrawer() {
   panel.hidden = true;
   panel.classList.remove("show");
   trigger?.setAttribute("aria-expanded", "false");
+  applyDrawerLayout(panel, trigger, false);
 }
 
 function openDrawer() {
@@ -52,6 +105,10 @@ function openDrawer() {
   panel.hidden = false;
   panel.classList.add("show");
   trigger?.setAttribute("aria-expanded", "true");
+  if (trigger) {
+    applyDrawerLayout(panel, trigger, true);
+    requestAnimationFrame(() => positionFloatingDrawer(panel, trigger));
+  }
 }
 
 function toggleDrawer() {
@@ -105,5 +162,18 @@ export function initAdminAppDrawer({ currentAppId, brandTitle }) {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeDrawer();
+  });
+
+  window.addEventListener("resize", () => {
+    if (!panel.classList.contains("show") || !panel.classList.contains("app-drawer--floating")) return;
+    positionFloatingDrawer(panel, trigger);
+  });
+
+  document.getElementById("sidebar-collapse")?.addEventListener("click", () => {
+    if (!panel.classList.contains("show")) return;
+    window.setTimeout(() => {
+      if (!isSidebarExpanded()) closeDrawer();
+      else positionFloatingDrawer(panel, trigger);
+    }, 0);
   });
 }

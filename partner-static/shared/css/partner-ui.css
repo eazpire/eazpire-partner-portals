@@ -5966,29 +5966,6 @@ html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block .brand-name,
 html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block .brand-sub {
   display: none;
 }
-/* Collapsed rail: float app drawer past sidebar edge (Partner + Creations) */
-@media (min-width: 769px) {
-  html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block {
-    min-height: 42px;
-    overflow: visible;
-  }
-  html[data-portal="admin"] .app-root.sidebar-collapsed .sidebar-content {
-    overflow: visible;
-  }
-  html[data-portal="admin"] .app-root.sidebar-collapsed .app-drawer-trigger {
-    position: fixed;
-    left: calc(var(--sidebar-collapsed) - 21px);
-    top: 22px;
-    z-index: 250;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.32);
-  }
-  html[data-portal="admin"] .app-root.sidebar-collapsed .app-drawer {
-    position: fixed;
-    left: 12px;
-    top: 72px;
-    z-index: 240;
-  }
-}
 html[data-portal="admin"] .app-drawer {
   position: absolute;
   top: 58px;
@@ -6003,6 +5980,10 @@ html[data-portal="admin"] .app-drawer {
 }
 html[data-portal="admin"] .sidebar-content {
   position: relative;
+}
+html[data-portal="admin"] .app-drawer.app-drawer--floating {
+  position: fixed;
+  z-index: 1000;
 }
 html[data-portal="admin"] .app-drawer.show {
   animation: appDrawerIn 0.18s ease both;
