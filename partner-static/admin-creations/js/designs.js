@@ -92,15 +92,91 @@ function filterToolbarHtml() {
     </div>`;
 }
 
+function designDownloadUrl(item) {
+  const original = item?.original_url != null ? String(item.original_url).trim() : "";
+  if (original) return original;
+  const preview = item?.preview_url != null ? String(item.preview_url).trim() : "";
+  return preview || "";
+}
+
+function designDownloadFilename(item, url) {
+  let base = "design";
+  if (item?.title) {
+    base =
+      String(item.title)
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_|_$/g, "")
+        .substring(0, 50) || "design";
+  } else if (item?.id) {
+    base = `design-${item.id}`;
+  } else if (item?.job_id) {
+    base = `design-${item.job_id}`;
+  } else {
+    base = `design-${Date.now()}`;
+  }
+
+  let extension = "png";
+  try {
+    const pathname = new URL(url, window.location.origin).pathname;
+    const raw = pathname.substring(pathname.lastIndexOf(".") + 1).toLowerCase();
+    if (["png", "jpg", "jpeg", "webp", "gif"].includes(raw)) extension = raw;
+  } catch {
+    /* keep default */
+  }
+  return `${base}.${extension}`;
+}
+
+async function downloadDesignOriginal(item) {
+  const url = designDownloadUrl(item);
+  if (!url) {
+    showToast("Error", "No original design available to download");
+    return;
+  }
+  const filename = designDownloadFilename(item, url);
+
+  try {
+    const res = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!res.ok) throw new Error(`http_${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+  } catch {
+    // Cross-origin hosts without CORS: open URL as fallback
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+}
+
+const DOWNLOAD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
 function designCardHtml(item) {
   const title = item.title != null ? String(item.title) : "—";
   const imgUrl = item.preview_url || item.original_url || "";
+  const downloadUrl = designDownloadUrl(item);
   const libLabel = item.library_status === "inactive" ? "Inactive" : "Active";
   const unsaved = item.item_kind === "generated" ? '<span class="cr-badge cr-badge--warn">Unsaved</span>' : "";
   const thumbInner =
     imgUrl && String(imgUrl).trim()
       ? `<img src="${escapeHtml(imgUrl)}" alt="" loading="lazy" decoding="async" />`
       : '<span class="cr-card__noimg">No preview</span>';
+  const downloadBtn = downloadUrl
+    ? `<button type="button" class="cr-card__download" data-cr-download="${escapeHtml(item.item_key || "")}" aria-label="Download original design" title="Download original design">${DOWNLOAD_ICON_SVG}</button>`
+    : "";
 
   return `<article class="cr-card" data-item-key="${escapeHtml(item.item_key || "")}">
     <div class="cr-card__title-row">
@@ -108,6 +184,7 @@ function designCardHtml(item) {
     </div>
     <div class="cr-card__thumb">
       <div class="cr-card__thumb-inner">${thumbInner}</div>
+      ${downloadBtn}
     </div>
     <div class="cr-card__meta">
       <span class="cr-meta-chip" title="User">${escapeHtml(item.user_name || item.owner_id || "—")}</span>
@@ -125,6 +202,22 @@ function designCardHtml(item) {
   </article>`;
 }
 
+function bindDownloadButtons(grid) {
+  grid.querySelectorAll("[data-cr-download]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = btn.getAttribute("data-cr-download") || "";
+      const item = state.items.find((row) => String(row.item_key || "") === key);
+      if (!item) {
+        showToast("Error", "Design not found");
+        return;
+      }
+      void downloadDesignOriginal(item);
+    });
+  });
+}
+
 function renderGrid() {
   const grid = document.getElementById("cr-designs-grid");
   const empty = document.getElementById("cr-designs-empty");
@@ -133,6 +226,7 @@ function renderGrid() {
 
   const visible = state.items.filter((item) => matchesUsage(item, state.usage));
   grid.innerHTML = visible.map(designCardHtml).join("");
+  bindDownloadButtons(grid);
   const hasRows = visible.length > 0;
   grid.hidden = !hasRows;
   if (empty) empty.hidden = hasRows || state.loading;
