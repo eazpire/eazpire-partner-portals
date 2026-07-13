@@ -6041,7 +6041,7 @@ html[data-portal="admin"] .app-drawer__label {
 }
 
 /* ----- Creations admin portal ----- */
-html[data-portal="admin"] .creations-layout {
+html[data-portal="admin"] .creations-layout.view.active {
   display: flex;
   flex-direction: column;
   gap: 16px;
