@@ -17,11 +17,13 @@
       <div class="sidebar-inner">
         <div class="sidebar-content">
           <div class="brand-block">
+            <button type="button" class="app-drawer-trigger" id="app-drawer-trigger" aria-label="Eazpire apps" aria-expanded="false" aria-controls="app-drawer"></button>
             <div>
               <div class="brand-name">Eazpire Creations</div>
               <div class="brand-sub">Admin Ops</div>
             </div>
           </div>
+          <div id="app-drawer" class="app-drawer" hidden></div>
           <nav id="partner-nav"></nav>
           <div class="sidebar-card">
             <h4>Creator Ops</h4>
@@ -39,15 +41,9 @@
     </aside>
     <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     <header class="topbar">
-      <div class="topbar-lead">
-        <div class="app-drawer-anchor">
-          <button type="button" class="app-drawer-trigger app-drawer-trigger--topbar" id="app-drawer-trigger" aria-label="Eazpire apps" aria-expanded="false" aria-controls="app-drawer"></button>
-          <div id="app-drawer" class="app-drawer" hidden></div>
-        </div>
-        <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
-        <div class="topbar-start">
-          <h1 class="page-title" id="page-title">Designs</h1>
-        </div>
+      <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
+      <div class="topbar-start">
+        <h1 class="page-title" id="page-title">Designs</h1>
       </div>
       <div class="topbar-actions">
         <div id="topbar-extra"></div>

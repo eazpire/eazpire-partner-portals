@@ -162,7 +162,7 @@ html, body { margin: 0; min-height: 100%; max-width: 100%; overflow-x: hidden; f
 .nav-icon { width: 23px; height: 23px; border-radius: 8px; background: rgba(255,255,255,.10); display: grid; place-items: center; font-size: 13px; }
 .sidebar-card { margin-top: auto; padding: 14px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10); font-size: 12px; color: rgba(255,255,255,.58); }
 .app-root.sidebar-collapsed { grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr); }
-.app-root.sidebar-collapsed .brand-block > div:not(.logo-mark),
+.app-root.sidebar-collapsed .brand-block > div:not(.app-drawer-trigger):not(.logo-mark),
 .app-root.sidebar-collapsed .nav-section-title,
 .app-root.sidebar-collapsed .nav-label,
 .app-root.sidebar-collapsed .sidebar-card { display: none; }
@@ -2005,23 +2005,6 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
     gap: 8px;
     min-height: var(--topbar);
     flex-wrap: nowrap;
-  }
-
-  html[data-portal="admin"] .topbar-lead {
-    gap: 6px;
-    min-width: 0;
-  }
-
-  html[data-portal="admin"] .app-drawer-trigger--topbar {
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-  }
-
-  html[data-portal="admin"] .app-drawer {
-    left: 0;
-    right: auto;
-    max-width: min(360px, calc(100vw - 24px));
   }
 
   .main {
@@ -5954,17 +5937,6 @@ a.ce-tpl-draft-head__id:hover {
 }
 
 /* ----- Admin app drawer (Microsoft-style) ----- */
-html[data-portal="admin"] .topbar-lead {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-html[data-portal="admin"] .app-drawer-anchor {
-  position: relative;
-  flex-shrink: 0;
-}
 html[data-portal="admin"] .app-drawer-trigger {
   width: 42px;
   height: 42px;
@@ -5972,19 +5944,14 @@ html[data-portal="admin"] .app-drawer-trigger {
   border-radius: 12px;
   display: grid;
   place-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s ease, transform 0.15s ease;
 }
-html[data-portal="admin"] .app-drawer-trigger--topbar {
-  background: rgba(15, 23, 42, 0.06);
-  color: var(--text);
-  border: 1px solid var(--line);
-}
-html[data-portal="admin"] .app-drawer-trigger--topbar:hover {
-  background: rgba(109, 93, 252, 0.1);
-  border-color: rgba(109, 93, 252, 0.35);
-  color: #4338ca;
+html[data-portal="admin"] .app-drawer-trigger:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 html[data-portal="admin"] .app-drawer-trigger--static {
   opacity: 0.35;
@@ -5994,17 +5961,25 @@ html[data-portal="admin"] .app-drawer-dots__svg {
   width: 22px;
   height: 22px;
 }
+html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block > div:not(.app-drawer-trigger),
+html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block .brand-name,
+html[data-portal="admin"] .app-root.sidebar-collapsed .brand-block .brand-sub {
+  display: none;
+}
 html[data-portal="admin"] .app-drawer {
   position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  z-index: 1200;
+  top: 58px;
+  left: 16px;
+  z-index: 120;
   width: min(360px, calc(100vw - 32px));
   background: #1b1f27;
   border: 1px solid #2d3545;
   border-radius: 14px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   padding: 14px 14px 12px;
+}
+html[data-portal="admin"] .sidebar-content {
+  position: relative;
 }
 html[data-portal="admin"] .app-drawer.show {
   animation: appDrawerIn 0.18s ease both;
