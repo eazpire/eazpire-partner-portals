@@ -4,6 +4,7 @@
 
 import { json, getCorsHeaders } from "../../utils/response.js";
 import { shopifyAPI } from "../../utils/shopify.js";
+import { CAT_REVERSE, buildCategoryTree } from "../admin/catalogConstants.js";
 
 export function proxyRequestWithAdminOwner(request, ownerId) {
   const url = new URL(request.url);
@@ -21,6 +22,87 @@ function shopDomainFromEnv(env) {
     .replace(/\/$/, "");
   if (!shop) return "allyoucanpink.myshopify.com";
   return shop.includes(".") ? shop : `${shop}.myshopify.com`;
+}
+
+/** Printify catalog products for Creations admin (lightweight — no adminProducts.js import). */
+export async function handleAdminCreationsPrintifyProducts(request, env) {
+  const cors = getCorsHeaders(request);
+  if (!env.CATALOG_DB) {
+    return json({ ok: false, error: "database_unavailable" }, 500, cors);
+  }
+
+  const url = new URL(request.url);
+  const isActive = url.searchParams.get("is_active");
+  const activeFilter =
+    isActive != null && isActive !== "" ? Math.max(0, Math.min(2, Number.parseInt(isActive, 10) || 0)) : null;
+
+  try {
+    const r = await env.CATALOG_DB.prepare(
+      `SELECT
+        pc.product_key,
+        pc.title,
+        pc.is_active,
+        pc.updated_at,
+        (SELECT bp.category FROM product_publish_profiles pp
+          JOIN printify_blueprints bp ON bp.id = pp.blueprint_id
+          WHERE pp.product_key = pc.product_key AND pp.blueprint_id IS NOT NULL
+            AND pp.source_system = 'printify'
+          LIMIT 1) AS blueprint_category,
+        (SELECT bp.images_json FROM product_publish_profiles pp
+          JOIN printify_blueprints bp ON bp.id = pp.blueprint_id
+          WHERE pp.product_key = pc.product_key AND pp.blueprint_id IS NOT NULL
+            AND pp.source_system = 'printify'
+          LIMIT 1) AS blueprint_images_json
+      FROM product_catalog pc
+      WHERE EXISTS (
+        SELECT 1 FROM product_publish_profiles ppx
+        WHERE ppx.product_key = pc.product_key AND ppx.blueprint_id IS NOT NULL
+          AND ppx.source_system = 'printify'
+      )
+      ORDER BY pc.title`
+    ).all();
+
+    let products = (r?.results || []).map((row) => {
+      let images = [];
+      try {
+        const parsed = JSON.parse(row.blueprint_images_json || "[]");
+        images = parsed.filter((i) => typeof i === "string");
+      } catch {
+        images = [];
+      }
+      const category = row.blueprint_category || null;
+      return {
+        product_key: row.product_key,
+        title: row.title || row.product_key,
+        is_active: row.is_active,
+        updated_at: row.updated_at,
+        images,
+        category,
+        parent_group: CAT_REVERSE[category] || "Sonstiges",
+        source: "printify",
+      };
+    });
+
+    if (activeFilter != null) {
+      products = products.filter((p) => Number(p.is_active) === activeFilter);
+    }
+
+    const category_tree = buildCategoryTree(products);
+    return json(
+      {
+        ok: true,
+        products,
+        total: products.length,
+        category_tree,
+        source: "printify",
+      },
+      200,
+      cors
+    );
+  } catch (err) {
+    console.error("[admin-creations-printify-products]", err);
+    return json({ ok: false, error: err?.message || "internal_error" }, 500, cors);
+  }
 }
 
 /** Customer-created products from published_designs (D1). */

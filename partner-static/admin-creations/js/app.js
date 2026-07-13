@@ -63,7 +63,8 @@ const ROUTES = {
 };
 
 async function onRoute(route) {
-  const path = route === "/creations" ? "/creations/designs" : route || "/creations/designs";
+  const raw = String(route || "/creations/designs").replace(/\/$/, "") || "/creations/designs";
+  const path = raw === "/creations" ? "/creations/designs" : raw;
   const fn = ROUTES[path] || ROUTES["/creations/designs"];
   try {
     await fn();

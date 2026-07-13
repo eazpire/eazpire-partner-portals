@@ -238,7 +238,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-test-printify-design-dimensions",
   "admin-creations-list",
   "admin-creations-stats",
-  "admin-products-get",
+  "admin-creations-printify-products",
   "admin-creations-customer-products",
   "admin-creations-shopify-products",
 ]);
@@ -1048,10 +1048,9 @@ export async function handleManufacturerRouter(request, env) {
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminCreationsList(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
-    if (op === "admin-products-get" && request.method === "GET") {
-      const { handleAdminProductsGet } = await import("../admin/adminProducts.js");
-      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
-      return handleAdminProductsGet(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    if (op === "admin-creations-printify-products" && request.method === "GET") {
+      const { handleAdminCreationsPrintifyProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsPrintifyProducts(request, env);
     }
     if (op === "admin-creations-customer-products" && request.method === "GET") {
       const { handleAdminCreationsCustomerProducts } = await import("./adminCreationsPortalApi.js");

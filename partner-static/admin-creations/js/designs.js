@@ -97,27 +97,30 @@ function designCardHtml(item) {
   const imgUrl = item.preview_url || item.original_url || "";
   const libLabel = item.library_status === "inactive" ? "Inactive" : "Active";
   const unsaved = item.item_kind === "generated" ? '<span class="cr-badge cr-badge--warn">Unsaved</span>' : "";
-  const thumb = imgUrl
-    ? `<img src="${escapeHtml(imgUrl)}" alt="" loading="lazy" decoding="async" />`
-    : '<span class="cr-card__noimg">No preview</span>';
+  const thumbInner =
+    imgUrl && String(imgUrl).trim()
+      ? `<img src="${escapeHtml(imgUrl)}" alt="" loading="lazy" decoding="async" />`
+      : '<span class="cr-card__noimg">No preview</span>';
 
   return `<article class="cr-card" data-item-key="${escapeHtml(item.item_key || "")}">
-    <div class="cr-card__thumb">${thumb}</div>
-    <div class="cr-card__body">
+    <div class="cr-card__title-row">
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-      <div class="cr-card__meta">
-        <span class="cr-meta-chip" title="User">${escapeHtml(item.user_name || item.owner_id || "—")}</span>
-        <span class="cr-meta-chip">${escapeHtml(sourceBucketLabel(item.source_bucket))}</span>
-        <span class="cr-meta-chip">${escapeHtml(formatDateTime(item.created_at))}</span>
-        <span class="cr-meta-chip">${escapeHtml(item.creator_name || "—")}</span>
-        <span class="cr-meta-chip">${escapeHtml(libLabel)} ${unsaved}</span>
-        <span class="cr-meta-chip">${escapeHtml(item.type || "Classic")}</span>
-        ${
-          item.is_publishable
-            ? `<span class="cr-meta-chip cr-meta-chip--stat">${Number(item.publish_count || 0)} / ${Number(item.publish_max || 0)} products</span>`
-            : '<span class="cr-meta-chip cr-meta-chip--muted">—</span>'
-        }
-      </div>
+    </div>
+    <div class="cr-card__thumb">
+      <div class="cr-card__thumb-inner">${thumbInner}</div>
+    </div>
+    <div class="cr-card__meta">
+      <span class="cr-meta-chip" title="User">${escapeHtml(item.user_name || item.owner_id || "—")}</span>
+      <span class="cr-meta-chip">${escapeHtml(sourceBucketLabel(item.source_bucket))}</span>
+      <span class="cr-meta-chip">${escapeHtml(formatDateTime(item.created_at))}</span>
+      <span class="cr-meta-chip">${escapeHtml(item.creator_name || "—")}</span>
+      <span class="cr-meta-chip">${escapeHtml(libLabel)} ${unsaved}</span>
+      <span class="cr-meta-chip">${escapeHtml(item.type || "Classic")}</span>
+      ${
+        item.is_publishable
+          ? `<span class="cr-meta-chip cr-meta-chip--stat">${Number(item.publish_count || 0)} / ${Number(item.publish_max || 0)} products</span>`
+          : '<span class="cr-meta-chip cr-meta-chip--muted">—</span>'
+      }
     </div>
   </article>`;
 }

@@ -13,8 +13,10 @@ const state = {
   q: "",
   qDebounced: "",
   loading: false,
+  error: "",
   items: [],
   categories: [],
+  categoryTree: [],
   searchTimer: null,
 };
 
@@ -32,8 +34,31 @@ function statusBadgeClass(isActive) {
   return "badge-neutral";
 }
 
+function categoriesForToolbar() {
+  const cats = [{ key: "all", label: "All", count: state.items.length }];
+  const seen = new Set(["all"]);
+  for (const group of state.categoryTree || []) {
+    for (const child of group.children || []) {
+      if (!child?.name || seen.has(child.name)) continue;
+      seen.add(child.name);
+      cats.push({ key: child.name, label: child.name, count: child.count });
+    }
+  }
+  for (const p of state.items) {
+    const cat = p.category;
+    if (!cat || seen.has(cat)) continue;
+    seen.add(cat);
+    cats.push({
+      key: cat,
+      label: cat,
+      count: state.items.filter((x) => x.category === cat).length,
+    });
+  }
+  return cats;
+}
+
 function filterToolbarHtml() {
-  const cats = [{ key: "all", label: "All", count: state.items.length }, ...state.categories];
+  const cats = categoriesForToolbar();
   return `
     <div class="cr-toolbar panel">
       <div class="cr-toolbar__row cr-toolbar__row--primary">
@@ -76,20 +101,23 @@ function filterToolbarHtml() {
 function productCardHtml(item) {
   const title = item.title || item.product_key || "—";
   const img = (item.images && item.images[0]) || item.preview_url || "";
-  const thumb = img
-    ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" />`
-    : '<span class="cr-card__noimg">No image</span>';
+  const thumbInner =
+    img && String(img).trim()
+      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" />`
+      : '<span class="cr-card__noimg">No image</span>';
 
   return `<article class="cr-card cr-card--product" data-product-key="${escapeHtml(item.product_key || item.id || "")}">
-    <div class="cr-card__thumb">${thumb}</div>
-    <div class="cr-card__body">
+    <div class="cr-card__title-row">
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-      <div class="cr-card__meta">
-        ${item.category ? `<span class="cr-meta-chip">${escapeHtml(item.category)}</span>` : ""}
-        ${item.owner_label ? `<span class="cr-meta-chip">${escapeHtml(item.owner_label)}</span>` : ""}
-        <span class="cr-meta-chip badge ${statusBadgeClass(item.is_active)}">${escapeHtml(statusLabel(item.is_active))}</span>
-        <span class="cr-meta-chip cr-meta-chip--muted">${escapeHtml(item.source_label || state.source)}</span>
-      </div>
+    </div>
+    <div class="cr-card__thumb">
+      <div class="cr-card__thumb-inner">${thumbInner}</div>
+    </div>
+    <div class="cr-card__meta">
+      ${item.category ? `<span class="cr-meta-chip">${escapeHtml(item.category)}</span>` : ""}
+      ${item.owner_label ? `<span class="cr-meta-chip">${escapeHtml(item.owner_label)}</span>` : ""}
+      <span class="cr-meta-chip badge ${statusBadgeClass(item.is_active)}">${escapeHtml(statusLabel(item.is_active))}</span>
+      <span class="cr-meta-chip cr-meta-chip--muted">${escapeHtml(item.source_label || state.source)}</span>
     </div>
   </article>`;
 }
@@ -99,7 +127,7 @@ function applyFilters() {
   const needle = state.qDebounced.toLowerCase();
   if (needle) {
     items = items.filter((p) => {
-      const hay = [p.title, p.product_key, p.category, p.owner_label, p.creator_name]
+      const hay = [p.title, p.product_key, p.category, p.owner_label, p.creator_name, p.parent_group]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -112,30 +140,23 @@ function applyFilters() {
   return items;
 }
 
-function buildCategories(items) {
-  const map = new Map();
-  items.forEach((p) => {
-    const cat = p.category || p.parent_group;
-    if (!cat) return;
-    map.set(cat, (map.get(cat) || 0) + 1);
-  });
-  return [...map.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, count]) => ({ key, label: key, count }));
-}
-
 function renderGrid() {
   const grid = document.getElementById("cr-products-grid");
   const empty = document.getElementById("cr-products-empty");
   const loading = document.getElementById("cr-products-loading");
+  const error = document.getElementById("cr-products-error");
   if (!grid) return;
 
   const visible = applyFilters();
   grid.innerHTML = visible.map(productCardHtml).join("");
   const hasRows = visible.length > 0;
   grid.hidden = !hasRows;
-  if (empty) empty.hidden = hasRows || state.loading;
+  if (empty) empty.hidden = hasRows || state.loading || !!state.error;
   if (loading) loading.hidden = !state.loading;
+  if (error) {
+    error.hidden = !state.error;
+    error.textContent = state.error;
+  }
 }
 
 function initCategoryCarousel(el) {
@@ -149,14 +170,14 @@ function initCategoryCarousel(el) {
 }
 
 async function loadPrintifyProducts() {
-  const data = await partnerFetch("admin-products-get", { query: { provider: "printify" } });
+  const data = await partnerFetch("admin-creations-printify-products");
   const products = Array.isArray(data.products) ? data.products : [];
   state.items = products.map((p) => ({
     ...p,
     source_label: "Printify",
     product_key: p.product_key,
   }));
-  state.categories = buildCategories(state.items);
+  state.categoryTree = Array.isArray(data.category_tree) ? data.category_tree : [];
 }
 
 async function loadCustomerProducts() {
@@ -168,7 +189,7 @@ async function loadCustomerProducts() {
     category: p.category || "Customer products",
     is_active: 2,
   }));
-  state.categories = buildCategories(state.items);
+  state.categoryTree = [];
 }
 
 async function loadShopifyProducts() {
@@ -181,12 +202,12 @@ async function loadShopifyProducts() {
       is_active: p.status === "ACTIVE" ? 2 : 0,
       category: p.category || p.product_type || "Shopify",
     }));
-    state.categories = buildCategories(state.items);
+    state.categoryTree = [];
   } catch (e) {
     if (e.data?.error === "shopify_not_configured") {
       state.items = [];
-      state.categories = [];
-      showToast("Shopify catalog", "Shopify API is not configured on this worker yet.");
+      state.categoryTree = [];
+      state.error = "Shopify API is not configured on this worker yet.";
       return;
     }
     throw e;
@@ -196,6 +217,7 @@ async function loadShopifyProducts() {
 async function fetchProducts() {
   if (state.loading) return;
   state.loading = true;
+  state.error = "";
   renderGrid();
 
   try {
@@ -204,14 +226,17 @@ async function fetchProducts() {
     else await loadPrintifyProducts();
     state.category = "all";
   } catch (e) {
-    showToast("Error", e.message || "Could not load products");
+    const msg = e.message || "Could not load products";
+    state.error = msg;
     state.items = [];
-    state.categories = [];
+    state.categoryTree = [];
+    showToast("Error", msg);
   } finally {
     state.loading = false;
-    const toolbar = document.querySelector("#view-products .cr-toolbar");
+    const el = document.getElementById("view-products");
+    const toolbar = el?.querySelector(".cr-toolbar");
     if (toolbar) toolbar.outerHTML = filterToolbarHtml();
-    bindToolbar(document.getElementById("view-products"));
+    if (el) bindToolbar(el);
     renderGrid();
   }
 }
@@ -245,7 +270,8 @@ function bindToolbar(el) {
       const next = btn.dataset.crCategory || "all";
       if (state.category === next) return;
       state.category = next;
-      el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
+      const toolbar = el.querySelector(".cr-toolbar");
+      if (toolbar) toolbar.outerHTML = filterToolbarHtml();
       bindToolbar(el);
       renderGrid();
     });
@@ -254,18 +280,30 @@ function bindToolbar(el) {
   initCategoryCarousel(el);
 }
 
+function pageShellHtml() {
+  return `
+    ${filterToolbarHtml()}
+    <div class="cr-stage">
+      <p class="cr-loading" id="cr-products-loading">Loading products…</p>
+      <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
+      <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
+      <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
+    </div>`;
+}
+
 export async function mountProductsPage() {
   const el = document.getElementById("view-products");
   if (!el) return;
 
-  el.innerHTML = `
-    ${filterToolbarHtml()}
-    <div class="cr-stage">
-      <p class="cr-loading" id="cr-products-loading">Loading products…</p>
-      <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
-      <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
-    </div>`;
-
-  bindToolbar(el);
-  await fetchProducts();
+  try {
+    el.innerHTML = pageShellHtml();
+    bindToolbar(el);
+    await fetchProducts();
+  } catch (e) {
+    el.innerHTML = `
+      <div class="cr-stage">
+        <p class="cr-error" role="alert">Could not open Products page: ${escapeHtml(e.message || String(e))}</p>
+      </div>`;
+    showToast("Error", e.message || String(e));
+  }
 }
