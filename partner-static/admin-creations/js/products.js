@@ -7,6 +7,14 @@ const SOURCE_FILTERS = [
   { key: "shopify", label: "Shopify" },
 ];
 
+const DETAIL_MENUS = [
+  { key: "mockups", label: "Mockups" },
+  { key: "variants", label: "Variants" },
+  { key: "metafields", label: "Metafields" },
+];
+
+const VALUE_TRUNCATE = 160;
+
 const state = {
   source: "printify",
   category: "all",
@@ -19,6 +27,17 @@ const state = {
   categoryTree: [],
   searchTimer: null,
   fetchGen: 0,
+  detail: {
+    open: false,
+    loading: false,
+    error: "",
+    menu: "mockups",
+    productId: "",
+    title: "",
+    preview: null,
+    data: null,
+    expandedValues: new Set(),
+  },
 };
 
 function statusLabel(isActive) {
@@ -33,6 +52,20 @@ function statusBadgeClass(isActive) {
   if (n === 2) return "badge-success";
   if (n === 1) return "badge-warning";
   return "badge-neutral";
+}
+
+function formatMoney(amount, currency) {
+  if (amount == null || amount === "") return "—";
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return escapeHtml(String(amount));
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "EUR",
+    }).format(n);
+  } catch {
+    return `${n.toFixed(2)} ${currency || ""}`.trim();
+  }
 }
 
 function categoriesForToolbar() {
@@ -106,8 +139,10 @@ function productCardHtml(item) {
     img && String(img).trim()
       ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" />`
       : '<span class="cr-card__noimg">No image</span>';
+  const shopifyId = item.shopify_product_id || item.id || "";
+  const clickable = state.source === "shopify" && shopifyId;
 
-  return `<article class="cr-card cr-card--product" data-product-key="${escapeHtml(item.product_key || item.id || "")}">
+  return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}"${clickable ? ` data-shopify-id="${escapeHtml(String(shopifyId))}" data-product-title="${escapeHtml(title)}" tabindex="0" role="button"` : ""}>
     <div class="cr-card__title-row">
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
     </div>
@@ -326,7 +361,295 @@ function pageShellHtml() {
       <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
       <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
       <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
+    </div>
+    <div id="cr-pd-backdrop" class="cr-pd-backdrop" hidden>
+      <div class="cr-pd-modal" role="dialog" aria-modal="true" aria-labelledby="cr-pd-title">
+        <div class="cr-pd-modal__head">
+          <div class="cr-pd-modal__head-text">
+            <h2 id="cr-pd-title">Product</h2>
+            <p class="cr-pd-modal__sub" id="cr-pd-sub" hidden></p>
+          </div>
+          <button type="button" class="icon-btn" id="cr-pd-close" aria-label="Close">×</button>
+        </div>
+        <div class="cr-pd-modal__body">
+          <nav class="cr-pd-nav" aria-label="Product detail sections">
+            ${DETAIL_MENUS.map(
+              (m) =>
+                `<button type="button" class="cr-pd-nav__btn" data-cr-pd-menu="${m.key}">${escapeHtml(m.label)}</button>`
+            ).join("")}
+          </nav>
+          <div class="cr-pd-content" id="cr-pd-content"></div>
+        </div>
+      </div>
     </div>`;
+}
+
+function ensureDetailDom() {
+  return document.getElementById("cr-pd-backdrop");
+}
+
+function truncateValue(value, id) {
+  const raw = String(value ?? "");
+  const expanded = state.detail.expandedValues.has(id);
+  if (raw.length <= VALUE_TRUNCATE || expanded) {
+    const collapse =
+      raw.length > VALUE_TRUNCATE
+        ? `<button type="button" class="cr-pd-expand" data-cr-pd-expand="${escapeHtml(id)}">Show less</button>`
+        : "";
+    return `<pre class="cr-pd-value">${escapeHtml(raw)}</pre>${collapse}`;
+  }
+  return `<pre class="cr-pd-value">${escapeHtml(raw.slice(0, VALUE_TRUNCATE))}…</pre><button type="button" class="cr-pd-expand" data-cr-pd-expand="${escapeHtml(id)}">Show more</button>`;
+}
+
+function renderMockupsPanel(product) {
+  const mockups = Array.isArray(product?.mockups) ? product.mockups : [];
+  if (!mockups.length) {
+    return `<div class="cr-pd-empty">No mockups for this product. Gift cards and simple listings often have none.</div>`;
+  }
+
+  const groups = new Map();
+  for (const m of mockups) {
+    const key = m.variant_label || "Unassigned";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+
+  let html = "";
+  for (const [variant, items] of groups) {
+    html += `<section class="cr-pd-mockup-group">
+      <h3 class="cr-pd-section-title">${escapeHtml(variant)}</h3>
+      <div class="cr-pd-mockup-grid">
+        ${items
+          .map(
+            (m) => `<figure class="cr-pd-mockup">
+              ${m.src ? `<img src="${escapeHtml(m.src)}" alt="${escapeHtml(m.alt || m.view || "")}" loading="lazy" />` : `<div class="cr-pd-mockup__missing">No image</div>`}
+              <figcaption>${escapeHtml(m.view || "other")}${m.is_preview ? " · preview" : ""}</figcaption>
+            </figure>`
+          )
+          .join("")}
+      </div>
+    </section>`;
+  }
+  return html;
+}
+
+function renderVariantsPanel(product) {
+  const variants = Array.isArray(product?.variants) ? product.variants : [];
+  if (!variants.length) {
+    return `<div class="cr-pd-empty">No variants found.</div>`;
+  }
+  const currency = product.currency || "EUR";
+  return `<div class="cr-pd-table-wrap"><table class="cr-pd-table">
+    <thead>
+      <tr>
+        <th>Variant</th>
+        <th>SKU</th>
+        <th>Price</th>
+        <th>Compare at</th>
+        <th>Inventory</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${variants
+        .map((v) => {
+          const title =
+            (Array.isArray(v.options) && v.options.length ? v.options.join(" / ") : null) ||
+            v.title ||
+            "Default";
+          return `<tr>
+            <td>${escapeHtml(title)}</td>
+            <td>${escapeHtml(v.sku || "—")}</td>
+            <td>${formatMoney(v.price, currency)}</td>
+            <td>${formatMoney(v.compare_at_price, currency)}</td>
+            <td>${v.inventory_quantity != null ? escapeHtml(String(v.inventory_quantity)) : "—"}</td>
+          </tr>`;
+        })
+        .join("")}
+    </tbody>
+  </table></div>`;
+}
+
+function metafieldRowsHtml(rows, sectionPrefix) {
+  if (!rows.length) return `<div class="cr-pd-empty">None</div>`;
+  const byGroup = new Map();
+  for (const m of rows) {
+    const g = m.group || m.namespace || "other";
+    if (!byGroup.has(g)) byGroup.set(g, []);
+    byGroup.get(g).push(m);
+  }
+  let html = "";
+  for (const [group, items] of byGroup) {
+    html += `<div class="cr-pd-mf-group"><h4 class="cr-pd-mf-group__title">${escapeHtml(group)}</h4>`;
+    for (let i = 0; i < items.length; i++) {
+      const m = items[i];
+      const id = `${sectionPrefix}:${m.namespace}.${m.key}:${i}`;
+      const label = m.label || `${m.namespace}.${m.key}`;
+      html += `<div class="cr-pd-mf-row">
+        <div class="cr-pd-mf-row__key">
+          <strong>${escapeHtml(label)}</strong>
+          <code>${escapeHtml(`${m.namespace}.${m.key}`)}</code>
+        </div>
+        <div class="cr-pd-mf-row__val">${truncateValue(m.value, id)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+function renderMetafieldsPanel(product) {
+  const mf = product?.metafields || {};
+  const dbOnly = Array.isArray(mf.in_database_not_in_shopify) ? mf.in_database_not_in_shopify : [];
+  const shopify = Array.isArray(mf.used_in_shopify) ? mf.used_in_shopify : [];
+  return `
+    <section class="cr-pd-mf-section">
+      <h3 class="cr-pd-section-title">In database, not in Shopify</h3>
+      <p class="cr-pd-hint">Catalog / publish-profile values that are missing or empty on this Shopify product.</p>
+      ${metafieldRowsHtml(dbOnly, "db")}
+    </section>
+    <section class="cr-pd-mf-section">
+      <h3 class="cr-pd-section-title">Used in Shopify</h3>
+      <p class="cr-pd-hint">Metafields currently set on the Shopify product.</p>
+      ${metafieldRowsHtml(shopify, "shop")}
+    </section>`;
+}
+
+function renderDetailContent() {
+  const content = document.getElementById("cr-pd-content");
+  const titleEl = document.getElementById("cr-pd-title");
+  const subEl = document.getElementById("cr-pd-sub");
+  if (!content) return;
+
+  if (titleEl) titleEl.textContent = state.detail.title || "Product";
+  if (subEl) {
+    const p = state.detail.data;
+    const bits = [];
+    if (p?.product_key) bits.push(p.product_key);
+    if (p?.handle) bits.push(`/${p.handle}`);
+    if (p?.status) bits.push(p.status);
+    subEl.textContent = bits.join(" · ");
+    subEl.hidden = !bits.length;
+  }
+
+  document.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.crPdMenu === state.detail.menu);
+  });
+
+  if (state.detail.loading) {
+    content.innerHTML = `<p class="cr-pd-loading">Loading product details…</p>`;
+    return;
+  }
+  if (state.detail.error) {
+    content.innerHTML = `<p class="cr-pd-error" role="alert">${escapeHtml(state.detail.error)}</p>`;
+    return;
+  }
+  const product = state.detail.data;
+  if (!product) {
+    content.innerHTML = `<p class="cr-pd-empty">No product data.</p>`;
+    return;
+  }
+
+  if (state.detail.menu === "variants") content.innerHTML = renderVariantsPanel(product);
+  else if (state.detail.menu === "metafields") content.innerHTML = renderMetafieldsPanel(product);
+  else content.innerHTML = renderMockupsPanel(product);
+
+  content.querySelectorAll("[data-cr-pd-expand]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.crPdExpand;
+      if (!id) return;
+      if (state.detail.expandedValues.has(id)) state.detail.expandedValues.delete(id);
+      else state.detail.expandedValues.add(id);
+      renderDetailContent();
+    });
+  });
+}
+
+function closeProductDetail() {
+  state.detail.open = false;
+  state.detail.loading = false;
+  state.detail.error = "";
+  state.detail.data = null;
+  state.detail.productId = "";
+  state.detail.expandedValues = new Set();
+  const backdrop = ensureDetailDom();
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.classList.remove("show");
+  }
+  document.removeEventListener("keydown", onDetailKeydown);
+}
+
+function onDetailKeydown(e) {
+  if (e.key === "Escape") closeProductDetail();
+}
+
+async function openProductDetail(productId, title) {
+  const id = String(productId || "").trim();
+  if (!id) return;
+
+  state.detail.open = true;
+  state.detail.loading = true;
+  state.detail.error = "";
+  state.detail.menu = "mockups";
+  state.detail.productId = id;
+  state.detail.title = title || "Product";
+  state.detail.data = null;
+  state.detail.expandedValues = new Set();
+
+  const backdrop = ensureDetailDom();
+  if (backdrop) {
+    backdrop.hidden = false;
+    backdrop.classList.add("show");
+  }
+  document.addEventListener("keydown", onDetailKeydown);
+  renderDetailContent();
+
+  try {
+    const data = await partnerFetch("admin-creations-shopify-product-detail", {
+      query: { product_id: id },
+    });
+    if (state.detail.productId !== id) return;
+    state.detail.data = data.product || null;
+    if (data.product?.title) state.detail.title = data.product.title;
+  } catch (e) {
+    if (state.detail.productId !== id) return;
+    state.detail.error = e.message || "Could not load product detail";
+    showToast("Error", state.detail.error);
+  } finally {
+    if (state.detail.productId !== id) return;
+    state.detail.loading = false;
+    renderDetailContent();
+  }
+}
+
+function bindDetailModal(el) {
+  el.querySelector("#cr-pd-close")?.addEventListener("click", closeProductDetail);
+  el.querySelector("#cr-pd-backdrop")?.addEventListener("click", (e) => {
+    if (e.target?.id === "cr-pd-backdrop") closeProductDetail();
+  });
+  el.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const menu = btn.dataset.crPdMenu;
+      if (!menu || state.detail.menu === menu) return;
+      state.detail.menu = menu;
+      renderDetailContent();
+    });
+  });
+}
+
+function bindProductCards(el) {
+  el.querySelector("#cr-products-grid")?.addEventListener("click", (e) => {
+    const card = e.target.closest(".cr-card--product[data-shopify-id]");
+    if (!card || state.source !== "shopify") return;
+    openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
+  });
+  el.querySelector("#cr-products-grid")?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const card = e.target.closest?.(".cr-card--product[data-shopify-id]");
+    if (!card || state.source !== "shopify") return;
+    e.preventDefault();
+    openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
+  });
 }
 
 export async function mountProductsPage() {
@@ -336,6 +659,8 @@ export async function mountProductsPage() {
   try {
     el.innerHTML = pageShellHtml();
     bindToolbar(el);
+    bindDetailModal(el);
+    bindProductCards(el);
     await fetchProducts();
   } catch (e) {
     el.innerHTML = `

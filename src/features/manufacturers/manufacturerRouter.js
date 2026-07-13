@@ -241,6 +241,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-printify-products",
   "admin-creations-customer-products",
   "admin-creations-shopify-products",
+  "admin-creations-shopify-product-detail",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1059,6 +1060,12 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-creations-shopify-products" && request.method === "GET") {
       const { handleAdminCreationsShopifyProducts } = await import("./adminCreationsPortalApi.js");
       return handleAdminCreationsShopifyProducts(request, env);
+    }
+    if (op === "admin-creations-shopify-product-detail" && request.method === "GET") {
+      const { handleAdminCreationsShopifyProductDetail } = await import(
+        "./adminCreationsShopifyProductDetail.js"
+      );
+      return handleAdminCreationsShopifyProductDetail(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);
