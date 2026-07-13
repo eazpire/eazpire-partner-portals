@@ -4,6 +4,7 @@
  */
 
 import { shopifyAPI } from "../../utils/shopify.js";
+import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 
 const PRODUCTS_GQL = `
   query CreationsAdminProducts($first: Int!, $after: String, $query: String) {
@@ -24,6 +25,7 @@ const PRODUCTS_GQL = `
           mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
           mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
           mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
+          mfProvider: metafield(namespace: "custom", key: "provider") { value }
         }
       }
       pageInfo {
@@ -34,12 +36,15 @@ const PRODUCTS_GQL = `
   }
 `;
 
+const DEFAULT_MAX_SCAN = 2000;
+
 export function shopDomainFromEnv(env) {
-  const shop = String(env.SHOPIFY_SHOP || env.SHOPIFY_STORE_URL || "")
+  const raw = String(env?.SHOPIFY_SHOP || env?.SHOPIFY_SHOP_DOMAIN || "")
+    .trim()
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
-  if (!shop) return "allyoucanpink.myshopify.com";
-  return shop.includes(".") ? shop : `${shop}.myshopify.com`;
+  if (!raw) return "allyoucanpink.myshopify.com";
+  return raw.includes(".") ? raw : `${raw}.myshopify.com`;
 }
 
 /** @param {string|null|undefined} id */
@@ -47,6 +52,10 @@ export function normalizeShopifyProductId(id) {
   const raw = String(id ?? "").trim();
   if (!raw) return "";
   return raw.replace(/^gid:\/\/shopify\/Product\//i, "").replace(/\.0$/, "");
+}
+
+function sqlNormalizeShopifyProductId(column = "shopify_product_id") {
+  return `REPLACE(REPLACE(TRIM(CAST(${column} AS TEXT)), 'gid://shopify/Product/', ''), '.0', '')`;
 }
 
 function shopifyStatusToIsActive(status) {
@@ -60,14 +69,48 @@ function imageUrlFromNode(node) {
   return node?.featuredMedia?.image?.url || null;
 }
 
+function printifyIdFromNode(node) {
+  return parseMetafieldValue(node?.mfPrintifyId?.value);
+}
+
+function providerFromNode(node) {
+  return parseMetafieldValue(node?.mfProvider?.value).toLowerCase();
+}
+
+/**
+ * Shopify listing originates from Printify when metafield, provider, or D1 link says so.
+ * @param {object} node
+ * @param {Map<string, string>|null|undefined} printifyLinks shopify_product_id → printify_product_id
+ */
+export function isPrintifySourcedProduct(node, printifyLinks) {
+  const printifyId = printifyIdFromNode(node);
+  if (printifyId) return true;
+
+  const provider = providerFromNode(node);
+  if (provider === "printify") return true;
+
+  const sid = normalizeShopifyProductId(node?.id);
+  if (sid && printifyLinks?.has(sid)) return true;
+
+  return false;
+}
+
+/** @deprecated Use isPrintifySourcedProduct — kept for tests/callers that only check metafield. */
+export function hasPrintifyMetafield(node) {
+  return Boolean(printifyIdFromNode(node));
+}
+
 /**
  * @param {object} node Shopify GraphQL product node
  * @param {"printify"|"shopify"} source
+ * @param {Map<string, string>|null|undefined} [printifyLinks]
  */
-export function mapShopifyNodeToProduct(node, source) {
+export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   const shopifyId = normalizeShopifyProductId(node?.id);
-  const productKey = String(node?.mfProductKey?.value || node?.handle || shopifyId).trim();
+  const productKey = String(parseMetafieldValue(node?.mfProductKey?.value) || node?.handle || shopifyId).trim();
   const imageUrl = imageUrlFromNode(node);
+  const printifyFromMf = printifyIdFromNode(node);
+  const printifyFromD1 = shopifyId && printifyLinks?.get(shopifyId);
   return {
     id: shopifyId,
     product_key: productKey,
@@ -79,8 +122,8 @@ export function mapShopifyNodeToProduct(node, source) {
     is_active: shopifyStatusToIsActive(node?.status),
     vendor: node?.vendor || "",
     shopify_product_id: shopifyId,
-    printify_product_id: String(node?.mfPrintifyId?.value || "").trim() || null,
-    listing_origin: String(node?.mfListingOrigin?.value || "").trim() || null,
+    printify_product_id: printifyFromMf || printifyFromD1 || null,
+    listing_origin: parseMetafieldValue(node?.mfListingOrigin?.value) || null,
     source,
   };
 }
@@ -120,7 +163,80 @@ export async function fetchShopifyProductNodes(env, opts = {}) {
   return items;
 }
 
-/** Shopify product IDs linked to Shop Design Studio (exclude from Printify tab). */
+/**
+ * Paginate Shopify products and collect nodes matching matchFn (post-filter).
+ * @param {object} env
+ * @param {{ matchFn: (node: object) => boolean, limit?: number, maxScan?: number, queryStr?: string }} opts
+ */
+export async function fetchShopifyProductNodesMatching(env, opts = {}) {
+  const matchFn = typeof opts.matchFn === "function" ? opts.matchFn : () => true;
+  const shopDomain = shopDomainFromEnv(env);
+  const limit = Math.min(250, Math.max(1, Number(opts.limit) || 50));
+  const maxScan = Math.min(5000, Math.max(limit, Number(opts.maxScan) || DEFAULT_MAX_SCAN));
+  const queryStr = String(opts.queryStr || "").trim();
+
+  const items = [];
+  let cursor = null;
+  let hasNext = true;
+  let scanned = 0;
+
+  while (hasNext && items.length < limit && scanned < maxScan) {
+    const first = Math.min(50, maxScan - scanned);
+    const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
+      method: "POST",
+      body: JSON.stringify({
+        query: PRODUCTS_GQL,
+        variables: { first, after: cursor, query: queryStr || null },
+      }),
+    });
+
+    const conn = resp?.data?.products;
+    const edges = conn?.edges || [];
+    for (const edge of edges) {
+      scanned += 1;
+      const node = edge?.node;
+      if (!node) continue;
+      if (matchFn(node)) items.push(node);
+      if (items.length >= limit) break;
+    }
+    hasNext = Boolean(conn?.pageInfo?.hasNextPage);
+    cursor = conn?.pageInfo?.endCursor || null;
+    if (!edges.length) break;
+  }
+
+  return items;
+}
+
+/** published_designs shopify ids with Printify linkage (D1 backfill, same as admin catalog). */
+export async function loadPrintifyLinksFromD1(env) {
+  /** @type {Map<string, string>} */
+  const links = new Map();
+  if (!env?.CREATOR_DB) return links;
+
+  try {
+    const normSid = sqlNormalizeShopifyProductId();
+    const res = await env.CREATOR_DB.prepare(
+      `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid
+       FROM published_designs
+       WHERE shopify_product_id IS NOT NULL
+         AND printify_product_id IS NOT NULL
+         AND TRIM(printify_product_id) != ''
+       ORDER BY published_at DESC`
+    ).all();
+
+    for (const row of res?.results || []) {
+      const sid = normalizeShopifyProductId(row.sid);
+      const pid = String(row.pid || "").trim();
+      if (sid && pid && !links.has(sid)) links.set(sid, pid);
+    }
+  } catch (e) {
+    console.warn("[admin-creations-shopify-list] printify d1 links:", e?.message);
+  }
+
+  return links;
+}
+
+/** Shopify product IDs linked to Shop Design Studio (exclude from Printify + Shopify tabs). */
 export async function loadCustomerStudioShopifyIds(env) {
   const ids = new Set();
   if (!env?.CUSTOMER_DB) return ids;
@@ -150,10 +266,6 @@ export async function loadCustomerStudioShopifyIds(env) {
 export function isCustomerStudioShopifyProduct(node, customerStudioIds) {
   const sid = normalizeShopifyProductId(node?.id);
   if (sid && customerStudioIds.has(sid)) return true;
-  const origin = String(node?.mfListingOrigin?.value || "").trim().toLowerCase();
+  const origin = parseMetafieldValue(node?.mfListingOrigin?.value).toLowerCase();
   return origin === "shop";
-}
-
-export function hasPrintifyMetafield(node) {
-  return Boolean(String(node?.mfPrintifyId?.value || "").trim());
 }

@@ -6,11 +6,12 @@ import { json, getCorsHeaders } from "../../utils/response.js";
 import { CAT_REVERSE, buildCategoryTree } from "../admin/catalogConstants.js";
 import {
   shopDomainFromEnv,
-  fetchShopifyProductNodes,
+  fetchShopifyProductNodesMatching,
   mapShopifyNodeToProduct,
   loadCustomerStudioShopifyIds,
+  loadPrintifyLinksFromD1,
   isCustomerStudioShopifyProduct,
-  hasPrintifyMetafield,
+  isPrintifySourcedProduct,
   normalizeShopifyProductId,
 } from "./adminCreationsShopifyList.js";
 
@@ -89,15 +90,19 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     isActive != null && isActive !== "" ? Math.max(0, Math.min(2, Number.parseInt(isActive, 10) || 0)) : null;
 
   try {
-    const customerStudioIds = await loadCustomerStudioShopifyIds(env);
-    const nodes = await fetchShopifyProductNodes(env, {
-      queryStr: "metafields.custom.printify_product_id:*",
+    const [customerStudioIds, printifyLinks] = await Promise.all([
+      loadCustomerStudioShopifyIds(env),
+      loadPrintifyLinksFromD1(env),
+    ]);
+
+    const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
+      matchFn: (node) =>
+        isPrintifySourcedProduct(node, printifyLinks) &&
+        !isCustomerStudioShopifyProduct(node, customerStudioIds),
     });
 
-    let products = nodes
-      .filter((node) => hasPrintifyMetafield(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds))
-      .map((node) => mapShopifyNodeToProduct(node, "printify"));
+    let products = nodes.map((node) => mapShopifyNodeToProduct(node, "printify", printifyLinks));
 
     products = await enrichPrintifyCategories(env, products);
 
@@ -252,12 +257,19 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const nodes = await fetchShopifyProductNodes(env, { queryStr: "", limit: limit * 2 });
+    const [customerStudioIds, printifyLinks] = await Promise.all([
+      loadCustomerStudioShopifyIds(env),
+      loadPrintifyLinksFromD1(env),
+    ]);
 
-    let products = nodes
-      .filter((node) => !hasPrintifyMetafield(node))
-      .map((node) => mapShopifyNodeToProduct(node, "shopify"))
-      .slice(0, limit);
+    const nodes = await fetchShopifyProductNodesMatching(env, {
+      limit,
+      matchFn: (node) =>
+        !isPrintifySourcedProduct(node, printifyLinks) &&
+        !isCustomerStudioShopifyProduct(node, customerStudioIds),
+    });
+
+    let products = nodes.map((node) => mapShopifyNodeToProduct(node, "shopify", printifyLinks));
 
     if (q) {
       products = products.filter((p) =>

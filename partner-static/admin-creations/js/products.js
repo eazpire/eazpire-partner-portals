@@ -140,6 +140,19 @@ function applyFilters() {
   return items;
 }
 
+function emptyMessageForSource() {
+  if (state.source === "printify") {
+    return "No Printify-sourced Shopify listings found (products with a Printify link).";
+  }
+  if (state.source === "shopify") {
+    return "No native Shopify store products found (gift cards, samples, and other non-Printify items).";
+  }
+  if (state.source === "customer") {
+    return "No Shop Design Studio customer products found.";
+  }
+  return "No products match your filters.";
+}
+
 function renderGrid() {
   const grid = document.getElementById("cr-products-grid");
   const empty = document.getElementById("cr-products-empty");
@@ -151,7 +164,10 @@ function renderGrid() {
   grid.innerHTML = visible.map(productCardHtml).join("");
   const hasRows = visible.length > 0;
   grid.hidden = !hasRows;
-  if (empty) empty.hidden = hasRows || state.loading || !!state.error;
+  if (empty) {
+    empty.hidden = hasRows || state.loading || !!state.error;
+    if (!empty.hidden) empty.textContent = emptyMessageForSource();
+  }
   if (loading) loading.hidden = !state.loading;
   if (error) {
     error.hidden = !state.error;
