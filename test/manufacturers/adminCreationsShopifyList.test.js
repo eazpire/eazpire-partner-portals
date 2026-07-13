@@ -24,27 +24,40 @@ describe("adminCreationsShopifyList", () => {
     expect(normalizeShopifyProductId("12345.0")).toBe("12345");
   });
 
-  it("isPrintifySourcedProduct detects metafield, provider, and D1 link", () => {
+  it("isPrintifySourcedProduct detects metafield, provider, listing_origin, and D1 link", () => {
     const links = new Map([["99", "pf-d1"]]);
+    const publishedIds = new Set(["88", "99"]);
 
     expect(
       isPrintifySourcedProduct(
         { id: "gid://shopify/Product/1", mfPrintifyId: { value: "pf-1" } },
-        links
+        links,
+        publishedIds
       )
     ).toBe(true);
 
     expect(
       isPrintifySourcedProduct(
         { id: "gid://shopify/Product/2", mfProvider: { value: "printify" } },
-        links
+        links,
+        publishedIds
       )
     ).toBe(true);
 
-    expect(isPrintifySourcedProduct({ id: "gid://shopify/Product/99" }, links)).toBe(true);
+    expect(
+      isPrintifySourcedProduct(
+        { id: "gid://shopify/Product/3", mfListingOrigin: { value: "creator" } },
+        links,
+        publishedIds
+      )
+    ).toBe(true);
+
+    expect(isPrintifySourcedProduct({ id: "gid://shopify/Product/99" }, links, publishedIds)).toBe(true);
+
+    expect(isPrintifySourcedProduct({ id: "gid://shopify/Product/88" }, links, publishedIds)).toBe(true);
 
     expect(
-      isPrintifySourcedProduct({ id: "gid://shopify/Product/3", mfProvider: { value: "gelato" } }, links)
+      isPrintifySourcedProduct({ id: "gid://shopify/Product/3", mfProvider: { value: "gelato" } }, links, publishedIds)
     ).toBe(false);
   });
 

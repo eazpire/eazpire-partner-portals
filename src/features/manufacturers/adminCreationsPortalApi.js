@@ -9,7 +9,7 @@ import {
   fetchShopifyProductNodesMatching,
   mapShopifyNodeToProduct,
   loadCustomerStudioShopifyIds,
-  loadPrintifyLinksFromD1,
+  loadPublishedDesignsShopifyIndex,
   isCustomerStudioShopifyProduct,
   isPrintifySourcedProduct,
   normalizeShopifyProductId,
@@ -90,15 +90,15 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     isActive != null && isActive !== "" ? Math.max(0, Math.min(2, Number.parseInt(isActive, 10) || 0)) : null;
 
   try {
-    const [customerStudioIds, printifyLinks] = await Promise.all([
+    const [customerStudioIds, { printifyLinks, creatorPublishedIds }] = await Promise.all([
       loadCustomerStudioShopifyIds(env),
-      loadPrintifyLinksFromD1(env),
+      loadPublishedDesignsShopifyIndex(env),
     ]);
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
       matchFn: (node) =>
-        isPrintifySourcedProduct(node, printifyLinks) &&
+        isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
         !isCustomerStudioShopifyProduct(node, customerStudioIds),
     });
 
@@ -257,15 +257,15 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const [customerStudioIds, printifyLinks] = await Promise.all([
+    const [customerStudioIds, { printifyLinks, creatorPublishedIds }] = await Promise.all([
       loadCustomerStudioShopifyIds(env),
-      loadPrintifyLinksFromD1(env),
+      loadPublishedDesignsShopifyIndex(env),
     ]);
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
       matchFn: (node) =>
-        !isPrintifySourcedProduct(node, printifyLinks) &&
+        !isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
         !isCustomerStudioShopifyProduct(node, customerStudioIds),
     });
 

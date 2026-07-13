@@ -18,6 +18,7 @@ const state = {
   categories: [],
   categoryTree: [],
   searchTimer: null,
+  fetchGen: 0,
 };
 
 function statusLabel(isActive) {
@@ -240,8 +241,14 @@ async function loadShopifyProducts() {
   }
 }
 
+function refreshToolbar(el) {
+  const toolbar = el?.querySelector(".cr-toolbar");
+  if (toolbar) toolbar.outerHTML = filterToolbarHtml();
+  if (el) bindToolbar(el);
+}
+
 async function fetchProducts() {
-  if (state.loading) return;
+  const gen = ++state.fetchGen;
   state.loading = true;
   state.error = "";
   renderGrid();
@@ -250,19 +257,20 @@ async function fetchProducts() {
     if (state.source === "customer") await loadCustomerProducts();
     else if (state.source === "shopify") await loadShopifyProducts();
     else await loadPrintifyProducts();
+    if (gen !== state.fetchGen) return;
     state.category = "all";
   } catch (e) {
+    if (gen !== state.fetchGen) return;
     const msg = e.message || "Could not load products";
     state.error = msg;
     state.items = [];
     state.categoryTree = [];
     showToast("Error", msg);
   } finally {
+    if (gen !== state.fetchGen) return;
     state.loading = false;
     const el = document.getElementById("view-products");
-    const toolbar = el?.querySelector(".cr-toolbar");
-    if (toolbar) toolbar.outerHTML = filterToolbarHtml();
-    if (el) bindToolbar(el);
+    refreshToolbar(el);
     renderGrid();
   }
 }
@@ -287,6 +295,12 @@ function bindToolbar(el) {
       const next = btn.dataset.crSource;
       if (!next || state.source === next) return;
       state.source = next;
+      state.category = "all";
+      state.error = "";
+      state.items = [];
+      state.categoryTree = [];
+      refreshToolbar(el);
+      renderGrid();
       fetchProducts();
     });
   });
@@ -296,9 +310,7 @@ function bindToolbar(el) {
       const next = btn.dataset.crCategory || "all";
       if (state.category === next) return;
       state.category = next;
-      const toolbar = el.querySelector(".cr-toolbar");
-      if (toolbar) toolbar.outerHTML = filterToolbarHtml();
-      bindToolbar(el);
+      refreshToolbar(el);
       renderGrid();
     });
   });

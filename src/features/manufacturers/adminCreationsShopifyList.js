@@ -78,19 +78,24 @@ function providerFromNode(node) {
 }
 
 /**
- * Shopify listing originates from Printify when metafield, provider, or D1 link says so.
+ * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.
  * @param {object} node
  * @param {Map<string, string>|null|undefined} printifyLinks shopify_product_id → printify_product_id
+ * @param {Set<string>|null|undefined} [creatorPublishedIds] all published_designs shopify_product_id values
  */
-export function isPrintifySourcedProduct(node, printifyLinks) {
+export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) {
   const printifyId = printifyIdFromNode(node);
   if (printifyId) return true;
 
   const provider = providerFromNode(node);
   if (provider === "printify") return true;
 
+  const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value).toLowerCase();
+  if (listingOrigin === "creator") return true;
+
   const sid = normalizeShopifyProductId(node?.id);
   if (sid && printifyLinks?.has(sid)) return true;
+  if (sid && creatorPublishedIds?.has(sid)) return true;
 
   return false;
 }
@@ -207,11 +212,16 @@ export async function fetchShopifyProductNodesMatching(env, opts = {}) {
   return items;
 }
 
-/** published_designs shopify ids with Printify linkage (D1 backfill, same as admin catalog). */
-export async function loadPrintifyLinksFromD1(env) {
+/**
+ * published_designs shopify ids — all creator publishes plus optional printify_product_id for backfill.
+ * @returns {{ printifyLinks: Map<string, string>, creatorPublishedIds: Set<string> }}
+ */
+export async function loadPublishedDesignsShopifyIndex(env) {
   /** @type {Map<string, string>} */
-  const links = new Map();
-  if (!env?.CREATOR_DB) return links;
+  const printifyLinks = new Map();
+  /** @type {Set<string>} */
+  const creatorPublishedIds = new Set();
+  if (!env?.CREATOR_DB) return { printifyLinks, creatorPublishedIds };
 
   try {
     const normSid = sqlNormalizeShopifyProductId();
@@ -219,21 +229,28 @@ export async function loadPrintifyLinksFromD1(env) {
       `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid
        FROM published_designs
        WHERE shopify_product_id IS NOT NULL
-         AND printify_product_id IS NOT NULL
-         AND TRIM(printify_product_id) != ''
+         AND TRIM(CAST(shopify_product_id AS TEXT)) != ''
        ORDER BY published_at DESC`
     ).all();
 
     for (const row of res?.results || []) {
       const sid = normalizeShopifyProductId(row.sid);
+      if (!sid) continue;
+      creatorPublishedIds.add(sid);
       const pid = String(row.pid || "").trim();
-      if (sid && pid && !links.has(sid)) links.set(sid, pid);
+      if (pid && !printifyLinks.has(sid)) printifyLinks.set(sid, pid);
     }
   } catch (e) {
-    console.warn("[admin-creations-shopify-list] printify d1 links:", e?.message);
+    console.warn("[admin-creations-shopify-list] published_designs index:", e?.message);
   }
 
-  return links;
+  return { printifyLinks, creatorPublishedIds };
+}
+
+/** @deprecated Prefer loadPublishedDesignsShopifyIndex — kept for callers that only need printify id map. */
+export async function loadPrintifyLinksFromD1(env) {
+  const { printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
+  return printifyLinks;
 }
 
 /** Shopify product IDs linked to Shop Design Studio (exclude from Printify + Shopify tabs). */
