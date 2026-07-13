@@ -172,6 +172,116 @@ async function fetchDesignBlob(url) {
 }
 
 const PNG_MIME = "image/png";
+/** Prefer 300 DPI for print-oriented optimized downloads (pHYs pixels/meter). */
+const OPTIMIZED_PNG_DPI = 300;
+const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** PNG CRC-32 (ISO 3309 / ITU-T V.42) over chunk type + data. */
+function pngCrc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let b = 0; b < 8; b++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dpiToPixelsPerMeter(dpi) {
+  const d = Number(dpi);
+  const safeDpi = Number.isFinite(d) && d >= 150 ? d : OPTIMIZED_PNG_DPI;
+  return Math.round(safeDpi / 0.0254);
+}
+
+/**
+ * Build a PNG pHYs chunk for the given DPI (unit = meter).
+ * 300 DPI → ~11811 pixels per meter.
+ */
+function buildPngPhysChunk(dpi = OPTIMIZED_PNG_DPI) {
+  const ppm = dpiToPixelsPerMeter(dpi);
+  const data = new Uint8Array(9);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, ppm, false);
+  view.setUint32(4, ppm, false);
+  data[8] = 1; // unit: meter
+  const type = new TextEncoder().encode("pHYs");
+  const typeAndData = new Uint8Array(4 + data.length);
+  typeAndData.set(type, 0);
+  typeAndData.set(data, 4);
+  const crc = pngCrc32(typeAndData);
+  const chunk = new Uint8Array(4 + 4 + data.length + 4);
+  const chunkView = new DataView(chunk.buffer);
+  chunkView.setUint32(0, data.length, false);
+  chunk.set(typeAndData, 4);
+  chunkView.setUint32(4 + typeAndData.length, crc, false);
+  return chunk;
+}
+
+/**
+ * Insert or replace the PNG pHYs chunk so image viewers report the given DPI.
+ * Does not change pixel dimensions — metadata only.
+ */
+function setPngDpiBytes(pngBytes, dpi = OPTIMIZED_PNG_DPI) {
+  const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes);
+  if (bytes.length < 8) throw new Error("Invalid PNG");
+  for (let i = 0; i < 8; i++) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) throw new Error("Not a PNG file");
+  }
+
+  const physChunk = buildPngPhysChunk(dpi);
+  const parts = [bytes.subarray(0, 8)];
+  let offset = 8;
+  let inserted = false;
+
+  while (offset + 8 <= bytes.length) {
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+    const type = String.fromCharCode(
+      bytes[offset + 4],
+      bytes[offset + 5],
+      bytes[offset + 6],
+      bytes[offset + 7]
+    );
+    const chunkEnd = offset + 12 + length;
+    if (chunkEnd > bytes.length) throw new Error("Truncated PNG chunk");
+
+    if (type === "pHYs") {
+      if (!inserted) {
+        parts.push(physChunk);
+        inserted = true;
+      }
+      offset = chunkEnd;
+      continue;
+    }
+
+    parts.push(bytes.subarray(offset, chunkEnd));
+    offset = chunkEnd;
+
+    // Preferred placement: immediately after IHDR.
+    if (!inserted && type === "IHDR") {
+      parts.push(physChunk);
+      inserted = true;
+    }
+    if (type === "IEND") break;
+  }
+
+  if (!inserted) throw new Error("Could not place PNG pHYs chunk");
+
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let writeAt = 0;
+  for (const part of parts) {
+    out.set(part, writeAt);
+    writeAt += part.length;
+  }
+  return out;
+}
+
+async function setPngBlobDpi(blob, dpi = OPTIMIZED_PNG_DPI) {
+  const buf = await blob.arrayBuffer();
+  const withDpi = setPngDpiBytes(new Uint8Array(buf), dpi);
+  return new Blob([withDpi], { type: PNG_MIME });
+}
 
 function loadImageFromBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -245,14 +355,26 @@ async function downloadDirectUrl(item, url, { suffix = "" } = {}) {
  * Client-side size optimization as PNG.
  * PNG is lossless — quality knobs don't apply; binary-search scale (dimensions)
  * to stay as large as possible under maxBytes without exceeding it.
+ * Always stamps pHYs at 300 DPI (metadata only; pixel count unchanged).
  */
 async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
   if (!(sourceBlob instanceof Blob)) throw new Error("Invalid image data");
   if (!Number.isFinite(maxBytes) || maxBytes <= 0) throw new Error("Max size must be greater than 0");
 
+  async function withOptimizedDpi(blob, meta) {
+    let out = blob;
+    try {
+      out = await setPngBlobDpi(blob, OPTIMIZED_PNG_DPI);
+    } catch (e) {
+      // Fall back to canvas PNG as-is if chunk rewrite fails (still downloadable).
+      console.warn("[designs] Could not set PNG DPI metadata:", e?.message || e);
+    }
+    return { blob: out, mimeType: PNG_MIME, ...meta };
+  }
+
   const alreadyPng = String(sourceBlob.type || "").toLowerCase().includes("png");
   if (alreadyPng && sourceBlob.size <= maxBytes) {
-    return { blob: sourceBlob, mimeType: PNG_MIME, scaled: false, reused: true };
+    return withOptimizedDpi(sourceBlob, { scaled: false, reused: true });
   }
 
   const img = await loadImageFromBlob(sourceBlob);
@@ -263,12 +385,7 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
   // Full-res PNG first — keep if under the limit.
   const fullPng = await encodePngAtScale(img, 1);
   if (fullPng.size <= maxBytes) {
-    return {
-      blob: fullPng,
-      mimeType: PNG_MIME,
-      scaled: false,
-      reused: false,
-    };
+    return withOptimizedDpi(fullPng, { scaled: false, reused: false });
   }
 
   // Binary search on scale: find the largest dimensions that fit under maxBytes.
@@ -297,12 +414,10 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
     throw new Error("Could not fit image under the selected size limit");
   }
 
-  return {
-    blob: best.blob,
-    mimeType: PNG_MIME,
+  return withOptimizedDpi(best.blob, {
     scaled: best.scale < 0.999,
     reused: false,
-  };
+  });
 }
 
 function setDownloadModalBusy(busy, label) {
