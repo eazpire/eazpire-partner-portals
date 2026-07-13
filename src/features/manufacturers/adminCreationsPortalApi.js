@@ -12,6 +12,8 @@ import {
   loadPublishedDesignsShopifyIndex,
   isCustomerStudioShopifyProduct,
   isPrintifySourcedProduct,
+  isNativeShopifyStoreProduct,
+  NATIVE_SHOPIFY_STORE_QUERY,
   normalizeShopifyProductId,
 } from "./adminCreationsShopifyList.js";
 
@@ -245,7 +247,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
   }
 }
 
-/** Shopify = store products without Printify linkage (gift cards, samples, etc.). */
+/** Shopify = native store offerings only (gift cards + sample templates with custom.sample). */
 export async function handleAdminCreationsShopifyProducts(request, env) {
   const cors = getCorsHeaders(request);
   if (!env.SHOPIFY_ACCESS_TOKEN) {
@@ -257,16 +259,12 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const [customerStudioIds, { printifyLinks, creatorPublishedIds }] = await Promise.all([
-      loadCustomerStudioShopifyIds(env),
-      loadPublishedDesignsShopifyIndex(env),
-    ]);
+    const { printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      matchFn: (node) =>
-        !isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
-        !isCustomerStudioShopifyProduct(node, customerStudioIds),
+      queryStr: NATIVE_SHOPIFY_STORE_QUERY,
+      matchFn: (node) => isNativeShopifyStoreProduct(node),
     });
 
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "shopify", printifyLinks));

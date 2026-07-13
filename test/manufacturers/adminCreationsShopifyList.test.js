@@ -5,6 +5,9 @@ import {
   hasPrintifyMetafield,
   isPrintifySourcedProduct,
   isCustomerStudioShopifyProduct,
+  isGiftCardShopifyProduct,
+  isSampleShopifyProduct,
+  isNativeShopifyStoreProduct,
   mapShopifyNodeToProduct,
 } from "../../src/features/manufacturers/adminCreationsShopifyList.js";
 
@@ -80,6 +83,40 @@ describe("adminCreationsShopifyList", () => {
         { id: "gid://shopify/Product/8", mfListingOrigin: { value: "creator" } },
         studioIds
       )
+    ).toBe(false);
+  });
+
+  it("isGiftCardShopifyProduct matches product type and gift-card tag", () => {
+    expect(isGiftCardShopifyProduct({ productType: "Gift Card" })).toBe(true);
+    expect(isGiftCardShopifyProduct({ tags: ["gift-card", "featured"] })).toBe(true);
+    expect(isGiftCardShopifyProduct({ productType: "Poster", tags: [] })).toBe(false);
+  });
+
+  it("isSampleShopifyProduct matches custom.sample yes", () => {
+    expect(isSampleShopifyProduct({ mfSample: { value: "yes" } })).toBe(true);
+    expect(isSampleShopifyProduct({ mfSample: { value: "YES" } })).toBe(true);
+    expect(isSampleShopifyProduct({ mfSample: { value: "no" } })).toBe(false);
+    expect(isSampleShopifyProduct({})).toBe(false);
+  });
+
+  it("isNativeShopifyStoreProduct whitelists gift cards and samples only", () => {
+    expect(isNativeShopifyStoreProduct({ productType: "Gift Card" })).toBe(true);
+    expect(isNativeShopifyStoreProduct({ mfSample: { value: "yes" }, productType: "Poster" })).toBe(
+      true
+    );
+    expect(
+      isNativeShopifyStoreProduct({
+        productType: "Poster",
+        mfPrintifyId: { value: "pf-1" },
+        mfProvider: { value: "printify" },
+      })
+    ).toBe(false);
+    expect(
+      isNativeShopifyStoreProduct({
+        title: "Unisex Hoodie",
+        productType: "Hoodie",
+        mfProductKey: { value: "unisex-hoodie" },
+      })
     ).toBe(false);
   });
 

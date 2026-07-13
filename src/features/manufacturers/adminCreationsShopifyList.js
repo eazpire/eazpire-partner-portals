@@ -17,6 +17,7 @@ const PRODUCTS_GQL = `
           status
           vendor
           productType
+          tags
           featuredMedia {
             ... on MediaImage {
               image { url }
@@ -26,6 +27,7 @@ const PRODUCTS_GQL = `
           mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
           mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
           mfProvider: metafield(namespace: "custom", key: "provider") { value }
+          mfSample: metafield(namespace: "custom", key: "sample") { value }
         }
       }
       pageInfo {
@@ -76,6 +78,50 @@ function printifyIdFromNode(node) {
 function providerFromNode(node) {
   return parseMetafieldValue(node?.mfProvider?.value).toLowerCase();
 }
+
+function normYes(val) {
+  return String(val || "")
+    .trim()
+    .toLowerCase() === "yes";
+}
+
+function tagsFromNode(node) {
+  const raw = node?.tags;
+  if (Array.isArray(raw)) {
+    return raw.map((t) => String(t || "").trim().toLowerCase()).filter(Boolean);
+  }
+  return String(raw || "")
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** Shopify gift card product (native store offering, not Printify POD). */
+export function isGiftCardShopifyProduct(node) {
+  const productType = String(node?.productType || "")
+    .trim()
+    .toLowerCase();
+  if (productType === "gift card") return true;
+  const tags = tagsFromNode(node);
+  return tags.includes("gift-card") || tags.includes("gift card");
+}
+
+/** Shopify sample template product (`custom.sample` = yes). */
+export function isSampleShopifyProduct(node) {
+  return normYes(parseMetafieldValue(node?.mfSample?.value));
+}
+
+/**
+ * Native Shopify store products for the Creations admin Shopify tab (strict whitelist).
+ * Gift cards + sample templates only — not creator Printify listings.
+ */
+export function isNativeShopifyStoreProduct(node) {
+  return isGiftCardShopifyProduct(node) || isSampleShopifyProduct(node);
+}
+
+/** Shopify Admin search hint for native store products (post-filter remains authoritative). */
+export const NATIVE_SHOPIFY_STORE_QUERY =
+  '(product_type:"Gift Card" OR tag:gift-card OR metafields.custom.sample:yes)';
 
 /**
  * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.
