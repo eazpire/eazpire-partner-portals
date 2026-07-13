@@ -5983,6 +5983,8 @@ html[data-portal="admin"] .sidebar-content {
 }
 html[data-portal="admin"] .app-drawer.app-drawer--floating {
   position: fixed;
+  top: auto;
+  left: auto;
   z-index: 1000;
 }
 html[data-portal="admin"] .app-drawer.show {

@@ -36,11 +36,6 @@ function appItemHtml(app, activeId) {
   </a>`;
 }
 
-function isSidebarExpanded() {
-  const root = document.querySelector(".app-root");
-  return root && !root.classList.contains("sidebar-collapsed");
-}
-
 function positionFloatingDrawer(panel, trigger) {
   const rect = trigger.getBoundingClientRect();
   const margin = 8;
@@ -76,16 +71,9 @@ function applyDrawerLayout(panel, trigger, open) {
     restoreDrawerDom(panel);
     return;
   }
-  if (isSidebarExpanded()) {
-    mountFloatingDrawer(panel);
-    panel.classList.add("app-drawer--floating");
-    positionFloatingDrawer(panel, trigger);
-  } else {
-    panel.classList.remove("app-drawer--floating");
-    panel.style.top = "";
-    panel.style.left = "";
-    restoreDrawerDom(panel);
-  }
+  mountFloatingDrawer(panel);
+  panel.classList.add("app-drawer--floating");
+  positionFloatingDrawer(panel, trigger);
 }
 
 function closeDrawer() {
@@ -171,9 +159,6 @@ export function initAdminAppDrawer({ currentAppId, brandTitle }) {
 
   document.getElementById("sidebar-collapse")?.addEventListener("click", () => {
     if (!panel.classList.contains("show")) return;
-    window.setTimeout(() => {
-      if (!isSidebarExpanded()) closeDrawer();
-      else positionFloatingDrawer(panel, trigger);
-    }, 0);
+    window.setTimeout(() => positionFloatingDrawer(panel, trigger), 0);
   });
 }
