@@ -7,6 +7,8 @@
 #   RESEND_API_KEY, PARTNER_JWT_SECRET (optional if using JWT_APP_SECRET)
 #   PRINTIFY_API_KEY (required for Catalog Studio → Sync Printify; copy from creator-engine:
 #     node scripts/deployment/sync-partner-printify-secret.cjs)
+#   SHOPIFY_ACCESS_TOKEN (Creations admin Products → Shopify source; copy from creator-engine:
+#     node scripts/deployment/sync-shopify-access-token-to-workers.cjs --partner-only)
 
 name = "eazpire-partner-portals"
 main = "src/partner-worker.js"
@@ -36,6 +38,8 @@ CATALOG_OPS_MASTER_WRITE = "1"
 PRINTIFY_SHOP_ID = "22170465"
 # Design files for test-product create / Printify remote upload URLs
 PUBLIC_FILE_BASE_URL = "https://creator-engine.eazpire.workers.dev"
+# Same Shopify store as creator-engine (Creations admin Products tab)
+SHOPIFY_SHOP = "allyoucanpink.myshopify.com"
 
 [[kv_namespaces]]
 binding = "JOBS"
@@ -58,6 +62,12 @@ database_id = "c053e4e5-df6e-4eba-9e99-b5f05c18888b"
 binding = "CREATOR_DB"
 database_name = "creator-db"
 database_id = "9c7965da-2cad-40af-a6fa-1a4ce6c4d116"
+
+# Shop Design Studio listings + customer_products (Creations admin Customer source)
+[[d1_databases]]
+binding = "CUSTOMER_DB"
+database_name = "customer-db"
+database_id = "b82071cb-35fb-4efc-8167-ae7e0be52219"
 
 [assets]
 binding = "PARTNER_ASSETS"

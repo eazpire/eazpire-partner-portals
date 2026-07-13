@@ -90,6 +90,7 @@
     "dev:partner": "wrangler dev -c wrangler-partner.toml",
     "deploy:partner": "npm run sync:partner-static && node scripts/utils/wrangler-with-local-env.cjs deploy -c wrangler-partner.toml",
     "deploy:sync-printify-secret": "node scripts/deployment/sync-printify-api-key-to-workers.cjs",
+    "deploy:sync-shopify-secret": "node scripts/deployment/sync-shopify-access-token-to-workers.cjs",
     "deploy:sync-replicate-secret": "node scripts/deployment/sync-replicate-api-token-to-workers.cjs",
     "sync:play-static": "node scripts/utils/sync-play-static.js",
     "deploy:play": "npm run sync:play-static && node scripts/utils/wrangler-with-local-env.cjs deploy -c wrangler-play.toml",

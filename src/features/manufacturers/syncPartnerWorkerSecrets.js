@@ -7,7 +7,7 @@
  * Body: { account_id, cloudflare_api_token, script_name? }
  */
 
-const SECRET_NAMES = ["RESEND_API_KEY", "JWT_APP_SECRET"];
+const SECRET_NAMES = ["RESEND_API_KEY", "JWT_APP_SECRET", "SHOPIFY_ACCESS_TOKEN"];
 const DEFAULT_SCRIPT = "eazpire-partner-portals";
 
 export async function handleSyncPartnerWorkerSecrets(request, env) {

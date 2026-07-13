@@ -170,14 +170,24 @@ function initCategoryCarousel(el) {
 }
 
 async function loadPrintifyProducts() {
-  const data = await partnerFetch("admin-creations-printify-products");
-  const products = Array.isArray(data.products) ? data.products : [];
-  state.items = products.map((p) => ({
-    ...p,
-    source_label: "Printify",
-    product_key: p.product_key,
-  }));
-  state.categoryTree = Array.isArray(data.category_tree) ? data.category_tree : [];
+  try {
+    const data = await partnerFetch("admin-creations-printify-products");
+    const products = Array.isArray(data.products) ? data.products : [];
+    state.items = products.map((p) => ({
+      ...p,
+      source_label: "Printify",
+      product_key: p.product_key,
+    }));
+    state.categoryTree = Array.isArray(data.category_tree) ? data.category_tree : [];
+  } catch (e) {
+    if (e.data?.error === "shopify_not_configured") {
+      state.items = [];
+      state.categoryTree = [];
+      state.error = "Shopify API is not configured on this worker yet.";
+      return;
+    }
+    throw e;
+  }
 }
 
 async function loadCustomerProducts() {

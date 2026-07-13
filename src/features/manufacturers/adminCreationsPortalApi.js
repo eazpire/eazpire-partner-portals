@@ -3,8 +3,16 @@
  */
 
 import { json, getCorsHeaders } from "../../utils/response.js";
-import { shopifyAPI } from "../../utils/shopify.js";
 import { CAT_REVERSE, buildCategoryTree } from "../admin/catalogConstants.js";
+import {
+  shopDomainFromEnv,
+  fetchShopifyProductNodes,
+  mapShopifyNodeToProduct,
+  loadCustomerStudioShopifyIds,
+  isCustomerStudioShopifyProduct,
+  hasPrintifyMetafield,
+  normalizeShopifyProductId,
+} from "./adminCreationsShopifyList.js";
 
 export function proxyRequestWithAdminOwner(request, ownerId) {
   const url = new URL(request.url);
@@ -16,75 +24,94 @@ export function proxyRequestWithAdminOwner(request, ownerId) {
   });
 }
 
-function shopDomainFromEnv(env) {
-  const shop = String(env.SHOPIFY_SHOP || env.SHOPIFY_STORE_URL || "")
-    .replace(/^https?:\/\//, "")
-    .replace(/\/$/, "");
-  if (!shop) return "allyoucanpink.myshopify.com";
-  return shop.includes(".") ? shop : `${shop}.myshopify.com`;
+function studioStatusToIsActive(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "complete" || s === "published" || s === "ready") return 2;
+  if (s === "pending" || s === "processing") return 1;
+  return 0;
 }
 
-/** Printify catalog products for Creations admin (lightweight — no adminProducts.js import). */
+async function enrichPrintifyCategories(env, products) {
+  if (!env.CATALOG_DB || !products.length) return products;
+
+  const keys = [...new Set(products.map((p) => p.product_key).filter(Boolean))];
+  if (!keys.length) return products;
+
+  const placeholders = keys.map(() => "?").join(",");
+  try {
+    const res = await env.CATALOG_DB.prepare(
+      `SELECT pc.product_key,
+              (SELECT bp.category FROM product_publish_profiles pp
+                JOIN printify_blueprints bp ON bp.id = pp.blueprint_id
+                WHERE pp.product_key = pc.product_key AND pp.blueprint_id IS NOT NULL
+                  AND pp.source_system = 'printify'
+                LIMIT 1) AS blueprint_category
+       FROM product_catalog pc
+       WHERE pc.product_key IN (${placeholders})`
+    )
+      .bind(...keys)
+      .all();
+
+    const catByKey = new Map();
+    for (const row of res?.results || []) {
+      if (row.product_key) catByKey.set(row.product_key, row.blueprint_category || null);
+    }
+
+    return products.map((p) => {
+      const category = catByKey.get(p.product_key) || p.category;
+      return {
+        ...p,
+        category,
+        parent_group: CAT_REVERSE[category] || p.parent_group || "Other",
+      };
+    });
+  } catch (e) {
+    console.warn("[admin-creations-printify-products] category enrich:", e?.message);
+    return products;
+  }
+}
+
+/**
+ * Printify = Shopify-listed products with Printify metafield (creator publish flow).
+ * Excludes Shop Design Studio listings (customer tab).
+ */
 export async function handleAdminCreationsPrintifyProducts(request, env) {
   const cors = getCorsHeaders(request);
-  if (!env.CATALOG_DB) {
-    return json({ ok: false, error: "database_unavailable" }, 500, cors);
+  if (!env.SHOPIFY_ACCESS_TOKEN) {
+    return json({ ok: false, error: "shopify_not_configured" }, 503, cors);
   }
 
   const url = new URL(request.url);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
   const isActive = url.searchParams.get("is_active");
   const activeFilter =
     isActive != null && isActive !== "" ? Math.max(0, Math.min(2, Number.parseInt(isActive, 10) || 0)) : null;
 
   try {
-    const r = await env.CATALOG_DB.prepare(
-      `SELECT
-        pc.product_key,
-        pc.title,
-        pc.is_active,
-        pc.updated_at,
-        (SELECT bp.category FROM product_publish_profiles pp
-          JOIN printify_blueprints bp ON bp.id = pp.blueprint_id
-          WHERE pp.product_key = pc.product_key AND pp.blueprint_id IS NOT NULL
-            AND pp.source_system = 'printify'
-          LIMIT 1) AS blueprint_category,
-        (SELECT bp.images_json FROM product_publish_profiles pp
-          JOIN printify_blueprints bp ON bp.id = pp.blueprint_id
-          WHERE pp.product_key = pc.product_key AND pp.blueprint_id IS NOT NULL
-            AND pp.source_system = 'printify'
-          LIMIT 1) AS blueprint_images_json
-      FROM product_catalog pc
-      WHERE EXISTS (
-        SELECT 1 FROM product_publish_profiles ppx
-        WHERE ppx.product_key = pc.product_key AND ppx.blueprint_id IS NOT NULL
-          AND ppx.source_system = 'printify'
-      )
-      ORDER BY pc.title`
-    ).all();
-
-    let products = (r?.results || []).map((row) => {
-      let images = [];
-      try {
-        const parsed = JSON.parse(row.blueprint_images_json || "[]");
-        images = parsed.filter((i) => typeof i === "string");
-      } catch {
-        images = [];
-      }
-      const category = row.blueprint_category || null;
-      return {
-        product_key: row.product_key,
-        title: row.title || row.product_key,
-        is_active: row.is_active,
-        updated_at: row.updated_at,
-        images,
-        category,
-        parent_group: CAT_REVERSE[category] || "Sonstiges",
-        source: "printify",
-      };
+    const customerStudioIds = await loadCustomerStudioShopifyIds(env);
+    const nodes = await fetchShopifyProductNodes(env, {
+      queryStr: "metafields.custom.printify_product_id:*",
+      limit,
     });
+
+    let products = nodes
+      .filter((node) => hasPrintifyMetafield(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds))
+      .map((node) => mapShopifyNodeToProduct(node, "printify"));
+
+    products = await enrichPrintifyCategories(env, products);
 
     if (activeFilter != null) {
       products = products.filter((p) => Number(p.is_active) === activeFilter);
+    }
+    if (q) {
+      products = products.filter((p) =>
+        [p.title, p.product_key, p.category, p.vendor, p.printify_product_id, p.shopify_product_id]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      );
     }
 
     const category_tree = buildCategoryTree(products);
@@ -105,10 +132,10 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
   }
 }
 
-/** Customer-created products from published_designs (D1). */
+/** Customer = Shop Design Studio products (CUSTOMER_DB), not creator-area published_designs. */
 export async function handleAdminCreationsCustomerProducts(request, env) {
   const cors = getCorsHeaders(request);
-  if (!env.CREATOR_DB) {
+  if (!env.CUSTOMER_DB) {
     return json({ ok: false, error: "database_unavailable" }, 500, cors);
   }
 
@@ -116,52 +143,89 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
   const q = String(new URL(request.url).searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const res = await env.CREATOR_DB.prepare(
-      `SELECT pd.id AS published_id,
-              pd.design_id,
-              pd.owner_id,
-              pd.product_key,
-              pd.shopify_product_id,
-              pd.printify_product_id,
-              pd.updated_at,
-              c.preview_url,
-              c.creator_name,
-              c.prompt
-       FROM published_designs pd
-       LEFT JOIN creations c ON c.id = pd.design_id
-       WHERE pd.shopify_product_id IS NOT NULL
-         AND TRIM(CAST(pd.shopify_product_id AS TEXT)) != ''
-         AND TRIM(CAST(pd.shopify_product_id AS TEXT)) != '0'
-       ORDER BY pd.updated_at DESC
+    const products = [];
+    const seen = new Set();
+
+    const studioRes = await env.CUSTOMER_DB.prepare(
+      `SELECT id, customer_id, product_key, product_title, printify_product_id,
+              shopify_product_id, shopify_completion_status, preview_url, updated_at
+       FROM shop_studio_listings
+       WHERE listing_origin = 'shop' OR listing_origin IS NULL
+       ORDER BY updated_at DESC
        LIMIT ?`
     )
       .bind(limit)
       .all();
 
-    let products = (res?.results || []).map((row) => {
-      const title =
-        String(row.product_key || "").trim() ||
-        (row.prompt ? String(row.prompt).slice(0, 80) : `Design #${row.design_id || row.published_id}`);
-      return {
-        id: String(row.published_id),
-        product_key: String(row.product_key || row.published_id),
+    for (const row of studioRes?.results || []) {
+      const key = `studio:${row.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const title = String(row.product_title || row.product_key || `Studio #${row.id}`).trim();
+      const preview = row.preview_url || null;
+      products.push({
+        id: String(row.id),
+        product_key: String(row.product_key || row.id),
         title,
-        preview_url: row.preview_url || null,
-        images: row.preview_url ? [row.preview_url] : [],
-        category: "Customer products",
-        owner_id: String(row.owner_id || ""),
-        owner_label: row.creator_name ? String(row.creator_name) : `Owner ${row.owner_id || "—"}`,
-        creator_name: row.creator_name || "",
-        shopify_product_id: row.shopify_product_id,
-        printify_product_id: row.printify_product_id,
-        design_id: row.design_id,
+        preview_url: preview,
+        images: preview ? [preview] : [],
+        category: "Shop Design Studio",
+        owner_id: String(row.customer_id || ""),
+        owner_label: row.customer_id ? `Customer ${row.customer_id}` : "Customer",
+        shopify_product_id: normalizeShopifyProductId(row.shopify_product_id) || null,
+        printify_product_id: row.printify_product_id || null,
+        is_active: studioStatusToIsActive(row.shopify_completion_status),
         source: "customer",
-      };
-    });
+      });
+    }
 
+    const cpRes = await env.CUSTOMER_DB.prepare(
+      `SELECT cp.id, cp.customer_id, cp.design_id, cp.product_key, cp.product_name,
+              cp.printify_product_id, cp.shopify_product_id, cp.updated_at,
+              cd.preview_url, cd.prompt
+       FROM customer_products cp
+       LEFT JOIN customer_designs cd ON cd.id = cp.design_id
+       WHERE COALESCE(cp.listing_origin, 'shop') = 'shop'
+       ORDER BY cp.updated_at DESC
+       LIMIT ?`
+    )
+      .bind(limit)
+      .all();
+
+    for (const row of cpRes?.results || []) {
+      const sid = normalizeShopifyProductId(row.shopify_product_id);
+      const dedupeKey = sid ? `sid:${sid}` : `cp:${row.id}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      const title =
+        String(row.product_name || "").trim() ||
+        String(row.product_key || "").trim() ||
+        (row.prompt ? String(row.prompt).slice(0, 80) : `Design #${row.design_id || row.id}`);
+      const preview = row.preview_url || null;
+      products.push({
+        id: String(row.id),
+        product_key: String(row.product_key || row.id),
+        title,
+        preview_url: preview,
+        images: preview ? [preview] : [],
+        category: "Customer products",
+        owner_id: String(row.customer_id || ""),
+        owner_label: row.customer_id ? `Customer ${row.customer_id}` : "Customer",
+        shopify_product_id: sid || null,
+        printify_product_id: row.printify_product_id || null,
+        design_id: row.design_id,
+        is_active: sid ? 2 : 1,
+        source: "customer",
+      });
+    }
+
+    products.sort((a, b) => Number(b.is_active) - Number(a.is_active));
+
+    let filtered = products;
     if (q) {
-      products = products.filter((p) =>
-        [p.title, p.product_key, p.owner_label, p.creator_name, p.shopify_product_id]
+      filtered = products.filter((p) =>
+        [p.title, p.product_key, p.owner_label, p.shopify_product_id, p.printify_product_id]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -169,50 +233,31 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
       );
     }
 
-    return json({ ok: true, products, total: products.length, source: "customer" }, 200, cors);
+    return json({ ok: true, products: filtered, total: filtered.length, source: "customer" }, 200, cors);
   } catch (err) {
     console.error("[admin-creations-customer-products]", err);
     return json({ ok: false, error: err?.message || "internal_error" }, 500, cors);
   }
 }
 
-/** Shopify-native products without Printify (gift cards, samples, etc.). */
+/** Shopify = store products without Printify linkage (gift cards, samples, etc.). */
 export async function handleAdminCreationsShopifyProducts(request, env) {
   const cors = getCorsHeaders(request);
   if (!env.SHOPIFY_ACCESS_TOKEN) {
     return json({ ok: false, error: "shopify_not_configured" }, 503, cors);
   }
 
-  const shopDomain = shopDomainFromEnv(env);
-  const limit = Math.min(100, Math.max(1, Number(new URL(request.url).searchParams.get("limit")) || 50));
-  const q = String(new URL(request.url).searchParams.get("q") || "").trim().toLowerCase();
+  const url = new URL(request.url);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const resp = await shopifyAPI(env, shopDomain, `products.json?limit=${limit}&fields=id,title,handle,product_type,status,images,vendor`, {
-      method: "GET",
-    });
-    const nodes = Array.isArray(resp?.products) ? resp.products : [];
+    const nodes = await fetchShopifyProductNodes(env, { queryStr: "", limit: limit * 2 });
 
     let products = nodes
-      .filter((p) => {
-        const vendor = String(p.vendor || "").toLowerCase();
-        return !vendor.includes("printify");
-      })
-      .map((p) => {
-        const images = (p.images || []).map((img) => img.src).filter(Boolean);
-        return {
-          id: String(p.id),
-          product_key: p.handle || String(p.id),
-          title: p.title || p.handle || String(p.id),
-          preview_url: images[0] || null,
-          images,
-          category: p.product_type || "Shopify",
-          status: p.status,
-          vendor: p.vendor,
-          shopify_product_id: p.id,
-          source: "shopify",
-        };
-      });
+      .filter((node) => !hasPrintifyMetafield(node))
+      .map((node) => mapShopifyNodeToProduct(node, "shopify"))
+      .slice(0, limit);
 
     if (q) {
       products = products.filter((p) =>
@@ -226,3 +271,5 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
   }
 }
+
+export { shopDomainFromEnv };
