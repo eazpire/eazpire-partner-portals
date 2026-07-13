@@ -171,27 +171,7 @@ async function fetchDesignBlob(url) {
   return res.blob();
 }
 
-async function downloadDirectUrl(item, url, { suffix = "" } = {}) {
-  const filename = designDownloadFilename(item, url, { suffix });
-  try {
-    const blob = await fetchDesignBlob(url);
-    triggerBlobDownload(blob, designDownloadFilename(item, url, { suffix, mimeType: blob.type }));
-  } catch {
-    // Cross-origin hosts without CORS: open URL as fallback
-    triggerUrlDownloadFallback(url, filename);
-  }
-}
-
-function supportsWebPEncoding() {
-  try {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    return canvas.toDataURL("image/webp").startsWith("data:image/webp");
-  } catch {
-    return false;
-  }
-}
+const PNG_MIME = "image/png";
 
 function loadImageFromBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -203,26 +183,25 @@ function loadImageFromBlob(blob) {
     };
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error("Could not decode image for optimization"));
+      reject(new Error("Could not decode image"));
     };
     img.src = objectUrl;
   });
 }
 
-function canvasToBlob(canvas, mimeType, quality) {
+function canvasToPngBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
-        if (!blob) reject(new Error("Image encoding failed"));
+        if (!blob) reject(new Error("PNG encoding failed"));
         else resolve(blob);
       },
-      mimeType,
-      quality
+      PNG_MIME
     );
   });
 }
 
-async function encodeAtScale(img, scale, mimeType, quality) {
+async function encodePngAtScale(img, scale) {
   const width = Math.max(1, Math.round(img.naturalWidth * scale));
   const height = Math.max(1, Math.round(img.naturalHeight * scale));
   const canvas = document.createElement("canvas");
@@ -231,20 +210,49 @@ async function encodeAtScale(img, scale, mimeType, quality) {
   const ctx = canvas.getContext("2d", { alpha: true });
   if (!ctx) throw new Error("Canvas unavailable");
   ctx.drawImage(img, 0, 0, width, height);
-  return canvasToBlob(canvas, mimeType, quality);
+  return canvasToPngBlob(canvas);
+}
+
+/** Convert any decodable image blob to PNG at full resolution. */
+async function convertBlobToPng(sourceBlob) {
+  if (sourceBlob instanceof Blob && String(sourceBlob.type || "").toLowerCase().includes("png")) {
+    return sourceBlob;
+  }
+  const img = await loadImageFromBlob(sourceBlob);
+  if (!img.naturalWidth || !img.naturalHeight) {
+    throw new Error("Image has no dimensions");
+  }
+  return encodePngAtScale(img, 1);
+}
+
+async function downloadDirectUrl(item, url, { suffix = "" } = {}) {
+  const filename = designDownloadFilename(item, url, { suffix, mimeType: PNG_MIME, fallbackExt: "png" });
+  try {
+    const blob = await fetchDesignBlob(url);
+    const pngBlob = await convertBlobToPng(blob);
+    triggerBlobDownload(pngBlob, designDownloadFilename(item, url, {
+      suffix,
+      mimeType: PNG_MIME,
+      fallbackExt: "png",
+    }));
+  } catch {
+    // Cross-origin hosts without CORS / decode failure: open URL as fallback
+    triggerUrlDownloadFallback(url, filename);
+  }
 }
 
 /**
- * Client-side size optimization of the original asset.
- * Binary-search quality at full resolution, then scale down only if needed.
- * Stays as close as possible to maxBytes without exceeding it.
+ * Client-side size optimization as PNG.
+ * PNG is lossless — quality knobs don't apply; binary-search scale (dimensions)
+ * to stay as large as possible under maxBytes without exceeding it.
  */
 async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
   if (!(sourceBlob instanceof Blob)) throw new Error("Invalid image data");
   if (!Number.isFinite(maxBytes) || maxBytes <= 0) throw new Error("Max size must be greater than 0");
 
-  if (sourceBlob.size <= maxBytes) {
-    return { blob: sourceBlob, mimeType: sourceBlob.type || "application/octet-stream", scaled: false, reused: true };
+  const alreadyPng = String(sourceBlob.type || "").toLowerCase().includes("png");
+  if (alreadyPng && sourceBlob.size <= maxBytes) {
+    return { blob: sourceBlob, mimeType: PNG_MIME, scaled: false, reused: true };
   }
 
   const img = await loadImageFromBlob(sourceBlob);
@@ -252,41 +260,37 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
     throw new Error("Image has no dimensions");
   }
 
-  const mimeType = supportsWebPEncoding() ? "image/webp" : "image/jpeg";
-  const qualityMin = 0.1;
-  const qualityMax = 0.95;
-  let scale = 1;
+  // Full-res PNG first — keep if under the limit.
+  const fullPng = await encodePngAtScale(img, 1);
+  if (fullPng.size <= maxBytes) {
+    return {
+      blob: fullPng,
+      mimeType: PNG_MIME,
+      scaled: false,
+      reused: false,
+    };
+  }
+
+  // Binary search on scale: find the largest dimensions that fit under maxBytes.
+  let lo = 0.05;
+  let hi = 1;
   let best = null;
 
-  for (let scaleAttempt = 0; scaleAttempt < 18; scaleAttempt++) {
-    let lo = qualityMin;
-    let hi = qualityMax;
-    let bestAtScale = null;
-
-    for (let i = 0; i < 10; i++) {
-      const quality = (lo + hi) / 2;
-      const blob = await encodeAtScale(img, scale, mimeType, quality);
-      if (blob.size <= maxBytes) {
-        bestAtScale = { blob, quality };
-        lo = quality;
-      } else {
-        hi = quality;
-      }
+  for (let i = 0; i < 14; i++) {
+    const scale = (lo + hi) / 2;
+    const blob = await encodePngAtScale(img, scale);
+    if (blob.size <= maxBytes) {
+      best = { blob, scale };
+      lo = scale;
+    } else {
+      hi = scale;
     }
+  }
 
-    // Prefer the highest quality that still fits; if none, try lowest quality once more.
-    if (!bestAtScale) {
-      const lowest = await encodeAtScale(img, scale, mimeType, qualityMin);
-      if (lowest.size <= maxBytes) bestAtScale = { blob: lowest, quality: qualityMin };
-    }
-
-    if (bestAtScale) {
-      best = bestAtScale;
-      break;
-    }
-
-    scale *= 0.9;
-    if (scale < 0.05) break;
+  // Ensure we have a fitting candidate (edge: even tiny scale may still be over).
+  if (!best) {
+    const tiny = await encodePngAtScale(img, 0.05);
+    if (tiny.size <= maxBytes) best = { blob: tiny, scale: 0.05 };
   }
 
   if (!best) {
@@ -295,8 +299,8 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
 
   return {
     blob: best.blob,
-    mimeType,
-    scaled: scale < 0.999,
+    mimeType: PNG_MIME,
+    scaled: best.scale < 0.999,
     reused: false,
   };
 }
@@ -353,7 +357,7 @@ function openDesignDownloadModal(item) {
       <div class="field cr-dl-opt-field" id="cr-dl-opt-field" ${defaultMode === "optimized" ? "" : "hidden"}>
         <label for="cr-dl-max-mb">Max file size (MB)</label>
         <input class="input" id="cr-dl-max-mb" type="number" min="0.1" step="0.1" value="10" inputmode="decimal" />
-        <p class="cr-dl-hint">Stays as close as possible to this limit without exceeding it.</p>
+        <p class="cr-dl-hint">Downloads as PNG. Scales down to stay under this limit while keeping the largest size possible.</p>
       </div>`,
     onSave: async () => {
       const mode = document.querySelector('input[name="cr-dl-mode"]:checked')?.value;
@@ -397,16 +401,16 @@ function openDesignDownloadModal(item) {
           const result = await optimizeImageToMaxBytes(source, maxBytes);
           const filename = designDownloadFilename(item, originalUrl, {
             suffix: "-optimized",
-            mimeType: result.mimeType,
-            fallbackExt: result.mimeType.includes("webp") ? "webp" : "jpg",
+            mimeType: PNG_MIME,
+            fallbackExt: "png",
           });
           triggerBlobDownload(result.blob, filename);
           const sizeMb = (result.blob.size / (1024 * 1024)).toFixed(2);
           showToast(
             "Downloaded",
             result.reused
-              ? `Original already under ${maxMb} MB (${sizeMb} MB)`
-              : `Optimized to ${sizeMb} MB`
+              ? `Already under ${maxMb} MB as PNG (${sizeMb} MB)`
+              : `Optimized PNG to ${sizeMb} MB`
           );
         } catch (e) {
           throw new Error(e?.message || "Optimization failed");
