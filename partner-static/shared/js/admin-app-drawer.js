@@ -61,6 +61,10 @@ function toggleDrawer() {
   else openDrawer();
 }
 
+function getDrawerTriggers() {
+  return [...document.querySelectorAll("#app-drawer-trigger, .app-drawer-trigger")];
+}
+
 /**
  * @param {{ currentAppId: string, brandTitle?: string }} opts
  */
@@ -70,7 +74,7 @@ export function initAdminAppDrawer({ currentAppId, brandTitle }) {
   if (!trigger || !panel) return;
 
   if (brandTitle) {
-    const brandName = document.querySelector(".brand-block .brand-name");
+    const brandName = document.querySelector(".sidebar .brand-block .brand-name");
     if (brandName) brandName.textContent = brandTitle;
   }
 
@@ -94,7 +98,8 @@ export function initAdminAppDrawer({ currentAppId, brandTitle }) {
 
   document.addEventListener("click", (e) => {
     if (!panel.classList.contains("show")) return;
-    if (panel.contains(e.target) || trigger.contains(e.target)) return;
+    const triggers = getDrawerTriggers();
+    if (panel.contains(e.target) || triggers.some((t) => t.contains(e.target))) return;
     closeDrawer();
   });
 
