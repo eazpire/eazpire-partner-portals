@@ -156,7 +156,9 @@ export async function handlePartnerPortalRequest(request, env) {
       status: 200,
       headers: {
         "content-type": fallback.contentType,
-        "cache-control": key.endsWith(".html") ? "no-store" : "public, max-age=300",
+        "cache-control": key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
+          ? "no-store"
+          : "public, max-age=300",
       },
     });
   }
@@ -166,7 +168,12 @@ export async function handlePartnerPortalRequest(request, env) {
     const ext = key.slice(key.lastIndexOf("."));
     const headers = new Headers(assetRes.headers);
     if (MIME[ext]) headers.set("content-type", MIME[ext]);
-    headers.set("cache-control", key.endsWith(".html") ? "no-store" : "public, max-age=300");
+    headers.set(
+      "cache-control",
+      key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
+        ? "no-store"
+        : "public, max-age=300"
+    );
     return new Response(assetRes.body, { status: assetRes.status, headers });
   }
 

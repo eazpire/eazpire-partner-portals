@@ -150,7 +150,8 @@ function triggerBlobDownload(blob, filename) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+  // Large optimized PNGs can take a few seconds to flush to disk — keep the blob URL alive.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 function triggerUrlDownloadFallback(url, filename) {
@@ -182,7 +183,7 @@ function pngCrc32(bytes) {
   for (let i = 0; i < bytes.length; i++) {
     crc ^= bytes[i];
     for (let b = 0; b < 8; b++) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
     }
   }
   return (crc ^ 0xffffffff) >>> 0;
@@ -194,16 +195,66 @@ function dpiToPixelsPerMeter(dpi) {
   return Math.round(safeDpi / 0.0254);
 }
 
+function assertPngSignature(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 8) throw new Error("Invalid PNG");
+  for (let i = 0; i < 8; i++) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) throw new Error("Not a PNG file");
+  }
+}
+
+function readU32be(bytes, offset) {
+  return (
+    ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+  );
+}
+
+function writeU32be(bytes, offset, value) {
+  bytes[offset] = (value >>> 24) & 0xff;
+  bytes[offset + 1] = (value >>> 16) & 0xff;
+  bytes[offset + 2] = (value >>> 8) & 0xff;
+  bytes[offset + 3] = value & 0xff;
+}
+
+/**
+ * Parse PNG into signature + chunk copies (skips nothing; caller filters).
+ * Each chunk is a full on-disk chunk: length|type|data|crc.
+ */
+function parsePngChunks(pngBytes) {
+  const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes);
+  assertPngSignature(bytes);
+  const chunks = [];
+  let offset = 8;
+  while (offset + 8 <= bytes.length) {
+    const length = readU32be(bytes, offset);
+    const chunkEnd = offset + 12 + length;
+    if (chunkEnd > bytes.length) throw new Error("Truncated PNG chunk");
+    const type = String.fromCharCode(
+      bytes[offset + 4],
+      bytes[offset + 5],
+      bytes[offset + 6],
+      bytes[offset + 7]
+    );
+    chunks.push({
+      type,
+      bytes: bytes.slice(offset, chunkEnd),
+    });
+    offset = chunkEnd;
+    if (type === "IEND") break;
+  }
+  if (!chunks.some((c) => c.type === "IHDR")) throw new Error("PNG missing IHDR");
+  if (!chunks.some((c) => c.type === "IEND")) throw new Error("PNG missing IEND");
+  return chunks;
+}
+
 /**
  * Build a PNG pHYs chunk for the given DPI (unit = meter).
- * 300 DPI → ~11811 pixels per meter.
+ * 300 DPI → 11811 pixels per meter.
  */
 function buildPngPhysChunk(dpi = OPTIMIZED_PNG_DPI) {
   const ppm = dpiToPixelsPerMeter(dpi);
   const data = new Uint8Array(9);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, ppm, false);
-  view.setUint32(4, ppm, false);
+  writeU32be(data, 0, ppm);
+  writeU32be(data, 4, ppm);
   data[8] = 1; // unit: meter
   const type = new TextEncoder().encode("pHYs");
   const typeAndData = new Uint8Array(4 + data.length);
@@ -211,68 +262,79 @@ function buildPngPhysChunk(dpi = OPTIMIZED_PNG_DPI) {
   typeAndData.set(data, 4);
   const crc = pngCrc32(typeAndData);
   const chunk = new Uint8Array(4 + 4 + data.length + 4);
-  const chunkView = new DataView(chunk.buffer);
-  chunkView.setUint32(0, data.length, false);
+  writeU32be(chunk, 0, data.length);
   chunk.set(typeAndData, 4);
-  chunkView.setUint32(4 + typeAndData.length, crc, false);
+  writeU32be(chunk, 4 + typeAndData.length, crc);
   return chunk;
 }
 
-/**
- * Insert or replace the PNG pHYs chunk so image viewers report the given DPI.
- * Does not change pixel dimensions — metadata only.
- */
-function setPngDpiBytes(pngBytes, dpi = OPTIMIZED_PNG_DPI) {
+/** Read first pHYs chunk → { ppmX, ppmY, unit, dpiX, dpiY } or null. */
+function readPngPhys(pngBytes) {
   const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes);
-  if (bytes.length < 8) throw new Error("Invalid PNG");
-  for (let i = 0; i < 8; i++) {
-    if (bytes[i] !== PNG_SIGNATURE[i]) throw new Error("Not a PNG file");
-  }
-
-  const physChunk = buildPngPhysChunk(dpi);
-  const parts = [bytes.subarray(0, 8)];
+  assertPngSignature(bytes);
   let offset = 8;
-  let inserted = false;
-
   while (offset + 8 <= bytes.length) {
-    const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+    const length = readU32be(bytes, offset);
+    const chunkEnd = offset + 12 + length;
+    if (chunkEnd > bytes.length) throw new Error("Truncated PNG chunk");
     const type = String.fromCharCode(
       bytes[offset + 4],
       bytes[offset + 5],
       bytes[offset + 6],
       bytes[offset + 7]
     );
-    const chunkEnd = offset + 12 + length;
-    if (chunkEnd > bytes.length) throw new Error("Truncated PNG chunk");
-
     if (type === "pHYs") {
-      if (!inserted) {
-        parts.push(physChunk);
-        inserted = true;
-      }
-      offset = chunkEnd;
-      continue;
+      if (length < 9) throw new Error("Invalid pHYs chunk");
+      const typeAndData = bytes.subarray(offset + 4, offset + 8 + length);
+      const storedCrc = readU32be(bytes, offset + 8 + length);
+      if (pngCrc32(typeAndData) !== storedCrc) throw new Error("PNG pHYs CRC mismatch");
+      const ppmX = readU32be(bytes, offset + 8);
+      const ppmY = readU32be(bytes, offset + 12);
+      const unit = bytes[offset + 16];
+      return {
+        ppmX,
+        ppmY,
+        unit,
+        dpiX: unit === 1 ? ppmX * 0.0254 : null,
+        dpiY: unit === 1 ? ppmY * 0.0254 : null,
+      };
     }
-
-    parts.push(bytes.subarray(offset, chunkEnd));
     offset = chunkEnd;
-
-    // Preferred placement: immediately after IHDR.
-    if (!inserted && type === "IHDR") {
-      parts.push(physChunk);
-      inserted = true;
-    }
     if (type === "IEND") break;
   }
+  return null;
+}
 
-  if (!inserted) throw new Error("Could not place PNG pHYs chunk");
+/**
+ * Remove every pHYs chunk, then insert a fresh one immediately after IHDR.
+ * Does not change pixel dimensions — metadata only.
+ */
+function setPngDpiBytes(pngBytes, dpi = OPTIMIZED_PNG_DPI) {
+  const chunks = parsePngChunks(pngBytes).filter((c) => c.type !== "pHYs");
+  const physChunk = buildPngPhysChunk(dpi);
+  const ihdrIndex = chunks.findIndex((c) => c.type === "IHDR");
+  if (ihdrIndex < 0) throw new Error("PNG missing IHDR");
+  chunks.splice(ihdrIndex + 1, 0, { type: "pHYs", bytes: physChunk });
 
-  const total = parts.reduce((n, p) => n + p.length, 0);
+  let total = 8;
+  for (const c of chunks) total += c.bytes.length;
   const out = new Uint8Array(total);
-  let writeAt = 0;
-  for (const part of parts) {
-    out.set(part, writeAt);
-    writeAt += part.length;
+  out.set(PNG_SIGNATURE, 0);
+  let writeAt = 8;
+  for (const c of chunks) {
+    out.set(c.bytes, writeAt);
+    writeAt += c.bytes.length;
+  }
+
+  const verified = readPngPhys(out);
+  const expectedPpm = dpiToPixelsPerMeter(dpi);
+  if (
+    !verified ||
+    verified.unit !== 1 ||
+    verified.ppmX !== expectedPpm ||
+    verified.ppmY !== expectedPpm
+  ) {
+    throw new Error("PNG DPI stamp verification failed");
   }
   return out;
 }
@@ -280,7 +342,20 @@ function setPngDpiBytes(pngBytes, dpi = OPTIMIZED_PNG_DPI) {
 async function setPngBlobDpi(blob, dpi = OPTIMIZED_PNG_DPI) {
   const buf = await blob.arrayBuffer();
   const withDpi = setPngDpiBytes(new Uint8Array(buf), dpi);
-  return new Blob([withDpi], { type: PNG_MIME });
+  // Copy into a fresh ArrayBuffer so the Blob owns exact PNG bytes.
+  const copy = withDpi.buffer.slice(withDpi.byteOffset, withDpi.byteOffset + withDpi.byteLength);
+  return new Blob([copy], { type: PNG_MIME });
+}
+
+/** Confirm stamped blob still has ~target DPI before download. */
+async function assertPngBlobDpi(blob, dpi = OPTIMIZED_PNG_DPI) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  const phys = readPngPhys(buf);
+  const expectedPpm = dpiToPixelsPerMeter(dpi);
+  if (!phys || phys.unit !== 1 || phys.ppmX !== expectedPpm || phys.ppmY !== expectedPpm) {
+    throw new Error(`Optimized PNG DPI assert failed (expected ${dpi}, got ${phys?.dpiX ?? "missing"})`);
+  }
+  return phys;
 }
 
 function loadImageFromBlob(blob) {
@@ -355,26 +430,36 @@ async function downloadDirectUrl(item, url, { suffix = "" } = {}) {
  * Client-side size optimization as PNG.
  * PNG is lossless — quality knobs don't apply; binary-search scale (dimensions)
  * to stay as large as possible under maxBytes without exceeding it.
- * Always stamps pHYs at 300 DPI (metadata only; pixel count unchanged).
+ * Always stamps pHYs at 300 DPI and asserts it before download — never silent-fail.
  */
 async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
   if (!(sourceBlob instanceof Blob)) throw new Error("Invalid image data");
   if (!Number.isFinite(maxBytes) || maxBytes <= 0) throw new Error("Max size must be greater than 0");
 
-  async function withOptimizedDpi(blob, meta) {
-    let out = blob;
-    try {
-      out = await setPngBlobDpi(blob, OPTIMIZED_PNG_DPI);
-    } catch (e) {
-      // Fall back to canvas PNG as-is if chunk rewrite fails (still downloadable).
-      console.warn("[designs] Could not set PNG DPI metadata:", e?.message || e);
-    }
-    return { blob: out, mimeType: PNG_MIME, ...meta };
+  async function stampOptimizedDpi(blob, meta) {
+    const stamped = await setPngBlobDpi(blob, OPTIMIZED_PNG_DPI);
+    await assertPngBlobDpi(stamped, OPTIMIZED_PNG_DPI);
+    return { blob: stamped, mimeType: PNG_MIME, dpi: OPTIMIZED_PNG_DPI, ...meta };
   }
 
-  const alreadyPng = String(sourceBlob.type || "").toLowerCase().includes("png");
-  if (alreadyPng && sourceBlob.size <= maxBytes) {
-    return withOptimizedDpi(sourceBlob, { scaled: false, reused: true });
+  // Prefer magic-byte detection: R2/CDN often serves application/octet-stream.
+  let looksPng = String(sourceBlob.type || "").toLowerCase().includes("png");
+  if (!looksPng && sourceBlob.size >= 8) {
+    try {
+      const head = new Uint8Array(await sourceBlob.slice(0, 8).arrayBuffer());
+      looksPng = PNG_SIGNATURE.every((b, i) => head[i] === b);
+    } catch {
+      looksPng = false;
+    }
+  }
+
+  if (looksPng && sourceBlob.size <= maxBytes) {
+    try {
+      return await stampOptimizedDpi(sourceBlob, { scaled: false, reused: true });
+    } catch (e) {
+      // Odd/corrupt structure: fall through to canvas re-encode + stamp.
+      console.warn("[designs] Direct PNG DPI stamp failed, re-encoding:", e?.message || e);
+    }
   }
 
   const img = await loadImageFromBlob(sourceBlob);
@@ -385,7 +470,7 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
   // Full-res PNG first — keep if under the limit.
   const fullPng = await encodePngAtScale(img, 1);
   if (fullPng.size <= maxBytes) {
-    return withOptimizedDpi(fullPng, { scaled: false, reused: false });
+    return stampOptimizedDpi(fullPng, { scaled: false, reused: false });
   }
 
   // Binary search on scale: find the largest dimensions that fit under maxBytes.
@@ -414,7 +499,7 @@ async function optimizeImageToMaxBytes(sourceBlob, maxBytes) {
     throw new Error("Could not fit image under the selected size limit");
   }
 
-  return withOptimizedDpi(best.blob, {
+  return stampOptimizedDpi(best.blob, {
     scaled: best.scale < 0.999,
     reused: false,
   });
@@ -521,11 +606,12 @@ function openDesignDownloadModal(item) {
           });
           triggerBlobDownload(result.blob, filename);
           const sizeMb = (result.blob.size / (1024 * 1024)).toFixed(2);
+          const dpiLabel = `${result.dpi || OPTIMIZED_PNG_DPI} DPI`;
           showToast(
             "Downloaded",
             result.reused
-              ? `Already under ${maxMb} MB as PNG (${sizeMb} MB)`
-              : `Optimized PNG to ${sizeMb} MB`
+              ? `Already under ${maxMb} MB as PNG (${sizeMb} MB, ${dpiLabel})`
+              : `Optimized PNG to ${sizeMb} MB · ${dpiLabel}`
           );
         } catch (e) {
           throw new Error(e?.message || "Optimization failed");
