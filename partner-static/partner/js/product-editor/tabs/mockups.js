@@ -22,6 +22,36 @@ function slotsMap(mockups) {
   return map;
 }
 
+function resolveColors(ctx, section) {
+  const fromLocal = [...(ctx.localColors || [])];
+  const fromBundle = [...(ctx.bundle?.colors || [])];
+  const fromSlots = (ctx.localMockups || ctx.bundle?.mockups || [])
+    .filter((m) => (m.mockup_set || "clean") === section)
+    .map((m) => String(m.color_key || "").trim())
+    .filter(Boolean);
+  const merged = [...new Set([...fromLocal, ...fromBundle, ...fromSlots].filter(Boolean))];
+  return merged.length ? merged : ["Default"];
+}
+
+function resolveViews(ctx, section) {
+  const base = [...(ctx.localViews || ctx.bundle?.views || [])];
+  const byKey = new Map(base.map((v) => [v.view_key, v]));
+  for (const m of ctx.localMockups || ctx.bundle?.mockups || []) {
+    if ((m.mockup_set || "clean") !== section) continue;
+    if (section === MOCKUP_SECTION_PREVIEW_IMAGES) continue;
+    const key = String(m.view_key || "").trim();
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, { view_key: key, label: key, printable: true, sort_order: byKey.size });
+  }
+  const list = [...byKey.values()];
+  return list.length
+    ? list
+    : [
+        { view_key: "front", label: "Front", sort_order: 0, printable: true },
+        { view_key: "back", label: "Back", sort_order: 1, printable: true },
+      ];
+}
+
 function previewImagesFromLocal(localMockups) {
   return (localMockups || [])
     .filter((m) => (m.mockup_set || "") === MOCKUP_SECTION_PREVIEW_IMAGES)
@@ -31,6 +61,16 @@ function previewImagesFromLocal(localMockups) {
 
 function newPreviewKey() {
   return `pi_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function upsertLocalSlot(ctx, patch) {
+  if (!ctx.localMockups) ctx.localMockups = [...(ctx.bundle?.mockups || [])];
+  const key = slotKey(patch.mockup_set || "clean", patch.view_key, patch.color_key || "");
+  const idx = ctx.localMockups.findIndex(
+    (m) => slotKey(m.mockup_set || "clean", m.view_key, m.color_key || "") === key
+  );
+  if (idx >= 0) ctx.localMockups[idx] = { ...ctx.localMockups[idx], ...patch };
+  else ctx.localMockups.push({ ...patch });
 }
 
 function renderPreviewImagesSection(ctx) {
@@ -69,12 +109,8 @@ function renderPreviewImagesSection(ctx) {
 }
 
 function renderViewColorGrid(ctx, section) {
-  const views = ctx.localViews || ctx.bundle?.views || [];
-  const colors = ctx.localColors?.length
-    ? ctx.localColors
-    : ctx.bundle?.colors?.length
-      ? ctx.bundle.colors
-      : ["Default"];
+  const views = resolveViews(ctx, section);
+  const colors = resolveColors(ctx, section);
   const map = slotsMap(ctx.localMockups || ctx.bundle?.mockups || []);
 
   const grid = views
@@ -88,7 +124,7 @@ function renderViewColorGrid(ctx, section) {
             <div class="pe-mock-card__label">${escapeHtml(view.label)} · ${escapeHtml(color)}</div>
             <div class="pe-mock-card__preview">${
               preview
-                ? `<img src="${escapeHtml(preview)}" alt="" />`
+                ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy" />`
                 : `<span class="ce-hint">No image</span>`
             }</div>
             <div class="field"><label>Image URL</label>
@@ -187,6 +223,15 @@ function bindUploadInputs(ctx, root) {
       if (imgWrap && el.value) {
         imgWrap.innerHTML = `<img src="${escapeHtml(el.value)}" alt="" />`;
       }
+      if (card && !card.classList.contains("pe-preview-card")) {
+        upsertLocalSlot(ctx, {
+          mockup_set: ctx.mockupSection || "clean",
+          view_key: card.dataset.view,
+          color_key: card.dataset.color || "",
+          image_url: el.value?.trim() || null,
+          image_r2_key: card.querySelector(".pe-mock-r2")?.value || null,
+        });
+      }
       ctx.markDirty?.();
     });
   });
@@ -211,6 +256,24 @@ function bindUploadInputs(ctx, root) {
           const titleInput = card.querySelector(".pe-preview-title");
           if (titleInput && !titleInput.value.trim() && file.name) {
             titleInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
+          }
+          if (card.classList.contains("pe-preview-card")) {
+            upsertLocalSlot(ctx, {
+              mockup_set: MOCKUP_SECTION_PREVIEW_IMAGES,
+              view_key: card.dataset.view,
+              color_key: "",
+              title: titleInput?.value || "",
+              image_url: res.image_url || null,
+              image_r2_key: res.image_r2_key || null,
+            });
+          } else {
+            upsertLocalSlot(ctx, {
+              mockup_set: ctx.mockupSection || "clean",
+              view_key: card.dataset.view,
+              color_key: card.dataset.color || "",
+              image_url: res.image_url || null,
+              image_r2_key: res.image_r2_key || null,
+            });
           }
         }
         ctx.markDirty?.();

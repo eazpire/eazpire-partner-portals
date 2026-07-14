@@ -24,6 +24,10 @@ export function publicFileUrl(env, r2Key) {
   const key = String(r2Key || "").trim();
   if (!key) return null;
   const base = String(env?.PUBLIC_FILE_BASE_URL || "https://creator-engine.eazpire.workers.dev").replace(/\/$/, "");
+  // Partner editor uploads land in MOCKUP_R2 — served via /mockup-r2, not /file (main R2)
+  if (key.startsWith("partner-products/")) {
+    return `${base}/mockup-r2?k=${encodeURIComponent(key)}`;
+  }
   return `${base}/file/${encodeURIComponent(key)}`;
 }
 
@@ -110,13 +114,21 @@ export async function listMockupSlots(db, env, productId) {
     .all();
   return (res?.results || []).map((row) => {
     const overlay = parseJson(row.overlay_json, {});
+    const r2Key = row.image_r2_key || null;
+    // Always rebuild MOCKUP_R2 URLs — older rows may have broken /file/ links
+    let imageUrl = null;
+    if (r2Key) {
+      imageUrl = publicFileUrl(env, r2Key);
+    } else if (row.image_url) {
+      imageUrl = row.image_url;
+    }
     return {
       id: row.id,
       view_key: row.view_key,
       color_key: row.color_key || "",
       mockup_set: row.mockup_set || "clean",
-      image_r2_key: row.image_r2_key || null,
-      image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
+      image_r2_key: r2Key,
+      image_url: imageUrl,
       title: overlay.title || row.view_key || "",
       overlay,
       status: row.status,
@@ -355,7 +367,7 @@ export async function savePartnerProductVariants(db, manufacturerId, productId, 
   return { ok: true, variants: await listVariants(db, manufacturerId, productId) };
 }
 
-export async function savePartnerProductMockups(db, manufacturerId, productId, slots) {
+export async function savePartnerProductMockups(db, manufacturerId, productId, slots, env = null) {
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
   await ensureEditorColumns(db);
@@ -372,6 +384,9 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
       ...(s.overlay && typeof s.overlay === "object" ? s.overlay : {}),
     };
     if (s.title != null) overlay.title = String(s.title).trim();
+    // Prefer regenerating URL from R2 key so clients always get a valid mockup-r2 link
+    const r2Key = s.image_r2_key || null;
+    const imageUrl = r2Key && env ? publicFileUrl(env, r2Key) : s.image_url || null;
     await db
       .prepare(
         `INSERT INTO manufacturer_mockup_templates
@@ -382,8 +397,8 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
         newId("mmock"),
         productId,
         viewKey,
-        s.image_r2_key || null,
-        s.image_url || null,
+        r2Key,
+        imageUrl,
         JSON.stringify(overlay),
         now,
         now,
@@ -392,7 +407,7 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
       )
       .run();
   }
-  return { ok: true };
+  return { ok: true, mockups: await listMockupSlots(db, env, productId) };
 }
 
 export async function savePartnerProductPrintAreas(db, manufacturerId, productId, areas) {

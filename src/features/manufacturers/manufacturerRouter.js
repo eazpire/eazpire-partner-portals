@@ -1239,7 +1239,7 @@ export async function handleManufacturerRouter(request, env) {
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
     const { savePartnerProductMockups } = await import("./partnerProductEditorService.js");
-    const result = await savePartnerProductMockups(db, mfgId, body.product_id, body.slots);
+    const result = await savePartnerProductMockups(db, mfgId, body.product_id, body.slots, env);
     return json(result, result.ok ? 200 : 404, cors);
   }
 

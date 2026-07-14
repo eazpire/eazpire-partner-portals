@@ -245,9 +245,10 @@ async function saveCurrentTab() {
       ctx.bundle.sizes = snap.sizes;
     } else if (ctx.activeTab === "mockups") {
       const slots = snapshotMockupsTab(ctx);
-      await saveMockups(ctx.productId, slots);
-      ctx.localMockups = slots;
-      ctx.bundle.mockups = slots;
+      const mockRes = await saveMockups(ctx.productId, slots);
+      const refreshedMockups = mockRes.mockups || slots;
+      ctx.localMockups = refreshedMockups;
+      ctx.bundle.mockups = refreshedMockups;
     } else if (ctx.activeTab === "print_area") {
       const areas = snapshotPrintAreaTab();
       const res = await savePrintAreas(ctx.productId, areas);
@@ -259,11 +260,17 @@ async function saveCurrentTab() {
       ctx.bundle.product = res.product;
     }
 
-    // Refresh readiness
+    // Refresh readiness + keep editor state in sync with server
     const refreshed = await fetchEditorBundle(ctx.productId);
-    ctx.bundle.readiness = refreshed.readiness;
+    ctx.bundle = { ...ctx.bundle, ...refreshed, ok: true };
+    if (Array.isArray(refreshed.mockups)) ctx.localMockups = refreshed.mockups;
+    if (Array.isArray(refreshed.views)) ctx.localViews = refreshed.views;
+    if (Array.isArray(refreshed.colors)) ctx.localColors = refreshed.colors;
+    if (Array.isArray(refreshed.sizes)) ctx.localSizes = refreshed.sizes;
+    if (Array.isArray(refreshed.print_areas)) ctx.localPrintAreas = refreshed.print_areas;
     renderReadiness(refreshed.readiness);
     clearDirty();
+    if (ctx.activeTab === "mockups") await loadActiveTab(ctx);
     showToast("Saved", "Tab changes stored");
   } catch (e) {
     showToast("Save failed", e.message || String(e));
