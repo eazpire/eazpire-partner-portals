@@ -38,6 +38,7 @@ import {
   updateManufacturer,
   listLocations,
   createLocation,
+  updateLocation,
   getDashboard,
   adminCreateManufacturer,
   adminListManufacturers,
@@ -112,6 +113,7 @@ const PARTNER_OPS = new Set([
   "manufacturer-dashboard",
   "manufacturer-location-list",
   "manufacturer-location-create",
+  "manufacturer-location-update",
   "manufacturer-product-list",
   "manufacturer-product-get",
   "manufacturer-product-create",
@@ -420,10 +422,27 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-manufacturer-product-editor-bundle" && request.method === "GET") {
       const productId = url.searchParams.get("product_id");
-      const row = await db.prepare(`SELECT manufacturer_id FROM manufacturer_products WHERE id = ?`).bind(productId).first();
-      if (!row) return json({ ok: false, error: "not_found" }, 404, cors);
+      const catalogKey = url.searchParams.get("product_key");
+      let manufacturerId = null;
+      let resolvedProductId = productId;
+      if (!resolvedProductId && catalogKey) {
+        const { findManufacturerProductByCatalogKey } = await import("./partnerProductEditorService.js");
+        const link = await findManufacturerProductByCatalogKey(env, catalogKey);
+        if (!link) return json({ ok: false, error: "not_found" }, 404, cors);
+        manufacturerId = link.manufacturer_id;
+        resolvedProductId = link.product_id;
+      } else if (resolvedProductId) {
+        const row = await db
+          .prepare(`SELECT manufacturer_id FROM manufacturer_products WHERE id = ?`)
+          .bind(resolvedProductId)
+          .first();
+        if (!row) return json({ ok: false, error: "not_found" }, 404, cors);
+        manufacturerId = row.manufacturer_id;
+      } else {
+        return json({ ok: false, error: "product_id_or_product_key_required" }, 400, cors);
+      }
       const { getPartnerProductEditorBundle } = await import("./partnerProductEditorService.js");
-      const result = await getPartnerProductEditorBundle(env, row.manufacturer_id, productId);
+      const result = await getPartnerProductEditorBundle(env, manufacturerId, resolvedProductId);
       return json(result, result.ok ? 200 : 404, cors);
     }
     if (op === "admin-manufacturer-product-approve-to-catalog" && request.method === "POST") {
@@ -432,6 +451,7 @@ export async function handleManufacturerRouter(request, env) {
       const result = await adminApprovePartnerProductToCatalog(env, body.product_id, admin.owner_id, {
         changesRequested: !!body.changes_requested,
         rejected: !!body.rejected,
+        discarded: !!body.discarded,
         note: body.note,
       });
       if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
@@ -1154,6 +1174,15 @@ export async function handleManufacturerRouter(request, env) {
   if (op === "manufacturer-location-create" && request.method === "POST") {
     const body = await request.json().catch(() => ({}));
     const location = await createLocation(db, mfgId, body);
+    return json({ ok: true, location }, 200, cors);
+  }
+
+  if (op === "manufacturer-location-update" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const locationId = body.location_id || body.id;
+    if (!locationId) return json({ ok: false, error: "location_id_required" }, 400, cors);
+    const location = await updateLocation(db, mfgId, locationId, body);
+    if (!location) return json({ ok: false, error: "not_found" }, 404, cors);
     return json({ ok: true, location }, 200, cors);
   }
 

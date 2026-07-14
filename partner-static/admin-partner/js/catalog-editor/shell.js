@@ -13,6 +13,7 @@ import { loadVariantsTab, saveVariantsTab, bindVariantsTab } from "./tabs/varian
 import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/print-area.js";
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
 import { renderAutomationsTab, bindAutomationsTab, saveAutomationsTab } from "./tabs/automations.js";
+import { loadPartnerReviewBundle, renderReviewTab, bindReviewTab } from "./tabs/review.js";
 import {
   registerDirtyListener,
   setDirtySnapshot,
@@ -51,7 +52,9 @@ import { editorProductTitle } from "./editor-product-title.js";
 
 const CE_SIDEBAR_KEY = "admin_catalog_editor_sidebar_collapsed";
 
-const TABS = [
+const REVIEW_TAB = { id: "review", label: "Review", icon: "⚑", needsProvider: false };
+
+const CORE_TABS = [
   { id: "provider", label: "Provider", icon: "◈", needsProvider: false },
   { id: "template", label: "Templates", icon: "⎘", needsProvider: true },
   { id: "mockups", label: "Mockups", icon: "▣", needsProvider: true },
@@ -61,6 +64,11 @@ const TABS = [
   { id: "products", label: "Products", icon: "▤", needsProvider: false },
   { id: "automations", label: "Automations", icon: "⚙", needsProvider: true },
 ];
+
+function tabsForCtx(ctx) {
+  if (ctx?.showReviewTab) return [REVIEW_TAB, ...CORE_TABS];
+  return CORE_TABS;
+}
 
 let overlayEl = null;
 let editorState = null;

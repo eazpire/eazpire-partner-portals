@@ -269,24 +269,35 @@ export async function sendPartnerProductReviewDecisionEmail(
   const decisionKey = String(decision || "").toLowerCase();
   const approved = decisionKey === "approved";
   const rejected = decisionKey === "rejected";
+  const revoked = decisionKey === "approval_revoked" || decisionKey === "discarded";
   const subject = approved
     ? "Your product was approved for the Eazpire catalog"
-    : rejected
-      ? "Your product was rejected"
-      : "Changes requested for your product submission";
+    : revoked
+      ? decisionKey === "approval_revoked"
+        ? "Catalog approval was revoked for your product"
+        : "Your product review was discarded"
+      : rejected
+        ? "Your product was rejected"
+        : "Changes requested for your product submission";
 
   const safeTitle = escape(productTitle || "your product");
   const decisionLine = approved
     ? `<p>Good news${companyName ? ` for ${escape(companyName)}` : ""} — <strong>${safeTitle}</strong> was approved and added as a catalog draft.</p>`
-    : rejected
-      ? `<p>After review, we are unable to approve <strong>${safeTitle}</strong> at this time.</p>`
-      : `<p>We need changes before we can approve <strong>${safeTitle}</strong>.</p>`;
+    : revoked
+      ? decisionKey === "approval_revoked"
+        ? `<p>The catalog approval for <strong>${safeTitle}</strong> was revoked. The product is no longer in the preview/catalog pipeline.</p>`
+        : `<p>The review for <strong>${safeTitle}</strong> was discarded and withdrawn from the pending queue.</p>`
+      : rejected
+        ? `<p>After review, we are unable to approve <strong>${safeTitle}</strong> at this time.</p>`
+        : `<p>We need changes before we can approve <strong>${safeTitle}</strong>.</p>`;
 
   const noteBlock = note ? `<p><strong>Note from our team:</strong> ${escape(note)}</p>` : "";
   const keyBlock =
     approved && productKey
       ? `<p>Catalog key: <code>${escape(productKey)}</code> (set to Preview — you can review details in the Partner Portal).</p>`
-      : "";
+      : revoked && productKey
+        ? `<p>Catalog key <code>${escape(productKey)}</code> was set offline. You can resubmit after addressing the note.</p>`
+        : "";
   const portalBlock = portalUrl
     ? `<p><a href="${escape(portalUrl)}">Open the Partner Portal</a> to view the decision under Overview.</p>`
     : "";

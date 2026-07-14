@@ -13,7 +13,7 @@ function withVisibility(ctx, base) {
   return { ...(base || {}), visibility };
 }
 
-const SAVE_DISABLED_TABS = new Set(["template", "products"]);
+const SAVE_DISABLED_TABS = new Set(["template", "products", "review"]);
 
 export function tabSaveDisabled(tabId) {
   return SAVE_DISABLED_TABS.has(tabId);

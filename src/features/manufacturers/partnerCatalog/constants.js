@@ -9,7 +9,12 @@ export const PRINTIFY_PARTNER_SLUG = "printify";
 export const TODIFY_PARTNER_ID = "mfg_todify";
 export const TODIFY_PARTNER_SLUG = "todify";
 export const TODIFY_FULFILLMENT_EXTERNAL_ID = "ma-1";
+/** Brand / Shopify source label (not the Catalog Studio print-provider node). */
 export const TODIFY_PROVIDER_DISPLAY_NAME = "Todify";
+/** Catalog Studio print-provider label — mirrors company location name. */
+export const TODIFY_PRINT_PROVIDER_DISPLAY_NAME = "KNL print";
+/** Stable company-location id for Todify MA (source of truth for the print-provider label). */
+export const TODIFY_LOCATION_ID = "mloc_todify_ma_1";
 
 /**
  * Official Todify brand assets (sourced from https://todify.ma CDN / CloudFront).

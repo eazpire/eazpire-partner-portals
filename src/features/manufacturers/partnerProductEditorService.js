@@ -194,6 +194,11 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
 
+  const mfg = await db
+    .prepare(`SELECT id, name, slug FROM manufacturers WHERE id = ?`)
+    .bind(manufacturerId)
+    .first();
+
   // Do not auto-seed Front/Back — partners add views on Variants; Mockups stay empty until then.
   const views = await listViews(db, productId);
 
@@ -220,6 +225,8 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
   return {
     ok: true,
     product,
+    manufacturer_name: mfg?.name || null,
+    manufacturer_slug: mfg?.slug || null,
     views,
     variants,
     colors,
@@ -237,6 +244,19 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
     ),
     readiness: await buildPartnerProductReadiness(db, env, manufacturerId, productId),
   };
+}
+
+/** Resolve partner manufacturer_product linked to a catalog product_key (for Review tab). */
+export async function findManufacturerProductByCatalogKey(env, productKey) {
+  const db = getManufacturerDb(env);
+  if (!db || !productKey) return null;
+  await ensureEditorColumns(db);
+  const row = await db
+    .prepare(`SELECT manufacturer_id, id FROM manufacturer_products WHERE eazpire_product_key = ? LIMIT 1`)
+    .bind(String(productKey))
+    .first();
+  if (!row) return null;
+  return { manufacturer_id: row.manufacturer_id, product_id: row.id };
 }
 
 export async function buildPartnerProductReadiness(db, env, manufacturerId, productId) {
@@ -722,13 +742,13 @@ export async function uploadPartnerProductImage(env, manufacturerId, productId, 
 
 /**
  * Admin approve → eazpire_product + minimal catalog-db draft (source_system=todify)
- * Reject / changes_requested → partner notified with required review note
+ * Reject / changes_requested / discard (revoke) → partner notified with required review note
  */
 export async function adminApprovePartnerProductToCatalog(
   env,
   productId,
   adminOwnerId,
-  { changesRequested, rejected, note } = {}
+  { changesRequested, rejected, discarded, note } = {}
 ) {
   const db = getManufacturerDb(env);
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
@@ -743,6 +763,74 @@ export async function adminApprovePartnerProductToCatalog(
   if (!row) return { ok: false, error: "not_found" };
   const manufacturerId = row.manufacturer_id;
   const productTitle = String(parseJson(row.meta_json, {})?.display_name || row.title || productId);
+  const previousStatus = String(row.status || "");
+  const linkedKey = row.eazpire_product_key ? String(row.eazpire_product_key) : null;
+
+  // Discard / revoke — withdraw from review or pull approved preview back offline
+  if (discarded) {
+    const now = Date.now();
+    await db
+      .prepare(
+        `UPDATE manufacturer_products SET status = 'rejected', review_note = ?, updated_at = ? WHERE id = ?`
+      )
+      .bind(reviewNote, now, productId)
+      .run();
+
+    if (linkedKey) {
+      try {
+        const { updateEazpireProduct } = await import("./partnerCatalog/eazpireProductService.js");
+        await updateEazpireProduct(db, linkedKey, { catalog_status: "offline" });
+      } catch (e) {
+        console.warn("[discard-review] eazpire offline:", e?.message || e);
+      }
+      if (env.CATALOG_DB) {
+        try {
+          await env.CATALOG_DB.prepare(
+            `UPDATE product_catalog SET is_active = 0, updated_at = ? WHERE product_key = ?`
+          )
+            .bind(now, linkedKey)
+            .run();
+        } catch (e) {
+          console.warn("[discard-review] catalog deactivate:", e?.message || e);
+        }
+      }
+    }
+
+    await writeAuditLog(env, {
+      manufacturer_id: manufacturerId,
+      user_id: adminOwnerId,
+      action: "admin_product_approval_discarded",
+      entity_type: "manufacturer_product",
+      entity_id: productId,
+      after_json: {
+        review_note: reviewNote,
+        previous_status: previousStatus,
+        product_key: linkedKey,
+      },
+    });
+
+    const product = rowToProduct(
+      await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first()
+    );
+    const decision =
+      previousStatus === "approved" || linkedKey ? "approval_revoked" : "discarded";
+    await notifyPartnerProductReviewDecision(env, {
+      manufacturerId,
+      productTitle,
+      decision,
+      note: reviewNote,
+      productId,
+      productKey: linkedKey,
+    });
+    return {
+      ok: true,
+      status: "rejected",
+      decision,
+      product_key: linkedKey,
+      catalog_status: linkedKey ? "offline" : null,
+      product,
+    };
+  }
 
   const rejectOrChanges = !!(changesRequested || rejected);
   if (rejectOrChanges) {
@@ -815,12 +903,14 @@ export async function adminApprovePartnerProductToCatalog(
     const { listFulfillmentProviders } = await import("./partnerCatalog/fulfillmentProviderService.js");
     const { upsertProductVersion } = await import("./partnerCatalog/eazpireProductVersionService.js");
     const providers = await listFulfillmentProviders(db, manufacturerId);
+    const locId = product.provider_location_id ? String(product.provider_location_id) : "";
     const fp =
-      (product.provider_location_id &&
+      (locId &&
         providers.find(
           (p) =>
-            String(p.id) === String(product.provider_location_id) ||
-            String(p.external_provider_id) === String(product.provider_location_id)
+            String(p.id) === locId ||
+            String(p.external_provider_id) === locId ||
+            String(p.location?.location_id || "") === locId
         )) ||
       providers[0];
     if (fp?.id) {

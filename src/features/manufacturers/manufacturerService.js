@@ -6,6 +6,11 @@ import { getManufacturerDb, newId, slugify, rowToManufacturer, parseJson } from 
 import { writeAuditLog } from "./rbac.js";
 import { blockPartnerEmail, normalizePartnerEmail } from "./partnerEmailBlocks.js";
 import { sendPartnerManufacturerSuspendedEmail } from "./email.js";
+import { PRINTIFY_PARTNER_ID } from "./partnerCatalog/constants.js";
+import {
+  listFulfillmentProviders,
+  upsertFulfillmentProvider,
+} from "./partnerCatalog/fulfillmentProviderService.js";
 
 export async function getManufacturerById(db, manufacturerId) {
   const row = await db.prepare(`SELECT * FROM manufacturers WHERE id = ?`).bind(manufacturerId).first();
@@ -60,6 +65,56 @@ export async function listLocations(db, manufacturerId) {
   }));
 }
 
+/**
+ * Keep Catalog Studio print-provider labels in sync with company location names.
+ * Skips Printify (those providers come from Printify catalog sync).
+ * If a fulfillment provider already links to this location via location_json.location_id,
+ * only the display name / geo fields are updated (preserves todify/printify external ids).
+ */
+export async function syncLocationToFulfillmentProvider(db, manufacturerId, location) {
+  if (!location?.id || manufacturerId === PRINTIFY_PARTNER_ID) return null;
+
+  const displayName = String(location.label || location.name || "").trim();
+  if (!displayName) return null;
+
+  const providers = await listFulfillmentProviders(db, manufacturerId);
+  const linked = providers.find(
+    (p) => String(p.location?.location_id || "") === String(location.id)
+  );
+
+  const locationPayload = {
+    ...(linked?.location && typeof linked.location === "object" ? linked.location : {}),
+    country: location.country || null,
+    city: location.city || null,
+    region: location.region || null,
+    location_id: location.id,
+  };
+
+  if (linked) {
+    return upsertFulfillmentProvider(db, manufacturerId, {
+      integration_system: linked.integration_system,
+      external_provider_id: linked.external_provider_id,
+      name: displayName,
+      location: locationPayload,
+      ships_to: location.ships_to?.length ? location.ships_to : linked.ships_to || [],
+      production_days_min: location.production_days_min ?? linked.production_days_min,
+      production_days_max: location.production_days_max ?? linked.production_days_max,
+      status: location.status || linked.status || "active",
+    });
+  }
+
+  return upsertFulfillmentProvider(db, manufacturerId, {
+    integration_system: "portal",
+    external_provider_id: String(location.id),
+    name: displayName,
+    location: locationPayload,
+    ships_to: location.ships_to || [],
+    production_days_min: location.production_days_min ?? 2,
+    production_days_max: location.production_days_max ?? 7,
+    status: location.status || "active",
+  });
+}
+
 export async function createLocation(db, manufacturerId, input) {
   const id = newId("mloc");
   const now = Date.now();
@@ -86,7 +141,62 @@ export async function createLocation(db, manufacturerId, input) {
       now
     )
     .run();
-  return (await listLocations(db, manufacturerId)).find((l) => l.id === id);
+  const location = (await listLocations(db, manufacturerId)).find((l) => l.id === id);
+  try {
+    await syncLocationToFulfillmentProvider(db, manufacturerId, location);
+  } catch (e) {
+    console.warn("[createLocation] fulfillment provider sync:", e?.message || e);
+  }
+  return location;
+}
+
+export async function updateLocation(db, manufacturerId, locationId, input) {
+  const existing = (await listLocations(db, manufacturerId)).find((l) => l.id === locationId);
+  if (!existing) return null;
+
+  const now = Date.now();
+  const next = {
+    label: input.label ?? input.name ?? existing.label ?? existing.name,
+    country: input.country ?? existing.country,
+    region: input.region !== undefined ? input.region : existing.region,
+    city: input.city !== undefined ? input.city : existing.city,
+    postal_code: input.postal_code !== undefined ? input.postal_code : existing.postal_code,
+    ships_to: input.ships_to !== undefined ? input.ships_to : existing.ships_to || [],
+    production_days_min: Number(input.production_days_min ?? existing.production_days_min ?? 2),
+    production_days_max: Number(input.production_days_max ?? existing.production_days_max ?? 7),
+    status: input.status ?? existing.status ?? "active",
+  };
+
+  await db
+    .prepare(
+      `UPDATE manufacturer_locations SET
+        label = ?, country = ?, region = ?, city = ?, postal_code = ?, ships_to_json = ?,
+        production_days_min = ?, production_days_max = ?, status = ?, updated_at = ?
+       WHERE id = ? AND manufacturer_id = ?`
+    )
+    .bind(
+      next.label,
+      next.country,
+      next.region || null,
+      next.city || null,
+      next.postal_code || null,
+      JSON.stringify(next.ships_to || []),
+      next.production_days_min,
+      next.production_days_max,
+      next.status,
+      now,
+      locationId,
+      manufacturerId
+    )
+    .run();
+
+  const location = (await listLocations(db, manufacturerId)).find((l) => l.id === locationId);
+  try {
+    await syncLocationToFulfillmentProvider(db, manufacturerId, location);
+  } catch (e) {
+    console.warn("[updateLocation] fulfillment provider sync:", e?.message || e);
+  }
+  return location;
 }
 
 export async function getDashboard(db, manufacturerId) {
@@ -182,7 +292,7 @@ export async function getDashboard(db, manufacturerId) {
       status === "approved"
         ? `Product approved: ${displayName || row.id}`
         : status === "rejected"
-          ? `Product rejected: ${displayName || row.id}`
+          ? `Product rejected / review discarded: ${displayName || row.id}`
           : `Changes requested: ${displayName || row.id}`;
     actionItems.push({
       key: `product_review_${row.id}`,
