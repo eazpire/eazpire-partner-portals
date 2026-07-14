@@ -270,6 +270,31 @@ async function enhanceProvidersBundleFromCatalog(env, productKey) {
     enrichProviderRowWithCatalog(row, catalogById)
   );
 
+  // Attach opaque fulfillment external ids (Todify ma-1) onto partner-direct plans that lack
+  // a numeric Printify print_provider_id — otherwise Providers UI falls back to Printify name-match.
+  if (product?.manufacturer_id && env.MANUFACTURER_DB) {
+    const { listFulfillmentProviders } = await import("../fulfillmentProviderService.js");
+    const { isDirectShopifySourceSystem } = await import("../constants.js");
+    const fps = await listFulfillmentProviders(env.MANUFACTURER_DB, product.manufacturer_id);
+    const versions = await listCatalogOpsProductVersions(env, productKey);
+    for (const row of merged) {
+      if (row.print_provider_id != null && row.print_provider_id !== "") continue;
+      if (!isDirectShopifySourceSystem(row.profile?.source_system)) continue;
+      const fromVersion = versions.find((v) => v.external_provider_id != null)?.external_provider_id;
+      const fromFp = fps.find((fp) => {
+        const ext = String(fp.external_provider_id || "").trim();
+        return ext && !(Number.isFinite(Number(ext)) && String(Number(ext)) === ext);
+      });
+      const opaque = fromVersion || fromFp?.external_provider_id || null;
+      if (!opaque) continue;
+      row.print_provider_id = opaque;
+      row.external_provider_id = opaque;
+      if (fromFp?.name) row.name = fromFp.name;
+      row.is_enabled = true;
+      row.type = "configured";
+    }
+  }
+
   return {
     ok: true,
     product,

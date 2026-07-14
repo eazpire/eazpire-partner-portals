@@ -2,6 +2,8 @@
  * Partner product editor provider merge helpers (ES module port).
  */
 
+import { isDirectShopifySourceSystem } from "../constants.js";
+
 const COUNTRY_TO_REGION = {
   US: "US",
   CA: "CA",
@@ -131,11 +133,16 @@ export function mergeProviders(dbPlans = [], catalogProviders = [], activePrintP
     let catMatch = null;
     let usedNameFallback = false;
     const hadPpIdOnProfile = !!(plan?.profile?.print_provider_id != null && plan?.profile?.print_provider_id !== "");
+    // Todify / direct-Shopify plans seed provider_name (e.g. "Todify") without print_provider_id —
+    // never match that label against Printify's global catalog (causes UI "provider 93").
+    const partnerDirect = isDirectShopifySourceSystem(plan?.profile?.source_system);
 
     if (ppId != null && ppId !== "") {
-      seen.add(Number(ppId));
+      const n = Number(ppId);
+      if (Number.isFinite(n) && n > 0) seen.add(n);
+      else seen.add(String(ppId));
       catMatch = (catalogProviders || []).find((cp) => String(cp.id) === String(ppId)) || null;
-    } else if (plan?.provider_name) {
+    } else if (plan?.provider_name && !partnerDirect) {
       const nameLc = String(plan.provider_name).trim().toLowerCase();
       catMatch =
         (catalogProviders || []).find(

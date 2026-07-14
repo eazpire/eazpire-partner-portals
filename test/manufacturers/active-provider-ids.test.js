@@ -51,4 +51,13 @@ describe("resolveActivePrintProviderIds", () => {
     });
     expect([...ids]).toEqual(["ma-1"]);
   });
+
+  it("prefers opaque version ids over orphan Printify active_providers numerics", () => {
+    const ids = resolveActivePrintProviderIds({
+      active_providers: [{ print_provider_id: 93 }],
+      merged_providers: [{ type: "configured", print_provider_id: 93, is_enabled: true }],
+      versions: [{ external_provider_id: "ma-1" }],
+    });
+    expect([...ids]).toEqual(["ma-1"]);
+  });
 });

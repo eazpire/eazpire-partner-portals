@@ -73,6 +73,18 @@ function mergedRowPid(row) {
 export function resolveActivePrintProviderIds(data = {}) {
   const ids = new Set();
 
+  const versionIds = [];
+  for (const v of data.versions || []) {
+    const pid = normalizeProviderId(v.external_provider_id);
+    if (pid != null) versionIds.push(pid);
+  }
+  // Partner versions (Todify ma-1) win over orphan Printify numerics from name-match / active table.
+  const hasOpaqueVersion = versionIds.some((id) => typeof id === "string");
+  if (hasOpaqueVersion) {
+    for (const pid of versionIds) ids.add(pid);
+    return ids;
+  }
+
   for (const row of data.active_providers || []) {
     const pid = rowPrintProviderId(row);
     if (pid != null) ids.add(pid);
@@ -96,10 +108,7 @@ export function resolveActivePrintProviderIds(data = {}) {
   }
   if (ids.size) return ids;
 
-  for (const v of data.versions || []) {
-    const pid = normalizeProviderId(v.external_provider_id);
-    if (pid != null) ids.add(pid);
-  }
+  for (const pid of versionIds) ids.add(pid);
 
   return ids;
 }

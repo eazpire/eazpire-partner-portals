@@ -3,6 +3,7 @@ import { fetchVariantsBundle, saveVariants } from "../api.js";
 import { buildVariantMatrixHtml, collectVariantConfigFromDom, bindVariantMatrixEvents } from "../utils/variant-matrix.js";
 import { notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import { markEditorDirty } from "../editor-dirty.js";
+import { providerLabel } from "../editor-subnav.js";
 
 /** Stable JSON for variant-config dirty checks (ignores visibility footer state). */
 export function stableVariantConfigJson(root) {
@@ -27,9 +28,10 @@ export async function loadVariantsTab(ctx) {
   ctx.variantsData = data;
   const productData = data.product_data || { variants: data.variants_json || [] };
   const matrixHtml = buildVariantMatrixHtml(productData, data.variant_config, data.prices_json, pid);
+  const label = providerLabel(ctx, pid);
   return `
     <div class="ce-tab-panel ce-variants-panel">
-      <h3 class="ce-section-title">Variant config · provider ${escapeHtml(pid)}</h3>
+      <h3 class="ce-section-title">Variant config · ${escapeHtml(label)}</h3>
       <p class="ce-hint">Configure margins and branding per color. Sync variant data from Printify on the Templates tab.</p>
       ${matrixHtml}
     </div>`;

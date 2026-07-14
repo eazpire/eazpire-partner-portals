@@ -1071,7 +1071,9 @@ export async function saveVariants(env, productKey, printProviderId, body) {
   const db = env.MANUFACTURER_DB;
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
   const now = Date.now();
-  const pid = Number(printProviderId);
+  const { coerceVariantConfigProviderId } = await import("../constants.js");
+  const rawNumericPid = Number(printProviderId);
+  const pid = coerceVariantConfigProviderId(printProviderId);
   if (body.config != null) {
     if (!Number.isFinite(pid)) {
       return {
@@ -1111,26 +1113,49 @@ export async function saveVariants(env, productKey, printProviderId, body) {
     }
   }
   if (body.prices_json != null || body.variants_json != null) {
-    const profile = await queryFirst(
-      db,
-      `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
-      productKey,
-      Number.isFinite(pid) ? pid : -1
-    );
-    if (profile?.id) {
-      await db
-        .prepare(
-          `UPDATE eazpire_product_publish_profiles SET
-            prices_json = COALESCE(?, prices_json), variants_json = COALESCE(?, variants_json), updated_at = ?
-           WHERE id = ?`
-        )
-        .bind(
-          body.prices_json != null ? JSON.stringify(body.prices_json) : null,
-          body.variants_json != null ? JSON.stringify(body.variants_json) : null,
-          now,
-          profile.id
-        )
-        .run();
+    if (!Number.isFinite(rawNumericPid) || rawNumericPid <= 0) {
+      const anyProfile = await queryFirst(
+        db,
+        `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`,
+        productKey
+      );
+      if (anyProfile?.id) {
+        await db
+          .prepare(
+            `UPDATE eazpire_product_publish_profiles SET
+              prices_json = COALESCE(?, prices_json), variants_json = COALESCE(?, variants_json), updated_at = ?
+             WHERE id = ?`
+          )
+          .bind(
+            body.prices_json != null ? JSON.stringify(body.prices_json) : null,
+            body.variants_json != null ? JSON.stringify(body.variants_json) : null,
+            now,
+            anyProfile.id
+          )
+          .run();
+      }
+    } else {
+      const profile = await queryFirst(
+        db,
+        `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        rawNumericPid
+      );
+      if (profile?.id) {
+        await db
+          .prepare(
+            `UPDATE eazpire_product_publish_profiles SET
+              prices_json = COALESCE(?, prices_json), variants_json = COALESCE(?, variants_json), updated_at = ?
+             WHERE id = ?`
+          )
+          .bind(
+            body.prices_json != null ? JSON.stringify(body.prices_json) : null,
+            body.variants_json != null ? JSON.stringify(body.variants_json) : null,
+            now,
+            profile.id
+          )
+          .run();
+      }
     }
   }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, productKey);

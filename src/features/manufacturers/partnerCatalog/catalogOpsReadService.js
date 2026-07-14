@@ -121,6 +121,19 @@ function profileRowToEditor(row) {
 
 function patRowToVersion(pat, linkedEazVersion = null) {
   const ppId = pat.print_provider_id != null ? Number(pat.print_provider_id) : null;
+  const linkedExt = linkedEazVersion?.external_provider_id;
+  const linkedOpaque =
+    linkedExt != null &&
+    String(linkedExt).trim() !== "" &&
+    !(Number.isFinite(Number(linkedExt)) && String(Number(linkedExt)) === String(linkedExt).trim())
+      ? String(linkedExt).trim()
+      : null;
+  // Prefer opaque partner ids (Todify ma-1) from manufacturer link over PAT integer print_provider_id
+  // (name-match / shadow bugs can store a wrong Printify id like 93 on PAT).
+  const externalProviderId =
+    linkedOpaque ||
+    (Number.isFinite(ppId) && ppId > 0 ? String(ppId) : null) ||
+    (linkedExt != null ? String(linkedExt) : null);
   return {
     id: linkedEazVersion?.id || `pat-${pat.id}`,
     product_key: pat.product_key,
@@ -138,7 +151,7 @@ function patRowToVersion(pat, linkedEazVersion = null) {
     catalog_pat_id: pat.id,
     created_at: pat.created_at,
     updated_at: pat.updated_at,
-    external_provider_id: ppId != null ? String(ppId) : linkedEazVersion?.external_provider_id || null,
+    external_provider_id: externalProviderId,
     provider_name: linkedEazVersion?.provider_name || null,
     _ops_source: "catalog-db",
   };

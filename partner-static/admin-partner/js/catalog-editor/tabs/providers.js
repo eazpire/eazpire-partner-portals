@@ -81,12 +81,11 @@ function rowFromFulfillmentProvider(fp) {
 
 function buildProviderList(data) {
   const merged = Array.isArray(data.merged_providers) ? data.merged_providers : [];
-  if (merged.length) {
-    return merged.filter((p) => {
-      const id = providerId(p);
-      return id != null && id !== "" && !(typeof id === "number" && !Number.isFinite(id));
-    });
-  }
+  const filteredMerged = merged.filter((p) => {
+    const id = providerId(p);
+    return id != null && id !== "" && !(typeof id === "number" && !Number.isFinite(id));
+  });
+  if (filteredMerged.length) return filteredMerged;
 
   const fromBlueprint = (data.blueprint_providers || []).map(rowFromBlueprintProvider);
   if (fromBlueprint.length) return fromBlueprint;
