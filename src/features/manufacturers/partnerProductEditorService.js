@@ -14,8 +14,151 @@ import { listLocations } from "./manufacturerService.js";
 import { validatePrintArea } from "./printAreaValidation.js";
 import { writeAuditLog } from "./rbac.js";
 import { upsertEazpireProduct } from "./partnerCatalog/eazpireProductService.js";
+import {
+  buildTodifyCatalogVariantsFromPartner,
+  catalogPlaceholdersFromPartnerPrintAreas,
+  placeholdersByPositionFromPartnerPrintAreas,
+} from "./partnerCatalog/partnerCatalogPlaceholders.js";
 
 const MOCKUP_SETS = ["clean", "shop_preview", "calibration", "preview_images"];
+
+/**
+ * Push partner print areas into catalog-db publish profile (variants_json placeholders +
+ * catalog_placeholder_positions_json) and seed version placeholder config when empty.
+ * Safe to call on approve, re-approve, and after partner print-area save.
+ */
+export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, productId, productKey) {
+  const db = getManufacturerDb(env);
+  if (!db || !env?.CATALOG_DB || !productKey) return { ok: false, error: "unavailable" };
+
+  await ensureEditorColumns(db);
+  const [variants, printAreas, views] = await Promise.all([
+    listVariants(db, manufacturerId, productId),
+    listPrintAreas(db, manufacturerId, productId),
+    listViews(db, productId),
+  ]);
+
+  const placeholders = catalogPlaceholdersFromPartnerPrintAreas(printAreas, views);
+  if (!placeholders.length) return { ok: true, placeholder_count: 0, updated: false };
+
+  const catalogVariants = buildTodifyCatalogVariantsFromPartner({ variants, printAreas, views });
+  const prices = {};
+  catalogVariants.forEach((v) => {
+    prices[String(v.id)] = v.price;
+  });
+  const positionsJson = JSON.stringify(placeholders.map((p) => p.position));
+  const variantsJson = JSON.stringify(catalogVariants);
+  const pricesJson = JSON.stringify(prices);
+  const now = Date.now();
+
+  const prof = await env.CATALOG_DB.prepare(
+    `SELECT id, variants_json FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`
+  )
+    .bind(productKey)
+    .first();
+
+  let profileId = prof?.id ?? null;
+  if (profileId) {
+    try {
+      await env.CATALOG_DB.prepare(
+        `UPDATE product_publish_profiles SET
+           variants_json = ?, prices_json = ?,
+           catalog_placeholder_positions_json = ?, catalog_placeholder_positions_updated_at = ?,
+           source_system = COALESCE(NULLIF(source_system, ''), 'todify'),
+           source_product_id = COALESCE(source_product_id, ?),
+           updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(variantsJson, pricesJson, positionsJson, now, productId, now, profileId)
+        .run();
+    } catch (e) {
+      // catalog_placeholder_positions_* may be missing on older DBs
+      console.warn("[sync-partner-print-areas] profile update (positions):", e?.message || e);
+      await env.CATALOG_DB.prepare(
+        `UPDATE product_publish_profiles SET variants_json = ?, prices_json = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(variantsJson, pricesJson, now, profileId)
+        .run();
+    }
+  }
+
+  // Seed product_variant_print_areas dims (used for Provider tab Height×Width)
+  for (const ph of placeholders) {
+    const pos = String(ph.position || "").trim().toLowerCase();
+    if (!pos) continue;
+    const w = Number(ph.width);
+    const h = Number(ph.height);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) continue;
+    for (const v of catalogVariants) {
+      const vid = Number(v.id);
+      if (!Number.isFinite(vid)) continue;
+      try {
+        const existing = await env.CATALOG_DB.prepare(
+          `SELECT id FROM product_variant_print_areas
+           WHERE product_key = ? AND print_area_key = ? AND variant_id = ? LIMIT 1`
+        )
+          .bind(productKey, pos, vid)
+          .first();
+        if (existing?.id) {
+          await env.CATALOG_DB.prepare(
+            `UPDATE product_variant_print_areas
+             SET printify_print_area_width = ?, printify_print_area_height = ?, updated_at = ?
+             WHERE id = ?`
+          )
+            .bind(Math.round(w), Math.round(h), now, existing.id)
+            .run();
+        } else {
+          await env.CATALOG_DB.prepare(
+            `INSERT INTO product_variant_print_areas
+              (product_key, print_area_key, variant_id, variant_title,
+               printify_print_area_width, printify_print_area_height, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+            .bind(productKey, pos, vid, v.title || null, Math.round(w), Math.round(h), now, now)
+            .run();
+        }
+      } catch (e) {
+        console.warn("[sync-partner-print-areas] variant_print_areas:", e?.message || e);
+      }
+    }
+  }
+
+  // Seed version config placeholders when empty (manufacturer DB)
+  try {
+    const { listProductVersions, updateProductVersion } = await import(
+      "./partnerCatalog/eazpireProductVersionService.js"
+    );
+    const versions = await listProductVersions(db, productKey);
+    const byPos = placeholdersByPositionFromPartnerPrintAreas(printAreas);
+    for (const ver of versions) {
+      const cfg =
+        ver.product_version_config && typeof ver.product_version_config === "object"
+          ? { ...ver.product_version_config }
+          : {};
+      const existing = cfg.placeholders_by_position;
+      const hasSlots =
+        existing && typeof existing === "object" && Object.keys(existing).some((k) => {
+          const s = existing[k];
+          return s && (s.qr > 0 || s.logo > 0 || s.creator_design > 0 || s.additional_design > 0);
+        });
+      if (hasSlots) continue;
+      cfg.placeholders_by_position = { ...(existing || {}), ...byPos };
+      if (!Array.isArray(cfg.design_types)) cfg.design_types = [];
+      await updateProductVersion(db, ver.id, { product_version_config: cfg });
+    }
+  } catch (e) {
+    console.warn("[sync-partner-print-areas] version config:", e?.message || e);
+  }
+
+  return {
+    ok: true,
+    placeholder_count: placeholders.length,
+    positions: placeholders.map((p) => p.position),
+    profile_id: profileId,
+    updated: true,
+    variants_json: catalogVariants,
+  };
+}
 
 export function publicFileUrl(env, r2Key) {
   const key = String(r2Key || "").trim();
@@ -552,7 +695,7 @@ function serializePrintRectForStorage(a) {
   };
 }
 
-export async function savePartnerProductPrintAreas(db, manufacturerId, productId, areas) {
+export async function savePartnerProductPrintAreas(db, manufacturerId, productId, areas, env = null) {
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
   await ensureEditorColumns(db);
@@ -592,6 +735,13 @@ export async function savePartnerProductPrintAreas(db, manufacturerId, productId
         a.image_url || null
       )
       .run();
+  }
+  if (product.eazpire_product_key && env?.CATALOG_DB) {
+    try {
+      await syncPartnerPrintAreasIntoCatalog(env, manufacturerId, productId, product.eazpire_product_key);
+    } catch (e) {
+      console.warn("[save-print-areas] catalog sync:", e?.message || e);
+    }
   }
   return { ok: true, print_areas: (await listPrintAreas(db, manufacturerId, productId)).map(normalizeAreaForClient) };
 }
@@ -898,6 +1048,13 @@ export async function adminApprovePartnerProductToCatalog(
     visible_design_types: product.design_types || [],
   });
 
+  const [partnerVariants, partnerPrintAreas, partnerViews] = await Promise.all([
+    listVariants(db, manufacturerId, productId),
+    listPrintAreas(db, manufacturerId, productId),
+    listViews(db, productId),
+  ]);
+  const byPosConfig = placeholdersByPositionFromPartnerPrintAreas(partnerPrintAreas);
+
   // One version (V1) under partner fulfillment provider when available
   try {
     const { listFulfillmentProviders } = await import("./partnerCatalog/fulfillmentProviderService.js");
@@ -927,6 +1084,10 @@ export async function adminApprovePartnerProductToCatalog(
           manufacturer_product_id: productId,
           cost_currency: product.currency || "EUR",
         },
+        product_version_config: {
+          placeholders_by_position: byPosConfig,
+          design_types: Array.isArray(product.design_types) ? product.design_types : [],
+        },
       });
     }
   } catch (e) {
@@ -953,50 +1114,79 @@ export async function adminApprovePartnerProductToCatalog(
         .run();
     }
 
-    // Seed a minimal publish profile if none
+    // Seed / refresh publish profile with partner print-area placeholders (Printify-shaped)
+    const catalogVariants = buildTodifyCatalogVariantsFromPartner({
+      variants: partnerVariants,
+      printAreas: partnerPrintAreas,
+      views: partnerViews,
+    });
+    const prices = {};
+    catalogVariants.forEach((v) => {
+      prices[String(v.id)] = v.price;
+    });
+    const positionsArr = catalogPlaceholdersFromPartnerPrintAreas(partnerPrintAreas, partnerViews).map(
+      (p) => p.position
+    );
+
     const prof = await env.CATALOG_DB.prepare(
       `SELECT id FROM product_publish_profiles WHERE product_key = ? LIMIT 1`
     )
       .bind(productKey)
       .first();
+
     if (!prof) {
-      const variants = await listVariants(db, manufacturerId, productId);
-      const variantsJson = JSON.stringify(
-        variants.map((v, idx) => ({
-          id: 900000 + idx,
-          title: `${v.color} / ${v.size}`,
-          options: { color: v.color, size: v.size },
-          price: v.base_cost_cents,
-          is_enabled: true,
-          sku: v.sku,
-        }))
-      );
-      const prices = {};
-      variants.forEach((v, idx) => {
-        prices[String(900000 + idx)] = v.base_cost_cents;
-      });
-      const insertResult = await env.CATALOG_DB.prepare(
-        `INSERT INTO product_publish_profiles
-          (product_key, title, source_system, source_product_id, standard_product_display_name,
-           variants_json, prices_json, product_features, care_instructions, size_table_html, gpsr_html,
-           is_active, collected_at, updated_at)
-         VALUES (?, ?, 'todify', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-      )
-        .bind(
-          productKey,
-          title,
-          productId,
-          title,
-          variantsJson,
-          JSON.stringify(prices),
-          meta.product_features || null,
-          meta.care_instructions || null,
-          meta.size_table_html || null,
-          meta.gpsr_html || null,
-          now,
-          now
+      let insertResult;
+      try {
+        insertResult = await env.CATALOG_DB.prepare(
+          `INSERT INTO product_publish_profiles
+            (product_key, title, source_system, source_product_id, standard_product_display_name,
+             variants_json, prices_json, product_features, care_instructions, size_table_html, gpsr_html,
+             catalog_placeholder_positions_json, catalog_placeholder_positions_updated_at,
+             is_active, collected_at, updated_at)
+           VALUES (?, ?, 'todify', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
         )
-        .run();
+          .bind(
+            productKey,
+            title,
+            productId,
+            title,
+            JSON.stringify(catalogVariants),
+            JSON.stringify(prices),
+            meta.product_features || null,
+            meta.care_instructions || null,
+            meta.size_table_html || null,
+            meta.gpsr_html || null,
+            JSON.stringify(positionsArr),
+            now,
+            now,
+            now
+          )
+          .run();
+      } catch (e) {
+        console.warn("[approve-to-catalog] profile insert with positions:", e?.message || e);
+        insertResult = await env.CATALOG_DB.prepare(
+          `INSERT INTO product_publish_profiles
+            (product_key, title, source_system, source_product_id, standard_product_display_name,
+             variants_json, prices_json, product_features, care_instructions, size_table_html, gpsr_html,
+             is_active, collected_at, updated_at)
+           VALUES (?, ?, 'todify', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        )
+          .bind(
+            productKey,
+            title,
+            productId,
+            title,
+            JSON.stringify(catalogVariants),
+            JSON.stringify(prices),
+            meta.product_features || null,
+            meta.care_instructions || null,
+            meta.size_table_html || null,
+            meta.gpsr_html || null,
+            now,
+            now
+          )
+          .run();
+      }
 
       const profileId = insertResult?.meta?.last_row_id;
       if (profileId) {
@@ -1021,6 +1211,13 @@ export async function adminApprovePartnerProductToCatalog(
           console.warn("[approve-to-catalog] publish map:", e?.message);
         }
       }
+    }
+
+    // Always refresh placeholders on approve (covers re-approve / already-existing profiles)
+    try {
+      await syncPartnerPrintAreasIntoCatalog(env, manufacturerId, productId, productKey);
+    } catch (e) {
+      console.warn("[approve-to-catalog] print-area sync:", e?.message || e);
     }
   }
 

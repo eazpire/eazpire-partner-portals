@@ -174,6 +174,7 @@ const ADMIN_OPS = new Set([
   "admin-manufacturer-product-review",
   "admin-manufacturer-product-editor-bundle",
   "admin-manufacturer-product-approve-to-catalog",
+  "admin-sync-partner-print-areas-to-catalog",
   "admin-test-order-create",
   "admin-manufacturer-orders-board",
   "admin-certification-review",
@@ -456,6 +457,62 @@ export async function handleManufacturerRouter(request, env) {
       });
       if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
       return json(result, 200, cors);
+    }
+    if (op === "admin-sync-partner-print-areas-to-catalog" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { syncPartnerPrintAreasIntoCatalog, findManufacturerProductByCatalogKey } = await import(
+        "./partnerProductEditorService.js"
+      );
+      const keys = [];
+      if (body.product_key) keys.push(String(body.product_key).trim());
+      if (Array.isArray(body.product_keys)) {
+        for (const k of body.product_keys) {
+          const t = String(k || "").trim();
+          if (t) keys.push(t);
+        }
+      }
+      if (!keys.length && env.CATALOG_DB) {
+        const rows = await env.CATALOG_DB.prepare(
+          `SELECT DISTINCT product_key FROM product_publish_profiles
+           WHERE LOWER(COALESCE(source_system, '')) IN ('todify', 'direct_shopify')
+             AND product_key IS NOT NULL AND TRIM(product_key) != ''`
+        )
+          .all()
+          .catch(() => ({ results: [] }));
+        for (const r of rows?.results || []) keys.push(String(r.product_key));
+      }
+      if (!keys.length && db) {
+        const rows = await db
+          .prepare(
+            `SELECT eazpire_product_key FROM manufacturer_products
+             WHERE eazpire_product_key IS NOT NULL AND TRIM(eazpire_product_key) != ''
+               AND status = 'approved'`
+          )
+          .all()
+          .catch(() => ({ results: [] }));
+        for (const r of rows?.results || []) keys.push(String(r.eazpire_product_key));
+      }
+      const unique = [...new Set(keys.filter(Boolean))];
+      const results = [];
+      for (const productKey of unique) {
+        const link = await findManufacturerProductByCatalogKey(env, productKey);
+        if (!link) {
+          results.push({ product_key: productKey, ok: false, error: "manufacturer_product_not_found" });
+          continue;
+        }
+        try {
+          const sync = await syncPartnerPrintAreasIntoCatalog(
+            env,
+            link.manufacturer_id,
+            link.product_id,
+            productKey
+          );
+          results.push({ product_key: productKey, ...sync });
+        } catch (e) {
+          results.push({ product_key: productKey, ok: false, error: String(e?.message || e) });
+        }
+      }
+      return json({ ok: true, synced: results.length, results }, 200, cors);
     }
     if (op === "admin-test-order-create" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
@@ -1278,7 +1335,7 @@ export async function handleManufacturerRouter(request, env) {
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
     const { savePartnerProductPrintAreas } = await import("./partnerProductEditorService.js");
-    const result = await savePartnerProductPrintAreas(db, mfgId, body.product_id, body.print_areas);
+    const result = await savePartnerProductPrintAreas(db, mfgId, body.product_id, body.print_areas, env);
     return json(result, result.ok ? 200 : 404, cors);
   }
 

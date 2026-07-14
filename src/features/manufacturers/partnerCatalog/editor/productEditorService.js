@@ -49,6 +49,12 @@ import { getCatalogDriftV2ForProduct } from "../shadow/catalogDriftV2.js";
 import { mirrorEazpireProductToCatalogDb } from "../mirrorToCatalogDb.js";
 import { enhanceProvidersBundle, resolvePrintifyBlueprintId, validateTemplateDraftProductId } from "./partnerEditorExtensions.js";
 import { fetchBlueprintProviderVariants } from "../../adapters/printify/printifyCatalogClient.js";
+import {
+  attachPlaceholdersToCatalogVariants,
+  buildTodifyCatalogVariantsFromPartner,
+  catalogPlaceholdersFromPartnerPrintAreas,
+  catalogVariantsHavePlaceholderPositions,
+} from "../partnerCatalogPlaceholders.js";
 
 async function queryAll(db, sql, ...binds) {
   try {
@@ -244,8 +250,13 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
   const db = env.MANUFACTURER_DB;
   if (!db && !shouldUseCatalogOps(env)) return { ok: false, error: "manufacturer_db_unavailable" };
 
+  const pidRaw = printProviderId;
   const pid = Number(printProviderId);
-  if (!Number.isFinite(pid)) return { ok: false, error: "print_provider_id_required" };
+  // Accept numeric Printify ids; partner opaque ids (e.g. ma-1) still allowed as string for matching
+  if (!Number.isFinite(pid) && !String(pidRaw || "").trim()) {
+    return { ok: false, error: "print_provider_id_required" };
+  }
+  const pidKey = Number.isFinite(pid) ? pid : String(pidRaw).trim();
 
   let product;
   let printifyBlueprintId;
@@ -262,12 +273,24 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
 
   let variants = [];
   let variants_available = false;
-  if (printifyBlueprintId) {
+  let variants_source = null;
+  if (printifyBlueprintId && Number.isFinite(pid)) {
     const variantsRes = await fetchBlueprintProviderVariants(env, printifyBlueprintId, pid);
     if (variantsRes.ok) {
       const raw = variantsRes.variants;
       variants = Array.isArray(raw) ? raw : Array.isArray(raw?.variants) ? raw.variants : [];
       variants_available = variants.length > 0;
+      if (variants_available) variants_source = "printify_catalog";
+    }
+  }
+
+  // Todify / partner: no Printify placeholders — use stored profile or manufacturer_print_areas
+  if (!catalogVariantsHavePlaceholderPositions(variants)) {
+    const partner = await loadPartnerCatalogVariantsForDetail(env, productKey);
+    if (partner?.variants?.length && catalogVariantsHavePlaceholderPositions(partner.variants)) {
+      variants = partner.variants;
+      variants_available = true;
+      variants_source = partner.source || "partner_print_areas";
     }
   }
 
@@ -286,20 +309,145 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
   const allVersions = shouldUseCatalogOps(env)
     ? await listCatalogOpsProductVersions(env, productKey)
     : await listProductVersions(db, productKey);
-  const versions = allVersions
-    .filter((v) => String(v.external_provider_id) === String(pid))
+
+  const matchProvider = (extId) => {
+    const e = String(extId ?? "");
+    if (!e) return false;
+    if (e === String(pidKey)) return true;
+    if (Number.isFinite(pid) && e === String(pid)) return true;
+    // Legacy: opaque partner ids like "ma-1" were coerced to trailing digits in the UI (→ 1)
+    if (Number.isFinite(pid) && e.includes("-")) {
+      const m = e.match(/(\d+)$/);
+      if (m && Number(m[1]) === pid) return true;
+    }
+    return false;
+  };
+
+  let versions = allVersions
+    .filter((v) => matchProvider(v.external_provider_id))
     .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+
+  // Partner products: if provider id coercion hid the match, still surface versions
+  if (!versions.length && !printifyBlueprintId && allVersions.length) {
+    versions = allVersions.slice().sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+  }
 
   return {
     ok: true,
     product_key: productKey,
-    print_provider_id: pid,
+    print_provider_id: pidKey,
     blueprint_id: printifyBlueprintId || product.source_blueprint_id,
     variants,
     variants_available,
+    variants_source,
     variant_print_areas: variantPrintAreas,
     versions,
   };
+}
+
+/**
+ * Load Printify-shaped catalog variants for a partner/Todify product.
+ * Prefer profile variants_json (with placeholders); else rebuild from manufacturer_print_areas.
+ */
+async function loadPartnerCatalogVariantsForDetail(env, productKey) {
+  const key = String(productKey || "").trim();
+  if (!key) return null;
+
+  // 1) Publish profile variants_json (already shaped)
+  if (env.CATALOG_DB) {
+    try {
+      const row = await env.CATALOG_DB.prepare(
+        `SELECT id, variants_json, source_system, source_product_id
+         FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`
+      )
+        .bind(key)
+        .first();
+      const stored = parseJson(row?.variants_json, null);
+      if (Array.isArray(stored) && catalogVariantsHavePlaceholderPositions(stored)) {
+        return { variants: stored, source: "publish_profile_variants_json", profile_id: row.id };
+      }
+
+      // 2) Rebuild from partner print areas and lazily persist
+      const mfgDb = env.MANUFACTURER_DB;
+      if (mfgDb) {
+        let manufacturerId = null;
+        let productId = row?.source_product_id || null;
+        const linked = await mfgDb
+          .prepare(
+            `SELECT manufacturer_id, id FROM manufacturer_products WHERE eazpire_product_key = ? LIMIT 1`
+          )
+          .bind(key)
+          .first();
+        if (linked?.id) {
+          manufacturerId = linked.manufacturer_id;
+          productId = linked.id;
+        } else if (productId) {
+          const byId = await mfgDb
+            .prepare(`SELECT manufacturer_id, id FROM manufacturer_products WHERE id = ? LIMIT 1`)
+            .bind(productId)
+            .first();
+          if (byId?.id) {
+            manufacturerId = byId.manufacturer_id;
+            productId = byId.id;
+          }
+        }
+
+        if (manufacturerId && productId) {
+          const { listVariants, listPrintAreas } = await import("../../catalogService.js");
+          const { listViews, syncPartnerPrintAreasIntoCatalog } = await import(
+            "../../partnerProductEditorService.js"
+          );
+          const [variants, printAreas, views] = await Promise.all([
+            listVariants(mfgDb, manufacturerId, productId),
+            listPrintAreas(mfgDb, manufacturerId, productId),
+            listViews(mfgDb, productId),
+          ]);
+          const placeholders = catalogPlaceholdersFromPartnerPrintAreas(printAreas, views);
+          if (placeholders.length) {
+            const catalogVariants =
+              Array.isArray(stored) && stored.length
+                ? attachPlaceholdersToCatalogVariants(stored, placeholders)
+                : buildTodifyCatalogVariantsFromPartner({ variants, printAreas, views });
+            try {
+              await syncPartnerPrintAreasIntoCatalog(env, manufacturerId, productId, key);
+            } catch (e) {
+              console.warn("[provider-catalog-detail] lazy partner print-area sync:", e?.message || e);
+            }
+            return { variants: catalogVariants, source: "partner_print_areas", profile_id: row?.id };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[provider-catalog-detail] partner fallback:", e?.message || e);
+    }
+  }
+
+  // 3) Manufacturer DB only (no catalog profile yet)
+  if (env.MANUFACTURER_DB) {
+    try {
+      const linked = await env.MANUFACTURER_DB.prepare(
+        `SELECT manufacturer_id, id FROM manufacturer_products WHERE eazpire_product_key = ? LIMIT 1`
+      )
+        .bind(key)
+        .first();
+      if (!linked?.id) return null;
+      const { listVariants, listPrintAreas } = await import("../../catalogService.js");
+      const { listViews } = await import("../../partnerProductEditorService.js");
+      const [variants, printAreas, views] = await Promise.all([
+        listVariants(env.MANUFACTURER_DB, linked.manufacturer_id, linked.id),
+        listPrintAreas(env.MANUFACTURER_DB, linked.manufacturer_id, linked.id),
+        listViews(env.MANUFACTURER_DB, linked.id),
+      ]);
+      const catalogVariants = buildTodifyCatalogVariantsFromPartner({ variants, printAreas, views });
+      if (catalogVariantsHavePlaceholderPositions(catalogVariants)) {
+        return { variants: catalogVariants, source: "partner_print_areas" };
+      }
+    } catch (e) {
+      console.warn("[provider-catalog-detail] mfg fallback:", e?.message || e);
+    }
+  }
+
+  return null;
 }
 
 async function fulfillmentProviderIdForPrintProvider(db, printProviderId) {
