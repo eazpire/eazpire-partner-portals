@@ -252,6 +252,11 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-test-printify-preview",
   "admin-eazpire-test-printify-placement-update",
   "admin-eazpire-test-printify-design-dimensions",
+  "admin-eazpire-test-todify-create",
+  "admin-eazpire-test-todify-list",
+  "admin-eazpire-test-todify-delete",
+  "admin-eazpire-test-todify-preview",
+  "admin-eazpire-test-todify-publish",
   "admin-creations-list",
   "admin-creations-stats",
   "admin-creations-printify-products",
@@ -1164,6 +1169,26 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-eazpire-test-printify-create" && request.method === "POST") {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");
       return tp.handlePartnerTestPrintifyCreate(request, env);
+    }
+    if (op === "admin-eazpire-test-todify-create" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestTodifyProducts.js");
+      return tp.handlePartnerTestTodifyCreate(request, env);
+    }
+    if (op === "admin-eazpire-test-todify-list" && (request.method === "GET" || request.method === "POST")) {
+      const tp = await import("./partnerCatalog/editor/partnerTestTodifyProducts.js");
+      return tp.handlePartnerTestTodifyList(request, env);
+    }
+    if (op === "admin-eazpire-test-todify-delete" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestTodifyProducts.js");
+      return tp.handlePartnerTestTodifyDelete(request, env);
+    }
+    if (op === "admin-eazpire-test-todify-preview" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestTodifyProducts.js");
+      return tp.handlePartnerTestTodifyPreview(request, env);
+    }
+    if (op === "admin-eazpire-test-todify-publish" && request.method === "POST") {
+      const tp = await import("./partnerCatalog/editor/partnerTestTodifyProducts.js");
+      return tp.handlePartnerTestTodifyPublish(request, env);
     }
     if (op === "admin-eazpire-test-printify-creations" && (request.method === "GET" || request.method === "POST")) {
       const tp = await import("./partnerCatalog/editor/partnerTestPrintifyProducts.js");

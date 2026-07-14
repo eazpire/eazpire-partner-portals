@@ -310,6 +310,38 @@ export async function createTestPrintifyProduct(body) {
   return partnerFetch("admin-eazpire-test-printify-create", { method: "POST", body });
 }
 
+export async function createTestTodifyProduct(body) {
+  return partnerFetch("admin-eazpire-test-todify-create", { method: "POST", body });
+}
+
+export async function fetchTestTodifyProducts(productKey, { status } = {}) {
+  return partnerFetch("admin-eazpire-test-todify-list", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      status: status || undefined,
+    },
+  });
+}
+
+export async function deleteTestTodifyProducts(ids) {
+  return partnerFetch("admin-eazpire-test-todify-delete", {
+    method: "POST",
+    body: { ids: Array.isArray(ids) ? ids : [ids] },
+  });
+}
+
+export async function fetchTestTodifyProductPreview(id, body = {}) {
+  return partnerFetch("admin-eazpire-test-todify-preview", {
+    method: "POST",
+    body: { id: Number(id), ...body },
+  });
+}
+
+export async function publishTestTodifyProduct(body) {
+  return partnerFetch("admin-eazpire-test-todify-publish", { method: "POST", body });
+}
+
 export async function fetchTestPrintifyCreations({ design_type, cursor, limit } = {}) {
   return partnerFetch("admin-eazpire-test-printify-creations", {
     method: "POST",

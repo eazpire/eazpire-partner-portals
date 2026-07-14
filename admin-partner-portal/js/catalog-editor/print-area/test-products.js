@@ -1,10 +1,14 @@
-import { escapeHtml } from "/partner/shared/js/partner-api.js";
+﻿import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { confirmAction } from "/partner/shared/js/partner-shell.js";
 import {
   createTestPrintifyProduct,
+  createTestTodifyProduct,
   deleteTestPrintifyProducts,
+  deleteTestTodifyProducts,
   fetchTestPrintifyProducts,
+  fetchTestTodifyProducts,
   fetchTestPrintifyProductPreview,
+  fetchTestTodifyProductPreview,
   fetchTestPrintifyCreations,
   fetchTestPrintifyDesignDimensions,
   updateTestPrintifyProductPlacement,
@@ -13,7 +17,9 @@ import {
   printAreaVersionSlug,
   resolvePrintAreaTemplateId,
   resolvePrintAreaVersion,
+  isPartnerOrTodifyProduct,
 } from "./helpers.js";
+import { editorProductTitle } from "../editor-product-title.js";
 import {
   getSessionDesignPlacementForApi,
   placeSessionTestDesign,
@@ -31,6 +37,30 @@ import {
 
 /** Design rows from the picker grid (id → API row with width/height). */
 const designPickerRowsById = new Map();
+
+function isPartnerCtx(ctx, data) {
+  return isPartnerOrTodifyProduct(ctx, data || ctx?.printAreaData);
+}
+
+async function apiCreateTestProduct(ctx, body, data) {
+  if (isPartnerCtx(ctx, data)) return createTestTodifyProduct(body);
+  return createTestPrintifyProduct(body);
+}
+
+async function apiFetchTestProducts(ctx, productKey, printProviderId) {
+  if (isPartnerCtx(ctx)) return fetchTestTodifyProducts(productKey);
+  return fetchTestPrintifyProducts(productKey, printProviderId);
+}
+
+async function apiDeleteTestProducts(ctx, ids) {
+  if (isPartnerCtx(ctx)) return deleteTestTodifyProducts(ids);
+  return deleteTestPrintifyProducts(ids);
+}
+
+async function apiFetchTestProductPreview(ctx, rowId, opts = {}) {
+  if (isPartnerCtx(ctx)) return fetchTestTodifyProductPreview(rowId, opts);
+  return fetchTestPrintifyProductPreview(rowId, opts);
+}
 
 /** Ensure true design pixel size (API/R2 original — not preview thumbnail). */
 async function resolveDesignRowDimensions(row) {
@@ -60,9 +90,10 @@ let sidebarItems = [];
 let sidebarCallbacksRef = null;
 
 function renderSidebarTestProductCard(row, activeId) {
-  const title = row.printify?.title || row.printify_title || `Test #${row.id}`;
+  const title = row.printify?.title || row.printify_title || row.title || `Test #${row.id}`;
   const isActive = Number(row.id) === Number(activeId);
-  const thumb = row.printify_product_id
+  const hasThumb = row.printify_product_id || row.design_preview_url || row.shopify_product_id;
+  const thumb = hasThumb
     ? `<div class="ce-pa-tp-sidebar-card__thumb ce-pa-tp-card__thumb--loading" data-thumb-id="${row.id}"></div>`
     : `<div class="ce-pa-tp-sidebar-card__thumb ce-pa-tp-card__thumb--empty">—</div>`;
   return `
@@ -132,7 +163,7 @@ async function activateTestProduct(ctx, st, row, callbacks = {}) {
   invalidateSessionTestProductPreviewCache(st);
   st.useSessionTestProductMock = true;
   try {
-    const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
+    const preview = await apiFetchTestProductPreview(ctx, rowId, { view_key: st.activeView });
     if (preview?.ok) {
       applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
       const designId = Number(preview.design_id ?? row.design_id);
@@ -166,7 +197,7 @@ export async function syncActiveTestProductViewSession(ctx, st, data, viewKey, c
   }
 
   try {
-    const preview = await fetchTestPrintifyProductPreview(rowId, {
+    const preview = await apiFetchTestProductPreview(ctx, rowId, {
       view_key: normViewKey(viewKey || st.activeView),
     });
     if (!preview?.ok) return null;
@@ -194,7 +225,7 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
   if (empty) empty.hidden = true;
 
   try {
-    const res = await fetchTestPrintifyProducts(ctx.productKey, ctx.selectedPrintProviderId);
+    const res = await apiFetchTestProducts(ctx, ctx.productKey, ctx.selectedPrintProviderId);
     if (!res?.ok) throw new Error(res?.error || "load_failed");
     const items = res.items || [];
     sidebarItems = items;
@@ -235,7 +266,7 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
           confirmClass: "btn-danger",
           onConfirm: async () => {
             try {
-              const delRes = await deleteTestPrintifyProducts([id]);
+              const delRes = await apiDeleteTestProducts(ctx, [id]);
               if (!delRes?.ok && !(Number(delRes?.deleted_count) > 0)) {
                 throw new Error(delRes?.error || delRes?.message || "Delete failed");
               }
@@ -256,7 +287,12 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
     for (const row of items) {
       const thumbEl = grid.querySelector(`[data-thumb-id="${row.id}"]`);
       if (!thumbEl) continue;
-      fetchTestPrintifyProductPreview(row.id)
+      if (row.design_preview_url && !row.printify_product_id) {
+        thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
+        thumbEl.innerHTML = `<img src="${escapeHtml(row.design_preview_url)}" alt="" loading="lazy" />`;
+        continue;
+      }
+      apiFetchTestProductPreview(ctx, row.id)
         .then((data) => {
           if (!data?.ok || !data.thumbnail_url) {
             thumbEl.classList.remove("ce-pa-tp-card__thumb--loading");
@@ -296,15 +332,26 @@ function normViewKey(viewKey) {
     .replace(/-/g, "_");
 }
 
-function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = false, designId, brandAssetsOnly = false } = {}) {
+function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = false, designId, brandAssetsOnly = false, title } = {}) {
   const version = resolvePrintAreaVersion(ctx, data);
-  const pid = Number(ctx.selectedPrintProviderId);
-  const profile = (ctx.bundle?.publish_profiles || []).find((p) => Number(p.print_provider_id) === pid);
+  const rawPid = ctx.selectedPrintProviderId;
+  const pidNum = Number(rawPid);
+  const pid =
+    Number.isFinite(pidNum) && String(pidNum) === String(rawPid).trim()
+      ? pidNum
+      : rawPid != null && String(rawPid).trim() !== ""
+        ? String(rawPid).trim()
+        : null;
+  const profile = (ctx.bundle?.publish_profiles || []).find((p) => {
+    const pp = p?.print_provider_id;
+    if (pid == null) return false;
+    return String(pp) === String(pid) || Number(pp) === Number(pid);
+  });
   const regions = ctx.bundle?.product?.regions;
   const regionCode = Array.isArray(regions) && regions.length ? regions[0] : "EU";
   const body = {
     product_key: ctx.productKey,
-    print_provider_id: pid,
+    print_provider_id: pid ?? undefined,
     print_area_template_id: resolvePrintAreaTemplateId(ctx, data),
     version_label: printAreaVersionSlug(version),
     design_type: st.activeDesignType || "classic",
@@ -312,6 +359,8 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = f
     region_code: regionCode,
     placement_modes: { ...(st.publishLogicByPh || {}) },
   };
+  const titleTrim = String(title || "").trim();
+  if (titleTrim) body.title = titleTrim;
   if (brandAssetsOnly) {
     body.brand_assets_only = true;
     return body;
@@ -502,31 +551,43 @@ export async function applySessionDesignToPrintify(ctx, st, data, { onStatus, vi
 export async function createTestProductFromPrintArea(
   ctx,
   st,
-  { onStatus, randomDesign = true, designId, keepSession = false, data, brandAssetsOnly = false } = {}
+  { onStatus, randomDesign = true, designId, keepSession = false, data, brandAssetsOnly = false, title } = {}
 ) {
-  if (!ctx?.productKey || !ctx?.selectedPrintProviderId) {
+  const partner = isPartnerCtx(ctx, data);
+  if (!ctx?.productKey) {
+    throw new Error("Select a product first.");
+  }
+  if (!partner && !ctx?.selectedPrintProviderId) {
     throw new Error("Select a print provider first.");
   }
+  if (partner && brandAssetsOnly) {
+    throw new Error("Brand-assets-only create is Printify-only. Choose Automatic or a design.");
+  }
+
   onStatus?.("Saving print area settings…");
   const { savePrintAreaTab } = await import("../tabs/print-area.js");
   await savePrintAreaTab(ctx);
 
   const placementData = data ?? ctx?.printAreaData;
-  const body = buildTestContext(ctx, st, placementData, { randomDesign, designId, brandAssetsOnly });
+  const body = buildTestContext(ctx, st, placementData, { randomDesign, designId, brandAssetsOnly, title });
   if (brandAssetsOnly) {
     onStatus?.("Creating test product (brand assets only)…");
   } else {
     onStatus?.(
       randomDesign
-        ? "Creating test product with random design…"
+        ? "Creating test product with automatic design…"
         : `Creating test product with design #${body.design_id}…`
     );
   }
-  const res = await createTestPrintifyProduct(body);
+  const res = await apiCreateTestProduct(ctx, body, placementData);
   if (!res?.ok) {
     throw new Error(res?.message || res?.error || "Create failed");
   }
-  onStatus?.(`Created: ${res.printify_product_id || "OK"}`);
+  onStatus?.(
+    partner
+      ? `Created: ${res.title || res.id || "OK"} (Available — publish from Admin → Products → Todify)`
+      : `Created: ${res.printify_product_id || "OK"}`
+  );
   if (brandAssetsOnly && res.id) {
     st.activeTestProductRowId = Number(res.id);
     st.useSessionTestProductMock = true;
@@ -539,6 +600,9 @@ export async function createTestProductFromPrintArea(
     st.sessionTestDesign.testProductCreating = false;
     markSessionDesignSaved(st);
     persistSessionDesignToMap(st);
+  } else if (res.id) {
+    st.activeTestProductRowId = Number(res.id);
+    st.useSessionTestProductMock = !!partner;
   }
   return res;
 }
@@ -594,7 +658,13 @@ function setModalOpen(el, open) {
   }
 }
 
-function ensurePlaceDesignChooserModal() {
+function readCreateTitleFromModal() {
+  const el = document.getElementById("ce-pa-tp-create-chooser");
+  const input = el?.querySelector("[data-ce-pa-create-title]");
+  return String(input?.value || "").trim();
+}
+
+function ensureCreateChooserModal() {
   let el = document.getElementById("ce-pa-tp-create-chooser");
   if (el) return el;
   el = document.createElement("div");
@@ -606,23 +676,28 @@ function ensurePlaceDesignChooserModal() {
     <div class="ce-pa-tp-modal__backdrop" data-ce-pa-create-close></div>
     <div class="ce-pa-tp-modal__dialog ce-pa-tp-create-chooser__dialog" role="dialog" aria-modal="true">
       <header class="ce-pa-tp-modal__header">
-        <h2 class="ce-pa-tp-modal__title">Add design</h2>
+        <h2 class="ce-pa-tp-modal__title">Create Test Product</h2>
         <button type="button" class="btn btn-ghost btn-xs ce-pa-tp-modal__close" data-ce-pa-create-close aria-label="Close">×</button>
       </header>
       <div class="ce-pa-tp-modal__body ce-pa-tp-create-chooser__body">
+        <div class="ce-pa-tp-create-title-field" data-ce-pa-create-title-wrap hidden>
+          <label class="ce-hint" for="ce-pa-tp-create-title">Product name</label>
+          <input type="text" class="input" id="ce-pa-tp-create-title" data-ce-pa-create-title autocomplete="off" />
+          <p class="ce-hint">Default is the partner catalog name. You can override it.</p>
+        </div>
         <p class="ce-hint">How should we pick the design?</p>
         <div class="ce-pa-tp-create-chooser__actions">
-          <button type="button" class="btn btn-primary" data-ce-pa-create-random>Random</button>
+          <button type="button" class="btn btn-primary" data-ce-pa-create-random>Automatic</button>
           <button type="button" class="btn btn-secondary" data-ce-pa-create-choose>Choose design</button>
         </div>
       </div>
     </div>`;
   document.body.appendChild(el);
   el.querySelectorAll("[data-ce-pa-create-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closePlaceDesignChooser());
+    btn.addEventListener("click", () => closeCreateChooserModal());
   });
   el.querySelector("[data-ce-pa-create-random]")?.addEventListener("click", () => {
-    void runPlaceRandom();
+    void runCreateWithRandom();
   });
   el.querySelector("[data-ce-pa-create-choose]")?.addEventListener("click", () => {
     openDesignPickerModal();
@@ -673,12 +748,12 @@ function ensureDesignPickerModal() {
       design_title: btn.querySelector(".ce-pa-tp-design-card__title")?.textContent || "",
       preview_url: btn.querySelector("img")?.getAttribute("src") || "",
     };
-    void runPlaceDesign(id, row);
+    void runCreateWithDesign(id, row);
   });
   return el;
 }
 
-function closePlaceDesignChooser() {
+function closeCreateChooserModal() {
   createChooserCallbacks = null;
   setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
 }
@@ -687,90 +762,96 @@ function closeDesignPickerModal() {
   designsCursor = null;
   designsLoading = false;
   setModalOpen(document.getElementById("ce-pa-tp-design-picker"), false);
-  setModalOpen(document.getElementById("ce-pa-tp-create-chooser"), false);
-  closePlaceDesignChooser();
 }
 
-function requireActiveTestProduct(st) {
-  const rowId = getActiveTestProductRowId(st);
-  if (!rowId) throw new Error("Select or create a test product first.");
-  return rowId;
-}
+async function afterCreateSuccess(res, callbacks) {
+  const { ctx, st, onStatus, onMockReady, onDesignPlaced, onDesignDockRefresh, root, data } = callbacks || {};
+  if (!res?.id || !st) return;
+  st.activeTestProductRowId = Number(res.id);
+  st.useSessionTestProductMock = true;
 
-async function runPlaceRandom() {
-  const callbacks = createChooserCallbacks || {};
-  const { ctx, st, onStatus } = callbacks;
-  if (!ctx || !st) return;
-  closeDesignPickerModal();
-  closePlaceDesignChooser();
-
-  try {
-    requireActiveTestProduct(st);
-    onStatus?.("Picking random design…");
-    const res = await fetchTestPrintifyCreations({
-      design_type: st.activeDesignType || "classic",
-      limit: 40,
-    });
-    if (!res?.ok) throw new Error(res?.error || "load_failed");
-    const items = res.items || [];
-    if (!items.length) throw new Error("No designs found for this design type.");
-    const pick = items[Math.floor(Math.random() * items.length)];
-    const designId = Number(pick?.id);
-    if (!designId) throw new Error("No design found for this design type.");
-    createChooserCallbacks = callbacks;
-    await runPlaceDesign(designId, pick);
-  } catch (e) {
-    onStatus?.(e?.message || "Place failed");
-  }
-}
-
-async function runPlaceDesign(designId, designRow) {
-  const { ctx, st, onStatus, onDesignPlaced, onMockReady, onDesignDockRefresh, data, brandAssets, root } =
-    createChooserCallbacks || {};
-  if (!ctx || !st || !designId) return;
-  const row = await resolveDesignRowDimensions(designRow || { id: designId });
-  closeDesignPickerModal();
-  closePlaceDesignChooser();
-
-  try {
-    const rowId = requireActiveTestProduct(st);
-    if (!st.sessionTestDesign?.testProductRowId) {
-      st.sessionTestDesign = st.sessionTestDesign || {};
-      st.sessionTestDesign.testProductRowId = rowId;
-    }
-
-    const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
-      onPlaced: () => {
-        onDesignPlaced?.();
-      },
-    });
-    if (!placed) {
-      onStatus?.("Could not place design on print area.");
-      return;
-    }
-
-    onStatus?.(`Applying design #${designId}…`);
-    const applyRes = await applySessionDesignToPrintify(
-      { ...ctx, printAreaData: data },
-      st,
-      data,
-      { onStatus, viewKey: st.activeView }
-    );
-    if (applyRes) {
-      onMockReady?.(applyRes);
-    } else {
-      const preview = await fetchTestPrintifyProductPreview(rowId, { view_key: st.activeView });
+  if (isPartnerCtx(ctx, data)) {
+    onMockReady?.(res);
+  } else {
+    try {
+      const preview = await fetchTestPrintifyProductPreview(res.id, { view_key: st.activeView });
       if (preview?.ok) {
         applySessionTestProductMockToState(st, preview, st.activeView, { cacheBust: true });
         onMockReady?.(preview);
       }
+    } catch {
+      /* optional */
     }
-    if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || createChooserCallbacks);
-    onDesignPlaced?.();
-    onDesignDockRefresh?.();
-    onStatus?.("Design applied — adjust placement and click ✓ to save.");
+  }
+  if (root) await loadSidebarTestProductsGrid(ctx, root, sidebarCallbacksRef || callbacks);
+  onDesignPlaced?.();
+  onDesignDockRefresh?.();
+  onStatus?.(
+    isPartnerCtx(ctx, data)
+      ? "Test product ready (Available). Publish from Admin → Products → Todify."
+      : "Test product ready — adjust design, then click ✓ to apply changes."
+  );
+}
+
+async function runCreateWithRandom() {
+  const callbacks = createChooserCallbacks || {};
+  const { ctx, st, onStatus } = callbacks;
+  if (!ctx || !st) return;
+  const title = readCreateTitleFromModal();
+  closeDesignPickerModal();
+  closeCreateChooserModal();
+  try {
+    onStatus?.("Working…");
+    const res = await createTestProductFromPrintArea(ctx, st, {
+      onStatus,
+      randomDesign: true,
+      keepSession: false,
+      data: callbacks.data,
+      title,
+    });
+    createChooserCallbacks = callbacks;
+    await afterCreateSuccess(res, callbacks);
   } catch (e) {
-    onStatus?.(e?.message || "Apply failed");
+    onStatus?.(e?.message || "Create failed");
+  }
+}
+
+async function runCreateWithDesign(designId, designRow) {
+  const callbacks = createChooserCallbacks || {};
+  const { ctx, st, onStatus, onDesignPlaced, data, brandAssets } = callbacks;
+  if (!ctx || !st || !designId) return;
+  const title = readCreateTitleFromModal();
+  const row = await resolveDesignRowDimensions(designRow || { id: designId });
+  closeDesignPickerModal();
+  closeCreateChooserModal();
+
+  const placed = placeSessionTestDesign(ctx, st, data, brandAssets, row, {
+    onPlaced: () => {
+      onDesignPlaced?.();
+    },
+  });
+  if (!placed) {
+    onStatus?.("Could not place design on print area.");
+    return;
+  }
+
+  onStatus?.(`Design #${designId} placed — creating test product…`);
+  if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = true;
+
+  try {
+    const res = await createTestProductFromPrintArea(ctx, st, {
+      onStatus,
+      randomDesign: false,
+      designId,
+      keepSession: true,
+      data,
+      title,
+    });
+    createChooserCallbacks = callbacks;
+    await afterCreateSuccess(res, callbacks);
+  } catch (e) {
+    if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
+    onStatus?.(e?.message || "Create failed");
   }
 }
 
@@ -841,12 +922,11 @@ function openDesignPickerModal() {
   void loadDesignGrid(false);
 }
 
-export function openPlaceDesignChooser(ctx, st, callbacks = {}) {
-  if (!getActiveTestProductRowId(st)) {
-    callbacks.onStatus?.("Select or create a test product first.");
-    return;
-  }
+export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
+  const data = callbacks.data || ctx?.printAreaData || null;
+  const partner = isPartnerCtx(ctx, data);
   createChooserCallbacks = {
+    mode: "create",
     ctx,
     st,
     root: callbacks.root || ctx?.printAreaRoot || null,
@@ -854,19 +934,46 @@ export function openPlaceDesignChooser(ctx, st, callbacks = {}) {
     onDesignPlaced: callbacks.onDesignPlaced || callbacks.onSessionDesignPlaced || null,
     onMockReady: callbacks.onMockReady || null,
     onDesignDockRefresh: callbacks.onDesignDockRefresh || null,
-    data: callbacks.data || ctx?.printAreaData || null,
+    data,
     brandAssets: callbacks.brandAssets || null,
   };
-  const el = ensurePlaceDesignChooserModal();
+  const el = ensureCreateChooserModal();
+  const titleWrap = el.querySelector("[data-ce-pa-create-title-wrap]");
+  const titleInput = el.querySelector("[data-ce-pa-create-title]");
+  if (titleWrap && titleInput) {
+    if (partner) {
+      titleWrap.hidden = false;
+      titleInput.value =
+        String(callbacks.defaultTitle || "").trim() ||
+        editorProductTitle(ctx?.bundle, ctx?.productKey) ||
+        ctx?.productKey ||
+        "";
+    } else {
+      titleWrap.hidden = true;
+      titleInput.value = "";
+    }
+  }
   setModalOpen(el, true);
 }
 
-/** @deprecated — use openPlaceDesignChooser */
-export function openCreateTestProductChooser(ctx, st, callbacks = {}) {
-  openPlaceDesignChooser(ctx, st, callbacks);
+export function openPlaceDesignChooser(ctx, st, callbacks = {}) {
+  openCreateTestProductChooser(ctx, st, callbacks);
+}
+
+export async function createTestProductWithSessionDesign(ctx, st, opts = {}) {
+  openCreateTestProductChooser(ctx, st, opts);
 }
 
 export async function removeDesignFromActiveView(ctx, st, callbacks = {}) {
+  if (isPartnerCtx(ctx)) {
+    const vk = normViewKey(st.activeView || "front");
+    removeSessionDesignForView(st, vk);
+    if (!st.sessionTestDesign?.designId) clearSessionTestDesign(st);
+    callbacks.onDesignPlaced?.();
+    callbacks.onDesignDockRefresh?.();
+    callbacks.onStatus?.("Design removed from view.");
+    return null;
+  }
   const rowId = getActiveTestProductRowId(st);
   if (!rowId) throw new Error("No test product selected.");
   const vk = normViewKey(st.activeView || "front");
@@ -896,33 +1003,18 @@ export async function removeDesignFromActiveView(ctx, st, callbacks = {}) {
   return res;
 }
 
-export async function createTestProductWithSessionDesign(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root } = {}) {
-  if (!getActiveTestProductRowId(st)) {
-    openPlaceDesignChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root });
-    return;
-  }
-
-  const sd = st.sessionTestDesign;
-  if (sd?.testProductRowId && isSessionDesignDirty(st)) {
-    try {
-      onStatus?.("Applying pending changes…");
-      await applySessionDesignToPrintify(ctx, st, data, { onStatus });
-      onMockReady?.(sd.previewCache);
-      onDesignDockRefresh?.();
-    } catch (e) {
-      onStatus?.(e?.message || "Apply failed");
-    }
-    return;
-  }
-
-  openPlaceDesignChooser(ctx, st, { onStatus, data, brandAssets, onDesignPlaced, onMockReady, onDesignDockRefresh, root });
-}
-
 export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
   const { onStatus, onMockReady, onDesignPlaced, onDirtyChange, data } = callbacks;
   const placementData = data || ctx?.printAreaData;
   return {
     async onSave() {
+      if (isPartnerCtx(ctx, placementData)) {
+        markSessionDesignSaved(st);
+        onDirtyChange?.(false);
+        onStatus?.("Design placement saved locally (Todify draft).");
+        onDesignPlaced?.();
+        return;
+      }
       try {
         const res = await applySessionDesignToPrintify(ctx, st, placementData, {
           onStatus,
@@ -941,3 +1033,4 @@ export function bindSessionTestProductFlow(ctx, st, callbacks = {}) {
     onDirtyChange,
   };
 }
+

@@ -18,7 +18,8 @@ import {
 } from "./main-source.js";
 import { renderUploadGrids, renderMockCarousels, bindImageGrids } from "./image-grid.js";
 import { renderBrandAssetsSection, bindBrandAssetsSection, refreshBrandAssetsSection } from "./brand-assets.js";
-import { loadSidebarTestProductsGrid, createBrandOnlyTestProduct } from "./test-products.js";
+import { loadSidebarTestProductsGrid, openCreateTestProductChooser } from "./test-products.js";
+import { editorProductTitle } from "../editor-product-title.js";
 
 const PATTERN_SLIDERS = [
   { key: "spacingH", label: "Spacing H", min: 0, max: 200, step: 1 },
@@ -436,10 +437,11 @@ export function bindPrintAreaSidebar(root, st, data, callbacks = {}) {
     root.querySelector("#ce-pa-create-test-product")?.blur();
     const brandAssets =
       callbacks.globalBrandAssetsRef?.current || { qr: {}, logo: {} };
-    void createBrandOnlyTestProduct(ctx, st, {
+    openCreateTestProductChooser(ctx, st, {
       root,
       data,
       brandAssets,
+      defaultTitle: editorProductTitle(ctx.bundle, ctx.productKey),
       onStatus: (msg) => {
         if (statusEl) {
           statusEl.hidden = false;
