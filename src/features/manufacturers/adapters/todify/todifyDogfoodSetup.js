@@ -17,16 +17,41 @@ async function ensureTodifyOwnerUser(db, ownerEmail) {
   const email = String(ownerEmail || "").trim().toLowerCase();
   if (!email || !email.includes("@")) return null;
 
-  const existing = await db
+  const existingOnTodify = await db
     .prepare(
-      `SELECT id, email FROM manufacturer_users
+      `SELECT id, email, manufacturer_id FROM manufacturer_users
        WHERE manufacturer_id = ? AND lower(email) = ? LIMIT 1`
     )
     .bind(TODIFY_PARTNER_ID, email)
     .first();
-  if (existing?.id) return { id: existing.id, email: existing.email, created: false };
+  if (existingOnTodify?.id) {
+    return { id: existingOnTodify.id, email: existingOnTodify.email, created: false, reassigned: false };
+  }
 
+  // Email is unique globally — reuse and point at Todify for dogfood.
+  const existingAny = await db
+    .prepare(`SELECT id, email, manufacturer_id FROM manufacturer_users WHERE lower(email) = ? LIMIT 1`)
+    .bind(email)
+    .first();
   const now = Date.now();
+  if (existingAny?.id) {
+    await db
+      .prepare(
+        `UPDATE manufacturer_users
+         SET manufacturer_id = ?, role = 'owner', status = 'active', updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(TODIFY_PARTNER_ID, now, existingAny.id)
+      .run();
+    return {
+      id: existingAny.id,
+      email: existingAny.email || email,
+      created: false,
+      reassigned: true,
+      previous_manufacturer_id: existingAny.manufacturer_id || null,
+    };
+  }
+
   const userId = newId("mfu");
   await db
     .prepare(
@@ -35,7 +60,7 @@ async function ensureTodifyOwnerUser(db, ownerEmail) {
     )
     .bind(userId, TODIFY_PARTNER_ID, userId, email, now, now)
     .run();
-  return { id: userId, email, created: true };
+  return { id: userId, email, created: true, reassigned: false };
 }
 
 /**
