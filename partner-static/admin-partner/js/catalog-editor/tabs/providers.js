@@ -121,10 +121,16 @@ function initProvidersState(ctx, data) {
     } catch {
       countryCodes = [];
     }
+    let normalized = normalizeCountryCodeList(countryCodes);
+    const available = normalizeCountryCodeList(data.available_partner_countries || []);
+    if (data.markets_mode === "partner" && available.length) {
+      if (!normalized.length) normalized = [...available];
+      else normalized = normalized.filter((cc) => available.includes(cc));
+    }
     ctx.providersTabState.marketEdits.set(pp, {
       plan_id: plan.id,
       provider_name: plan.provider_name || "",
-      country_codes: normalizeCountryCodeList(countryCodes),
+      country_codes: normalized,
       country_of_origin: String(plan.country_of_origin || "").trim().toUpperCase(),
     });
   }
@@ -267,6 +273,14 @@ function allLocalVersions(state) {
   return out;
 }
 
+function partnerAvailableCountries(state) {
+  return normalizeCountryCodeList(state?.bundle?.available_partner_countries || []);
+}
+
+function marketsMode(state) {
+  return state?.bundle?.markets_mode === "partner" ? "partner" : "full";
+}
+
 function marketStateForProvider(state, pid) {
   const key = Number(pid);
   if (!state.marketEdits.has(key)) {
@@ -277,10 +291,17 @@ function marketStateForProvider(state, pid) {
     } catch {
       countryCodes = [];
     }
+    let normalized = normalizeCountryCodeList(countryCodes);
+    const available = partnerAvailableCountries(state);
+    // Partner/todify: only partner set is choosable; seed from partner when plan empty
+    if (marketsMode(state) === "partner" && available.length) {
+      if (!normalized.length) normalized = [...available];
+      else normalized = normalized.filter((cc) => available.includes(cc));
+    }
     state.marketEdits.set(key, {
       plan_id: plan?.id || null,
       provider_name: plan?.provider_name || "",
-      country_codes: normalizeCountryCodeList(countryCodes),
+      country_codes: normalized,
       country_of_origin: String(plan?.country_of_origin || "").trim().toUpperCase(),
     });
   }
@@ -290,13 +311,23 @@ function marketStateForProvider(state, pid) {
 function renderProviderMarketsSection(state, pid) {
   const market = marketStateForProvider(state, pid);
   const pickerId = `ce-prov-market-${pid}`;
+  const partnerMode = marketsMode(state) === "partner";
+  const allowed = partnerMode ? partnerAvailableCountries(state) : null;
+  const hint = partnerMode
+    ? "Only countries the partner selected for this product. Enable the ones that should publish."
+    : "Choose countries where this provider can publish. Catalog regions are derived automatically.";
   return `
     <section class="ce-prov-markets">
       <h4 class="ce-prov-section-title">Markets</h4>
-      <p class="ce-hint">Choose countries where this provider can publish. Catalog regions are derived automatically.</p>
+      <p class="ce-hint">${escapeHtml(hint)}</p>
       ${renderMarketCountryPicker({
         idPrefix: pickerId,
         selected: market.country_codes,
+        allowedCountries: allowed,
+        defaultCollapsed: true,
+        emptyMessage: partnerMode
+          ? "Partner has not selected shipping countries yet. Ask them to set countries in the Partner product Details tab."
+          : undefined,
       })}
       <div class="field ce-prov-origin-field">
         <label for="${escapeHtml(pickerId)}-origin">Country of origin</label>
@@ -886,11 +917,16 @@ export function collectProvidersTabState(ctx) {
   for (const pid of state.activeIds) {
     const market = state.marketEdits.get(Number(pid));
     if (!market?.plan_id) continue;
-    const regionCodes = regionCodesFromCountryCodes(market.country_codes || []);
+    let countryCodes = market.country_codes || [];
+    if (marketsMode(state) === "partner") {
+      const available = new Set(partnerAvailableCountries(state));
+      if (available.size) countryCodes = countryCodes.filter((cc) => available.has(cc));
+    }
+    const regionCodes = regionCodesFromCountryCodes(countryCodes);
     publishPlanUpdates.push({
       id: market.plan_id,
       provider_name: market.provider_name,
-      country_codes: market.country_codes || [],
+      country_codes: countryCodes,
       region_codes: regionCodes,
       country_of_origin: market.country_of_origin || null,
     });
