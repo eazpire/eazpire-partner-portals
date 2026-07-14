@@ -59,16 +59,15 @@ function productCatalogStatusFallback(ctx) {
 }
 
 export function getVisibilityForVersion(ctx, version) {
-  const productFallback = productCatalogStatusFallback(ctx);
-  if (!version) return productFallback;
+  const productStatus = productCatalogStatusFallback(ctx);
+  if (!version) return productStatus;
   const map = ensureVisibilityState(ctx);
   const key = versionKey(version);
   if (map.has(key)) return map.get(key);
-  // Partner approve sets product.catalog_status=preview but may omit version config —
-  // fall back to product so list Preview and footer VISIBILITY stay aligned.
-  const fromConfig = readCatalogStatusFromConfig(version.product_version_config, productFallback);
-  map.set(key, fromConfig);
-  return fromConfig;
+  // Shared SoT with Catalog Studio: product.catalog_status wins over stale version config
+  // (approve sets product=preview; an older version config can still say offline).
+  map.set(key, productStatus);
+  return productStatus;
 }
 
 export function setVisibilityForVersion(ctx, version, status) {
@@ -80,6 +79,10 @@ export function setVisibilityForVersion(ctx, version, status) {
     version.product_version_config = {};
   }
   version.product_version_config.catalog_status = normalized;
+  // Keep in-memory product aligned so list/footer stay in sync before reload.
+  if (ctx?.bundle?.product) {
+    ctx.bundle.product.catalog_status = normalized;
+  }
 }
 
 export function renderCatalogEditorTriSwitch(status = "offline") {
@@ -175,10 +178,14 @@ export function bindCatalogEditorTriSwitch(ctx, onChange) {
 export function initVisibilityFromBundle(ctx) {
   const map = ensureVisibilityState(ctx);
   map.clear();
-  const productFallback = productCatalogStatusFallback(ctx);
+  // Product-level catalog_status is the shared source of truth with Catalog Studio.
+  const productStatus = productCatalogStatusFallback(ctx);
   for (const v of ctx.bundle?.versions || []) {
-    const status = readCatalogStatusFromConfig(v.product_version_config, productFallback);
-    map.set(versionKey(v), status);
+    map.set(versionKey(v), productStatus);
+    if (!v.product_version_config || typeof v.product_version_config !== "object") {
+      v.product_version_config = {};
+    }
+    v.product_version_config.catalog_status = productStatus;
   }
 }
 

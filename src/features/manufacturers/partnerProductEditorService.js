@@ -1315,24 +1315,68 @@ export async function adminApprovePartnerProductToCatalog(
       const profileId = insertResult?.meta?.last_row_id;
       if (profileId) {
         const providerName = mfg?.name || "Todify";
+        let countryOfOrigin = null;
+        try {
+          const locId = product.provider_location_id ? String(product.provider_location_id) : "";
+          let locCountry = null;
+          if (locId) {
+            const locRow = await db
+              .prepare(`SELECT country FROM manufacturer_locations WHERE id = ? LIMIT 1`)
+              .bind(locId)
+              .first();
+            locCountry = locRow?.country || null;
+          }
+          if (!locCountry) {
+            const mfgCountry = await db
+              .prepare(`SELECT country FROM manufacturers WHERE id = ? LIMIT 1`)
+              .bind(manufacturerId)
+              .first();
+            locCountry = mfgCountry?.country || null;
+          }
+          const raw = String(locCountry || "").trim().toUpperCase();
+          if (/^[A-Z]{2}$/.test(raw)) countryOfOrigin = raw;
+          else if (/^MOROCCO$/i.test(String(locCountry || ""))) countryOfOrigin = "MA";
+        } catch {
+          /* optional */
+        }
         try {
           await env.CATALOG_DB.prepare(
             `INSERT INTO product_publish_map
-              (product_key, region_codes_json, provider_name, country_codes_json, priority, publish_profile_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 100, ?, ?, ?)`
+              (product_key, region_codes_json, provider_name, country_codes_json, country_of_origin, priority, publish_profile_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 100, ?, ?, ?)`
           )
             .bind(
               productKey,
               JSON.stringify(regions),
               providerName,
               JSON.stringify(countryCodes),
+              countryOfOrigin,
               profileId,
               now,
               now
             )
             .run();
         } catch (e) {
-          console.warn("[approve-to-catalog] publish map:", e?.message);
+          // Older schemas may lack country_of_origin — fall back without it
+          try {
+            await env.CATALOG_DB.prepare(
+              `INSERT INTO product_publish_map
+                (product_key, region_codes_json, provider_name, country_codes_json, priority, publish_profile_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 100, ?, ?, ?)`
+            )
+              .bind(
+                productKey,
+                JSON.stringify(regions),
+                providerName,
+                JSON.stringify(countryCodes),
+                profileId,
+                now,
+                now
+              )
+              .run();
+          } catch (e2) {
+            console.warn("[approve-to-catalog] publish map:", e2?.message || e?.message);
+          }
         }
       }
     }

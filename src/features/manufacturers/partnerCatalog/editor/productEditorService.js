@@ -84,7 +84,10 @@ async function queryFirst(db, sql, ...binds) {
 
 export async function getProductEditorBundle(env, productKey) {
   if (shouldUseCatalogOps(env)) {
-    return getCatalogOpsEditorBundle(env, productKey);
+    const ops = await getCatalogOpsEditorBundle(env, productKey);
+    if (ops?.ok) return ops;
+    // Partner/Todify products may appear in Catalog Studio via manufacturer union
+    // before a complete product_catalog row exists — fall through to manufacturer master.
   }
   const db = env.MANUFACTURER_DB;
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };

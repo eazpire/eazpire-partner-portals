@@ -47,6 +47,7 @@ import {
   buildPrintProviderCatalogMap,
   enrichBlueprintProviderWithCatalog,
   enrichProviderRowWithCatalog,
+  countryToRegion,
 } from "./providerBundleService.js";
 
 async function queryAll(db, sql, ...binds) {
@@ -290,6 +291,21 @@ async function enhanceProvidersBundleFromCatalog(env, productKey) {
       row.print_provider_id = opaque;
       row.external_provider_id = opaque;
       if (fromFp?.name) row.name = fromFp.name;
+      // Prefer partner fulfillment location (Anbieter Standort) for region/COO.
+      const loc = fromFp?.location && typeof fromFp.location === "object" ? fromFp.location : null;
+      if (loc) {
+        row.locationDetail = loc;
+        const cc = String(loc.country || loc.country_code || loc.countryCode || "").trim();
+        if (cc) {
+          row.locationLabel = loc.city ? `${cc} / ${loc.city}` : cc;
+          row.region = countryToRegion(cc);
+        }
+        // Prefill empty country_of_origin on the linked publish plan for Admin Markets.
+        if (row.dbPlan && !String(row.dbPlan.country_of_origin || "").trim()) {
+          const iso = /^[A-Za-z]{2}$/.test(cc) ? cc.toUpperCase() : String(cc).toUpperCase() === "MOROCCO" ? "MA" : "";
+          if (iso) row.dbPlan.country_of_origin = iso;
+        }
+      }
       row.is_enabled = true;
       row.type = "configured";
     }

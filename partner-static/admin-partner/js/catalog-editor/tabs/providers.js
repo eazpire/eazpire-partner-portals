@@ -127,8 +127,18 @@ function initProvidersState(ctx, data) {
   };
 
   for (const plan of data.publish_plans || []) {
-    const pp = Number(plan?.profile?.print_provider_id ?? plan?.print_provider_id);
-    if (!Number.isFinite(pp)) continue;
+    const rawPid = plan?.profile?.print_provider_id ?? plan?.print_provider_id;
+    const ppNum = Number(rawPid);
+    const pid =
+      Number.isFinite(ppNum) && ppNum > 0 && String(ppNum) === String(rawPid).trim()
+        ? ppNum
+        : String(rawPid || "").trim() ||
+          // Todify plans often omit print_provider_id — use first opaque merged provider
+          (ctx.providersTabState.merged || [])
+            .map((p) => providerId(p))
+            .find((id) => id != null && id !== "" && !(typeof id === "number" && !Number.isFinite(id))) ||
+          null;
+    if (pid == null || pid === "") continue;
     let countryCodes = [];
     try {
       countryCodes = JSON.parse(plan.country_codes_json || "[]");
@@ -141,11 +151,11 @@ function initProvidersState(ctx, data) {
       if (!normalized.length) normalized = [...available];
       else normalized = normalized.filter((cc) => available.includes(cc));
     }
-    ctx.providersTabState.marketEdits.set(pp, {
+    ctx.providersTabState.marketEdits.set(marketKey(pid), {
       plan_id: plan.id,
       provider_name: plan.provider_name || "",
       country_codes: normalized,
-      country_of_origin: String(plan.country_of_origin || "").trim().toUpperCase(),
+      country_of_origin: deriveCountryOfOriginFromProvider(ctx.providersTabState, pid, plan),
     });
   }
 
@@ -170,7 +180,11 @@ function versionsForProvider(state, pid) {
 }
 
 function isProviderActive(state, pid) {
-  return state.activeIds.has(Number(pid));
+  const key = marketKey(pid);
+  if (state.activeIds.has(key)) return true;
+  // Legacy numeric Set membership
+  const n = Number(pid);
+  return Number.isFinite(n) && state.activeIds.has(n);
 }
 
 function filteredProviders(state) {
@@ -295,10 +309,77 @@ function marketsMode(state) {
   return state?.bundle?.markets_mode === "partner" ? "partner" : "full";
 }
 
+/** Normalize Map key for market edits — keep opaque partner ids as string (not Number("ma-1") → NaN). */
+function marketKey(pid) {
+  const n = Number(pid);
+  if (Number.isFinite(n) && n > 0 && String(n) === String(pid).trim()) return n;
+  return String(pid ?? "").trim();
+}
+
+const ORIGIN_NAME_TO_ISO = {
+  MOROCCO: "MA",
+  GERMANY: "DE",
+  FRANCE: "FR",
+  SPAIN: "ES",
+  ITALY: "IT",
+  "UNITED STATES": "US",
+  USA: "US",
+  US: "US",
+  "UNITED KINGDOM": "GB",
+  UK: "GB",
+  GB: "GB",
+};
+
+function normalizeOriginCode(value) {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  const upper = raw.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) return upper;
+  if (ORIGIN_NAME_TO_ISO[upper]) return ORIGIN_NAME_TO_ISO[upper];
+  const token = upper.split(/[/,\-|]/)[0].trim();
+  if (/^[A-Z]{2}$/.test(token)) return token;
+  return ORIGIN_NAME_TO_ISO[token] || "";
+}
+
+/** Country of origin from Anbieter Standort / fulfillment location when plan field is empty. */
+function deriveCountryOfOriginFromProvider(state, pid, plan) {
+  const fromPlan = normalizeOriginCode(plan?.country_of_origin);
+  if (fromPlan) return fromPlan;
+
+  const row =
+    (state.merged || []).find((p) => String(providerId(p)) === String(pid)) ||
+    (state.bundle?.providers || []).find(
+      (fp) =>
+        String(fp.external_provider_id || "") === String(pid) ||
+        String(fp.print_provider_id || "") === String(pid)
+    ) ||
+    null;
+
+  const loc = row?.locationDetail || row?.location || row?.catalogData?.location || null;
+  if (loc && typeof loc === "object") {
+    const fromLoc = normalizeOriginCode(loc.country || loc.country_code || loc.countryCode);
+    if (fromLoc) return fromLoc;
+  }
+  const fromLabel = normalizeOriginCode(row?.locationLabel || plan?.provider_location || "");
+  if (fromLabel) return fromLabel;
+
+  // Fulfillment providers on the editor bundle (Todify location_json)
+  for (const fp of state.bundle?.providers || []) {
+    const ext = String(fp.external_provider_id || "").trim();
+    if (ext && ext === String(pid)) {
+      const fpLoc = fp.location && typeof fp.location === "object" ? fp.location : null;
+      const cc = normalizeOriginCode(fpLoc?.country || fpLoc?.country_code || fpLoc?.countryCode);
+      if (cc) return cc;
+    }
+  }
+  return "";
+}
+
 function marketStateForProvider(state, pid) {
-  const key = Number(pid);
+  const key = marketKey(pid);
   if (!state.marketEdits.has(key)) {
-    const plan = publishPlanForProvider(state.bundle, key);
+    const plan = publishPlanForProvider(state.bundle, pid);
     let countryCodes = [];
     try {
       countryCodes = JSON.parse(plan?.country_codes_json || "[]");
@@ -316,7 +397,7 @@ function marketStateForProvider(state, pid) {
       plan_id: plan?.id || null,
       provider_name: plan?.provider_name || "",
       country_codes: normalized,
-      country_of_origin: String(plan?.country_of_origin || "").trim().toUpperCase(),
+      country_of_origin: deriveCountryOfOriginFromProvider(state, pid, plan),
     });
   }
   return state.marketEdits.get(key);
@@ -532,7 +613,7 @@ function syncMarketsFromDom(ctx, root) {
   if (originEl) {
     market.country_of_origin = String(originEl.value || "").trim().toUpperCase().slice(0, 2);
   }
-  state.marketEdits.set(Number(pid), market);
+  state.marketEdits.set(marketKey(pid), market);
 }
 
 /** Sync in-memory provider tab state from DOM before save/close dirty check. */
@@ -929,7 +1010,7 @@ export function collectProvidersTabState(ctx) {
 
   const publishPlanUpdates = [];
   for (const pid of state.activeIds) {
-    const market = state.marketEdits.get(Number(pid));
+    const market = state.marketEdits.get(marketKey(pid));
     if (!market?.plan_id) continue;
     let countryCodes = market.country_codes || [];
     if (marketsMode(state) === "partner") {

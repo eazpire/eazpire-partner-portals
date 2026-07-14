@@ -25,11 +25,27 @@ export function publishProfileForProvider(bundle, printProviderId) {
 }
 
 export function publishPlanForProvider(bundle, printProviderId) {
-  const pid = Number(printProviderId);
-  return (
-    (bundle?.publish_plans || []).find((r) => {
+  const raw = printProviderId == null ? "" : String(printProviderId).trim();
+  const pidNum = Number(raw);
+  const plans = bundle?.publish_plans || [];
+  if (Number.isFinite(pidNum) && String(pidNum) === raw) {
+    const byNumeric = plans.find((r) => {
       const pp = Number(r?.profile?.print_provider_id ?? r?.print_provider_id);
-      return pp === pid;
-    }) || null
-  );
+      return pp === pidNum;
+    });
+    if (byNumeric) return byNumeric;
+  }
+  // Opaque partner ids (Todify ma-1) or plans seeded without print_provider_id:
+  // match external id on profile / plan, else first enabled plan for this product.
+  const byOpaque = plans.find((r) => {
+    const ext = String(
+      r?.profile?.print_provider_id ?? r?.print_provider_id ?? r?.external_provider_id ?? ""
+    ).trim();
+    return ext && ext === raw;
+  });
+  if (byOpaque) return byOpaque;
+  if (raw && !Number.isFinite(pidNum)) {
+    return plans.find((r) => r?.is_enabled !== 0 && r?.is_enabled !== false) || plans[0] || null;
+  }
+  return null;
 }

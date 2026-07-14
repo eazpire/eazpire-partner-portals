@@ -14,6 +14,7 @@ import {
   catalogStatusToIsActive,
   isActiveToCatalogStatus,
   coerceVariantConfigProviderId,
+  CATALOG_STATUS_TO_IS_ACTIVE,
 } from "./constants.js";
 import { getEazpireProduct } from "./eazpireProductService.js";
 import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } from "./eazpireProductVersionService.js";
@@ -27,6 +28,8 @@ import {
   enrichPrintAreaBundleFromPartner,
   mockupDefaultsFromPartnerPrintAreas,
 } from "./partnerCatalogEditorEnrichment.js";
+
+const VALID_CATALOG_STATUSES = new Set(Object.keys(CATALOG_STATUS_TO_IS_ACTIVE));
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -74,7 +77,12 @@ export function enrichMockupDefaultsRows(rows, env) {
 
 function catalogRowToProduct(row, link = {}) {
   if (!row) return null;
-  const status = isActiveToCatalogStatus(row.is_active);
+  // Shared SoT with Catalog Studio: prefer eazpire_products.catalog_status when linked.
+  // product_catalog.is_active can drift (offline) while manufacturer still has preview.
+  const mfgStatus = String(link.catalog_status || "").toLowerCase();
+  const status = VALID_CATALOG_STATUSES.has(mfgStatus)
+    ? mfgStatus
+    : isActiveToCatalogStatus(row.is_active);
   return {
     product_key: row.product_key,
     manufacturer_id: link.manufacturer_id || null,
@@ -82,7 +90,7 @@ function catalogRowToProduct(row, link = {}) {
     title: row.title,
     regions: parseJson(row.regions_json, []),
     catalog_status: status,
-    is_active: Number(row.is_active),
+    is_active: catalogStatusToIsActive(status),
     visible_design_types: parseJson(row.visible_design_types_json, null),
     catalog_category_group: row.catalog_category_group ?? null,
     catalog_category_leaf: row.catalog_category_leaf ?? null,
@@ -168,6 +176,7 @@ async function resolveProductLink(env, productKey) {
       manufacturer_name: row.manufacturer_name,
       blueprint_title: row.blueprint_title,
       blueprint_category: row.blueprint_category,
+      catalog_status: row.catalog_status || null,
     };
   }
   try {
@@ -269,7 +278,7 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
     return p;
   });
 
-  const versions = await listCatalogOpsProductVersions(env, productKey);
+  let versions = await listCatalogOpsProductVersions(env, productKey);
 
   let providers = [];
   if (base.product.manufacturer_id && env.MANUFACTURER_DB) {
@@ -291,6 +300,20 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
     ...base.product,
     source_system: sourceSystem || base.product?.source_system || null,
   };
+
+  // Align version configs with product-level catalog_status (Catalog Studio SoT).
+  // Stale version config "offline" was causing the editor footer to disagree with the list badge.
+  const productStatus = String(product.catalog_status || "").toLowerCase();
+  if (VALID_CATALOG_STATUSES.has(productStatus)) {
+    versions = versions.map((v) => {
+      const cfg =
+        v.product_version_config && typeof v.product_version_config === "object"
+          ? { ...v.product_version_config }
+          : {};
+      cfg.catalog_status = productStatus;
+      return { ...v, product_version_config: cfg };
+    });
+  }
 
   return {
     ok: true,
