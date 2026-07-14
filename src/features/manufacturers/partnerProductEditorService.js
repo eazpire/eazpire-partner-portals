@@ -15,10 +15,6 @@ import { writeAuditLog } from "./rbac.js";
 import { upsertEazpireProduct } from "./partnerCatalog/eazpireProductService.js";
 
 const MOCKUP_SETS = ["clean", "shop_preview", "calibration", "preview_images"];
-const DEFAULT_VIEWS = [
-  { view_key: "front", label: "Front", sort_order: 0, printable: 1 },
-  { view_key: "back", label: "Back", sort_order: 1, printable: 1 },
-];
 
 export function publicFileUrl(env, r2Key) {
   const key = String(r2Key || "").trim();
@@ -166,21 +162,8 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
 
-  let views = await listViews(db, productId);
-  if (!views.length) {
-    const now = Date.now();
-    for (const v of DEFAULT_VIEWS) {
-      await db
-        .prepare(
-          `INSERT OR IGNORE INTO manufacturer_product_views
-            (id, manufacturer_product_id, view_key, label, sort_order, printable, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(newId("mpv"), productId, v.view_key, v.label, v.sort_order, v.printable, now, now)
-        .run();
-    }
-    views = await listViews(db, productId);
-  }
+  // Do not auto-seed Front/Back — partners add views on Variants; Mockups stay empty until then.
+  const views = await listViews(db, productId);
 
   const [variants, printAreas, mockups] = await Promise.all([
     listVariants(db, manufacturerId, productId),

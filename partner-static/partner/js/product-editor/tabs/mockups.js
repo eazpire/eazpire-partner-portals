@@ -22,34 +22,16 @@ function slotsMap(mockups) {
   return map;
 }
 
-function resolveColors(ctx, section) {
+/** Colors for View×Color grids — only from Variants (no invented "Default"). */
+function resolveColors(ctx) {
   const fromLocal = [...(ctx.localColors || [])];
   const fromBundle = [...(ctx.bundle?.colors || [])];
-  const fromSlots = (ctx.localMockups || ctx.bundle?.mockups || [])
-    .filter((m) => (m.mockup_set || "clean") === section)
-    .map((m) => String(m.color_key || "").trim())
-    .filter(Boolean);
-  const merged = [...new Set([...fromLocal, ...fromBundle, ...fromSlots].filter(Boolean))];
-  return merged.length ? merged : ["Default"];
+  return [...new Set([...fromLocal, ...fromBundle].filter(Boolean))];
 }
 
-function resolveViews(ctx, section) {
-  const base = [...(ctx.localViews || ctx.bundle?.views || [])];
-  const byKey = new Map(base.map((v) => [v.view_key, v]));
-  for (const m of ctx.localMockups || ctx.bundle?.mockups || []) {
-    if ((m.mockup_set || "clean") !== section) continue;
-    if (section === MOCKUP_SECTION_PREVIEW_IMAGES) continue;
-    const key = String(m.view_key || "").trim();
-    if (!key || byKey.has(key)) continue;
-    byKey.set(key, { view_key: key, label: key, printable: true, sort_order: byKey.size });
-  }
-  const list = [...byKey.values()];
-  return list.length
-    ? list
-    : [
-        { view_key: "front", label: "Front", sort_order: 0, printable: true },
-        { view_key: "back", label: "Back", sort_order: 1, printable: true },
-      ];
+/** Views for View×Color grids — only from Variants → Views (no Front/Back fallback). */
+function resolveViews(ctx) {
+  return [...(ctx.localViews || ctx.bundle?.views || [])];
 }
 
 function previewImagesFromLocal(localMockups) {
@@ -109,9 +91,19 @@ function renderPreviewImagesSection(ctx) {
 }
 
 function renderViewColorGrid(ctx, section) {
-  const views = resolveViews(ctx, section);
-  const colors = resolveColors(ctx, section);
+  const views = resolveViews(ctx);
+  const colors = resolveColors(ctx);
   const map = slotsMap(ctx.localMockups || ctx.bundle?.mockups || []);
+
+  const emptyMsg = `<p class="ce-hint">Add views and colors on the Variants tab first.</p>`;
+  if (!views.length || !colors.length) {
+    return `
+    <div class="ce-tab-panel pe-mockups-panel">
+      <h3 class="ce-section-title">${SETS.find((s) => s.id === section)?.label || "Mockups"}</h3>
+      <p class="ce-hint">Slots are View × Color. Upload to R2 or paste a URL. Clean Front is required for review.</p>
+      ${emptyMsg}
+    </div>`;
+  }
 
   const grid = views
     .map((view) => {
@@ -147,7 +139,7 @@ function renderViewColorGrid(ctx, section) {
     <div class="ce-tab-panel pe-mockups-panel">
       <h3 class="ce-section-title">${SETS.find((s) => s.id === section)?.label || "Mockups"}</h3>
       <p class="ce-hint">Slots are View × Color. Upload to R2 or paste a URL. Clean Front is required for review.</p>
-      ${grid || `<p class="ce-hint">Add views and colors on the Variants tab first.</p>`}
+      ${grid}
     </div>`;
 }
 

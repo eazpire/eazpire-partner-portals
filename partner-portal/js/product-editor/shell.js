@@ -345,13 +345,10 @@ export async function openProductEditor(productId = null, opts = {}) {
   let bundle = {
     ok: true,
     product: { title: "", currency: "EUR", status: "draft" },
-    views: [
-      { view_key: "front", label: "Front", sort_order: 0, printable: true },
-      { view_key: "back", label: "Back", sort_order: 1, printable: true },
-    ],
+    views: [],
     variants: [],
-    colors: ["Black"],
-    sizes: ["S", "M", "L"],
+    colors: [],
+    sizes: [],
     mockups: [],
     print_areas: [],
     readiness: { ok: false, errors: ["title_required"] },

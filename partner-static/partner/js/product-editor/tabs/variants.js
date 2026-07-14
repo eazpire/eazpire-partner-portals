@@ -120,11 +120,12 @@ function buildTreeFromBundle(ctx) {
   }
 
   if (!byColor.size) {
-    const colors = [...(ctx.localColors || ctx.bundle?.colors || [])];
-    const sizes = [...(ctx.localSizes || ctx.bundle?.sizes || [])];
-    const colorList = colors.length ? colors : ["Black"];
+    const colors = [...(ctx.localColors || ctx.bundle?.colors || [])].filter(Boolean);
+    const sizes = [...(ctx.localSizes || ctx.bundle?.sizes || [])].filter(Boolean);
+    // No invented Black/S/M/L — empty until partner adds a variant color.
+    if (!colors.length) return [];
     const sizeList = sizes.length ? sizes : ["S", "M", "L"];
-    for (const color of colorList) {
+    for (const color of colors) {
       const hex = normalizeHex(hexFromBundle[color] || "", "");
       byColor.set(color, {
         color,
@@ -343,7 +344,7 @@ export function renderVariantsTab(ctx) {
           <span class="pe-collapse__hint">Mockup slots &amp; printable sides</span>
         </summary>
         <div class="pe-collapse__body">
-          <p class="ce-hint">Views define mockup slots and printable sides. Front/Back are created by default.</p>
+          <p class="ce-hint">Views define mockup slots and printable sides. Add each side you need (e.g. Front, Back).</p>
           <div class="ce-inline-actions pe-collapse__actions">
             <button type="button" class="btn btn-primary btn-sm" id="pe-add-view">Add View</button>
           </div>
