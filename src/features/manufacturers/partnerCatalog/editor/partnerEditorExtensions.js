@@ -443,39 +443,42 @@ export async function savePrintAreaRect(
 ) {
   if (!productKey) return { ok: false, error: "product_key_required" };
 
-  const px = Number(placement?.x);
-  const py = Number(placement?.y);
-  const ps = Number(placement?.scale);
-  const pa = Number(placement?.angle);
+  try {
+    const px = Number(placement?.x);
+    const py = Number(placement?.y);
+    const ps = Number(placement?.scale);
+    const pa = Number(placement?.angle);
 
-  if (isCatalogOpsMasterWrite(env)) {
-    return upsertCatalogMockupDefault(env, productKey, printAreaKey, {
-      print_area_rect_json: printAreaRect,
-      mockup_print_area_rect_json: mockupRect,
-      universal_print_area_rect_json: universalRect,
-      placement_x: Number.isFinite(px) ? px : undefined,
-      placement_y: Number.isFinite(py) ? py : undefined,
-      placement_scale: Number.isFinite(ps) ? ps : undefined,
-      placement_angle: Number.isFinite(pa) ? pa : undefined,
-    });
-  }
+    if (isCatalogOpsMasterWrite(env)) {
+      // No print_provider_id on this path — rects are product/print-area scoped.
+      // Todify first save must INSERT catalog product_mockup_defaults without NaN binds.
+      return await upsertCatalogMockupDefault(env, productKey, printAreaKey, {
+        print_area_rect_json: printAreaRect,
+        mockup_print_area_rect_json: mockupRect,
+        universal_print_area_rect_json: universalRect,
+        placement_x: Number.isFinite(px) ? px : undefined,
+        placement_y: Number.isFinite(py) ? py : undefined,
+        placement_scale: Number.isFinite(ps) ? ps : undefined,
+        placement_angle: Number.isFinite(pa) ? pa : undefined,
+      });
+    }
 
-  const db = env.MANUFACTURER_DB;
-  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+    const db = env.MANUFACTURER_DB;
+    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
 
-  const key = String(printAreaKey || "front").trim() || "front";
-  const now = Date.now();
-  const row = await queryFirst(
-    db,
-    `SELECT id FROM eazpire_product_mockup_defaults WHERE product_key = ? AND print_area_key = ?`,
-    productKey,
-    key
-  );
+    const key = String(printAreaKey || "front").trim() || "front";
+    const now = Date.now();
+    const row = await queryFirst(
+      db,
+      `SELECT id FROM eazpire_product_mockup_defaults WHERE product_key = ? AND print_area_key = ?`,
+      productKey,
+      key
+    );
 
-  if (row?.id) {
-    await db
-      .prepare(
-        `UPDATE eazpire_product_mockup_defaults SET
+    if (row?.id) {
+      await db
+        .prepare(
+          `UPDATE eazpire_product_mockup_defaults SET
           print_area_rect_json = COALESCE(?, print_area_rect_json),
           mockup_print_area_rect_json = COALESCE(?, mockup_print_area_rect_json),
           universal_print_area_rect_json = COALESCE(?, universal_print_area_rect_json),
@@ -485,46 +488,54 @@ export async function savePrintAreaRect(
           placement_angle = COALESCE(?, placement_angle),
           updated_at = ?
          WHERE id = ?`
-      )
-      .bind(
-        printAreaRect != null ? JSON.stringify(printAreaRect) : null,
-        mockupRect != null ? JSON.stringify(mockupRect) : null,
-        universalRect != null ? JSON.stringify(universalRect) : null,
-        Number.isFinite(px) ? px : null,
-        Number.isFinite(py) ? py : null,
-        Number.isFinite(ps) ? ps : null,
-        Number.isFinite(pa) ? pa : null,
-        now,
-        row.id
-      )
-      .run();
-  } else {
-    await db
-      .prepare(
-        `INSERT INTO eazpire_product_mockup_defaults
+        )
+        .bind(
+          printAreaRect != null ? JSON.stringify(printAreaRect) : null,
+          mockupRect != null ? JSON.stringify(mockupRect) : null,
+          universalRect != null ? JSON.stringify(universalRect) : null,
+          Number.isFinite(px) ? px : null,
+          Number.isFinite(py) ? py : null,
+          Number.isFinite(ps) ? ps : null,
+          Number.isFinite(pa) ? pa : null,
+          now,
+          row.id
+        )
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO eazpire_product_mockup_defaults
           (id, product_key, print_area_key, print_area_rect_json, mockup_print_area_rect_json, universal_print_area_rect_json,
            placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        newId(),
-        productKey,
-        key,
-        printAreaRect != null ? JSON.stringify(printAreaRect) : null,
-        mockupRect != null ? JSON.stringify(mockupRect) : null,
-        universalRect != null ? JSON.stringify(universalRect) : null,
-        Number.isFinite(px) ? px : 0.5,
-        Number.isFinite(py) ? py : 0.5,
-        Number.isFinite(ps) ? ps : 1,
-        Number.isFinite(pa) ? pa : 0,
-        now,
-        now
-      )
-      .run();
-  }
+        )
+        .bind(
+          newId(),
+          productKey,
+          key,
+          printAreaRect != null ? JSON.stringify(printAreaRect) : null,
+          mockupRect != null ? JSON.stringify(mockupRect) : null,
+          universalRect != null ? JSON.stringify(universalRect) : null,
+          Number.isFinite(px) ? px : 0.5,
+          Number.isFinite(py) ? py : 0.5,
+          Number.isFinite(ps) ? ps : 1,
+          Number.isFinite(pa) ? pa : 0,
+          now,
+          now
+        )
+        .run();
+    }
 
-  if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  return { ok: true };
+    if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+    return { ok: true };
+  } catch (e) {
+    console.error("[savePrintAreaRect]", e?.message || e);
+    return {
+      ok: false,
+      error: "print_area_rect_save_failed",
+      message: e?.message || String(e) || "Failed to save print area rect.",
+    };
+  }
 }
 
 export async function savePrintAreasConfig(env, productKey, printProviderId, config, autoMirror = false) {

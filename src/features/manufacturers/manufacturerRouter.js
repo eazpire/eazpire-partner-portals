@@ -1015,17 +1015,36 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-eazpire-print-area-rect-save" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const result = await editorExt.savePrintAreaRect(env, {
-        productKey: body.product_key,
-        printAreaKey: body.print_area_key,
-        printAreaRect: body.print_area_rect,
-        mockupRect: body.mockup_rect,
-        universalRect: body.universal_rect,
-        placement: body.placement,
-        autoMirror: body.auto_mirror !== false,
-      });
-      if (!result.ok) return json(result, 400, cors);
-      return json(result, 200, cors);
+      try {
+        const result = await editorExt.savePrintAreaRect(env, {
+          productKey: body.product_key,
+          printAreaKey: body.print_area_key,
+          printAreaRect: body.print_area_rect,
+          mockupRect: body.mockup_rect,
+          universalRect: body.universal_rect,
+          placement: body.placement,
+          autoMirror: body.auto_mirror !== false,
+        });
+        if (!result?.ok) {
+          return json(
+            result || { ok: false, error: "print_area_rect_save_failed" },
+            result?.error === "print_area_rect_save_failed" ? 500 : 400,
+            cors
+          );
+        }
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-print-area-rect-save]", err?.message || err);
+        return json(
+          {
+            ok: false,
+            error: "print_area_rect_save_failed",
+            message: String(err?.message || err),
+          },
+          500,
+          cors
+        );
+      }
     }
     if (op === "admin-eazpire-print-areas-config-save" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));

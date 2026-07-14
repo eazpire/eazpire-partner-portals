@@ -1341,6 +1341,29 @@ export async function saveCatalogAutomations(env, versionId, body) {
   return { ok: true, version, _ops_source: "catalog-db" };
 }
 
+/** D1 rejects NaN/undefined binds — coerce optional numbers for COALESCE updates. */
+function d1FiniteOrNull(value) {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function d1FiniteOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Accept object or pre-stringified JSON without double-encoding. */
+function d1JsonText(value) {
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    throw new Error(`invalid_rect_json: ${err?.message || err}`);
+  }
+}
+
 export async function upsertCatalogMockupDefault(env, productKey, printAreaKey, patch) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
@@ -1353,6 +1376,14 @@ export async function upsertCatalogMockupDefault(env, productKey, printAreaKey, 
     productKey,
     key
   );
+
+  const rectJson = d1JsonText(patch.print_area_rect_json);
+  const mockupJson = d1JsonText(patch.mockup_print_area_rect_json);
+  const universalJson = d1JsonText(patch.universal_print_area_rect_json);
+  const px = d1FiniteOrNull(patch.placement_x);
+  const py = d1FiniteOrNull(patch.placement_y);
+  const ps = d1FiniteOrNull(patch.placement_scale);
+  const pa = d1FiniteOrNull(patch.placement_angle);
 
   if (row?.id) {
     await db
@@ -1368,36 +1399,35 @@ export async function upsertCatalogMockupDefault(env, productKey, printAreaKey, 
           updated_at = ?
          WHERE id = ?`
       )
-      .bind(
-        patch.print_area_rect_json != null ? JSON.stringify(patch.print_area_rect_json) : null,
-        patch.mockup_print_area_rect_json != null ? JSON.stringify(patch.mockup_print_area_rect_json) : null,
-        patch.universal_print_area_rect_json != null ? JSON.stringify(patch.universal_print_area_rect_json) : null,
-        patch.placement_x ?? null,
-        patch.placement_y ?? null,
-        patch.placement_scale ?? null,
-        patch.placement_angle ?? null,
-        now,
-        row.id
-      )
+      .bind(rectJson, mockupJson, universalJson, px, py, ps, pa, now, row.id)
       .run();
   } else {
+    // product_mockup_defaults.template_r2_key is TEXT NOT NULL (no DEFAULT).
+    // Todify / partner products often have no row yet (read path synthesizes defaults),
+    // so INSERT must satisfy NOT NULL — empty string is a valid placeholder until a mock uploads.
+    const templateR2 =
+      patch.template_r2_key != null && String(patch.template_r2_key).trim()
+        ? String(patch.template_r2_key).trim()
+        : "";
     await db
       .prepare(
         `INSERT INTO product_mockup_defaults
-          (product_key, print_area_key, print_area_rect_json, mockup_print_area_rect_json, universal_print_area_rect_json,
+          (product_key, print_area_key, template_r2_key, template_color,
+           print_area_rect_json, mockup_print_area_rect_json, universal_print_area_rect_json,
            placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, 'white', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         productKey,
         key,
-        patch.print_area_rect_json != null ? JSON.stringify(patch.print_area_rect_json) : null,
-        patch.mockup_print_area_rect_json != null ? JSON.stringify(patch.mockup_print_area_rect_json) : null,
-        patch.universal_print_area_rect_json != null ? JSON.stringify(patch.universal_print_area_rect_json) : null,
-        patch.placement_x ?? 0.5,
-        patch.placement_y ?? 0.5,
-        patch.placement_scale ?? 1,
-        patch.placement_angle ?? 0,
+        templateR2,
+        rectJson,
+        mockupJson,
+        universalJson,
+        d1FiniteOr(patch.placement_x, 0.5),
+        d1FiniteOr(patch.placement_y, 0.5),
+        d1FiniteOr(patch.placement_scale, 1),
+        d1FiniteOr(patch.placement_angle, 0),
         now,
         now
       )
@@ -1732,11 +1762,13 @@ export async function setCatalogPrintAreaTemplateKey(env, productKey, printAreaK
       .bind(r2Key || null, now, row.id)
       .run();
   } else {
+    // template_r2_key is NOT NULL — insert placeholder so Todify/first-time rows can be created.
     await db
       .prepare(
         `INSERT INTO product_mockup_defaults
-          (product_key, print_area_key, print_area_template_r2_key, template_color, placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
-         VALUES (?, ?, ?, 'white', 0.5, 0.5, 1.0, 0.0, ?, ?)`
+          (product_key, print_area_key, template_r2_key, print_area_template_r2_key, template_color,
+           placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
+         VALUES (?, ?, '', ?, 'white', 0.5, 0.5, 1.0, 0.0, ?, ?)`
       )
       .bind(productKey, key, r2Key || null, now, now)
       .run();
