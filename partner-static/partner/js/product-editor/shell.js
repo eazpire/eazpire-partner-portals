@@ -278,7 +278,17 @@ async function saveCurrentTab() {
       const res = await savePrintAreas(ctx.productId, areas);
       ctx.localPrintAreas = res.print_areas || areas;
       ctx.bundle.print_areas = ctx.localPrintAreas;
-      if (ctx.paUi) ctx.paUi.rects = {};
+      if (ctx.paUi) {
+        ctx.paUi.rects = {};
+        ctx.paUi.sourceByView = {};
+        ctx.paUi.autoDetectAttempted = {};
+        // Restore per-view lock from saved payload
+        ctx.paUi.lockedByView = {};
+        for (const a of ctx.localPrintAreas || []) {
+          const key = a.view_key || a.area_key;
+          if (key) ctx.paUi.lockedByView[key] = a.locked !== false;
+        }
+      }
     } else if (ctx.activeTab === "meta") {
       const meta = snapshotMetaTab();
       const res = await saveMeta(ctx.productId, meta);

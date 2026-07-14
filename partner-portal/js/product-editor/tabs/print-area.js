@@ -1,4 +1,5 @@
 import { escapeHtml } from "/shared/js/partner-api.js";
+import { detectPrintAreaFromCalibration } from "../api.js";
 import {
   rectHandlesHtml,
   clampRectToStage,
@@ -21,12 +22,34 @@ function ensurePaState(ctx) {
     ctx.paUi = {
       activeViewKey: null,
       activeColorKey: "",
-      locked: true,
+      /** @type {Record<string, boolean>} per-view lock; default true */
+      lockedByView: {},
+      /** @type {Record<string, object>} */
       rects: {},
+      /** @type {Record<string, 'bundle'|'detected'|'manual'|'default'>} */
+      sourceByView: {},
+      /** @type {Record<string, object>} */
       metaByView: {},
+      /** @type {Record<string, boolean>} */
+      autoDetectAttempted: {},
+      detecting: false,
     };
   }
+  if (!ctx.paUi.lockedByView) ctx.paUi.lockedByView = {};
+  if (!ctx.paUi.sourceByView) ctx.paUi.sourceByView = {};
+  if (!ctx.paUi.autoDetectAttempted) ctx.paUi.autoDetectAttempted = {};
   return ctx.paUi;
+}
+
+function isViewLocked(st, viewKey) {
+  if (!viewKey) return true;
+  if (typeof st.lockedByView[viewKey] === "boolean") return st.lockedByView[viewKey];
+  return true;
+}
+
+function setViewLocked(st, viewKey, locked) {
+  if (!viewKey) return;
+  st.lockedByView[viewKey] = !!locked;
 }
 
 function viewAspect(view) {
@@ -61,6 +84,16 @@ function cleanMockups(ctx) {
   );
 }
 
+function calibrationMockups(ctx) {
+  return (ctx.localMockups || ctx.bundle?.mockups || []).filter(
+    (m) => (m.mockup_set || "") === "calibration" && (m.image_url || m.image_r2_key)
+  );
+}
+
+function hasCalibrationForView(ctx, viewKey) {
+  return calibrationMockups(ctx).some((m) => String(m.view_key) === String(viewKey));
+}
+
 function cleanColorsForView(ctx, viewKey) {
   const colors = [];
   const seen = new Set();
@@ -81,6 +114,11 @@ function resolveCleanImage(ctx, viewKey, colorKey) {
   return preferred || slots[0];
 }
 
+function shouldKeepDetectedAspect(st, viewKey) {
+  const src = st.sourceByView[viewKey];
+  return src === "detected" || src === "bundle";
+}
+
 function seedRectsFromBundle(ctx) {
   const st = ensurePaState(ctx);
   const views = printableViews(ctx);
@@ -92,7 +130,16 @@ function seedRectsFromBundle(ctx) {
     if (st.rects[key]) continue;
     const a = byView[key];
     const parsed = parseNormalizedRect(a?.print_rect || a?.position);
-    st.rects[key] = parsed || defaultCenteredRect(viewAspect(view), 0.45);
+    if (parsed) {
+      st.rects[key] = parsed;
+      st.sourceByView[key] = "bundle";
+    } else {
+      st.rects[key] = defaultCenteredRect(viewAspect(view), 0.45);
+      st.sourceByView[key] = "default";
+    }
+    if (typeof st.lockedByView[key] !== "boolean") {
+      setViewLocked(st, key, a?.locked !== false);
+    }
     st.metaByView[key] = {
       placeholders: a?.placeholders || {},
       image_url: a?.image_url || null,
@@ -133,12 +180,15 @@ export function renderPrintAreaTab(ctx) {
 
   const st = ensurePaState(ctx);
   const activeView = views.find((v) => v.view_key === st.activeViewKey) || views[0];
-  const colors = cleanColorsForView(ctx, activeView.view_key);
-  const slot = resolveCleanImage(ctx, activeView.view_key, st.activeColorKey);
+  const viewKey = activeView.view_key;
+  const locked = isViewLocked(st, viewKey);
+  const colors = cleanColorsForView(ctx, viewKey);
+  const slot = resolveCleanImage(ctx, viewKey, st.activeColorKey);
   const imgUrl = slot?.image_url || "";
   const aspect = viewAspect(activeView);
-  const rect = st.rects[activeView.view_key] || defaultCenteredRect(aspect, 0.45);
-  st.rects[activeView.view_key] = rect;
+  const rect = st.rects[viewKey] || defaultCenteredRect(aspect, 0.45);
+  st.rects[viewKey] = rect;
+  const canDetect = hasCalibrationForView(ctx, viewKey);
 
   const unit = activeView.print_unit || "mm";
   const dimLabel =
@@ -165,7 +215,7 @@ export function renderPrintAreaTab(ctx) {
   const viewDock = `<div class="pe-pa-view-dock" role="tablist" aria-label="Printable views">
     ${views
       .map((v) => {
-        const active = v.view_key === activeView.view_key;
+        const active = v.view_key === viewKey;
         return `<button type="button" class="pe-pa-view-chip ${active ? "is-active" : ""}" data-pe-pa-view="${escapeHtml(v.view_key)}" role="tab" aria-selected="${active ? "true" : "false"}">${escapeHtml(v.label || v.view_key)}</button>`;
       })
       .join("")}
@@ -176,12 +226,14 @@ export function renderPrintAreaTab(ctx) {
       <div class="pe-pa-viewer-meta">
         <span class="pe-pa-meta-pill" title="Print technique">${escapeHtml(techLabel)}</span>
         <span class="pe-pa-meta-pill" title="Print area size">${escapeHtml(dimLabel)}</span>
-        <span class="pe-pa-meta-hint">Drag and scale the red area · aspect locked to Edit View size</span>
+        <span class="pe-pa-meta-hint">Unlock to drag and scale · aspect locked to Edit View size when editing</span>
+        <button type="button" class="pe-pa-detect-btn" id="pe-pa-detect" ${canDetect ? "" : "disabled"} title="${
+          canDetect
+            ? "Detect green placeholder on Calibration mockup"
+            : "Upload a Calibration mockup with a green print-area placeholder first"
+        }">Detect from calibration</button>
       </div>
       <div class="pe-pa-viewer" data-pe-pa-viewer>
-        <button type="button" class="pe-pa-viewer-lock ${st.locked ? "is-locked" : ""}" id="pe-pa-lock" aria-pressed="${st.locked ? "true" : "false"}" aria-label="${st.locked ? "Unlock print area" : "Lock print area"}" title="${st.locked ? "Unlock" : "Lock"}">
-          ${lockIcon(st.locked)}
-        </button>
         ${colorChips}
         <div class="pe-pa-stage" id="pe-pa-stage">
           <div class="pe-pa-stage-inner" data-pe-pa-stage-inner>
@@ -192,7 +244,10 @@ export function renderPrintAreaTab(ctx) {
             }
             ${
               imgUrl
-                ? `<div class="pe-pa-rect ${st.locked ? "is-locked" : "is-active"}" data-pe-pa-rect title="Print area">
+                ? `<button type="button" class="pe-pa-viewer-lock ${locked ? "is-locked" : ""}" id="pe-pa-lock" aria-pressed="${locked ? "true" : "false"}" aria-label="${locked ? "Unlock print area" : "Lock print area"}" title="${locked ? "Unlock" : "Lock"}">
+              ${lockIcon(locked)}
+            </button>
+            <div class="pe-pa-rect ${locked ? "is-locked" : "is-active"}" data-pe-pa-rect title="Print area">
               ${rectHandlesHtml()}
             </div>`
                 : ""
@@ -214,7 +269,11 @@ export function snapshotPrintAreaTab(ctx) {
     const key = view.view_key;
     const aspect = viewAspect(view);
     let rect = st.rects[key] || defaultCenteredRect(aspect, 0.45);
-    rect = clampRectToStage(fitRectWithAspect(rect, aspect));
+    if (shouldKeepDetectedAspect(st, key)) {
+      rect = clampRectToStage(rect);
+    } else {
+      rect = clampRectToStage(fitRectWithAspect(rect, aspect));
+    }
     st.rects[key] = rect;
     const canvas = physicalToCanvasPx(view);
     const meta = st.metaByView[key] || {};
@@ -235,6 +294,7 @@ export function snapshotPrintAreaTab(ctx) {
       dpi: canvas.dpi,
       print_rect,
       position: print_rect,
+      locked: isViewLocked(st, key),
       safe_zone: { x: 0, y: 0, width: canvas.width_px, height: canvas.height_px },
       placeholders: meta.placeholders || {},
       image_url: meta.image_url || null,
@@ -244,12 +304,69 @@ export function snapshotPrintAreaTab(ctx) {
   return areas;
 }
 
+async function runDetection(ctx, viewKey, { force = false } = {}) {
+  const st = ensurePaState(ctx);
+  if (!ctx.productId || !viewKey) return;
+  if (st.detecting) return;
+
+  const src = st.sourceByView[viewKey];
+  if (!force) {
+    if (src === "bundle" || src === "manual" || src === "detected") return;
+    if (st.autoDetectAttempted[viewKey]) return;
+    if (!hasCalibrationForView(ctx, viewKey)) return;
+  } else if (!hasCalibrationForView(ctx, viewKey)) {
+    ctx.showToast?.("No calibration mockup", "Upload a Calibration image with a green placeholder for this view.");
+    return;
+  }
+
+  st.autoDetectAttempted[viewKey] = true;
+  st.detecting = true;
+  const detectBtn = document.getElementById("pe-pa-detect");
+  if (detectBtn) {
+    detectBtn.disabled = true;
+    detectBtn.textContent = "Detecting…";
+  }
+
+  try {
+    const res = await detectPrintAreaFromCalibration(ctx.productId, {
+      view_key: viewKey,
+      color_key: st.activeColorKey || "",
+    });
+    const parsed = parseNormalizedRect(res?.print_rect);
+    if (!parsed) {
+      ctx.showToast?.("Detection failed", res?.detail || "Green placeholder not found on Calibration mockup.");
+      return;
+    }
+    st.rects[viewKey] = clampRectToStage(parsed);
+    st.sourceByView[viewKey] = "detected";
+    // Auto-detect leaves the view locked; unlock only via the per-view lock control.
+    if (typeof st.lockedByView[viewKey] !== "boolean") {
+      setViewLocked(st, viewKey, true);
+    }
+    ctx.markDirty?.();
+    if (force) {
+      ctx.showToast?.("Print area detected", "Green placeholder mapped onto the Clean mockup.");
+      if (st.activeViewKey === viewKey) ctx.reloadTab?.();
+    }
+  } catch (e) {
+    const detail = e?.data?.detail || e?.data?.error || e?.message || String(e);
+    ctx.showToast?.("Detection failed", detail);
+  } finally {
+    st.detecting = false;
+    if (detectBtn) {
+      detectBtn.disabled = !hasCalibrationForView(ctx, viewKey);
+      detectBtn.textContent = "Detect from calibration";
+    }
+  }
+}
+
 export function bindPrintAreaTab(ctx, root) {
   seedRectsFromBundle(ctx);
   const st = ensurePaState(ctx);
   const stageInner = root.querySelector("[data-pe-pa-stage-inner]");
   const rectEl = root.querySelector("[data-pe-pa-rect]");
   const lockBtn = root.querySelector("#pe-pa-lock");
+  const detectBtn = root.querySelector("#pe-pa-detect");
 
   const getActiveView = () => {
     const views = printableViews(ctx);
@@ -265,25 +382,48 @@ export function bindPrintAreaTab(ctx, root) {
   const redraw = () => {
     const view = getActiveView();
     if (!view || !rectEl) return;
+    const key = view.view_key;
+    const locked = isViewLocked(st, key);
     const aspect = viewAspect(view);
-    let rect = st.rects[view.view_key] || defaultCenteredRect(aspect, 0.45, getStageBox());
-    rect = fitRectWithAspect(rect, aspect, getStageBox());
-    st.rects[view.view_key] = rect;
-    drawRectEl(rectEl, rect, !st.locked);
-    rectEl.classList.toggle("is-locked", st.locked);
+    let rect = st.rects[key] || defaultCenteredRect(aspect, 0.45, getStageBox());
+    if (shouldKeepDetectedAspect(st, key)) {
+      rect = clampRectToStage(rect);
+    } else {
+      rect = fitRectWithAspect(rect, aspect, getStageBox());
+    }
+    st.rects[key] = rect;
+    drawRectEl(rectEl, rect, !locked);
+    rectEl.classList.toggle("is-locked", locked);
+  };
+
+  const syncLockButton = () => {
+    const view = getActiveView();
+    if (!lockBtn || !view) return;
+    const locked = isViewLocked(st, view.view_key);
+    lockBtn.classList.toggle("is-locked", locked);
+    lockBtn.setAttribute("aria-pressed", locked ? "true" : "false");
+    lockBtn.setAttribute("aria-label", locked ? "Unlock print area" : "Lock print area");
+    lockBtn.title = locked ? "Unlock" : "Lock";
+    lockBtn.innerHTML = lockIcon(locked);
   };
 
   requestAnimationFrame(() => redraw());
 
   lockBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    st.locked = !st.locked;
-    lockBtn.classList.toggle("is-locked", st.locked);
-    lockBtn.setAttribute("aria-pressed", st.locked ? "true" : "false");
-    lockBtn.setAttribute("aria-label", st.locked ? "Unlock print area" : "Lock print area");
-    lockBtn.title = st.locked ? "Unlock" : "Lock";
-    lockBtn.innerHTML = lockIcon(st.locked);
+    const view = getActiveView();
+    if (!view) return;
+    const next = !isViewLocked(st, view.view_key);
+    setViewLocked(st, view.view_key, next);
+    syncLockButton();
     redraw();
+    ctx.markDirty?.();
+  });
+
+  detectBtn?.addEventListener("click", () => {
+    const view = getActiveView();
+    if (!view) return;
+    runDetection(ctx, view.view_key, { force: true });
   });
 
   root.querySelectorAll("[data-pe-pa-view]").forEach((btn) => {
@@ -304,6 +444,17 @@ export function bindPrintAreaTab(ctx, root) {
     });
   });
 
+  // Auto-detect when no saved/manual rect yet
+  const active = getActiveView();
+  if (active && st.sourceByView[active.view_key] === "default") {
+    runDetection(ctx, active.view_key, { force: false }).then(() => {
+      if (st.sourceByView[active.view_key] === "detected" && st.activeViewKey === active.view_key) {
+        redraw();
+        syncLockButton();
+      }
+    });
+  }
+
   if (!rectEl || !stageInner) return;
 
   let drag = null;
@@ -319,9 +470,8 @@ export function bindPrintAreaTab(ctx, root) {
   };
 
   rectEl.addEventListener("mousedown", (ev) => {
-    if (st.locked) return;
     const view = getActiveView();
-    if (!view) return;
+    if (!view || isViewLocked(st, view.view_key)) return;
     const handle = ev.target.closest("[data-resize]");
     const pt = stagePoint(ev);
     if (!pt) return;
@@ -351,6 +501,7 @@ export function bindPrintAreaTab(ctx, root) {
     if (!drag) return;
     const pt = stagePoint(ev);
     if (!pt) return;
+    st.sourceByView[drag.viewKey] = "manual";
     if (drag.type === "move") {
       const next = moveRect(drag.rect, pt.x - drag.sx, pt.y - drag.sy);
       st.rects[drag.viewKey] = next;
@@ -373,7 +524,6 @@ export function bindPrintAreaTab(ctx, root) {
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
 
-  // Clean up listeners when tab is re-rendered (body replaced)
   const body = root.closest?.("#pe-body") || root;
   body._pePaCleanup?.();
   body._pePaCleanup = () => {

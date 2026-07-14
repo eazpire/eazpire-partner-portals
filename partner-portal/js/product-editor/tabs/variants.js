@@ -261,6 +261,29 @@ function iconRemove() {
   return `<svg class="pe-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4.2 3.2 8 7l3.8-3.8 1 1L9 8l3.8 3.8-1 1L8 9l-3.8 3.8-1-1L7 8 3.2 4.2l1-1Z"/></svg>`;
 }
 
+function iconChevron() {
+  return `<svg class="pe-icon pe-var-color-chevron__svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.2 3.2 10.9 8l-4.7 4.8-1.1-1.1L8.7 8 5.1 4.3l1.1-1.1Z"/></svg>`;
+}
+
+/** Session-scoped expand state for color parents (default: expanded). */
+function isColorExpanded(ctx, colorKey) {
+  const key = String(colorKey || "").trim().toLowerCase();
+  if (!key) return true;
+  if (!ctx.uiCollapse) ctx.uiCollapse = {};
+  if (!ctx.uiCollapse.colorSizes) ctx.uiCollapse.colorSizes = {};
+  const map = ctx.uiCollapse.colorSizes;
+  if (Object.prototype.hasOwnProperty.call(map, key)) return map[key] !== false;
+  return true;
+}
+
+function setColorExpanded(ctx, colorKey, open) {
+  const key = String(colorKey || "").trim().toLowerCase();
+  if (!key) return;
+  if (!ctx.uiCollapse) ctx.uiCollapse = {};
+  if (!ctx.uiCollapse.colorSizes) ctx.uiCollapse.colorSizes = {};
+  ctx.uiCollapse.colorSizes[key] = !!open;
+}
+
 function renderViewChips(ctx) {
   const views = ensureViews(ctx);
   if (!views.length) {
@@ -288,6 +311,7 @@ function renderVariantTree(ctx) {
   return tree
     .map((row, colorIdx) => {
       const hex = normalizeHex(row.color_hex || presetHexFromTitle(row.color));
+      const expanded = isColorExpanded(ctx, row.color);
       const sizeRows = (row.sizes || [])
         .map(
           (sz, sizeIdx) => `<div class="pe-var-size-row" data-color-idx="${colorIdx}" data-size-idx="${sizeIdx}">
@@ -308,8 +332,9 @@ function renderVariantTree(ctx) {
         )
         .join("");
 
-      return `<div class="pe-var-color" data-color-idx="${colorIdx}">
+      return `<div class="pe-var-color${expanded ? " is-expanded" : " is-collapsed"}" data-color-idx="${colorIdx}" data-color-key="${escapeHtml(String(row.color || "").trim().toLowerCase())}">
         <div class="pe-var-color-row">
+          <button type="button" class="pe-icon-btn pe-var-color-toggle" data-color-idx="${colorIdx}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Collapse" : "Expand"}" title="${expanded ? "Collapse" : "Expand"}">${iconChevron()}</button>
           <label class="pe-color-dot" title="Color swatch">
             <input type="color" class="pe-color-picker" value="${escapeHtml(hex)}" data-color-idx="${colorIdx}" aria-label="Pick color for ${escapeHtml(row.color)}" />
             <span class="pe-color-dot__swatch" style="background:${escapeHtml(hex)}"></span>
@@ -322,7 +347,7 @@ function renderVariantTree(ctx) {
           <button type="button" class="btn btn-secondary btn-sm pe-add-size" data-color-idx="${colorIdx}">Add Size</button>
           <button type="button" class="pe-icon-btn pe-rm-color" data-color-idx="${colorIdx}" aria-label="Remove color">${iconRemove()}</button>
         </div>
-        <div class="pe-var-size-list">${sizeRows || `<p class="ce-hint pe-var-size-empty">No sizes — add one under this color.</p>`}</div>
+        <div class="pe-var-size-list" ${expanded ? "" : "hidden"}>${sizeRows || `<p class="ce-hint pe-var-size-empty">No sizes — add one under this color.</p>`}</div>
       </div>`;
     })
     .join("");
@@ -539,13 +564,53 @@ function refreshTreeDom(ctx, root) {
 }
 
 function bindTreeEvents(ctx, root) {
+  root.querySelectorAll(".pe-var-color-toggle").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.colorIdx);
+      const tree = ensureVariantTree(ctx);
+      const row = tree[idx];
+      if (!row) return;
+      const next = !isColorExpanded(ctx, row.color);
+      setColorExpanded(ctx, row.color, next);
+      const card = root.querySelector(`.pe-var-color[data-color-idx="${idx}"]`);
+      const list = card?.querySelector(".pe-var-size-list");
+      if (card) {
+        card.classList.toggle("is-expanded", next);
+        card.classList.toggle("is-collapsed", !next);
+      }
+      if (list) list.hidden = !next;
+      btn.setAttribute("aria-expanded", next ? "true" : "false");
+      btn.setAttribute("aria-label", next ? "Collapse" : "Expand");
+      btn.title = next ? "Collapse" : "Expand";
+    });
+  });
+
+  root.querySelectorAll(".pe-var-color-row").forEach((rowEl) => {
+    rowEl.addEventListener("click", (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (t.closest("button, input, label, a, select, textarea, .pe-color-dot, .pe-hex-code")) return;
+      const toggle = rowEl.querySelector(".pe-var-color-toggle");
+      toggle?.click();
+    });
+  });
+
   root.querySelectorAll(".pe-color-name").forEach((input) => {
     input.addEventListener("change", () => {
       const idx = Number(input.dataset.colorIdx);
       const tree = ensureVariantTree(ctx);
       const row = tree[idx];
       if (!row) return;
+      const prevKey = String(row.color || "").trim().toLowerCase();
       const next = String(input.value || "").trim() || "Color";
+      const nextKey = next.toLowerCase();
+      if (prevKey && nextKey && prevKey !== nextKey && ctx.uiCollapse?.colorSizes) {
+        if (Object.prototype.hasOwnProperty.call(ctx.uiCollapse.colorSizes, prevKey)) {
+          ctx.uiCollapse.colorSizes[nextKey] = ctx.uiCollapse.colorSizes[prevKey];
+          delete ctx.uiCollapse.colorSizes[prevKey];
+        }
+      }
       row.color = next;
       if (!row.color_hex_manual) {
         row.color_hex = presetHexFromTitle(next);
@@ -612,6 +677,7 @@ function bindTreeEvents(ctx, root) {
       }
       const setAll = Number(document.getElementById("pe-set-all-price")?.value);
       row.sizes.push({ size: name, cost_major: Number.isFinite(setAll) ? setAll : 0 });
+      setColorExpanded(ctx, row.color, true);
       refreshTreeDom(ctx, root);
     });
   });
@@ -631,7 +697,12 @@ function bindTreeEvents(ctx, root) {
   root.querySelectorAll(".pe-rm-color").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = Number(btn.dataset.colorIdx);
-      ctx.localVariantTree = ensureVariantTree(ctx).filter((_, i) => i !== idx);
+      const tree = ensureVariantTree(ctx);
+      const removed = tree[idx];
+      if (removed?.color && ctx.uiCollapse?.colorSizes) {
+        delete ctx.uiCollapse.colorSizes[String(removed.color).trim().toLowerCase()];
+      }
+      ctx.localVariantTree = tree.filter((_, i) => i !== idx);
       refreshTreeDom(ctx, root);
     });
   });

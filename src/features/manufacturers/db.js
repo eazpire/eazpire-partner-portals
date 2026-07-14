@@ -87,6 +87,7 @@ export function rowToProduct(row) {
     meta: parseJson(row.meta_json, {}),
     eazpire_product_key: row.eazpire_product_key || null,
     review_note: row.review_note || null,
+    provider_location_id: row.provider_location_id || null,
     base_cost_cents: row.base_cost_cents,
     currency: row.currency,
     status: row.status,

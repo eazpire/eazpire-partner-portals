@@ -562,6 +562,7 @@ async function applyEazpireShadowSchemaPatches(db) {
   await ensureColumn(db, "manufacturer_products", "meta_json", "TEXT");
   await ensureColumn(db, "manufacturer_products", "eazpire_product_key", "TEXT");
   await ensureColumn(db, "manufacturer_products", "review_note", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "provider_location_id", "TEXT");
   await runSchemaPatch(
     db,
     "manufacturer_product_views",

@@ -38,6 +38,13 @@ export async function savePrintAreas(productId, print_areas) {
   });
 }
 
+export async function detectPrintAreaFromCalibration(productId, { view_key, color_key } = {}) {
+  return partnerFetch("manufacturer-product-editor-detect-print-area", {
+    method: "POST",
+    body: { product_id: productId, view_key, color_key },
+  });
+}
+
 export async function saveMeta(productId, meta) {
   return partnerFetch("manufacturer-product-editor-save-meta", {
     method: "POST",

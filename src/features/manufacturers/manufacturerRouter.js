@@ -123,6 +123,7 @@ const PARTNER_OPS = new Set([
   "manufacturer-product-editor-save-variants",
   "manufacturer-product-editor-save-mockups",
   "manufacturer-product-editor-save-print-areas",
+  "manufacturer-product-editor-detect-print-area",
   "manufacturer-product-editor-save-meta",
   "manufacturer-product-editor-upload",
   "manufacturer-product-editor-submit",
@@ -1249,6 +1250,17 @@ export async function handleManufacturerRouter(request, env) {
     const { savePartnerProductPrintAreas } = await import("./partnerProductEditorService.js");
     const result = await savePartnerProductPrintAreas(db, mfgId, body.product_id, body.print_areas);
     return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-detect-print-area" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { detectPartnerPrintAreaFromCalibration } = await import("./partnerProductEditorService.js");
+    const result = await detectPartnerPrintAreaFromCalibration(env, mfgId, body.product_id, {
+      view_key: body.view_key,
+      color_key: body.color_key,
+    });
+    return json(result, result.ok ? 200 : 400, cors);
   }
 
   if (op === "manufacturer-product-editor-save-meta" && request.method === "POST") {

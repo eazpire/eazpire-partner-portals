@@ -10,6 +10,7 @@ import {
   createProduct,
   updateProduct,
 } from "./catalogService.js";
+import { listLocations } from "./manufacturerService.js";
 import { validatePrintArea } from "./printAreaValidation.js";
 import { writeAuditLog } from "./rbac.js";
 import { upsertEazpireProduct } from "./partnerCatalog/eazpireProductService.js";
@@ -36,6 +37,7 @@ async function ensureEditorColumns(db) {
     ["meta_json", "TEXT"],
     ["eazpire_product_key", "TEXT"],
     ["review_note", "TEXT"],
+    ["provider_location_id", "TEXT"],
   ];
   for (const [col, def] of cols) {
     try {
@@ -146,8 +148,24 @@ export async function listMockupSlots(db, env, productId) {
   });
 }
 
+function normalizeAreaForClient(a) {
+  const raw = a?.print_rect || a?.position || {};
+  const locked = typeof a?.locked === "boolean" ? a.locked : raw.locked !== false;
+  const print_rect = {
+    x: raw.x,
+    y: raw.y,
+    w: raw.w ?? raw.width,
+    h: raw.h ?? raw.height,
+    width: raw.w ?? raw.width,
+    height: raw.h ?? raw.height,
+    angle: Number(raw.angle) || 0,
+  };
+  return { ...a, print_rect, locked };
+}
+
 function mapPrintArea(row, env) {
-  return {
+  const rawRect = parseJson(row.print_rect_json, {}) || {};
+  return normalizeAreaForClient({
     id: row.id,
     area_key: row.area_key,
     view_key: row.view_key || row.area_key,
@@ -157,7 +175,7 @@ function mapPrintArea(row, env) {
     dpi: row.dpi,
     safe_zone: parseJson(row.safe_zone_json, {}),
     position: parseJson(row.position_json, {}),
-    print_rect: parseJson(row.print_rect_json, {}),
+    print_rect: rawRect,
     placeholders: parseJson(row.placeholders_json, {}),
     image_r2_key: row.image_r2_key || null,
     image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
@@ -165,7 +183,7 @@ function mapPrintArea(row, env) {
     supports_transparency: !!row.supports_transparency,
     default_fit: row.default_fit,
     status: row.status,
-  };
+  });
 }
 
 export async function getPartnerProductEditorBundle(env, manufacturerId, productId) {
@@ -207,15 +225,14 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
     sizes,
     color_hexes,
     mockups,
-    print_areas: printAreas.map((a) => {
-      const row = a;
-      return {
+    print_areas: printAreas.map((a) =>
+      normalizeAreaForClient({
         ...a,
         view_key: a.view_key || a.area_key,
         print_rect: a.print_rect || a.position || {},
         placeholders: a.placeholders || {},
-      };
-    }),
+      })
+    ),
     readiness: await buildPartnerProductReadiness(db, env, manufacturerId, productId),
   };
 }
@@ -485,6 +502,21 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
   return { ok: true, mockups: await listMockupSlots(db, env, productId) };
 }
 
+function serializePrintRectForStorage(a) {
+  const raw = a?.print_rect || a?.position || {};
+  const locked = typeof a?.locked === "boolean" ? a.locked : raw.locked !== false;
+  return {
+    x: Number(raw.x),
+    y: Number(raw.y),
+    w: Number(raw.w ?? raw.width),
+    h: Number(raw.h ?? raw.height),
+    width: Number(raw.w ?? raw.width),
+    height: Number(raw.h ?? raw.height),
+    angle: Number(raw.angle) || 0,
+    locked,
+  };
+}
+
 export async function savePartnerProductPrintAreas(db, manufacturerId, productId, areas) {
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
@@ -496,6 +528,7 @@ export async function savePartnerProductPrintAreas(db, manufacturerId, productId
     if (!viewKey) continue;
     const width = Number(a.width_px);
     const height = Number(a.height_px);
+    const printRectStored = serializePrintRectForStorage(a);
     await db
       .prepare(
         `INSERT INTO manufacturer_print_areas
@@ -513,19 +546,124 @@ export async function savePartnerProductPrintAreas(db, manufacturerId, productId
         height,
         Number(a.dpi || 300),
         JSON.stringify(a.safe_zone || { x: 0, y: 0, width, height }),
-        JSON.stringify(a.print_rect || a.position || {}),
+        JSON.stringify(printRectStored),
         JSON.stringify(a.supported_file_types || ["png"]),
         now,
         now,
         viewKey,
-        JSON.stringify(a.print_rect || {}),
+        JSON.stringify(printRectStored),
         JSON.stringify(a.placeholders || {}),
         a.image_r2_key || null,
         a.image_url || null
       )
       .run();
   }
-  return { ok: true, print_areas: await listPrintAreas(db, manufacturerId, productId) };
+  return { ok: true, print_areas: (await listPrintAreas(db, manufacturerId, productId)).map(normalizeAreaForClient) };
+}
+
+/**
+ * Detect green print-area placeholder on Calibration mockup for a view (+ optional color).
+ * Returns normalized rect relative to the image (same coords map onto aligned Clean mocks).
+ */
+export async function detectPartnerPrintAreaFromCalibration(
+  env,
+  manufacturerId,
+  productId,
+  { view_key, color_key } = {}
+) {
+  const db = getManufacturerDb(env);
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  await ensureEditorColumns(db);
+
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+
+  const viewKey = String(view_key || "").trim();
+  if (!viewKey) return { ok: false, error: "view_key_required" };
+
+  const mockups = await listMockupSlots(db, env, productId);
+  const calibration = mockups.filter(
+    (m) => (m.mockup_set || "") === "calibration" && String(m.view_key) === viewKey && (m.image_r2_key || m.image_url)
+  );
+  if (!calibration.length) {
+    return { ok: false, error: "calibration_mockup_missing", detail: "Upload a Calibration mockup with a green print-area placeholder for this view." };
+  }
+
+  const preferredColor = String(color_key || "");
+  const slot =
+    calibration.find((m) => String(m.color_key || "") === preferredColor) ||
+    calibration.find((m) => !m.color_key) ||
+    calibration[0];
+
+  let buf = null;
+  if (slot.image_r2_key) {
+    const bucket = env.MOCKUP_R2 || env.R2;
+    if (!bucket) return { ok: false, error: "r2_unavailable" };
+    const obj = await bucket.get(slot.image_r2_key);
+    if (!obj) return { ok: false, error: "calibration_image_not_found" };
+    buf = await obj.arrayBuffer();
+  } else if (slot.image_url) {
+    const res = await fetch(slot.image_url);
+    if (!res.ok) return { ok: false, error: `fetch_${res.status}` };
+    buf = await res.arrayBuffer();
+  }
+  if (!buf) return { ok: false, error: "calibration_image_empty" };
+
+  const { detectPrintAreaFromRgba, fracFromRect } = await import("../../render/greenMarkerPrintArea.js");
+  const bytes = new Uint8Array(buf);
+  let rgba;
+  let width;
+  let height;
+
+  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+
+  try {
+    if (isPng) {
+      const { decodePNGToRGBA } = await import("../../utils/png-crop.js");
+      ({ rgba, width, height } = await decodePNGToRGBA(buf));
+    } else if (isJpeg) {
+      const jpegMod = await import("jpeg-js");
+      const jpeg = jpegMod.default || jpegMod;
+      const decoded = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true });
+      rgba = decoded.data;
+      width = decoded.width;
+      height = decoded.height;
+    } else {
+      return { ok: false, error: "unsupported_image_type", detail: "Use PNG or JPEG for Calibration mockups." };
+    }
+  } catch (e) {
+    return { ok: false, error: "decode_failed", detail: String(e?.message || e) };
+  }
+
+  const hit = detectPrintAreaFromRgba(rgba, width, height, { loose: true, greenOnly: true });
+  if (!hit) {
+    return {
+      ok: false,
+      error: "green_marker_not_found",
+      detail: "No solid green print-area placeholder found on the Calibration mockup.",
+    };
+  }
+
+  const frac = fracFromRect(hit);
+  const print_rect = {
+    x: Number((frac?.l ?? hit.x).toFixed(6)),
+    y: Number((frac?.t ?? hit.y).toFixed(6)),
+    w: Number((frac?.w ?? hit.w).toFixed(6)),
+    h: Number((frac?.h ?? hit.h).toFixed(6)),
+    width: Number((frac?.w ?? hit.w).toFixed(6)),
+    height: Number((frac?.h ?? hit.h).toFixed(6)),
+    angle: 0,
+  };
+
+  return {
+    ok: true,
+    view_key: viewKey,
+    color_key: slot.color_key || "",
+    marker: hit.marker || "green",
+    print_rect,
+    calibration_image_url: slot.image_url || null,
+  };
 }
 
 export async function savePartnerProductMeta(db, manufacturerId, productId, meta) {
