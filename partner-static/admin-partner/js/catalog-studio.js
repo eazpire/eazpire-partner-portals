@@ -2,7 +2,6 @@ import { partnerFetch, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast, renderTable, openModal, closeModal, confirmAction } from "/partner/shared/js/partner-shell.js";
 import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
-import { openPartnerProductReviewModal } from "./product-reviews.js";
 import {
   groupProvidersByShipCountry,
   buildCountryFlagHtml,
@@ -779,8 +778,12 @@ function wireProductsTable(container, reload) {
 
   productsEl.querySelectorAll(".btn-review-pending-product").forEach((btn) => {
     btn.onclick = () =>
-      openPartnerProductReviewModal(btn.dataset.id, async () => {
-        await reload();
+      openProductEditor({
+        manufacturerProductId: btn.dataset.id,
+        initialTab: "review",
+        onReviewDone: async () => {
+          await reload();
+        },
       });
   });
 

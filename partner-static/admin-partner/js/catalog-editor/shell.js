@@ -360,16 +360,24 @@ function renderSubnav(ctx) {
 
 function renderTabs(ctx) {
   const nav = overlayEl.querySelector("#ce-tabs");
-  nav.innerHTML = `<p class="ce-nav-section-title">Sections</p>${TABS.map(
-    (t) =>
-      `<button type="button" class="ce-nav-item ${ctx.activeTab === t.id ? "active" : ""}" data-tab="${t.id}" title="${escapeHtml(t.label)}">
+  const tabs = tabsForCtx(ctx);
+  nav.innerHTML = `<p class="ce-nav-section-title">Sections</p>${tabs
+    .map(
+      (t) =>
+        `<button type="button" class="ce-nav-item ${ctx.activeTab === t.id ? "active" : ""}" data-tab="${t.id}" title="${escapeHtml(t.label)}">
         <span class="ce-nav-icon" aria-hidden="true">${t.icon}</span>
         <span class="ce-nav-label">${escapeHtml(t.label)}</span>
       </button>`
-  ).join("")}`;
+    )
+    .join("")}`;
   nav.querySelectorAll(".ce-nav-item").forEach((btn) => {
     btn.onclick = () => {
-      ctx.activeTab = btn.dataset.tab;
+      const next = btn.dataset.tab;
+      if (ctx.partnerReviewOnly && next !== "review" && !ctx.productKey) {
+        showToast("Approve first", "Other editor tabs unlock after this partner product is approved to the catalog.");
+        return;
+      }
+      ctx.activeTab = next;
       renderTabs(ctx);
       renderSubnav(ctx);
       loadActiveTab(ctx);
@@ -384,11 +392,15 @@ async function loadActiveTab(ctx) {
   if (ctx.activeTab !== "print_area") removeViewDock();
   ensureEditorSelections(ctx);
   renderSubnav(ctx);
+  updateFooterForMode(ctx);
   const body = overlayEl.querySelector("#ce-body");
   body.innerHTML = `<p class="catalog-editor-loading">Loading…</p>`;
   try {
     let html = "";
     switch (ctx.activeTab) {
+      case "review":
+        html = renderReviewTab(ctx);
+        break;
       case "provider":
         html = await loadProvidersTab(ctx);
         break;
@@ -417,6 +429,13 @@ async function loadActiveTab(ctx) {
         html = "<p>Unknown tab</p>";
     }
     body.innerHTML = html;
+    if (ctx.activeTab === "review") {
+      bindReviewTab(ctx, body, {
+        onDecision: async (res) => {
+          await refreshAfterReviewDecision(ctx, res);
+        },
+      });
+    }
     if (ctx.activeTab === "provider") bindProvidersTab(ctx, body);
     if (ctx.activeTab === "print_area") bindPrintAreaTab(ctx, body);
     if (ctx.activeTab === "products") bindProductsTab(ctx, body);
@@ -427,9 +446,74 @@ async function loadActiveTab(ctx) {
     captureTabDirtySnapshot(ctx);
     captureVisibilityBaseline(ctx);
     refreshVisibilityTriSwitch(ctx);
+    updateFooterForMode(ctx);
     updateSaveButtonState(false);
   } catch (err) {
     body.innerHTML = `<div class="ce-error">${escapeHtml(err.message || "Load failed")}</div>`;
+  }
+}
+
+function updateFooterForMode(ctx) {
+  const visibility = overlayEl?.querySelector("#ce-foot-visibility");
+  const mirror = overlayEl?.querySelector("#ce-mirror");
+  const save = overlayEl?.querySelector("#ce-save");
+  if (!ctx) return;
+  const reviewOnly = !!(ctx.partnerReviewOnly && !ctx.productKey);
+  const onReview = ctx.activeTab === "review";
+  const hideCatalogChrome = reviewOnly || onReview;
+  if (visibility) visibility.hidden = hideCatalogChrome;
+  if (mirror) mirror.style.display = hideCatalogChrome ? "none" : "";
+  if (save) save.style.display = hideCatalogChrome ? "none" : "";
+}
+
+async function refreshAfterReviewDecision(ctx, res) {
+  const productId = ctx.manufacturerProductId || ctx.partnerReview?.product?.id;
+  const nextKey = res?.product_key || ctx.productKey || ctx.partnerReview?.product?.eazpire_product_key || null;
+
+  if (productId) {
+    try {
+      ctx.partnerReview = await loadPartnerReviewBundle(productId, null);
+      ctx.manufacturerProductId = productId;
+      ctx.showReviewTab = true;
+    } catch (e) {
+      console.warn("[catalog-editor] reload partner review", e);
+    }
+  }
+
+  if (nextKey && res?.status === "approved") {
+    ctx.productKey = nextKey;
+    ctx.partnerReviewOnly = false;
+    try {
+      ctx.bundle = await fetchEditorBundle(nextKey);
+      overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, nextKey);
+      ensureEditorSelections(ctx);
+      initVisibilityFromBundle(ctx);
+      captureVisibilityBaseline(ctx);
+      bindCatalogEditorTriSwitch(ctx, () => refreshDirtyBeforeClose(ctx));
+    } catch (e) {
+      console.warn("[catalog-editor] load catalog after approve", e);
+    }
+  } else if (res?.discarded || res?.decision === "approval_revoked" || res?.decision === "discarded" || res?.status === "rejected") {
+    // Keep productKey if present (data retained for re-approve) but refresh catalog bundle offline
+    if (ctx.productKey) {
+      try {
+        ctx.bundle = await fetchEditorBundle(ctx.productKey);
+        initVisibilityFromBundle(ctx);
+        captureVisibilityBaseline(ctx);
+      } catch {
+        /* offline product may still load */
+      }
+    }
+  }
+
+  renderTabs(ctx);
+  await loadActiveTab(ctx);
+  if (typeof ctx.onReviewDone === "function") {
+    try {
+      await ctx.onReviewDone(res);
+    } catch {
+      /* catalog studio reload */
+    }
   }
 }
 
@@ -581,7 +665,29 @@ function updateDriftBadge() {
   /* drift badge removed from slim header — mirror status via footer action */
 }
 
-export async function openProductEditor(productKey) {
+/**
+ * Open the catalog product editor.
+ * @param {string|{productKey?:string,manufacturerProductId?:string,initialTab?:string,onReviewDone?:Function}} productKeyOrOptions
+ * @param {{initialTab?:string,manufacturerProductId?:string,onReviewDone?:Function}} [maybeOptions]
+ */
+export async function openProductEditor(productKeyOrOptions, maybeOptions) {
+  let productKey = null;
+  let manufacturerProductId = null;
+  let initialTab = null;
+  let onReviewDone = null;
+
+  if (productKeyOrOptions && typeof productKeyOrOptions === "object") {
+    productKey = productKeyOrOptions.productKey || null;
+    manufacturerProductId = productKeyOrOptions.manufacturerProductId || null;
+    initialTab = productKeyOrOptions.initialTab || null;
+    onReviewDone = productKeyOrOptions.onReviewDone || null;
+  } else {
+    productKey = productKeyOrOptions || null;
+    manufacturerProductId = maybeOptions?.manufacturerProductId || null;
+    initialTab = maybeOptions?.initialTab || null;
+    onReviewDone = maybeOptions?.onReviewDone || null;
+  }
+
   ensureOverlay();
   overlayEl.hidden = false;
   overlayEl.querySelector("#ce-unsaved-dialog")?.setAttribute("hidden", "");
@@ -589,28 +695,74 @@ export async function openProductEditor(productKey) {
   document.body.classList.add("catalog-editor-open");
   removeViewDock();
 
+  const preferReview = initialTab === "review" || (!!manufacturerProductId && !productKey);
+
   editorState = {
     productKey,
-    activeTab: "provider",
+    manufacturerProductId,
+    partnerReview: null,
+    showReviewTab: !!manufacturerProductId || preferReview,
+    partnerReviewOnly: !!manufacturerProductId && !productKey,
+    activeTab: preferReview ? "review" : initialTab || "provider",
     selectedPrintProviderId: null,
     selectedVersionId: null,
     bundle: null,
+    onReviewDone,
     reloadTab: () => loadActiveTab(editorState),
   };
   window.__catalogEditorState = editorState;
 
   const ctx = editorState;
-  overlayEl.querySelector("#ce-title").textContent = productKey;
+  overlayEl.querySelector("#ce-title").textContent = productKey || "Partner product review";
   overlayEl.querySelector("#ce-body").innerHTML = `<p class="catalog-editor-loading">Loading product…</p>`;
+  updateFooterForMode(ctx);
 
   try {
-    ctx.bundle = await fetchEditorBundle(productKey);
-    overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, productKey);
-    ensureEditorSelections(ctx);
-    initVisibilityFromBundle(ctx);
-    captureVisibilityBaseline(ctx);
-    bindCatalogEditorTriSwitch(ctx, () => refreshDirtyBeforeClose(ctx));
-    updateDriftBadge(ctx);
+    if (manufacturerProductId) {
+      ctx.partnerReview = await loadPartnerReviewBundle(manufacturerProductId, null);
+      ctx.showReviewTab = true;
+      const linkedKey = ctx.partnerReview?.product?.eazpire_product_key || null;
+      if (linkedKey && !productKey) {
+        productKey = linkedKey;
+        ctx.productKey = linkedKey;
+        ctx.partnerReviewOnly = false;
+      }
+      const title =
+        ctx.partnerReview?.product?.meta?.display_name ||
+        ctx.partnerReview?.product?.title ||
+        productKey ||
+        "Partner product review";
+      overlayEl.querySelector("#ce-title").textContent = title;
+    } else if (productKey) {
+      // Detect linked partner submission for Review tab on Todify/partner catalog items
+      try {
+        const linkBundle = await loadPartnerReviewBundle(null, productKey);
+        if (linkBundle?.product?.id) {
+          ctx.partnerReview = linkBundle;
+          ctx.manufacturerProductId = linkBundle.product.id;
+          ctx.showReviewTab = true;
+        }
+      } catch {
+        /* no partner link — Review tab stays hidden */
+      }
+    }
+
+    if (productKey) {
+      ctx.bundle = await fetchEditorBundle(productKey);
+      overlayEl.querySelector("#ce-title").textContent = editorProductTitle(ctx.bundle, productKey);
+      ensureEditorSelections(ctx);
+      initVisibilityFromBundle(ctx);
+      captureVisibilityBaseline(ctx);
+      bindCatalogEditorTriSwitch(ctx, () => refreshDirtyBeforeClose(ctx));
+      updateDriftBadge(ctx);
+    } else if (!ctx.partnerReview?.product) {
+      throw new Error("Product not found");
+    }
+
+    if (preferReview && ctx.showReviewTab) ctx.activeTab = "review";
+    else if (!ctx.showReviewTab && ctx.activeTab === "review") ctx.activeTab = "provider";
+
+    updateFooterForMode(ctx);
     renderTabs(ctx);
     renderSubnav(ctx);
     await loadActiveTab(ctx);

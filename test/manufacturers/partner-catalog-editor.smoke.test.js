@@ -20,6 +20,7 @@ describe("partner catalog editor assets (smoke)", () => {
     "tabs/print-area.js",
     "tabs/products.js",
     "tabs/automations.js",
+    "tabs/review.js",
     "utils/variant-matrix.js",
     "version-config-panel.js",
     "print-area-canvas.js",
@@ -38,14 +39,16 @@ describe("partner catalog editor assets (smoke)", () => {
     "editor-visibility.js",
   ];
 
-  it("has shell with 8 tabs and mirror save bar", () => {
+  it("has shell with Review + core tabs and mirror save bar", () => {
     const src = readFileSync(join(portal, "shell.js"), "utf8");
     const needles = [
       "openProductEditor",
       "catalog-editor-overlay",
       "fetchEditorBundle",
       "mirrorProduct",
-      "const TABS = [",
+      "const CORE_TABS = [",
+      "REVIEW_TAB",
+      "tabsForCtx",
       "provider",
       "template",
       "Templates",
@@ -55,12 +58,16 @@ describe("partner catalog editor assets (smoke)", () => {
       "meta_data",
       "products",
       "automations",
+      "review",
       "ce-mirror",
       "ce-save",
+      "loadPartnerReviewBundle",
+      "renderReviewTab",
     ];
     for (const n of needles) {
       expect(src, `shell missing: ${n}`).toContain(n);
     }
+    expect(existsSync(join(portal, "tabs/review.js")), "missing tabs/review.js").toBe(true);
   });
 
   it("api.js wraps editor bundle and save ops", () => {
@@ -187,6 +194,8 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain("openMockViewer");
     expect(studioSrc).toContain("openStatusPicker");
     expect(studioSrc).toContain("openProductEditor");
+    expect(studioSrc).toContain("manufacturerProductId");
+    expect(studioSrc).toContain('initialTab: "review"');
     expect(studioSrc).toContain("renderCategorySidebar");
     expect(studioSrc).toContain("catalog-studio-filter-sidebar");
   });
