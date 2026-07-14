@@ -149,6 +149,54 @@ export async function getDashboard(db, manufacturerId) {
     });
   }
 
+  // Product review decisions (approve / reject / changes requested) for Overview notices
+  let reviewDecisions = [];
+  try {
+    const decisionRes = await db
+      .prepare(
+        `SELECT id, title, status, review_note, eazpire_product_key, updated_at, meta_json
+         FROM manufacturer_products
+         WHERE manufacturer_id = ?
+           AND status IN ('approved', 'rejected', 'changes_requested')
+           AND review_note IS NOT NULL AND TRIM(review_note) != ''
+         ORDER BY updated_at DESC
+         LIMIT 25`
+      )
+      .bind(manufacturerId)
+      .all();
+    reviewDecisions = decisionRes?.results || [];
+  } catch {
+    reviewDecisions = [];
+  }
+
+  for (const row of reviewDecisions) {
+    let displayName = row.title;
+    try {
+      const meta = JSON.parse(row.meta_json || "{}");
+      if (meta?.display_name) displayName = meta.display_name;
+    } catch {
+      /* ignore */
+    }
+    const status = row.status;
+    const title =
+      status === "approved"
+        ? `Product approved: ${displayName || row.id}`
+        : status === "rejected"
+          ? `Product rejected: ${displayName || row.id}`
+          : `Changes requested: ${displayName || row.id}`;
+    actionItems.push({
+      key: `product_review_${row.id}`,
+      title,
+      detail: row.review_note,
+      status,
+      count: 1,
+      severity: status === "approved" ? "success" : "warning",
+      product_id: row.id,
+      eazpire_product_key: row.eazpire_product_key || null,
+      updated_at: row.updated_at,
+    });
+  }
+
   const totalProducts = await db
     .prepare(`SELECT COUNT(*) AS cnt FROM manufacturer_products WHERE manufacturer_id = ?`)
     .bind(manufacturerId)
@@ -185,6 +233,14 @@ export async function getDashboard(db, manufacturerId) {
         .then((r) => Number(r?.cnt || 0)),
     },
     action_items: actionItems,
+    product_review_notices: reviewDecisions.map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      review_note: row.review_note,
+      eazpire_product_key: row.eazpire_product_key || null,
+      updated_at: row.updated_at,
+    })),
     pending_products: Number(pendingProducts?.cnt || 0),
   };
 }
@@ -328,6 +384,40 @@ async function deleteManufacturerCascade(db, manufacturerId) {
   await db.prepare(`DELETE FROM manufacturer_shipping_rates WHERE manufacturer_id = ?`).bind(manufacturerId).run();
   await db.prepare(`DELETE FROM manufacturer_certifications WHERE manufacturer_id = ?`).bind(manufacturerId).run();
   await db.prepare(`DELETE FROM manufacturer_locations WHERE manufacturer_id = ?`).bind(manufacturerId).run();
+
+  // Catalog versions / profiles tied to this manufacturer (before FPs / eazpire_products)
+  const eazpireKeys = await db
+    .prepare(`SELECT product_key FROM eazpire_products WHERE manufacturer_id = ?`)
+    .bind(manufacturerId)
+    .all();
+  for (const row of eazpireKeys?.results || []) {
+    const key = row.product_key;
+    if (!key) continue;
+    for (const table of [
+      "eazpire_product_versions",
+      "eazpire_template_products",
+      "eazpire_product_publish_plans",
+      "eazpire_product_publish_profiles",
+      "eazpire_product_active_providers",
+      "eazpire_product_mockup_defaults",
+      "eazpire_product_mockup_images",
+      "eazpire_product_mockup_view_random",
+      "eazpire_product_variant_print_areas",
+      "eazpire_product_base_costs",
+      "eazpire_product_variant_config",
+    ]) {
+      try {
+        await db.prepare(`DELETE FROM ${table} WHERE product_key = ?`).bind(key).run();
+      } catch {
+        /* optional older schema */
+      }
+    }
+  }
+  await db.prepare(`DELETE FROM eazpire_products WHERE manufacturer_id = ?`).bind(manufacturerId).run();
+  await db
+    .prepare(`DELETE FROM manufacturer_fulfillment_providers WHERE manufacturer_id = ?`)
+    .bind(manufacturerId)
+    .run();
 
   await db
     .prepare(

@@ -722,32 +722,57 @@ export async function uploadPartnerProductImage(env, manufacturerId, productId, 
 
 /**
  * Admin approve → eazpire_product + minimal catalog-db draft (source_system=todify)
+ * Reject / changes_requested → partner notified with required review note
  */
-export async function adminApprovePartnerProductToCatalog(env, productId, adminOwnerId, { changesRequested, note } = {}) {
+export async function adminApprovePartnerProductToCatalog(
+  env,
+  productId,
+  adminOwnerId,
+  { changesRequested, rejected, note } = {}
+) {
   const db = getManufacturerDb(env);
   if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
   await ensureEditorColumns(db);
 
+  const reviewNote = String(note || "").trim();
+  if (!reviewNote) {
+    return { ok: false, error: "review_note_required" };
+  }
+
   const row = await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first();
   if (!row) return { ok: false, error: "not_found" };
   const manufacturerId = row.manufacturer_id;
+  const productTitle = String(parseJson(row.meta_json, {})?.display_name || row.title || productId);
 
-  if (changesRequested) {
+  const rejectOrChanges = !!(changesRequested || rejected);
+  if (rejectOrChanges) {
     const now = Date.now();
+    const nextStatus = rejected && !changesRequested ? "rejected" : "changes_requested";
     await db
       .prepare(
-        `UPDATE manufacturer_products SET status = 'changes_requested', review_note = ?, updated_at = ? WHERE id = ?`
+        `UPDATE manufacturer_products SET status = ?, review_note = ?, updated_at = ? WHERE id = ?`
       )
-      .bind(String(note || ""), now, productId)
+      .bind(nextStatus, reviewNote, now, productId)
       .run();
     await writeAuditLog(env, {
       manufacturer_id: manufacturerId,
       user_id: adminOwnerId,
-      action: "admin_product_changes_requested",
+      action: nextStatus === "rejected" ? "admin_product_rejected" : "admin_product_changes_requested",
       entity_type: "manufacturer_product",
       entity_id: productId,
+      after_json: { review_note: reviewNote },
     });
-    return { ok: true, status: "changes_requested", product: rowToProduct(await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first()) };
+    const product = rowToProduct(
+      await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first()
+    );
+    await notifyPartnerProductReviewDecision(env, {
+      manufacturerId,
+      productTitle,
+      decision: nextStatus,
+      note: reviewNote,
+      productId,
+    });
+    return { ok: true, status: nextStatus, product };
   }
 
   const readiness = await buildPartnerProductReadiness(db, env, manufacturerId, productId);
@@ -790,7 +815,14 @@ export async function adminApprovePartnerProductToCatalog(env, productId, adminO
     const { listFulfillmentProviders } = await import("./partnerCatalog/fulfillmentProviderService.js");
     const { upsertProductVersion } = await import("./partnerCatalog/eazpireProductVersionService.js");
     const providers = await listFulfillmentProviders(db, manufacturerId);
-    const fp = providers[0];
+    const fp =
+      (product.provider_location_id &&
+        providers.find(
+          (p) =>
+            String(p.id) === String(product.provider_location_id) ||
+            String(p.external_provider_id) === String(product.provider_location_id)
+        )) ||
+      providers[0];
     if (fp?.id) {
       await upsertProductVersion(db, {
         product_key: productKey,
@@ -907,7 +939,7 @@ export async function adminApprovePartnerProductToCatalog(env, productId, adminO
     .prepare(
       `UPDATE manufacturer_products SET status = 'approved', eazpire_product_key = ?, review_note = ?, updated_at = ? WHERE id = ?`
     )
-    .bind(productKey, String(note || ""), now, productId)
+    .bind(productKey, reviewNote, now, productId)
     .run();
 
   await writeAuditLog(env, {
@@ -916,7 +948,16 @@ export async function adminApprovePartnerProductToCatalog(env, productId, adminO
     action: "admin_product_approved_to_catalog",
     entity_type: "manufacturer_product",
     entity_id: productId,
-    after_json: { product_key: productKey },
+    after_json: { product_key: productKey, review_note: reviewNote },
+  });
+
+  await notifyPartnerProductReviewDecision(env, {
+    manufacturerId,
+    productTitle: title,
+    decision: "approved",
+    note: reviewNote,
+    productId,
+    productKey,
   });
 
   return {
@@ -926,4 +967,52 @@ export async function adminApprovePartnerProductToCatalog(env, productId, adminO
     catalog_status: "preview",
     product: await getProduct(db, manufacturerId, productId),
   };
+}
+
+async function collectPartnerNotifyEmails(db, manufacturerId) {
+  const emails = new Set();
+  const users = await db
+    .prepare(`SELECT email FROM manufacturer_users WHERE manufacturer_id = ?`)
+    .bind(manufacturerId)
+    .all();
+  for (const row of users?.results || []) {
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email) emails.add(email);
+  }
+  const mfg = await db
+    .prepare(`SELECT name, support_email, business_email FROM manufacturers WHERE id = ?`)
+    .bind(manufacturerId)
+    .first();
+  for (const field of [mfg?.support_email, mfg?.business_email]) {
+    const email = String(field || "").trim().toLowerCase();
+    if (email) emails.add(email);
+  }
+  return { emails: [...emails], companyName: mfg?.name || null };
+}
+
+async function notifyPartnerProductReviewDecision(env, { manufacturerId, productTitle, decision, note, productId, productKey }) {
+  const db = getManufacturerDb(env);
+  if (!db) return;
+  const { emails, companyName } = await collectPartnerNotifyEmails(db, manufacturerId);
+  if (!emails.length) {
+    console.warn("[product-review-notify] no partner emails", manufacturerId, productId);
+    return;
+  }
+  const { sendPartnerProductReviewDecisionEmail } = await import("./email.js");
+  const portalBase = String(env.PARTNER_PORTAL_URL || "https://partner.eazpire.com").replace(/\/$/, "");
+  for (const to of emails) {
+    try {
+      await sendPartnerProductReviewDecisionEmail(env, {
+        to,
+        companyName,
+        productTitle,
+        decision,
+        note,
+        productKey: productKey || null,
+        portalUrl: `${portalBase}/`,
+      });
+    } catch (e) {
+      console.warn("[product-review-notify] email failed", to, e?.message || e);
+    }
+  }
 }

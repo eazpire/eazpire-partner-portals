@@ -5,6 +5,7 @@
 import { upsertFulfillmentProvider } from "./fulfillmentProviderService.js";
 import {
   TODIFY_FULFILLMENT_EXTERNAL_ID,
+  TODIFY_ICON_URL,
   TODIFY_PARTNER_ID,
   TODIFY_PARTNER_SLUG,
   TODIFY_PROVIDER_DISPLAY_NAME,
@@ -40,7 +41,8 @@ export async function ensureTodifyPartnerSetup(db) {
     integration_system: "todify",
     external_provider_id: TODIFY_FULFILLMENT_EXTERNAL_ID,
     name: `${TODIFY_PROVIDER_DISPLAY_NAME} Morocco`,
-    location: { country: "MA", city: "Casablanca" },
+    // logo_url from todify.ma CloudFront (apple-touch icon for Catalog Studio avatars)
+    location: { country: "MA", city: "Casablanca", logo_url: TODIFY_ICON_URL },
     ships_to: ["MA"],
     production_days_min: 1,
     production_days_max: 3,

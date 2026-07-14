@@ -2,6 +2,7 @@ import { partnerFetch, escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast, renderTable, openModal, closeModal, confirmAction } from "/partner/shared/js/partner-shell.js";
 import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
+import { openPartnerProductReviewModal } from "./product-reviews.js";
 import {
   groupProvidersByShipCountry,
   buildCountryFlagHtml,
@@ -226,15 +227,17 @@ function refreshProductsPanel(container, allItems, categoryTree, filter, reload)
   );
 }
 
-function statusBadge(status, { clickable = false, productKey = "" } = {}) {
+function statusBadge(status, { clickable = false, productKey = "", reviewStatus = null } = {}) {
   const map = {
     online: "badge-success",
     preview: "badge-warning",
     offline: "badge-neutral",
     available: "badge-info",
+    pending_review: "badge-warning",
   };
-  const cls = map[status] || "badge-neutral";
-  const label = escapeHtml(status);
+  const display = reviewStatus === "pending_review" ? "pending_review" : status;
+  const cls = map[display] || "badge-neutral";
+  const label = escapeHtml(display);
   if (clickable && productKey) {
     return `<button type="button" class="badge ${cls} cs-status-btn" data-product-key="${escapeHtml(productKey)}" data-status="${escapeHtml(status)}" title="Change status">${label}</button>`;
   }
@@ -725,15 +728,25 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
     ["", "Title", "Country", "Print areas", "Status", "Versions", ""],
     items
       .map((row, i) => {
-        const rowId = `pk-${row.product_key || i}`;
-        return `<tr data-product-key="${escapeHtml(row.product_key)}">
+        const isPending = row.kind === "pending_partner_product" || row.review_status === "pending_review";
+        const rowId = isPending
+          ? `mp-${row.manufacturer_product_id || i}`
+          : `pk-${row.product_key || i}`;
+        const action = isPending
+          ? `<button type="button" class="btn btn-primary btn-sm btn-review-pending-product" data-id="${escapeHtml(row.manufacturer_product_id)}">Review</button>`
+          : `<button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(row.product_key)}">Edit</button>`;
+        return `<tr data-product-key="${escapeHtml(row.product_key || "")}" data-manufacturer-product-id="${escapeHtml(row.manufacturer_product_id || "")}">
       <td class="cs-mock-cell">${buildMockCarouselHtml(row.mock_images, rowId)}</td>
       <td><div class="cs-title-cell cs-title-cell--product">${renderTitleCell(row)}</div></td>
       <td>${renderShippingCountryFlags(row)}</td>
       <td>${renderPrintAreaCountCell(row.print_areas, row)}</td>
-      <td>${statusBadge(row.catalog_status, { clickable: true, productKey: row.product_key })}</td>
-      <td>${escapeHtml(row.version_count ?? 0)}</td>
-      <td><button type="button" class="btn btn-primary btn-sm btn-edit-eaz-product" data-key="${escapeHtml(row.product_key)}">Edit</button></td>
+      <td>${statusBadge(row.catalog_status, {
+        clickable: !isPending && !!row.product_key,
+        productKey: row.product_key || "",
+        reviewStatus: row.review_status || null,
+      })}</td>
+      <td>${escapeHtml(isPending ? "—" : (row.version_count ?? 0))}</td>
+      <td>${action}</td>
     </tr>`;
       })
       .join("")
@@ -762,6 +775,13 @@ function wireProductsTable(container, reload) {
 
   productsEl.querySelectorAll(".btn-edit-eaz-product").forEach((btn) => {
     btn.onclick = () => openProductEditor(btn.dataset.key);
+  });
+
+  productsEl.querySelectorAll(".btn-review-pending-product").forEach((btn) => {
+    btn.onclick = () =>
+      openPartnerProductReviewModal(btn.dataset.id, async () => {
+        await reload();
+      });
   });
 
   productsEl.querySelectorAll(".cs-status-btn").forEach((btn) => {

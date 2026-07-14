@@ -14,7 +14,7 @@ import {
 } from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
-import { PRINTIFY_PARTNER_SLUG } from "./constants.js";
+import { PRINTIFY_PARTNER_SLUG, TODIFY_PARTNER_SLUG, TODIFY_ICON_URL, TODIFY_LOGO_URL } from "./constants.js";
 import {
   fetchBlueprint,
   buildPrintifyCatalogProductUrl,
@@ -36,6 +36,12 @@ const PRINT_AREAS_API_FETCH_MAX = 30;
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
   printify: "https://www.printify.com/favicon.ico",
+  // Todify.ma official CloudFront logo/icon (apple-touch for square tree avatars)
+  [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
+};
+
+const PROVIDER_LOGO_BY_PARTNER_SLUG = {
+  [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
 };
 
 const VALID_CATALOG_STATUSES = new Set(["online", "preview", "offline"]);
@@ -72,6 +78,14 @@ function resolvePartnerLogo(partner) {
   if (partner.logo_url) return partner.logo_url;
   const slug = String(partner.slug || "").toLowerCase();
   return PARTNER_LOGO_BY_SLUG[slug] || null;
+}
+
+function resolveProviderLogo(fp, partnerSlug) {
+  if (fp.logo_url) return fp.logo_url;
+  const fromLocation = fp.location && typeof fp.location === "object" ? fp.location.logo_url : null;
+  if (fromLocation) return fromLocation;
+  const slug = String(partnerSlug || "").toLowerCase();
+  return PROVIDER_LOGO_BY_PARTNER_SLUG[slug] || null;
 }
 
 async function queryAll(db, sql, ...binds) {
@@ -950,7 +964,7 @@ function studioCountryDisplayName(code, fallbackLabel = "") {
   return "Other";
 }
 
-function mapDbProviderToTreeNode(fp) {
+function mapDbProviderToTreeNode(fp, partnerSlug = null) {
   const location = fp.location && typeof fp.location === "object" ? fp.location : {};
   const countryRaw = location.country || null;
   const shipCountryCode = normalizeCountryCode(countryRaw) || "OTHER";
@@ -959,7 +973,7 @@ function mapDbProviderToTreeNode(fp) {
     name: fp.name,
     external_provider_id: fp.external_provider_id,
     status: fp.status,
-    logo_url: fp.logo_url || null,
+    logo_url: resolveProviderLogo(fp, partnerSlug),
     ship_country_code: shipCountryCode,
     ship_country_name: studioCountryDisplayName(shipCountryCode, countryRaw),
     location: Object.keys(location).length ? location : null,
@@ -1005,7 +1019,7 @@ export async function getCatalogStudioTree(db, env) {
     const isPrintify = String(partner.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
     const providers = isPrintify && env
       ? await buildPrintifyTreeProviders(db, partner.id, env)
-      : (await listFulfillmentProviders(db, partner.id)).map(mapDbProviderToTreeNode);
+      : (await listFulfillmentProviders(db, partner.id)).map((fp) => mapDbProviderToTreeNode(fp, partner.slug));
 
     out.push({
       id: partner.id,
@@ -1020,6 +1034,114 @@ export async function getCatalogStudioTree(db, env) {
     });
   }
   return { ok: true, partners: out };
+}
+
+async function loadManufacturerProductMockImages(db, env, productIds) {
+  const map = new Map();
+  if (!productIds.length) return map;
+  const placeholders = productIds.map(() => "?").join(",");
+  let rows = [];
+  try {
+    rows = await queryAll(
+      db,
+      `SELECT manufacturer_product_id, image_r2_key, image_url, mockup_set, created_at
+       FROM manufacturer_mockup_templates
+       WHERE manufacturer_product_id IN (${placeholders})
+       ORDER BY CASE WHEN COALESCE(mockup_set, '') = 'preview_images' THEN 0
+                     WHEN COALESCE(mockup_set, '') = 'shop_preview' THEN 1
+                     ELSE 2 END,
+                created_at ASC`,
+      ...productIds
+    );
+  } catch (e) {
+    if (!String(e?.message || e).includes("no such")) throw e;
+    return map;
+  }
+  for (const row of rows) {
+    const id = row.manufacturer_product_id;
+    if (!id) continue;
+    if (!map.has(id)) map.set(id, []);
+    let url = null;
+    const r2Key = row.image_r2_key ? String(row.image_r2_key).trim() : "";
+    if (r2Key) url = publicFileUrl(env, r2Key);
+    else if (row.image_url) url = String(row.image_url).trim() || null;
+    pushImageUrl(map.get(id), url);
+  }
+  return map;
+}
+
+/**
+ * Partner portal products with status pending_review → Catalog Studio Offline list.
+ * Shown under the partner's fulfillment provider(s) until approve creates an eazpire product.
+ */
+async function listPendingPartnerProductsAsOffline(db, env, manufacturerId, providerExternalId = null) {
+  if (providerExternalId) {
+    const providers = await listFulfillmentProviders(db, manufacturerId);
+    const match = providers.some((fp) => String(fp.external_provider_id) === String(providerExternalId));
+    if (!match) return [];
+  }
+
+  let rows = [];
+  try {
+    rows = await queryAll(
+      db,
+      `SELECT id, title, category, sku_base, status, review_note, provider_location_id,
+              eazpire_product_key, updated_at, regions_json, meta_json
+       FROM manufacturer_products
+       WHERE manufacturer_id = ? AND status = 'pending_review'
+       ORDER BY updated_at DESC`,
+      manufacturerId
+    );
+  } catch (e) {
+    if (String(e?.message || e).includes("no such")) return [];
+    throw e;
+  }
+
+  if (providerExternalId) {
+    const providers = await listFulfillmentProviders(db, manufacturerId);
+    const provider = providers.find((fp) => String(fp.external_provider_id) === String(providerExternalId));
+    if (provider) {
+      rows = rows.filter((row) => {
+        const locId = row.provider_location_id ? String(row.provider_location_id) : "";
+        if (!locId) return true; // unassigned pending → show under each provider of this partner
+        return locId === String(provider.id) || locId === String(provider.external_provider_id);
+      });
+    }
+  }
+
+  const imageMap = await loadManufacturerProductMockImages(
+    db,
+    env,
+    rows.map((r) => r.id)
+  );
+
+  return rows.map((row) => {
+    const meta = parseJson(row.meta_json, {}) || {};
+    const title = String(meta.display_name || row.title || row.sku_base || row.id);
+    return {
+      kind: "pending_partner_product",
+      manufacturer_product_id: row.id,
+      product_key: null,
+      title,
+      catalog_status: "offline",
+      review_status: "pending_review",
+      review_note: row.review_note || null,
+      catalog_category_leaf: row.category || null,
+      catalog_category_group: row.category || null,
+      blueprint_category: row.category || null,
+      version_count: 0,
+      updated_at: row.updated_at,
+      mock_images: slimMockImagesForList(imageMap.get(row.id) || []),
+      shipping_country_codes: [],
+      shipping_countries: null,
+      print_areas: [],
+      printify_choice: null,
+      printify_url: null,
+      printify_blueprint_id: null,
+      is_aop: isAllOverPrintFromTitle(title),
+      sku_base: row.sku_base || null,
+    };
+  });
 }
 
 /**
@@ -1138,6 +1260,12 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       is_aop: isAllOverPrintFromTitle(p.title),
     };
   });
+
+  // Partner submissions awaiting admin review appear under Offline (not yet curated).
+  if (status === "offline") {
+    const pendingItems = await listPendingPartnerProductsAsOffline(db, env, manufacturerId, providerId);
+    items.unshift(...pendingItems);
+  }
 
   return buildProductsResponse(status, items);
 }

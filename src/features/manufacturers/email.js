@@ -247,3 +247,68 @@ ${blockBlock}
   }
   return { ok: true };
 }
+
+export async function sendPartnerProductReviewDecisionEmail(
+  env,
+  { to, companyName, productTitle, decision, note, productKey, portalUrl }
+) {
+  const key = String(env.RESEND_API_KEY || "").trim();
+  if (!key) return { ok: false, skipped: true, error: "resend_not_configured" };
+
+  const from =
+    String(env.PARTNER_FROM_EMAIL || env.ACCOUNT_DELETION_FROM_EMAIL || "").trim() ||
+    "Eazpire <noreply@eazpire.com>";
+
+  const escape = (s) =>
+    String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const decisionKey = String(decision || "").toLowerCase();
+  const approved = decisionKey === "approved";
+  const rejected = decisionKey === "rejected";
+  const subject = approved
+    ? "Your product was approved for the Eazpire catalog"
+    : rejected
+      ? "Your product was rejected"
+      : "Changes requested for your product submission";
+
+  const safeTitle = escape(productTitle || "your product");
+  const decisionLine = approved
+    ? `<p>Good news${companyName ? ` for ${escape(companyName)}` : ""} — <strong>${safeTitle}</strong> was approved and added as a catalog draft.</p>`
+    : rejected
+      ? `<p>After review, we are unable to approve <strong>${safeTitle}</strong> at this time.</p>`
+      : `<p>We need changes before we can approve <strong>${safeTitle}</strong>.</p>`;
+
+  const noteBlock = note ? `<p><strong>Note from our team:</strong> ${escape(note)}</p>` : "";
+  const keyBlock =
+    approved && productKey
+      ? `<p>Catalog key: <code>${escape(productKey)}</code> (set to Preview — you can review details in the Partner Portal).</p>`
+      : "";
+  const portalBlock = portalUrl
+    ? `<p><a href="${escape(portalUrl)}">Open the Partner Portal</a> to view the decision under Overview.</p>`
+    : "";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      html: `${decisionLine}${noteBlock}${keyBlock}${portalBlock}
+<p>If you have questions, contact us at support@eazpire.com.</p>`,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return { ok: false, error: "resend_error", detail: text.slice(0, 300) };
+  }
+  return { ok: true };
+}

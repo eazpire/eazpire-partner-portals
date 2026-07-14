@@ -27,7 +27,7 @@ export async function renderPartnerProductReviews(container) {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">Partner product review</h2>
-          <p class="panel-subtitle">Approve creates a catalog draft (source_system=todify, status preview)</p>
+          <p class="panel-subtitle">Approve creates a catalog draft (source_system=todify, status preview). A review note is required.</p>
         </div>
         <span class="badge badge-warning">${products.length}</span>
       </div>
@@ -52,7 +52,7 @@ export async function renderPartnerProductReviews(container) {
   });
 }
 
-async function openPartnerProductReviewModal(productId, onDone) {
+export async function openPartnerProductReviewModal(productId, onDone) {
   const data = await partnerFetch("admin-manufacturer-product-editor-bundle", {
     query: { product_id: productId },
   });
@@ -83,23 +83,32 @@ async function openPartnerProductReviewModal(productId, onDone) {
           .join("")}
         ${variants.length > 8 ? `<li>… +${variants.length - 8} more</li>` : ""}
       </ul>
-      <div class="field"><label>Admin note</label>
-        <textarea class="textarea" id="pe-admin-note" rows="2">${escapeHtml(p.review_note || "")}</textarea></div>
+      <div class="field"><label>Review note (required)</label>
+        <textarea class="textarea" id="pe-admin-note" rows="3" required placeholder="Explain the approve or reject decision for the partner">${escapeHtml(p.review_note || "")}</textarea></div>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="btn btn-warning" id="btn-pe-changes">Request changes</button>
-        <button type="button" class="btn btn-primary" id="btn-pe-approve">Approve → catalog draft</button>
+        <button type="button" class="btn btn-danger" id="btn-pe-reject">Reject</button>
+        <button type="button" class="btn btn-primary" id="btn-pe-approve">Approve</button>
       </div>`,
     onSave: async () => {},
   });
   const saveBtn = document.getElementById("modal-save");
   if (saveBtn) saveBtn.style.display = "none";
 
-  const note = () => document.getElementById("pe-admin-note")?.value || "";
+  const note = () => String(document.getElementById("pe-admin-note")?.value || "").trim();
+  const requireNote = () => {
+    const value = note();
+    if (!value) {
+      showToast("Note required", "Add a review note before Approve or Reject");
+      return false;
+    }
+    return true;
+  };
 
   document.getElementById("btn-pe-approve").onclick = () => {
+    if (!requireNote()) return;
     confirmAction({
       title: "Approve to catalog",
-      message: "Create/update eazpire product and catalog draft (preview, source_system=todify)? You set margin and online later in Catalog Studio.",
+      message: "Create/update eazpire product and catalog draft (preview, source_system=todify)? The partner will be notified by email with your note.",
       confirmLabel: "Approve",
       onConfirm: async () => {
         try {
@@ -112,27 +121,32 @@ async function openPartnerProductReviewModal(productId, onDone) {
           document.getElementById("modal-close")?.click();
           if (onDone) await onDone();
         } catch (e) {
-          showToast("Approve failed", (e.data?.errors || [e.message]).join(", "));
+          showToast("Approve failed", (e.data?.errors || [e.message || e.data?.error]).filter(Boolean).join(", "));
         }
       },
     });
   };
 
-  document.getElementById("btn-pe-changes").onclick = () => {
+  document.getElementById("btn-pe-reject").onclick = () => {
+    if (!requireNote()) return;
     confirmAction({
-      title: "Request changes",
-      message: "Send this product back to the partner?",
-      confirmLabel: "Request changes",
-      confirmClass: "btn-warning",
+      title: "Reject product",
+      message: "Reject this submission and notify the partner with your note?",
+      confirmLabel: "Reject",
+      confirmClass: "btn-danger",
       onConfirm: async () => {
-        await partnerFetch("admin-manufacturer-product-approve-to-catalog", {
-          method: "POST",
-          body: { product_id: productId, changes_requested: true, note: note() },
-        });
-        showToast("Changes requested", "");
-        if (saveBtn) saveBtn.style.display = "";
-        document.getElementById("modal-close")?.click();
-        if (onDone) await onDone();
+        try {
+          await partnerFetch("admin-manufacturer-product-approve-to-catalog", {
+            method: "POST",
+            body: { product_id: productId, rejected: true, note: note() },
+          });
+          showToast("Rejected", "Partner notified");
+          if (saveBtn) saveBtn.style.display = "";
+          document.getElementById("modal-close")?.click();
+          if (onDone) await onDone();
+        } catch (e) {
+          showToast("Reject failed", e.message || e.data?.error || String(e));
+        }
       },
     });
   };

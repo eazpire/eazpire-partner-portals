@@ -431,6 +431,7 @@ export async function handleManufacturerRouter(request, env) {
       const { adminApprovePartnerProductToCatalog } = await import("./partnerProductEditorService.js");
       const result = await adminApprovePartnerProductToCatalog(env, body.product_id, admin.owner_id, {
         changesRequested: !!body.changes_requested,
+        rejected: !!body.rejected,
         note: body.note,
       });
       if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);

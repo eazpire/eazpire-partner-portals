@@ -258,6 +258,7 @@ async function renderOverview() {
   setTopbarExtra("");
   const { dashboard } = await partnerFetch("manufacturer-dashboard");
   const kpis = dashboard?.kpis || {};
+  const reviewNotices = dashboard?.product_review_notices || [];
   el.innerHTML = `
     <div class="kpi-grid">
       ${kpiCard("Products", kpis.products_total ?? 0)}
@@ -268,7 +269,24 @@ async function renderOverview() {
     <div class="panel" style="margin-top:18px">
       <div class="panel-header"><strong>Action items</strong></div>
       <div class="panel-body">${(dashboard?.action_items || []).map(actionRow).join("") || '<div class="empty">No action items</div>'}</div>
-    </div>`;
+    </div>
+    ${
+      reviewNotices.length
+        ? `<div class="panel" style="margin-top:18px">
+      <div class="panel-header"><strong>Product review notices</strong></div>
+      <div class="panel-body">${reviewNotices
+        .map(
+          (n) => `<div class="order-card">
+            <strong>${escapeHtml(n.title || "Product")}</strong>
+            <p>${escapeHtml(n.review_note || "")}</p>
+            <span class="badge ${badgeForStatus(n.status)}">${escapeHtml(n.status || "")}</span>
+            ${n.eazpire_product_key ? `<p class="muted">Catalog key: ${escapeHtml(n.eazpire_product_key)}</p>` : ""}
+          </div>`
+        )
+        .join("")}</div>
+    </div>`
+        : ""
+    }`;
 }
 
 function kpiCard(label, value) {

@@ -11,6 +11,13 @@ export const TODIFY_PARTNER_SLUG = "todify";
 export const TODIFY_FULFILLMENT_EXTERNAL_ID = "ma-1";
 export const TODIFY_PROVIDER_DISPLAY_NAME = "Todify";
 
+/**
+ * Official Todify brand assets (sourced from https://todify.ma CDN / CloudFront).
+ * Prefer square icon for Catalog Studio avatars; logo SVG for wide placements.
+ */
+export const TODIFY_LOGO_URL = "https://d2vw8tvocudf9g.cloudfront.net/images/logo.svg";
+export const TODIFY_ICON_URL = "https://d2vw8tvocudf9g.cloudfront.net/apple-touch-icon.png";
+
 /** Publish profiles with these source_system values skip Printify and create Shopify directly. */
 export const DIRECT_SHOPIFY_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
 
