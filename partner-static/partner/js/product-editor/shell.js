@@ -110,6 +110,7 @@ function ensureOverlay() {
                 <button type="button" class="ce-mock-section-pill" data-mock-section="calibration" role="tab">Calibration Mockup</button>
                 <button type="button" class="ce-mock-section-pill active" data-mock-section="clean" role="tab">Clean Mockups</button>
                 <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" role="tab">Shop Preview Mockups</button>
+                <button type="button" class="ce-mock-section-pill" data-mock-section="preview_images" role="tab">Preview Images</button>
               </nav>
             </div>
           </div>

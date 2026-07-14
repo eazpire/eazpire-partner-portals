@@ -14,7 +14,7 @@ import { validatePrintArea } from "./printAreaValidation.js";
 import { writeAuditLog } from "./rbac.js";
 import { upsertEazpireProduct } from "./partnerCatalog/eazpireProductService.js";
 
-const MOCKUP_SETS = ["clean", "shop_preview", "calibration"];
+const MOCKUP_SETS = ["clean", "shop_preview", "calibration", "preview_images"];
 const DEFAULT_VIEWS = [
   { view_key: "front", label: "Front", sort_order: 0, printable: 1 },
   { view_key: "back", label: "Back", sort_order: 1, printable: 1 },
@@ -108,15 +108,20 @@ export async function listMockupSlots(db, env, productId) {
     )
     .bind(productId)
     .all();
-  return (res?.results || []).map((row) => ({
-    id: row.id,
-    view_key: row.view_key,
-    color_key: row.color_key || "",
-    mockup_set: row.mockup_set || "clean",
-    image_r2_key: row.image_r2_key || null,
-    image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
-    status: row.status,
-  }));
+  return (res?.results || []).map((row) => {
+    const overlay = parseJson(row.overlay_json, {});
+    return {
+      id: row.id,
+      view_key: row.view_key,
+      color_key: row.color_key || "",
+      mockup_set: row.mockup_set || "clean",
+      image_r2_key: row.image_r2_key || null,
+      image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
+      title: overlay.title || row.view_key || "",
+      overlay,
+      status: row.status,
+    };
+  });
 }
 
 function mapPrintArea(row, env) {
@@ -358,13 +363,20 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
   await db.prepare(`DELETE FROM manufacturer_mockup_templates WHERE manufacturer_product_id = ?`).bind(productId).run();
   for (const s of Array.isArray(slots) ? slots : []) {
     const set = MOCKUP_SETS.includes(s.mockup_set) ? s.mockup_set : "clean";
-    const viewKey = String(s.view_key || "").trim();
+    let viewKey = String(s.view_key || "").trim();
+    if (!viewKey && set === "preview_images") {
+      viewKey = `pi_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
     if (!viewKey) continue;
+    const overlay = {
+      ...(s.overlay && typeof s.overlay === "object" ? s.overlay : {}),
+    };
+    if (s.title != null) overlay.title = String(s.title).trim();
     await db
       .prepare(
         `INSERT INTO manufacturer_mockup_templates
           (id, manufacturer_product_id, variant_id, view_key, image_r2_key, image_url, overlay_json, status, created_at, updated_at, mockup_set, color_key)
-         VALUES (?, ?, NULL, ?, ?, ?, '{}', 'draft', ?, ?, ?, ?)`
+         VALUES (?, ?, NULL, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`
       )
       .bind(
         newId("mmock"),
@@ -372,6 +384,7 @@ export async function savePartnerProductMockups(db, manufacturerId, productId, s
         viewKey,
         s.image_r2_key || null,
         s.image_url || null,
+        JSON.stringify(overlay),
         now,
         now,
         set,

@@ -6716,4 +6716,10 @@ html[data-portal="admin"] .cr-pd-expand {
   display: block;
   margin-bottom: 4px;
 }
+.pe-preview-images-panel .pe-preview-card {
+  position: relative;
+}
+.ce-subnav-row--mock-sections {
+  flex-wrap: wrap;
+}
 
