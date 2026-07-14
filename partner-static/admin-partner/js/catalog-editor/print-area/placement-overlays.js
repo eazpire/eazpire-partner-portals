@@ -18,9 +18,22 @@ function savedAreasForView(slice, viewKey) {
   return Array.isArray(block?.areas) ? block.areas : [];
 }
 
-function brandImageUrl(brandAssets, type) {
-  const url = brandAssets?.[type]?.black?.image_url || brandAssets?.[type]?.black?.imageUrl;
-  return url ? String(url) : "";
+function brandImageUrl(brandAssets, type, preferWhite = false) {
+  const pack = brandAssets?.[type];
+  if (!pack || typeof pack !== "object") return "";
+  const order = preferWhite
+    ? [pack.white, pack.black]
+    : [pack.black, pack.white];
+  for (const asset of order) {
+    const url = asset?.image_url || asset?.imageUrl;
+    if (url) return String(url);
+  }
+  return "";
+}
+
+function viewLooksDark(st) {
+  const color = String(st?.activeColorTitle || st?.activeColor || "").toLowerCase();
+  return /\b(black|navy|dark|charcoal|espresso|midnight)\b/.test(color);
 }
 
 function defaultStackRect(redRect, index, total, aspect) {
@@ -73,7 +86,7 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
 
     const overlay = { type: spec.type, index: spec.index, rect };
     if (spec.type === "qr" || spec.type === "logo") {
-      const url = brandImageUrl(brandAssets, spec.type);
+      const url = brandImageUrl(brandAssets, spec.type, viewLooksDark(st));
       if (url) overlay.imageUrl = url;
     }
     return overlay;

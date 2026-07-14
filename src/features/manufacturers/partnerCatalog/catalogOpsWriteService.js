@@ -9,7 +9,7 @@ import {
   autoPublishConfigToPatFields,
   mergeStudioIntoPatPatch,
 } from "./catalogOpsPatFields.js";
-import { getProductVersion, patRowToStudioConfig } from "./eazpireProductVersionService.js";
+import { getProductVersion, updateProductVersion, patRowToStudioConfig } from "./eazpireProductVersionService.js";
 import { updateEazpireProduct } from "./eazpireProductService.js";
 import { getCatalogOpsProduct, listCatalogOpsProductVersions } from "./catalogOpsReadService.js";
 import { regionCodesFromCountryCodes, expandToIsoCountryCodes } from "../../catalog/resolvePlanCountries.js";
@@ -506,9 +506,19 @@ export async function saveCatalogProviders(env, productKey, body) {
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
   const now = Date.now();
-  const activeIds = Array.isArray(body.active_print_provider_ids)
-    ? body.active_print_provider_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n))
-    : [];
+  const rawActive = Array.isArray(body.active_print_provider_ids) ? body.active_print_provider_ids : [];
+  const numericActive = [];
+  const opaqueActive = [];
+  for (const v of rawActive) {
+    const s = String(v ?? "").trim();
+    if (!s) continue;
+    const n = Number(s);
+    if (Number.isFinite(n) && String(n) === s) numericActive.push(n);
+    else opaqueActive.push(s);
+  }
+  // Prefer numeric Printify ids for INTEGER product_active_print_providers; Todify opaque ids
+  // (ma-1) are resolved via manufacturer versions — do not wipe the table when only opaque ids ship.
+  const activeIds = numericActive;
 
   const prevActive = await queryAll(
     db,
@@ -517,17 +527,19 @@ export async function saveCatalogProviders(env, productKey, body) {
   );
   const prevActiveSet = new Set(prevActive.map((r) => Number(r.print_provider_id)));
 
-  await db.prepare(`DELETE FROM product_active_print_providers WHERE product_key = ?`).bind(productKey).run();
-  for (const pid of activeIds) {
-    await db
-      .prepare(
-        `INSERT INTO product_active_print_providers (product_key, print_provider_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(productKey, pid, now, now)
-      .run();
-    if (!prevActiveSet.has(pid)) {
-      await ensureStandardPatForProvider(env, productKey, pid, now);
+  if (activeIds.length || opaqueActive.length === 0) {
+    await db.prepare(`DELETE FROM product_active_print_providers WHERE product_key = ?`).bind(productKey).run();
+    for (const pid of activeIds) {
+      await db
+        .prepare(
+          `INSERT INTO product_active_print_providers (product_key, print_provider_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?)`
+        )
+        .bind(productKey, pid, now, now)
+        .run();
+      if (!prevActiveSet.has(pid)) {
+        await ensureStandardPatForProvider(env, productKey, pid, now);
+      }
     }
   }
 
@@ -536,67 +548,119 @@ export async function saveCatalogProviders(env, productKey, body) {
       const patId = await resolvePatIdFromVersionId(env, versionId, productKey);
       if (patId) {
         await db.prepare(`DELETE FROM print_area_printify_templates WHERE id = ?`).bind(patId).run();
+      } else if (env.MANUFACTURER_DB) {
+        const id = String(versionId || "").trim();
+        if (id && !/^pat-/i.test(id)) {
+          const v = await getProductVersion(env.MANUFACTURER_DB, id);
+          if (v && v.product_key === productKey) {
+            await env.MANUFACTURER_DB.prepare(`DELETE FROM eazpire_product_versions WHERE id = ?`).bind(id).run();
+          }
+        }
       }
     }
   }
 
   if (Array.isArray(body.new_versions)) {
     for (const nv of body.new_versions) {
-      const ppId = Number(nv.print_provider_id);
-      if (!Number.isFinite(ppId)) continue;
-      await db
-        .prepare(
-          `INSERT INTO print_area_printify_templates
+      const ppRaw = nv.print_provider_id;
+      const ppId = Number(ppRaw);
+      if (Number.isFinite(ppId) && String(ppId) === String(ppRaw).trim()) {
+        await db
+          .prepare(
+            `INSERT INTO print_area_printify_templates
             (product_key, print_provider_id, display_name, sort_order, printify_product_id,
              product_version_config_json, is_active, publish_enabled, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          productKey,
-          ppId,
-          nv.display_name || "New version",
-          nv.sort_order ?? 99,
-          nv.external_template_product_id || "",
-          nv.product_version_config != null ? JSON.stringify(nv.product_version_config) : null,
-          nv.is_active !== false ? 1 : 0,
-          nv.publish_enabled !== false ? 1 : 0,
-          now,
-          now
-        )
-        .run();
+          )
+          .bind(
+            productKey,
+            ppId,
+            nv.display_name || "New version",
+            nv.sort_order ?? 99,
+            nv.external_template_product_id || "",
+            nv.product_version_config != null ? JSON.stringify(nv.product_version_config) : null,
+            nv.is_active !== false ? 1 : 0,
+            nv.publish_enabled !== false ? 1 : 0,
+            now,
+            now
+          )
+          .run();
+        continue;
+      }
+      // Opaque partner provider (Todify ma-1): store on manufacturer versions only.
+      if (env.MANUFACTURER_DB && String(ppRaw || "").trim()) {
+        const { upsertProductVersion } = await import("./eazpireProductVersionService.js");
+        const fp = await queryFirst(
+          env.MANUFACTURER_DB,
+          `SELECT id FROM manufacturer_fulfillment_providers WHERE external_provider_id = ? LIMIT 1`,
+          String(ppRaw).trim()
+        );
+        if (fp?.id) {
+          await upsertProductVersion(env.MANUFACTURER_DB, {
+            product_key: productKey,
+            fulfillment_provider_id: fp.id,
+            display_name: nv.display_name || "New version",
+            sort_order: nv.sort_order ?? 99,
+            external_template_product_id: nv.external_template_product_id || "",
+            product_version_config: nv.product_version_config ?? null,
+            publish_enabled: nv.publish_enabled !== false,
+            is_active: nv.is_active !== false,
+          });
+        }
+      }
     }
   }
 
   if (Array.isArray(body.version_updates)) {
     for (const vu of body.version_updates) {
       const patId = await resolvePatIdFromVersionId(env, vu.id, productKey);
-      if (!patId) continue;
-      const patch = [];
-      const binds = [];
-      if (vu.display_name != null) {
-        patch.push("display_name = ?");
-        binds.push(String(vu.display_name).trim() || "Version");
+      if (patId) {
+        const patch = [];
+        const binds = [];
+        if (vu.display_name != null) {
+          patch.push("display_name = ?");
+          binds.push(String(vu.display_name).trim() || "Version");
+        }
+        if (vu.product_version_config != null) {
+          patch.push("product_version_config_json = ?");
+          binds.push(JSON.stringify(vu.product_version_config));
+        }
+        if (vu.sort_order != null) {
+          patch.push("sort_order = ?");
+          binds.push(Number(vu.sort_order));
+        }
+        if (vu.publish_enabled != null) {
+          patch.push("publish_enabled = ?");
+          binds.push(vu.publish_enabled ? 1 : 0);
+        }
+        if (vu.is_active != null) {
+          patch.push("is_active = ?");
+          binds.push(vu.is_active ? 1 : 0);
+        }
+        if (patch.length) {
+          patch.push("updated_at = ?");
+          binds.push(now, patId);
+          await db.prepare(`UPDATE print_area_printify_templates SET ${patch.join(", ")} WHERE id = ?`).bind(...binds).run();
+          if (vu.product_version_config != null) {
+            await syncPatVisibilityToManufacturerShadow(env, patId, vu.product_version_config, productKey);
+          }
+        }
+        continue;
       }
-      if (vu.product_version_config != null) {
-        patch.push("product_version_config_json = ?");
-        binds.push(JSON.stringify(vu.product_version_config));
-      }
-      if (vu.sort_order != null) {
-        patch.push("sort_order = ?");
-        binds.push(Number(vu.sort_order));
-      }
-      if (vu.publish_enabled != null) {
-        patch.push("publish_enabled = ?");
-        binds.push(vu.publish_enabled ? 1 : 0);
-      }
-      if (vu.is_active != null) {
-        patch.push("is_active = ?");
-        binds.push(vu.is_active ? 1 : 0);
-      }
-      if (patch.length) {
-        patch.push("updated_at = ?");
-        binds.push(now, patId);
-        await db.prepare(`UPDATE print_area_printify_templates SET ${patch.join(", ")} WHERE id = ?`).bind(...binds).run();
+
+      // Todify / partner: version id is manufacturer eazpire_product_versions (no PAT row).
+      if (env.MANUFACTURER_DB) {
+        const id = String(vu.id || "").trim();
+        if (!id || /^pat-/i.test(id)) continue;
+        const v = await getProductVersion(env.MANUFACTURER_DB, id);
+        if (!v || v.product_key !== productKey) continue;
+        const patch = {};
+        if (vu.display_name != null) patch.display_name = String(vu.display_name).trim() || "Version";
+        if (vu.product_version_config != null) patch.product_version_config = vu.product_version_config;
+        if (vu.sort_order != null) patch.sort_order = Number(vu.sort_order);
+        if (vu.publish_enabled != null) patch.publish_enabled = !!vu.publish_enabled;
+        if (vu.is_active != null) patch.is_active = !!vu.is_active;
+        if (Object.keys(patch).length) await updateProductVersion(env.MANUFACTURER_DB, id, patch);
       }
     }
   }

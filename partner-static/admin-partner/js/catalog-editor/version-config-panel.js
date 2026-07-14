@@ -185,22 +185,29 @@ function readStoredMainSourceFlags(prevConfig) {
   };
 }
 
-export function collectVersionConfigPanel(root, prevConfig = null, versionId = null) {  let wrap = root;
+export function collectVersionConfigPanel(root, prevConfig = null, versionId = null) {
+  let wrap = root;
   if (versionId != null && root?.querySelectorAll) {
-    for (const el of root.querySelectorAll("[data-version-id]")) {
-      if (String(el.getAttribute("data-version-id")) === String(versionId)) {
-        wrap = el;
-        break;
-      }
-    }
+    // Prefer the version body panel — never a leaf control (name input / qty select) that also
+    // carries data-version-id. Leaf wraps made querySelectorAll(".ce-prov-ph-qty") return empty
+    // and wiped placeholders_by_position on Provider Save.
+    const vid = String(versionId);
+    wrap =
+      [...root.querySelectorAll(".ce-prov-version-body")].find(
+        (el) => String(el.getAttribute("data-version-id")) === vid
+      ) ||
+      root.querySelector(".ce-prov-version-pane") ||
+      root;
   }
   if (!wrap) return normalizePatProductVersionConfig(prevConfig);
 
   const cfg = normalizePatProductVersionConfig(prevConfig);
   const byPos = {};
 
-  wrap.querySelectorAll(".ce-prov-ph-qty").forEach((sel) => {
-    if (versionId != null && String(sel.dataset.versionId) !== String(versionId)) return;
+  const qtyEls = [...wrap.querySelectorAll(".ce-prov-ph-qty")].filter(
+    (sel) => versionId == null || String(sel.dataset.versionId) === String(versionId)
+  );
+  qtyEls.forEach((sel) => {
     const pos = sel.dataset.position;
     const key = sel.dataset.phKey;
     if (!pos || !key) return;
@@ -209,13 +216,16 @@ export function collectVersionConfigPanel(root, prevConfig = null, versionId = n
   });
 
   const designTypes = [];
-  wrap.querySelectorAll(".ce-prov-dt-cb").forEach((cb) => {
-    if (versionId != null && String(cb.dataset.versionId) !== String(versionId)) return;
+  const dtEls = [...wrap.querySelectorAll(".ce-prov-dt-cb")].filter(
+    (cb) => versionId == null || String(cb.dataset.versionId) === String(versionId)
+  );
+  dtEls.forEach((cb) => {
     if (cb.checked) designTypes.push(cb.dataset.dt);
   });
 
-  cfg.placeholders_by_position = byPos;
-  cfg.design_types = designTypes;
+  // Only overwrite when the panel actually rendered controls — otherwise keep prev (avoids wipe).
+  if (qtyEls.length) cfg.placeholders_by_position = byPos;
+  if (dtEls.length) cfg.design_types = designTypes;
   Object.assign(cfg, readStoredMainSourceFlags(prevConfig));
 
   applyPublishBrandingSemanticsToSlotsByPosition(cfg.placeholders_by_position);

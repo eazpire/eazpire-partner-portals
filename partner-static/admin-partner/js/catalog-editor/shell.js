@@ -572,16 +572,19 @@ async function saveCurrentTab() {
     if (ctx.activeTab !== "provider") {
       await saveVisibilityFromFooter(ctx);
     }
-    await runMirror(true);
-    ctx.bundle = await fetchEditorBundle(ctx.productKey);
-    updateDriftBadge(ctx);
-    // Success feedback MUST run before post-save remount. Provider remount (providers
-    // bundle + catalog detail) is much slower than Variants; waiting for it meant the
-    // flash either never ran (snapshot/reload throw) or appeared only after a long
-    // "Saving…" and was easy to miss. Flash lives on .catalog-editor, outside #ce-body.
+    // Flash immediately after tab APIs succeed — mirror/bundle/remount can be slow or throw
+    // (especially Todify/partner) and previously delayed or hid ✓ Saved.
     hideSaveLoading();
     showSaveFlash();
     showToast("Saved", "Tab saved and mirrored to publish index");
+    try {
+      await runMirror(true);
+      ctx.bundle = await fetchEditorBundle(ctx.productKey);
+      updateDriftBadge(ctx);
+    } catch (mirrorErr) {
+      console.warn("[catalog-editor] post-save mirror/bundle", mirrorErr);
+      showToast("Saved (sync pending)", mirrorErr?.message || "Mirror will retry on next save");
+    }
     try {
       resetDirtyAfterSave(getCurrentTabDirtyState(ctx) ?? {});
       await loadActiveTab(ctx);

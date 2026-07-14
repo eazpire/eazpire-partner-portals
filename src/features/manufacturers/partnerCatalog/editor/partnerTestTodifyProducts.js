@@ -192,6 +192,7 @@ export async function handlePartnerTestTodifyPublish(request, env) {
     template = await loadTemplateMetadata(env, row.product_key, regionCode, {
       printAreaTemplateId,
       publishProfileId,
+      printProviderId: row.print_provider_id || undefined,
     });
   } catch (e) {
     return json({ ok: false, error: "template_load_failed", message: e?.message || String(e) }, 400, cors);

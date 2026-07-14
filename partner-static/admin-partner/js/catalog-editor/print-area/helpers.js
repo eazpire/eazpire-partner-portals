@@ -619,10 +619,11 @@ export function groupVariantsForPrintArea(product) {
 /** Print area image mode: mockup carousels vs upload grids (product_catalog.print_area_edit_use_mocks). */
 export function resolvePrintAreaUseMockups(ctx, data) {
   const fromMockups = data?.product?.print_area_edit_use_mocks;
-  if (fromMockups !== undefined && fromMockups !== null) {
-    return !!fromMockups;
+  if (fromMockups !== undefined && fromMockups !== null && fromMockups !== "") {
+    return fromMockups === true || fromMockups === 1 || fromMockups === "1";
   }
-  return !!ctx.bundle?.product?.print_area_edit_use_mocks;
+  const fromBundle = ctx.bundle?.product?.print_area_edit_use_mocks;
+  return fromBundle === true || fromBundle === 1 || fromBundle === "1";
 }
 
 const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);

@@ -748,6 +748,15 @@ export async function savePrintAreaTab(ctx) {
   const st = ctx.printAreaState;
   if (!st || !ctx.selectedPrintProviderId) return;
 
+  // Persist Use mockups first so a later rect/config failure cannot drop the toggle.
+  await saveMockups(ctx.productKey, {
+    print_area_edit_use_mocks: !!st.useMockups,
+    auto_mirror: false,
+  });
+  if (ctx.bundle?.product) {
+    ctx.bundle.product.print_area_edit_use_mocks = !!st.useMockups;
+  }
+
   const config = buildConfigForSave(st, ctx, ctx.printAreaData);
   await savePrintAreasConfig({
     product_key: ctx.productKey,
@@ -760,14 +769,6 @@ export async function savePrintAreaTab(ctx) {
 
   if (st.variantsScope.size && st.variantGroups.groups.length) {
     await saveVariantRectsForScope(ctx, st);
-  }
-
-  await saveMockups(ctx.productKey, {
-    print_area_edit_use_mocks: !!st.useMockups,
-    auto_mirror: false,
-  });
-  if (ctx.bundle?.product) {
-    ctx.bundle.product.print_area_edit_use_mocks = !!st.useMockups;
   }
 
   st.greenDirty = false;

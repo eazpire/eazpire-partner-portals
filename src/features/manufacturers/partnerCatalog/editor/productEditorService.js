@@ -752,9 +752,22 @@ export async function saveProviders(env, productKey, body) {
   }
   const db = env.MANUFACTURER_DB;
   const now = Date.now();
-  const activeIds = Array.isArray(body.active_print_provider_ids)
-    ? body.active_print_provider_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n))
-    : [];
+  const rawActive = Array.isArray(body.active_print_provider_ids) ? body.active_print_provider_ids : [];
+  const numericActive = [];
+  const opaqueActive = [];
+  for (const v of rawActive) {
+    const s = String(v ?? "").trim();
+    if (!s) continue;
+    const n = Number(s);
+    if (Number.isFinite(n) && String(n) === s) numericActive.push(n);
+    else opaqueActive.push(s);
+  }
+  // INTEGER eazpire_product_active_providers: numeric Printify ids + opaque→sentinel.
+  const { coerceVariantConfigProviderId } = await import("../constants.js");
+  const activeIds = [
+    ...numericActive,
+    ...opaqueActive.map((oid) => coerceVariantConfigProviderId(oid)).filter((n) => Number.isFinite(n) && n > 0),
+  ];
 
   const prevActive = await queryAll(
     db,
@@ -772,6 +785,12 @@ export async function saveProviders(env, productKey, body) {
       )
       .bind(newId(), productKey, pid, now, now)
       .run();
+  }
+  // Ensure Standard versions for opaque partner providers (lookup by external id string).
+  for (const oid of opaqueActive) {
+    await ensureStandardVersionForProvider(db, productKey, oid, now);
+  }
+  for (const pid of numericActive) {
     if (!prevActiveSet.has(pid)) {
       await ensureStandardVersionForProvider(db, productKey, pid, now);
     }
@@ -790,9 +809,12 @@ export async function saveProviders(env, productKey, body) {
 
   if (Array.isArray(body.new_versions)) {
     for (const nv of body.new_versions) {
-      const ppId = Number(nv.print_provider_id);
-      if (!Number.isFinite(ppId)) continue;
-      const fpId = await fulfillmentProviderIdForPrintProvider(db, ppId);
+      const ppRaw = nv.print_provider_id;
+      const ppId = Number(ppRaw);
+      const lookupId =
+        Number.isFinite(ppId) && String(ppId) === String(ppRaw).trim() ? ppId : String(ppRaw || "").trim();
+      if (lookupId === "" || lookupId == null) continue;
+      const fpId = await fulfillmentProviderIdForPrintProvider(db, lookupId);
       if (!fpId) continue;
       await upsertProductVersion(db, {
         product_key: productKey,
