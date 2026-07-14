@@ -13,7 +13,7 @@ import {
 import { getProductVersion, patRowToStudioConfig } from "./eazpireProductVersionService.js";
 import { updateEazpireProduct } from "./eazpireProductService.js";
 import { getCatalogOpsProduct, listCatalogOpsProductVersions } from "./catalogOpsReadService.js";
-import { regionCodesFromCountryCodes } from "../../catalog/resolvePlanCountries.js";
+import { regionCodesFromCountryCodes, expandToIsoCountryCodes } from "../../catalog/resolvePlanCountries.js";
 import {
   MOCKUP_SET_CLEAN,
   MOCKUP_SET_SHOP_PREVIEW,
@@ -570,9 +570,33 @@ export async function saveCatalogProviders(env, productKey, body) {
   }
 
   if (Array.isArray(body.publish_plan_updates)) {
+    let allowed = null;
+    try {
+      const mfgDb = env.MANUFACTURER_DB;
+      if (mfgDb) {
+        const mp = await queryFirst(
+          mfgDb,
+          `SELECT regions_json FROM manufacturer_products WHERE eazpire_product_key = ? LIMIT 1`,
+          productKey
+        );
+        if (mp?.regions_json != null) {
+          let regions = [];
+          try {
+            regions = JSON.parse(mp.regions_json || "[]");
+          } catch {
+            regions = [];
+          }
+          const list = expandToIsoCountryCodes(regions);
+          if (list.length) allowed = new Set(list);
+        }
+      }
+    } catch {
+      allowed = null;
+    }
     for (const plan of body.publish_plan_updates) {
       if (!plan.id) continue;
-      const countryCodes = Array.isArray(plan.country_codes) ? plan.country_codes : [];
+      let countryCodes = expandToIsoCountryCodes(Array.isArray(plan.country_codes) ? plan.country_codes : []);
+      if (allowed) countryCodes = countryCodes.filter((cc) => allowed.has(cc));
       const regionCodes =
         Array.isArray(plan.region_codes) && plan.region_codes.length
           ? plan.region_codes

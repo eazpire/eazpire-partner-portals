@@ -29,12 +29,13 @@ import {
 } from "../catalogOpsWriteService.js";
 import { resolveVariantProductDataForUi } from "../variantTemplateSync.js";
 import { parseJson, newId } from "../../db.js";
-import { regionCodesFromCountryCodes } from "../../../catalog/resolvePlanCountries.js";
+import { regionCodesFromCountryCodes, expandToIsoCountryCodes } from "../../../catalog/resolvePlanCountries.js";
 import {
   filterImagesByMockupSet,
   MOCKUP_SET_CLEAN,
   MOCKUP_SET_SHOP_PREVIEW,
   MOCKUP_SET_CALIBRATION,
+  MOCKUP_SET_PREVIEW_IMAGES,
   mockupSetSqlMatch,
 } from "../mockupSet.js";
 import { getEazpireProduct, updateEazpireProduct } from "../eazpireProductService.js";
@@ -55,6 +56,13 @@ import {
   catalogPlaceholdersFromPartnerPrintAreas,
   catalogVariantsHavePlaceholderPositions,
 } from "../partnerCatalogPlaceholders.js";
+import {
+  loadPartnerEditorSource,
+  enrichMockupsBundleFromPartner,
+  enrichVariantsBundleFromPartner,
+  enrichPrintAreaBundleFromPartner,
+  mockupDefaultsFromPartnerPrintAreas,
+} from "../partnerCatalogEditorEnrichment.js";
 
 async function queryAll(db, sql, ...binds) {
   try {
@@ -234,6 +242,7 @@ export async function getProvidersBundle(env, productKey) {
   const bundle = await getProductEditorBundle(env, productKey);
   if (!bundle.ok) return bundle;
 
+  const partnerMarkets = await loadPartnerAvailableCountries(env, productKey);
   return {
     ok: true,
     product: bundle.product,
@@ -243,6 +252,70 @@ export async function getProvidersBundle(env, productKey) {
     active_providers: bundle.active_providers,
     versions: bundle.versions,
     publish_plans: enhanced.publish_plans || bundle.publish_plans,
+    available_partner_countries: partnerMarkets.countries,
+    markets_mode: partnerMarkets.mode,
+  };
+}
+
+/**
+ * Partner/Todify products expose the partner's selected shipping countries as the Admin market pool.
+ * Printify (and products without a linked manufacturer_product) keep full-world markets.
+ */
+async function loadPartnerAvailableCountries(env, productKey) {
+  const key = String(productKey || "").trim();
+  if (!key) return { mode: "full", countries: [] };
+
+  const db = env.MANUFACTURER_DB;
+  let row = null;
+  if (db) {
+    row = await queryFirst(
+      db,
+      `SELECT regions_json FROM manufacturer_products WHERE eazpire_product_key = ? LIMIT 1`,
+      key
+    );
+    if (!row) {
+      const ver = await queryFirst(
+        db,
+        `SELECT studio_config_json FROM eazpire_product_versions WHERE product_key = ? ORDER BY sort_order ASC, created_at ASC LIMIT 1`,
+        key
+      );
+      let mpId = null;
+      try {
+        const sc = JSON.parse(ver?.studio_config_json || "{}");
+        if (sc.manufacturer_product_id) mpId = sc.manufacturer_product_id;
+      } catch {
+        /* ignore */
+      }
+      if (mpId) {
+        row = await queryFirst(db, `SELECT regions_json FROM manufacturer_products WHERE id = ? LIMIT 1`, mpId);
+      }
+    }
+  }
+
+  let todifyProfile = false;
+  if (env.CATALOG_DB) {
+    const prof = await queryFirst(
+      env.CATALOG_DB,
+      `SELECT source_system FROM product_publish_profiles WHERE product_key = ? LIMIT 1`,
+      key
+    );
+    todifyProfile = String(prof?.source_system || "").toLowerCase() === "todify";
+  }
+
+  if (!row && !todifyProfile) {
+    return { mode: "full", countries: [] };
+  }
+
+  let regions = [];
+  try {
+    regions = typeof row?.regions_json === "string" ? JSON.parse(row.regions_json || "[]") : row?.regions_json || [];
+  } catch {
+    regions = [];
+  }
+  const countries = expandToIsoCountryCodes(Array.isArray(regions) ? regions : []);
+  return {
+    mode: "partner",
+    countries,
   };
 }
 
@@ -740,12 +813,19 @@ export async function saveProviders(env, productKey, body) {
   }
 
   if (Array.isArray(body.publish_plan_updates)) {
+    const partnerMarkets = await loadPartnerAvailableCountries(env, productKey);
+    const allowed =
+      partnerMarkets.mode === "partner" && partnerMarkets.countries.length
+        ? new Set(partnerMarkets.countries)
+        : null;
     for (const plan of body.publish_plan_updates) {
       const existing = plan.id
         ? await queryFirst(db, `SELECT id FROM eazpire_product_publish_plans WHERE id = ?`, plan.id)
         : null;
       if (existing?.id) {
-        const countryCodes = Array.isArray(plan.country_codes) ? plan.country_codes : [];
+        let countryCodes = Array.isArray(plan.country_codes) ? plan.country_codes : [];
+        countryCodes = expandToIsoCountryCodes(countryCodes);
+        if (allowed) countryCodes = countryCodes.filter((cc) => allowed.has(cc));
         const regionCodes =
           Array.isArray(plan.region_codes) && plan.region_codes.length
             ? plan.region_codes
@@ -858,7 +938,15 @@ export async function getPrintAreaBundle(env, productKey, { printProviderId, ver
     `SELECT * FROM eazpire_product_variant_print_areas WHERE product_key = ?`,
     productKey
   );
-  return { ok: true, version, versions, mockup_defaults: mockupDefaults, variant_print_areas: variantPrintAreas };
+  let bundle = { ok: true, version, versions, mockup_defaults: mockupDefaults, variant_print_areas: variantPrintAreas };
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichPrintAreaBundleFromPartner(bundle, partner, env);
+    if (bundle.mockup_defaults?.length) {
+      bundle.mockup_defaults = enrichMockupDefaultsRows(bundle.mockup_defaults, env);
+    }
+  }
+  return bundle;
 }
 
 export async function savePrintAreaSnapshot(env, versionId, body) {
@@ -913,25 +1001,39 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
     return getCatalogOpsVariantsBundle(env, productKey, printProviderId);
   }
   const db = env.MANUFACTURER_DB;
-  const variantConfig = await queryFirst(
-    db,
-    `SELECT * FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
-    productKey,
-    Number(printProviderId)
-  );
-  const profile = await queryFirst(
-    db,
-    `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
-    productKey,
-    Number(printProviderId)
-  );
-  const template = await queryFirst(
-    db,
-    `SELECT * FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
-    productKey,
-    Number(printProviderId)
-  );
-  return {
+  const pid = Number(printProviderId);
+  let variantConfig = Number.isFinite(pid)
+    ? await queryFirst(
+        db,
+        `SELECT * FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        pid
+      )
+    : null;
+  let profile = Number.isFinite(pid)
+    ? await queryFirst(
+        db,
+        `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        pid
+      )
+    : null;
+  if (!profile) {
+    profile = await queryFirst(
+      db,
+      `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`,
+      productKey
+    );
+  }
+  const template = Number.isFinite(pid)
+    ? await queryFirst(
+        db,
+        `SELECT * FROM eazpire_template_products WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        pid
+      )
+    : null;
+  let bundle = {
     ok: true,
     variant_config: variantConfig ? parseJson(variantConfig.config_json, {}) : null,
     prices_json: profile ? parseJson(profile.prices_json, null) : null,
@@ -940,6 +1042,11 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
     product_data_json: resolveVariantProductDataForUi(template, profile),
     template,
   };
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichVariantsBundleFromPartner(bundle, partner, { title: profile?.title || productKey });
+  }
+  return bundle;
 }
 
 export async function saveVariants(env, productKey, printProviderId, body) {
@@ -1166,12 +1273,15 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
   const db = env.MANUFACTURER_DB;
   const product = await getEazpireProduct(db, productKey);
   let images = await queryAll(db, `SELECT * FROM eazpire_product_mockup_images WHERE product_key = ?`, productKey);
-  if (printProviderId != null) {
-    images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
+  if (printProviderId != null && Number.isFinite(Number(printProviderId))) {
+    const pid = Number(printProviderId);
+    const filtered = images.filter((i) => Number(i.print_provider_id) === pid);
+    if (filtered.length) images = filtered;
   }
   const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
   const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
   const calibrationImages = filterImagesByMockupSet(images, MOCKUP_SET_CALIBRATION);
+  const previewImages = filterImagesByMockupSet(images, MOCKUP_SET_PREVIEW_IMAGES);
   const viewRandom = await queryAll(
     db,
     `SELECT * FROM eazpire_product_mockup_view_random WHERE product_key = ?`,
@@ -1181,15 +1291,30 @@ export async function getMockupsBundle(env, productKey, printProviderId) {
     await queryAll(db, `SELECT * FROM eazpire_product_mockup_defaults WHERE product_key = ?`, productKey),
     env
   );
-  return {
+  let bundle = {
     ok: true,
     product,
     images: cleanImages,
     shop_preview_images: shopPreviewImages,
     calibration_images: calibrationImages,
+    preview_images: previewImages,
     view_random: viewRandom,
     mockup_defaults: defaults,
   };
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichMockupsBundleFromPartner(bundle, partner, { productKey, printProviderId });
+    if (!(bundle.mockup_defaults || []).length && partner.print_areas?.length) {
+      bundle.mockup_defaults = enrichMockupDefaultsRows(
+        mockupDefaultsFromPartnerPrintAreas(partner.print_areas, env).map((row) => ({
+          ...row,
+          product_key: productKey,
+        })),
+        env
+      );
+    }
+  }
+  return bundle;
 }
 
 export async function saveMockups(env, productKey, body) {

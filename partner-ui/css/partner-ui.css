@@ -2897,11 +2897,20 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   max-width: 920px;
 }
 
-/* Provider markets — region-grouped country picker */
+/* Provider markets — continent-grouped collapsible country picker */
 .ce-prov-markets {
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid var(--line);
+}
+.ce-market-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.ce-market-toolbar .btn {
+  font-size: 0.78rem;
 }
 .ce-market-regions {
   display: flex;
@@ -2916,9 +2925,43 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   overflow: hidden;
 }
 .ce-market-region-head {
-  padding: 10px 14px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
+}
+.ce-market-region-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.ce-market-region-toggle:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.ce-market-chevron {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.ce-market-region-toggle[aria-expanded="false"] .ce-market-chevron {
+  transform: rotate(-45deg);
+}
+.ce-market-region--collapsed .ce-market-region-head {
+  border-bottom: 0;
 }
 .ce-market-region-select {
   display: flex;
@@ -2927,6 +2970,9 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   cursor: pointer;
   user-select: none;
   margin: 0;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px 10px 0;
 }
 .ce-market-region-select input[type="checkbox"] {
   width: 16px;
@@ -2962,6 +3008,15 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 4px 12px;
   padding: 10px 14px 12px;
+}
+.ce-market-region-countries[hidden] {
+  display: none !important;
+}
+.ce-market-empty {
+  margin: 8px 0 0;
+}
+.pe-regions-field .ce-market-countries {
+  margin-top: 6px;
 }
 .ce-market-country {
   display: flex;

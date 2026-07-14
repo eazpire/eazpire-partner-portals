@@ -2,11 +2,14 @@ export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
 /** Internal placement-guide mocks for print-area detection (red rectangle) and try-on AI. */
 export const MOCKUP_SET_CALIBRATION = "calibration";
+/** Partner lifestyle / Catalog Studio gallery images (not Printify-synced). */
+export const MOCKUP_SET_PREVIEW_IMAGES = "preview_images";
 
 export function normalizeMockupSet(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (raw === MOCKUP_SET_SHOP_PREVIEW) return MOCKUP_SET_SHOP_PREVIEW;
   if (raw === MOCKUP_SET_CALIBRATION) return MOCKUP_SET_CALIBRATION;
+  if (raw === MOCKUP_SET_PREVIEW_IMAGES) return MOCKUP_SET_PREVIEW_IMAGES;
   return MOCKUP_SET_CLEAN;
 }
 
@@ -47,5 +50,12 @@ export function mockupSetSqlMatch(mockupSet) {
   if (want === MOCKUP_SET_CALIBRATION) {
     return { clause: "mockup_set = ?", bind: MOCKUP_SET_CALIBRATION };
   }
-  return { clause: "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)", bind: MOCKUP_SET_CLEAN };
+  if (want === MOCKUP_SET_PREVIEW_IMAGES) {
+    return { clause: "mockup_set = ?", bind: MOCKUP_SET_PREVIEW_IMAGES };
+  }
+  // Clean excludes partner lifestyle previews (preview_images) and other named sets
+  return {
+    clause: "(mockup_set IS NULL OR mockup_set = '' OR mockup_set = ?)",
+    bind: MOCKUP_SET_CLEAN,
+  };
 }

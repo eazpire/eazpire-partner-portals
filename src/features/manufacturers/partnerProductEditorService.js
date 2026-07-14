@@ -19,12 +19,17 @@ import {
   catalogPlaceholdersFromPartnerPrintAreas,
   placeholdersByPositionFromPartnerPrintAreas,
 } from "./partnerCatalog/partnerCatalogPlaceholders.js";
+import {
+  expandToIsoCountryCodes,
+  regionCodesFromCountryCodes,
+} from "../catalog/resolvePlanCountries.js";
 
 const MOCKUP_SETS = ["clean", "shop_preview", "calibration", "preview_images"];
 
 /**
  * Push partner print areas into catalog-db publish profile (variants_json placeholders +
  * catalog_placeholder_positions_json) and seed version placeholder config when empty.
+ * Also mirrors mockups + mockup_defaults + product_data_json for Admin Catalog editor tabs.
  * Safe to call on approve, re-approve, and after partner print-area save.
  */
 export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, productId, productKey) {
@@ -32,15 +37,14 @@ export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, prod
   if (!db || !env?.CATALOG_DB || !productKey) return { ok: false, error: "unavailable" };
 
   await ensureEditorColumns(db);
-  const [variants, printAreas, views] = await Promise.all([
+  const [variants, printAreas, views, mockups] = await Promise.all([
     listVariants(db, manufacturerId, productId),
     listPrintAreas(db, manufacturerId, productId),
     listViews(db, productId),
+    listMockupSlots(db, env, productId),
   ]);
 
   const placeholders = catalogPlaceholdersFromPartnerPrintAreas(printAreas, views);
-  if (!placeholders.length) return { ok: true, placeholder_count: 0, updated: false };
-
   const catalogVariants = buildTodifyCatalogVariantsFromPartner({ variants, printAreas, views });
   const prices = {};
   catalogVariants.forEach((v) => {
@@ -50,6 +54,14 @@ export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, prod
   const variantsJson = JSON.stringify(catalogVariants);
   const pricesJson = JSON.stringify(prices);
   const now = Date.now();
+
+  const {
+    buildPartnerProductDataForUi,
+    catalogMockupRowsFromPartnerSlots,
+    mockupDefaultsFromPartnerPrintAreas,
+  } = await import("./partnerCatalog/partnerCatalogEditorEnrichment.js");
+  const productData = buildPartnerProductDataForUi(variants, { title: productKey });
+  const productDataJson = productData ? JSON.stringify(productData) : null;
 
   const prof = await env.CATALOG_DB.prepare(
     `SELECT id, variants_json FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`
@@ -64,21 +76,41 @@ export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, prod
         `UPDATE product_publish_profiles SET
            variants_json = ?, prices_json = ?,
            catalog_placeholder_positions_json = ?, catalog_placeholder_positions_updated_at = ?,
+           product_data_json = COALESCE(?, product_data_json),
            source_system = COALESCE(NULLIF(source_system, ''), 'todify'),
            source_product_id = COALESCE(source_product_id, ?),
            updated_at = ?
          WHERE id = ?`
       )
-        .bind(variantsJson, pricesJson, positionsJson, now, productId, now, profileId)
+        .bind(
+          variantsJson,
+          pricesJson,
+          positionsJson,
+          now,
+          productDataJson,
+          productId,
+          now,
+          profileId
+        )
         .run();
     } catch (e) {
-      // catalog_placeholder_positions_* may be missing on older DBs
+      // catalog_placeholder_positions_* or product_data may be missing on older DBs
       console.warn("[sync-partner-print-areas] profile update (positions):", e?.message || e);
-      await env.CATALOG_DB.prepare(
-        `UPDATE product_publish_profiles SET variants_json = ?, prices_json = ?, updated_at = ? WHERE id = ?`
-      )
-        .bind(variantsJson, pricesJson, now, profileId)
-        .run();
+      try {
+        await env.CATALOG_DB.prepare(
+          `UPDATE product_publish_profiles SET
+             variants_json = ?, prices_json = ?, product_data_json = COALESCE(?, product_data_json), updated_at = ?
+           WHERE id = ?`
+        )
+          .bind(variantsJson, pricesJson, productDataJson, now, profileId)
+          .run();
+      } catch (e2) {
+        await env.CATALOG_DB.prepare(
+          `UPDATE product_publish_profiles SET variants_json = ?, prices_json = ?, updated_at = ? WHERE id = ?`
+        )
+          .bind(variantsJson, pricesJson, now, profileId)
+          .run();
+      }
     }
   }
 
@@ -123,6 +155,91 @@ export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, prod
     }
   }
 
+  // Seed product_mockup_defaults from partner print rects (only when row missing)
+  const defaults = mockupDefaultsFromPartnerPrintAreas(printAreas, env);
+  let defaultsSeeded = 0;
+  for (const md of defaults) {
+    const key = String(md.print_area_key || "").trim().toLowerCase();
+    if (!key) continue;
+    try {
+      const existing = await env.CATALOG_DB.prepare(
+        `SELECT id FROM product_mockup_defaults WHERE product_key = ? AND print_area_key = ? LIMIT 1`
+      )
+        .bind(productKey, key)
+        .first();
+      if (existing?.id) continue;
+      await env.CATALOG_DB.prepare(
+        `INSERT INTO product_mockup_defaults
+          (product_key, print_area_key, print_area_rect_json, mockup_print_area_rect_json,
+           printify_print_area_width, printify_print_area_height, print_area_template_r2_key,
+           template_color, placement_x, placement_y, placement_scale, placement_angle, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'white', 0.5, 0.5, 1.0, 0.0, ?, ?)`
+      )
+        .bind(
+          productKey,
+          key,
+          md.print_area_rect_json,
+          md.mockup_print_area_rect_json,
+          md.printify_print_area_width,
+          md.printify_print_area_height,
+          md.print_area_template_r2_key,
+          now,
+          now
+        )
+        .run();
+      defaultsSeeded += 1;
+    } catch (e) {
+      console.warn("[sync-partner-print-areas] mockup_defaults:", e?.message || e);
+    }
+  }
+
+  // Mirror partner mockup images into catalog when catalog has none for this product
+  let mockupsMirrored = 0;
+  try {
+    const existingImg = await env.CATALOG_DB.prepare(
+      `SELECT id FROM product_mockup_images WHERE product_key = ? LIMIT 1`
+    )
+      .bind(productKey)
+      .first();
+    if (!existingImg && mockups.length) {
+      const { ensureCatalogMockupImageSchema } = await import(
+        "./partnerCatalog/ensureCatalogMockupImageSchema.js"
+      );
+      await ensureCatalogMockupImageSchema(env.CATALOG_DB);
+      const rows = catalogMockupRowsFromPartnerSlots(mockups, {
+        productKey,
+        printProviderId: 0,
+      });
+      for (const row of rows) {
+        try {
+          await env.CATALOG_DB.prepare(
+            `INSERT INTO product_mockup_images
+              (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex,
+               image_url, printify_variant_ids, is_default, mockup_set, created_at)
+             VALUES (?, ?, '', ?, ?, ?, ?, NULL, ?, ?, ?)`
+          )
+            .bind(
+              productKey,
+              0,
+              row.view_key,
+              row.color_name,
+              row.color_hex,
+              row.image_url,
+              row.is_default ? 1 : 0,
+              row.mockup_set || "clean",
+              now
+            )
+            .run();
+          mockupsMirrored += 1;
+        } catch (e) {
+          console.warn("[sync-partner-print-areas] mockup image:", e?.message || e);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[sync-partner-print-areas] mockups mirror:", e?.message || e);
+  }
+
   // Seed version config placeholders when empty (manufacturer DB)
   try {
     const { listProductVersions, updateProductVersion } = await import(
@@ -157,6 +274,9 @@ export async function syncPartnerPrintAreasIntoCatalog(env, manufacturerId, prod
     profile_id: profileId,
     updated: true,
     variants_json: catalogVariants,
+    mockups_mirrored: mockupsMirrored,
+    mockup_defaults_seeded: defaultsSeeded,
+    product_data_seeded: !!productData,
   };
 }
 
@@ -481,7 +601,9 @@ export async function savePartnerProductHeader(db, manufacturerId, productId, bo
       body.sku_base !== undefined ? body.sku_base : existing?.sku_base ?? null,
       JSON.stringify(body.design_types ?? existing?.design_types ?? []),
       body.print_technique !== undefined ? body.print_technique : existing?.print_technique ?? null,
-      JSON.stringify(body.regions ?? existing?.regions ?? []),
+      JSON.stringify(
+        expandToIsoCountryCodes(body.regions ?? existing?.regions ?? [])
+      ),
       JSON.stringify(body.meta ?? existing?.meta ?? {}),
       body.currency ?? existing?.currency ?? "EUR",
       providerLocationId,
@@ -1035,7 +1157,8 @@ export async function adminApprovePartnerProductToCatalog(
 
   const meta = product.meta || {};
   const title = String(meta.display_name || product.title || productKey);
-  const regions = product.regions?.length ? product.regions : ["EU"];
+  const countryCodes = expandToIsoCountryCodes(product.regions?.length ? product.regions : ["EU"]);
+  const regions = regionCodesFromCountryCodes(countryCodes);
 
   await upsertEazpireProduct(db, {
     product_key: productKey,
@@ -1201,7 +1324,7 @@ export async function adminApprovePartnerProductToCatalog(
               productKey,
               JSON.stringify(regions),
               providerName,
-              JSON.stringify(["MA", "DE", "FR"]),
+              JSON.stringify(countryCodes),
               profileId,
               now,
               now

@@ -6,19 +6,21 @@ import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js
 export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
 export const MOCKUP_SET_CALIBRATION = "calibration";
+export const MOCKUP_SET_PREVIEW_IMAGES = "preview_images";
 
 const MOCK_SECTION_IDS = {
   clean: MOCKUP_SET_CLEAN,
   shop_preview: MOCKUP_SET_SHOP_PREVIEW,
   calibration: MOCKUP_SET_CALIBRATION,
+  preview_images: MOCKUP_SET_PREVIEW_IMAGES,
 };
 
 const SECTION_META = {
   [MOCKUP_SET_CLEAN]: {
     id: "clean",
     title: "Clean Mockups",
-    hint: "Catalog product mockups for publishing and shop display — sync via Templates → Clean Mockups. Enable one Preview Mock globally (Shopify alt text).",
-    emptyHint: "No clean mockup images yet. Sync on the Templates tab under Clean Mockups.",
+    hint: "Catalog product mockups for publishing and shop display — sync via Templates → Clean Mockups (or partner portal uploads).",
+    emptyHint: "No clean mockup images yet. Sync on Templates, or wait for partner portal Clean mockups.",
     showPrintAreaToggle: true,
     showPreviewToggle: true,
     internal: false,
@@ -26,8 +28,8 @@ const SECTION_META = {
   [MOCKUP_SET_SHOP_PREVIEW]: {
     id: "shop_preview",
     title: "Shop Preview Mockups",
-    hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Sync via Templates → Shop Preview Mockups.",
-    emptyHint: "No shop preview mockups yet. Set a Printify product ID on Templates → Shop Preview Mockups and sync.",
+    hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Sync via Templates or partner portal.",
+    emptyHint: "No shop preview mockups yet.",
     showPrintAreaToggle: false,
     showPreviewToggle: true,
     internal: false,
@@ -35,11 +37,20 @@ const SECTION_META = {
   [MOCKUP_SET_CALIBRATION]: {
     id: "calibration",
     title: "Calibration Mockup",
-    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Not shown in the shop. Sync via Templates → Calibration Mockup.",
-    emptyHint: "No calibration mockup images yet. Set a Printify product ID on Templates → Calibration Mockup and sync.",
+    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Not shown in the shop.",
+    emptyHint: "No calibration mockup images yet.",
     showPrintAreaToggle: false,
     showPreviewToggle: false,
     internal: true,
+  },
+  [MOCKUP_SET_PREVIEW_IMAGES]: {
+    id: "preview_images",
+    title: "Preview Images",
+    hint: "Lifestyle / gallery images from the partner portal (Catalog Studio thumbnails). Not Printify-synced.",
+    emptyHint: "No preview images yet. Partners upload these in the Product Editor → Mockups → Preview Images.",
+    showPrintAreaToggle: false,
+    showPreviewToggle: false,
+    internal: false,
   },
 };
 
@@ -60,12 +71,14 @@ export function resolveActiveMockSection(ctx) {
   const section = ui.selectedSection;
   if (section === MOCKUP_SET_SHOP_PREVIEW) return MOCKUP_SET_SHOP_PREVIEW;
   if (section === MOCKUP_SET_CALIBRATION) return MOCKUP_SET_CALIBRATION;
+  if (section === MOCKUP_SET_PREVIEW_IMAGES) return MOCKUP_SET_PREVIEW_IMAGES;
   return MOCKUP_SET_CLEAN;
 }
 
 function imagesForSet(data, mockupSet) {
   if (mockupSet === MOCKUP_SET_SHOP_PREVIEW) return data?.shop_preview_images || [];
   if (mockupSet === MOCKUP_SET_CALIBRATION) return data?.calibration_images || [];
+  if (mockupSet === MOCKUP_SET_PREVIEW_IMAGES) return data?.preview_images || [];
   return data?.images || [];
 }
 

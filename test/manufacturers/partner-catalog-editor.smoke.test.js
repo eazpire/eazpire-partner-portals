@@ -169,10 +169,30 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("publish_plan_updates");
     expect(src).toContain("ce-prov-origin");
     expect(src).toContain("mergeVisibilityIntoVersionConfig");
-    const picker = readFileSync(join(portal, "market-country-picker.js"), "utf8");
+    expect(src).toContain("available_partner_countries");
+    expect(src).toContain("markets_mode");
+    const picker = readFileSync(join(root, "partner-ui/js/market-country-picker.js"), "utf8");
     expect(picker).toContain("ce-market-region");
     expect(picker).toContain("buildCountryFlagHtml");
     expect(picker).toContain("ce-market-country-cb");
+    expect(picker).toContain("ce-market-collapse-all");
+    expect(picker).toContain("buildContinentGroups");
+    const world = readFileSync(join(root, "partner-ui/js/world-countries.js"), "utf8");
+    expect(world).toContain("Africa");
+    expect(world).toContain("Antarctica");
+    expect(world).toContain("COUNTRY_CONTINENT_MAP");
+    const adminPicker = readFileSync(join(portal, "market-country-picker.js"), "utf8");
+    expect(adminPicker).toContain("/partner/shared/js/market-country-picker.js");
+  });
+
+  it("partner details tab uses shared country picker", () => {
+    const details = readFileSync(
+      join(root, "partner-portal/js/product-editor/tabs/details.js"),
+      "utf8"
+    );
+    expect(details).toContain("renderMarketCountryPicker");
+    expect(details).toContain("Shipping countries");
+    expect(details).not.toContain('id="pe-product-regions"');
   });
 
   it("all tab modules exist", () => {

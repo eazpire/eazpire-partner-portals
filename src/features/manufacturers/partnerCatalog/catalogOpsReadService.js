@@ -8,6 +8,7 @@ import {
   MOCKUP_SET_CLEAN,
   MOCKUP_SET_SHOP_PREVIEW,
   MOCKUP_SET_CALIBRATION,
+  MOCKUP_SET_PREVIEW_IMAGES,
 } from "./mockupSet.js";
 import { catalogStatusToIsActive, isActiveToCatalogStatus } from "./constants.js";
 import { getEazpireProduct } from "./eazpireProductService.js";
@@ -15,6 +16,13 @@ import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } 
 import { ensurePrintifyPartner } from "./printifyPartnerSeed.js";
 import { resolvePrintifyBlueprintId } from "./editor/partnerEditorExtensions.js";
 import { resolveVariantProductDataForUi } from "./variantTemplateSync.js";
+import {
+  loadPartnerEditorSource,
+  enrichMockupsBundleFromPartner,
+  enrichVariantsBundleFromPartner,
+  enrichPrintAreaBundleFromPartner,
+  mockupDefaultsFromPartnerPrintAreas,
+} from "./partnerCatalogEditorEnrichment.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -38,11 +46,20 @@ export function enrichMockupDefaultRow(row, publicBaseUrl) {
   const base = String(publicBaseUrl || mockupPublicBaseUrl({})).replace(/\/$/, "");
   const printAreaKey = row.print_area_template_r2_key || null;
   const templateKey = row.template_r2_key || null;
+  const urlForKey = (key) => {
+    if (!key) return null;
+    // Partner portal uploads live in MOCKUP_R2
+    if (String(key).startsWith("partner-products/")) {
+      return `${base}/mockup-r2?k=${encodeURIComponent(key)}`;
+    }
+    // Preserve slash path for catalog mockup keys (historic contract)
+    return `${base}/mockup/${key}`;
+  };
   return {
     ...row,
-    print_area_template_url: printAreaKey ? `${base}/mockup/${printAreaKey}` : null,
-    template_url: templateKey ? `${base}/mockup/${templateKey}` : null,
-    has_print_area_in_image: !!printAreaKey,
+    print_area_template_url: row.print_area_template_url || urlForKey(printAreaKey),
+    template_url: row.template_url || urlForKey(templateKey),
+    has_print_area_in_image: !!(printAreaKey || row.print_area_template_url),
   };
 }
 
@@ -321,12 +338,20 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
   const pid = Number(printProviderId);
-  const profile = Number.isFinite(pid)
+  let profile = Number.isFinite(pid)
     ? await catalogDb
         .prepare(`SELECT * FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`)
         .bind(productKey, pid)
         .first()
     : null;
+
+  // Todify approve seeds profiles without print_provider_id — fall back to any profile for this key
+  if (!profile) {
+    profile = await catalogDb
+      .prepare(`SELECT * FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`)
+      .bind(productKey)
+      .first();
+  }
 
   const template = Number.isFinite(pid)
     ? await catalogDb
@@ -343,7 +368,7 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
       .first();
   }
 
-  return {
+  let bundle = {
     ok: true,
     variant_config: variantConfig ? parseJson(variantConfig.config_json, {}) : null,
     prices_json: profile ? parseJson(profile.prices_json, null) : null,
@@ -357,6 +382,12 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
     template,
     _ops_source: "catalog-db",
   };
+
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichVariantsBundleFromPartner(bundle, partner, { title: profile?.title || productKey });
+  }
+  return bundle;
 }
 
 export async function getCatalogOpsMockupsBundle(env, productKey, printProviderId) {
@@ -369,12 +400,16 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
     .first();
 
   let images = await queryAll(catalogDb, `SELECT * FROM product_mockup_images WHERE product_key = ?`, productKey);
-  if (printProviderId != null) {
-    images = images.filter((i) => Number(i.print_provider_id) === Number(printProviderId));
+  if (printProviderId != null && Number.isFinite(Number(printProviderId))) {
+    const pid = Number(printProviderId);
+    const filtered = images.filter((i) => Number(i.print_provider_id) === pid);
+    // Partner-mirrored rows may use 0 / null provider — keep unfiltered if filter empties the set
+    if (filtered.length) images = filtered;
   }
   const cleanImages = filterImagesByMockupSet(images, MOCKUP_SET_CLEAN);
   const shopPreviewImages = filterImagesByMockupSet(images, MOCKUP_SET_SHOP_PREVIEW);
   const calibrationImages = filterImagesByMockupSet(images, MOCKUP_SET_CALIBRATION);
+  const previewImages = filterImagesByMockupSet(images, MOCKUP_SET_PREVIEW_IMAGES);
   const viewRandom = await queryAll(
     catalogDb,
     `SELECT * FROM product_mockup_view_random WHERE product_key = ?`,
@@ -389,16 +424,35 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
     env
   );
 
-  return {
+  let bundle = {
     ok: true,
     product,
     images: cleanImages,
     shop_preview_images: shopPreviewImages,
     calibration_images: calibrationImages,
+    preview_images: previewImages,
     view_random: viewRandom,
     mockup_defaults: defaults,
     _ops_source: "catalog-db",
   };
+
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichMockupsBundleFromPartner(bundle, partner, {
+      productKey,
+      printProviderId,
+    });
+    if (!(bundle.mockup_defaults || []).length && partner.print_areas?.length) {
+      bundle.mockup_defaults = enrichMockupDefaultsRows(
+        mockupDefaultsFromPartnerPrintAreas(partner.print_areas, env).map((row) => ({
+          ...row,
+          product_key: productKey,
+        })),
+        env
+      );
+    }
+  }
+  return bundle;
 }
 
 export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProviderId, versionId } = {}) {
@@ -425,7 +479,7 @@ export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProvi
     productKey
   );
 
-  return {
+  let bundle = {
     ok: true,
     version,
     versions,
@@ -433,6 +487,15 @@ export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProvi
     variant_print_areas: variantPrintAreas,
     _ops_source: "catalog-db",
   };
+
+  const partner = await loadPartnerEditorSource(env, productKey);
+  if (partner) {
+    bundle = enrichPrintAreaBundleFromPartner(bundle, partner, env);
+    if (bundle.mockup_defaults?.length) {
+      bundle.mockup_defaults = enrichMockupDefaultsRows(bundle.mockup_defaults, env);
+    }
+  }
+  return bundle;
 }
 
 export async function productKeysForProviderFromCatalog(catalogDb, providerExternalId) {
