@@ -6,6 +6,10 @@ export async function fetchEditorBundle(productId) {
   });
 }
 
+export async function fetchLocations() {
+  return partnerFetch("manufacturer-location-list");
+}
+
 export async function saveHeader(body) {
   return partnerFetch("manufacturer-product-editor-save-header", { method: "POST", body });
 }

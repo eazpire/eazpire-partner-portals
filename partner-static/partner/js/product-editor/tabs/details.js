@@ -17,6 +17,16 @@ export function renderDetailsTab(ctx) {
   const cat = p.normalized_category || p.category || "apparel.tshirt";
   const designTypes = new Set(p.design_types || []);
   const regions = (p.regions || []).join(", ");
+  const locations = Array.isArray(ctx.bundle?.locations) ? ctx.bundle.locations : [];
+  const selectedProvider = p.provider_location_id || "";
+  const hasLocations = locations.length > 0;
+  const providerOptions = [
+    `<option value="">Select provider…</option>`,
+    ...locations.map(
+      (l) =>
+        `<option value="${escapeHtml(l.id)}" ${selectedProvider === l.id ? "selected" : ""}>${escapeHtml(l.name || l.label || l.id)}</option>`
+    ),
+  ].join("");
 
   return `
     <div class="ce-tab-panel pe-details-panel">
@@ -24,6 +34,16 @@ export function renderDetailsTab(ctx) {
       <p class="ce-hint">Title, SKU, category and shipping regions. Saved with the Details tab.</p>
       <div class="field"><label for="pe-product-title">Title</label>
         <input class="input" id="pe-product-title" value="${escapeHtml(p.title || "")}" required /></div>
+      <div class="field"><label for="pe-product-provider">Provider</label>
+        <select class="input" id="pe-product-provider" ${hasLocations ? "" : "disabled"}>
+          ${providerOptions}
+        </select>
+        ${
+          hasLocations
+            ? ""
+            : `<p class="ce-hint">No locations yet. Add them under Company, then reopen this product.</p>`
+        }
+      </div>
       <div class="split-row">
         <div class="field"><label for="pe-product-sku">SKU base</label>
           <input class="input" id="pe-product-sku" value="${escapeHtml(p.sku_base || "")}" placeholder="TODIFY-TEE" /></div>
@@ -70,6 +90,7 @@ export function snapshotDetailsTab() {
     print_technique: document.getElementById("pe-product-technique")?.value?.trim() || "",
     regions,
     currency: document.getElementById("pe-product-currency")?.value || "EUR",
+    provider_location_id: document.getElementById("pe-product-provider")?.value || "",
   };
 }
 

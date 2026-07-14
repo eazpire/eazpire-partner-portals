@@ -2,6 +2,7 @@ import { escapeHtml } from "/shared/js/partner-api.js";
 import { showToast } from "/shared/js/partner-shell.js";
 import {
   fetchEditorBundle,
+  fetchLocations,
   saveHeader,
   saveViews,
   saveVariants,
@@ -369,6 +370,7 @@ export async function openProductEditor(productId = null, opts = {}) {
     variants: [],
     colors: [],
     sizes: [],
+    locations: [],
     mockups: [],
     print_areas: [],
     readiness: { ok: false, errors: ["title_required"] },
@@ -376,6 +378,16 @@ export async function openProductEditor(productId = null, opts = {}) {
 
   if (productId) {
     bundle = await fetchEditorBundle(productId);
+  } else {
+    try {
+      const locRes = await fetchLocations();
+      bundle.locations = (locRes.locations || []).map((l) => ({
+        id: l.id,
+        name: l.name || l.label || "",
+      }));
+    } catch (_) {
+      bundle.locations = [];
+    }
   }
 
   editorState = {

@@ -197,10 +197,11 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
   // Do not auto-seed Front/Back — partners add views on Variants; Mockups stay empty until then.
   const views = await listViews(db, productId);
 
-  const [variants, printAreas, mockups] = await Promise.all([
+  const [variants, printAreas, mockups, locations] = await Promise.all([
     listVariants(db, manufacturerId, productId),
     listPrintAreas(db, manufacturerId, productId),
     listMockupSlots(db, env, productId),
+    listLocations(db, manufacturerId),
   ]);
 
   const colors = [...new Set(variants.map((v) => String(v.color || "").trim()).filter(Boolean))];
@@ -224,6 +225,7 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
     colors,
     sizes,
     color_hexes,
+    locations: (locations || []).map((l) => ({ id: l.id, name: l.name || l.label || "" })),
     mockups,
     print_areas: printAreas.map((a) =>
       normalizeAreaForClient({
@@ -287,13 +289,25 @@ export async function savePartnerProductHeader(db, manufacturerId, productId, bo
       body.title != null && String(body.title).trim() !== ""
         ? String(body.title).trim()
         : existing?.title || "Untitled product";
+  let providerLocationId =
+    body.provider_location_id !== undefined
+      ? String(body.provider_location_id || "").trim() || null
+      : existing?.provider_location_id ?? null;
+  if (providerLocationId) {
+    const loc = await db
+      .prepare(`SELECT id FROM manufacturer_locations WHERE id = ? AND manufacturer_id = ?`)
+      .bind(providerLocationId, manufacturerId)
+      .first();
+    if (!loc) providerLocationId = null;
+  }
+
   const now = Date.now();
   await db
     .prepare(
       `UPDATE manufacturer_products SET
         title = ?, description = ?, category = ?, normalized_category = ?,
         sku_base = ?, design_types_json = ?, print_technique = ?, regions_json = ?,
-        meta_json = ?, currency = ?, updated_at = ?
+        meta_json = ?, currency = ?, provider_location_id = ?, updated_at = ?
        WHERE id = ? AND manufacturer_id = ?`
     )
     .bind(
@@ -307,6 +321,7 @@ export async function savePartnerProductHeader(db, manufacturerId, productId, bo
       JSON.stringify(body.regions ?? existing?.regions ?? []),
       JSON.stringify(body.meta ?? existing?.meta ?? {}),
       body.currency ?? existing?.currency ?? "EUR",
+      providerLocationId,
       now,
       id,
       manufacturerId
