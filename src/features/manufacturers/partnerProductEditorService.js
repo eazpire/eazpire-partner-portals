@@ -190,6 +190,16 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
 
   const colors = [...new Set(variants.map((v) => String(v.color || "").trim()).filter(Boolean))];
   const sizes = [...new Set(variants.map((v) => String(v.size || "").trim()).filter(Boolean))];
+  /** @type {Record<string, string>} */
+  const color_hexes = {};
+  for (const v of variants) {
+    const color = String(v.color || "").trim();
+    if (!color || color_hexes[color]) continue;
+    const hex = String(v.attributes?.color_hex || "").trim();
+    if (/^#?[0-9a-fA-F]{3,8}$/.test(hex)) {
+      color_hexes[color] = hex.startsWith("#") ? hex.toLowerCase() : `#${hex.toLowerCase()}`;
+    }
+  }
 
   return {
     ok: true,
@@ -198,6 +208,7 @@ export async function getPartnerProductEditorBundle(env, manufacturerId, product
     variants,
     colors,
     sizes,
+    color_hexes,
     mockups,
     print_areas: printAreas.map((a) => {
       const row = a;
@@ -327,6 +338,18 @@ export async function savePartnerProductViews(db, manufacturerId, productId, vie
   return { ok: true, views: await listViews(db, productId) };
 }
 
+function normalizeColorHex(raw) {
+  const s = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(s)) return s;
+  if (/^[0-9a-f]{6}$/.test(s)) return `#${s}`;
+  if (/^#[0-9a-f]{3}$/.test(s)) {
+    return `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`;
+  }
+  return null;
+}
+
 export async function savePartnerProductVariants(db, manufacturerId, productId, body) {
   const product = await getProduct(db, manufacturerId, productId);
   if (!product) return { ok: false, error: "not_found" };
@@ -334,34 +357,70 @@ export async function savePartnerProductVariants(db, manufacturerId, productId, 
   const sizes = Array.isArray(body.sizes) ? body.sizes.map((s) => String(s).trim()).filter(Boolean) : [];
   const currency = String(body.currency || product.currency || "EUR").trim() || "EUR";
   const costs = body.costs && typeof body.costs === "object" ? body.costs : {};
+  const costsMajor = body.costs_major && typeof body.costs_major === "object" ? body.costs_major : {};
+  const colorHexes = body.color_hexes && typeof body.color_hexes === "object" ? body.color_hexes : {};
   const now = Date.now();
 
   await db.prepare(`DELETE FROM manufacturer_variants WHERE manufacturer_product_id = ?`).bind(productId).run();
 
-  const colorList = colors.length ? colors : ["Default"];
-  const sizeList = sizes.length ? sizes : ["One Size"];
-
-  for (const color of colorList) {
-    for (const size of sizeList) {
-      const costKey = `${color}||${size}`;
-      const colorCostKey = color;
-      let cents = Number(costs[costKey] ?? costs[colorCostKey] ?? body.default_cost_cents ?? 0);
-      if (!Number.isFinite(cents)) cents = 0;
-      // Allow decimal major units via costs_major
-      if (body.costs_major && body.costs_major[costKey] != null) {
-        cents = Math.round(Number(body.costs_major[costKey]) * 100);
-      } else if (body.costs_major && body.costs_major[colorCostKey] != null) {
-        cents = Math.round(Number(body.costs_major[colorCostKey]) * 100);
-      }
-      await db
-        .prepare(
-          `INSERT INTO manufacturer_variants
-            (id, manufacturer_product_id, sku, color, size, material, base_cost_cents, currency, available, attributes_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 1, '{}', ?, ?)`
-        )
-        .bind(newId("mvar"), productId, `${product.sku_base || product.id}-${color}-${size}`.slice(0, 100), color, size, cents, currency, now, now)
-        .run();
+  /** @type {Array<{ color: string, size: string }>} */
+  let pairs = [];
+  const pairKeys = Object.keys(costsMajor).filter((k) => String(k).includes("||"));
+  if (pairKeys.length) {
+    const seen = new Set();
+    for (const key of pairKeys) {
+      const sep = String(key).indexOf("||");
+      const color = String(key.slice(0, sep) || "").trim();
+      const size = String(key.slice(sep + 2) || "").trim();
+      if (!color || !size) continue;
+      const id = `${color}||${size}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      pairs.push({ color, size });
     }
+  } else {
+    const colorList = colors.length ? colors : ["Default"];
+    const sizeList = sizes.length ? sizes : ["One Size"];
+    for (const color of colorList) {
+      for (const size of sizeList) pairs.push({ color, size });
+    }
+  }
+
+  if (!pairs.length) {
+    pairs = [{ color: "Default", size: "One Size" }];
+  }
+
+  for (const { color, size } of pairs) {
+    const costKey = `${color}||${size}`;
+    const colorCostKey = color;
+    let cents = Number(costs[costKey] ?? costs[colorCostKey] ?? body.default_cost_cents ?? 0);
+    if (!Number.isFinite(cents)) cents = 0;
+    if (costsMajor[costKey] != null) {
+      cents = Math.round(Number(costsMajor[costKey]) * 100);
+    } else if (costsMajor[colorCostKey] != null) {
+      cents = Math.round(Number(costsMajor[colorCostKey]) * 100);
+    }
+    const hex = normalizeColorHex(colorHexes[color]);
+    const attributes = hex ? { color_hex: hex } : {};
+    await db
+      .prepare(
+        `INSERT INTO manufacturer_variants
+          (id, manufacturer_product_id, sku, color, size, material, base_cost_cents, currency, available, attributes_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?)`
+      )
+      .bind(
+        newId("mvar"),
+        productId,
+        `${product.sku_base || product.id}-${color}-${size}`.slice(0, 100),
+        color,
+        size,
+        cents,
+        currency,
+        JSON.stringify(attributes),
+        now,
+        now
+      )
+      .run();
   }
 
   await db

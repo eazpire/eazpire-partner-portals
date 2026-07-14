@@ -139,7 +139,11 @@ function ensureOverlay() {
   });
   document.addEventListener("keydown", (e) => {
     if (!editorState || overlayEl.hidden) return;
-    if (e.key === "Escape") void closeProductEditor();
+    if (e.key !== "Escape") return;
+    // Shared partner modal sits above the editor — don't close the editor while it's open
+    const modal = document.getElementById("modal-backdrop");
+    if (modal?.classList.contains("show")) return;
+    void closeProductEditor();
   });
   applySidebarState();
   return overlayEl;
@@ -193,7 +197,11 @@ async function loadActiveTab(ctx) {
   body.innerHTML = html;
   ctx.markDirty = markDirty;
   ctx.showToast = showToast;
-  ctx.reloadTab = () => loadActiveTab(ctx);
+  ctx.reloadTab = async () => {
+    const wasDirty = !!ctx.dirty;
+    await loadActiveTab(ctx);
+    if (wasDirty) markDirty();
+  };
 
   if (ctx.activeTab === "details") bindDetailsTab(ctx, body);
   else if (ctx.activeTab === "variants") bindVariantsTab(ctx, body);
@@ -240,14 +248,18 @@ async function saveCurrentTab() {
         sizes: snap.sizes,
         currency: snap.currency,
         costs_major: snap.costs_major,
+        color_hexes: snap.color_hexes,
       });
       ctx.localViews = snap.views;
       ctx.localColors = snap.colors;
       ctx.localSizes = snap.sizes;
       ctx.localCurrency = snap.currency;
+      ctx.localColorHexes = snap.color_hexes || {};
+      ctx.localVariantTree = null;
       ctx.bundle.variants = varRes.variants || [];
       ctx.bundle.colors = snap.colors;
       ctx.bundle.sizes = snap.sizes;
+      ctx.bundle.color_hexes = snap.color_hexes || {};
     } else if (ctx.activeTab === "mockups") {
       const slots = snapshotMockupsTab(ctx);
       const mockRes = await saveMockups(ctx.productId, slots);
@@ -272,10 +284,14 @@ async function saveCurrentTab() {
     if (Array.isArray(refreshed.views)) ctx.localViews = refreshed.views;
     if (Array.isArray(refreshed.colors)) ctx.localColors = refreshed.colors;
     if (Array.isArray(refreshed.sizes)) ctx.localSizes = refreshed.sizes;
+    if (refreshed.color_hexes && typeof refreshed.color_hexes === "object") {
+      ctx.localColorHexes = { ...refreshed.color_hexes };
+    }
     if (Array.isArray(refreshed.print_areas)) ctx.localPrintAreas = refreshed.print_areas;
+    if (ctx.activeTab === "variants") ctx.localVariantTree = null;
     renderReadiness(refreshed.readiness);
     clearDirty();
-    if (ctx.activeTab === "mockups") await loadActiveTab(ctx);
+    if (ctx.activeTab === "mockups" || ctx.activeTab === "variants") await loadActiveTab(ctx);
     showToast("Saved", "Tab changes stored");
   } catch (e) {
     showToast("Save failed", e.message || String(e));
@@ -353,9 +369,12 @@ export async function openProductEditor(productId = null, opts = {}) {
     localViews: [...(bundle.views || [])],
     localColors: [...(bundle.colors || [])],
     localSizes: [...(bundle.sizes || [])],
+    localColorHexes: { ...(bundle.color_hexes || {}) },
+    localVariantTree: null,
     localCurrency: bundle.product?.currency || "EUR",
     localMockups: [...(bundle.mockups || [])],
     localPrintAreas: [...(bundle.print_areas || [])],
+    uiCollapse: { views: true, variants: true },
     dirty: false,
     onClose: opts.onClose,
   };
