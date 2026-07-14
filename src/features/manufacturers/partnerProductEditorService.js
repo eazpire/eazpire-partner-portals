@@ -257,6 +257,11 @@ export async function savePartnerProductHeader(db, manufacturerId, productId, bo
     id = created.id;
   }
 
+    // Prefer non-empty title; empty string must not wipe existing title
+    const title =
+      body.title != null && String(body.title).trim() !== ""
+        ? String(body.title).trim()
+        : existing?.title || "Untitled product";
   const now = Date.now();
   await db
     .prepare(
@@ -267,13 +272,13 @@ export async function savePartnerProductHeader(db, manufacturerId, productId, bo
        WHERE id = ? AND manufacturer_id = ?`
     )
     .bind(
-      body.title ?? existing?.title ?? "Untitled",
-      body.description ?? existing?.description ?? null,
-      body.category ?? existing?.category ?? null,
-      body.category ?? existing?.normalized_category ?? null,
-      body.sku_base ?? existing?.sku_base ?? null,
+      title,
+      body.description !== undefined ? body.description : existing?.description ?? null,
+      body.category !== undefined ? body.category : existing?.category ?? null,
+      body.category !== undefined ? body.category : existing?.normalized_category ?? null,
+      body.sku_base !== undefined ? body.sku_base : existing?.sku_base ?? null,
       JSON.stringify(body.design_types ?? existing?.design_types ?? []),
-      body.print_technique ?? existing?.print_technique ?? null,
+      body.print_technique !== undefined ? body.print_technique : existing?.print_technique ?? null,
       JSON.stringify(body.regions ?? existing?.regions ?? []),
       JSON.stringify(body.meta ?? existing?.meta ?? {}),
       body.currency ?? existing?.currency ?? "EUR",

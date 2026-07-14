@@ -222,11 +222,16 @@ async function saveCurrentTab() {
   try {
     if (ctx.activeTab === "details") {
       const snap = snapshotDetailsTab();
+      if (!snap.title) {
+        showToast("Title required", "Enter a product title before saving");
+        return;
+      }
       const body = { ...snap, product_id: ctx.productId || undefined };
       const res = await saveHeader(body);
       ctx.productId = res.product.id;
       ctx.bundle.product = res.product;
       overlayEl.querySelector("#pe-title").textContent = res.product.title || "Product";
+      await loadActiveTab(ctx);
     } else if (ctx.activeTab === "variants") {
       const snap = snapshotVariantsTab(ctx);
       await saveViews(ctx.productId, snap.views);

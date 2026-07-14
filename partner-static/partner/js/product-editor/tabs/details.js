@@ -22,20 +22,20 @@ export function renderDetailsTab(ctx) {
     <div class="ce-tab-panel pe-details-panel">
       <h3 class="ce-section-title">Product details</h3>
       <p class="ce-hint">Title, SKU, category and shipping regions. Saved with the Details tab.</p>
-      <div class="field"><label for="pe-title">Title</label>
-        <input class="input" id="pe-title" value="${escapeHtml(p.title || "")}" required /></div>
+      <div class="field"><label for="pe-product-title">Title</label>
+        <input class="input" id="pe-product-title" value="${escapeHtml(p.title || "")}" required /></div>
       <div class="split-row">
-        <div class="field"><label for="pe-sku">SKU base</label>
-          <input class="input" id="pe-sku" value="${escapeHtml(p.sku_base || "")}" placeholder="TODIFY-TEE" /></div>
-        <div class="field"><label for="pe-currency">Default currency</label>
-          <select class="input" id="pe-currency">
+        <div class="field"><label for="pe-product-sku">SKU base</label>
+          <input class="input" id="pe-product-sku" value="${escapeHtml(p.sku_base || "")}" placeholder="TODIFY-TEE" /></div>
+        <div class="field"><label for="pe-product-currency">Default currency</label>
+          <select class="input" id="pe-product-currency">
             ${CURRENCIES.map((c) => `<option value="${c}" ${p.currency === c ? "selected" : ""}>${c}</option>`).join("")}
           </select></div>
       </div>
-      <div class="field"><label for="pe-desc">Description</label>
-        <textarea class="textarea" id="pe-desc" rows="4">${escapeHtml(p.description || "")}</textarea></div>
-      <div class="field"><label for="pe-category">Category</label>
-        <select class="input" id="pe-category">
+      <div class="field"><label for="pe-product-desc">Description</label>
+        <textarea class="textarea" id="pe-product-desc" rows="4">${escapeHtml(p.description || "")}</textarea></div>
+      <div class="field"><label for="pe-product-category">Category</label>
+        <select class="input" id="pe-product-category">
           ${CATEGORIES.map((c) => `<option value="${c.value}" ${cat === c.value ? "selected" : ""}>${c.label}</option>`).join("")}
         </select></div>
       <div class="field"><label>Design types</label>
@@ -44,10 +44,10 @@ export function renderDetailsTab(ctx) {
             (d) => `<label class="pe-chip"><input type="checkbox" value="${d}" ${designTypes.has(d) ? "checked" : ""} /> ${d}</label>`
           ).join("")}
         </div></div>
-      <div class="field"><label for="pe-technique">Print technique</label>
-        <input class="input" id="pe-technique" value="${escapeHtml(p.print_technique || "")}" placeholder="DTG, embroidery, …" /></div>
-      <div class="field"><label for="pe-regions">Regions / ships to</label>
-        <input class="input" id="pe-regions" value="${escapeHtml(regions)}" placeholder="EU, MA, FR (comma-separated)" /></div>
+      <div class="field"><label for="pe-product-technique">Print technique</label>
+        <input class="input" id="pe-product-technique" value="${escapeHtml(p.print_technique || "")}" placeholder="DTG, embroidery, …" /></div>
+      <div class="field"><label for="pe-product-regions">Regions / ships to</label>
+        <input class="input" id="pe-product-regions" value="${escapeHtml(regions)}" placeholder="EU, MA, FR (comma-separated)" /></div>
       ${p.status ? `<p class="ce-hint">Status: <span class="badge">${escapeHtml(p.status)}</span>
         ${p.review_note ? ` · Note: ${escapeHtml(p.review_note)}` : ""}
         ${p.eazpire_product_key ? ` · Catalog key: <code>${escapeHtml(p.eazpire_product_key)}</code>` : ""}</p>` : ""}
@@ -56,20 +56,20 @@ export function renderDetailsTab(ctx) {
 
 export function snapshotDetailsTab() {
   const design_types = [...document.querySelectorAll("#pe-design-types input:checked")].map((el) => el.value);
-  const regionsRaw = document.getElementById("pe-regions")?.value || "";
+  const regionsRaw = document.getElementById("pe-product-regions")?.value || "";
   const regions = regionsRaw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   return {
-    title: document.getElementById("pe-title")?.value?.trim() || "",
-    sku_base: document.getElementById("pe-sku")?.value?.trim() || "",
-    description: document.getElementById("pe-desc")?.value || "",
-    category: document.getElementById("pe-category")?.value || "",
+    title: document.getElementById("pe-product-title")?.value?.trim() || "",
+    sku_base: document.getElementById("pe-product-sku")?.value?.trim() || "",
+    description: document.getElementById("pe-product-desc")?.value || "",
+    category: document.getElementById("pe-product-category")?.value || "",
     design_types,
-    print_technique: document.getElementById("pe-technique")?.value?.trim() || "",
+    print_technique: document.getElementById("pe-product-technique")?.value?.trim() || "",
     regions,
-    currency: document.getElementById("pe-currency")?.value || "EUR",
+    currency: document.getElementById("pe-product-currency")?.value || "EUR",
   };
 }
 
