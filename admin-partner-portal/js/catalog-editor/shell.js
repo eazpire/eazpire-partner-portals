@@ -121,14 +121,16 @@ function hideSaveLoading() {
 }
 
 function showSaveFlash() {
-  const main = overlayEl?.querySelector(".catalog-editor-main");
-  if (!main) return;
-  let flash = main.querySelector(".ce-save-flash");
+  const editor = overlayEl?.querySelector(".catalog-editor");
+  if (!editor) return;
+  let flash = editor.querySelector(".ce-save-flash");
   if (!flash) {
     flash = document.createElement("div");
     flash.className = "ce-save-flash";
+    flash.setAttribute("role", "status");
+    flash.setAttribute("aria-live", "polite");
     flash.innerHTML = `<div class="ce-save-flash-inner"><span class="ce-save-flash-icon" aria-hidden="true">✓</span><span>Saved</span></div>`;
-    main.appendChild(flash);
+    editor.appendChild(flash);
   }
   flash.classList.remove("ce-save-flash--show");
   void flash.offsetWidth;
@@ -562,10 +564,13 @@ async function saveCurrentTab() {
     await runMirror(true);
     ctx.bundle = await fetchEditorBundle(ctx.productKey);
     updateDriftBadge(ctx);
-    showSaveFlash();
-    showToast("Saved", "Tab saved and mirrored to publish index");
     resetDirtyAfterSave(getCurrentTabDirtyState(ctx) ?? {});
     await loadActiveTab(ctx);
+    // Hide loading first — flash used to fire under .ce-save-loading (higher z-index)
+    // and timed out before the overlay cleared, so success feedback never appeared.
+    hideSaveLoading();
+    showSaveFlash();
+    showToast("Saved", "Tab saved and mirrored to publish index");
   } catch (err) {
     showToast("Save failed", err.message || "Unknown error");
   } finally {

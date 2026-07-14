@@ -4610,7 +4610,8 @@ body.catalog-editor-open #partner-toast {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  z-index: 20;
+  /* Above .ce-save-loading (30) so success feedback is never covered */
+  z-index: 40;
   opacity: 0;
   transition: opacity 0.25s ease;
 }
