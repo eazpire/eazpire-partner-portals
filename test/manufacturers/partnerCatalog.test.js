@@ -550,6 +550,7 @@ describe("catalog studio service", () => {
               };
             }
             if (sql.includes("eazpire_product_mockup")) return { results: [] };
+            if (sql.includes("manufacturer_mockup_templates")) return { results: [] };
             if (sql.includes("manufacturer_eazpire_blueprints")) return { results: [] };
             return { results: [] };
           },
@@ -569,6 +570,92 @@ describe("catalog studio service", () => {
     expect(Array.isArray(result.category_tree)).toBe(true);
     expect(result.items[0].category).toBe("T-Shirt");
     expect(result.items[0].parent_group).toBe("Kleidung");
+  });
+
+  it("prefers partner Preview Images on catalog studio product rows", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => null,
+          all: async () => {
+            if (sql.includes("FROM eazpire_products")) {
+              return {
+                results: [
+                  {
+                    product_key: "todify-tee",
+                    title: "Todify — Unisex Softstyle Cotton Tee",
+                    catalog_status: "preview",
+                    catalog_category_leaf: "T-Shirt",
+                    catalog_category_group: "Kleidung",
+                    version_count: 1,
+                    manufacturer_name: "Todify",
+                    blueprint_title: null,
+                    blueprint_category: null,
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("eazpire_product_mockup_images")) {
+              return {
+                results: [
+                  {
+                    product_key: "todify-tee",
+                    image_url: "https://catalog/fallback-mock.png",
+                    is_default: 1,
+                    created_at: 1,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("manufacturer_mockup_templates")) {
+              return {
+                results: [
+                  {
+                    product_key: "todify-tee",
+                    image_r2_key: "partner-products/todify/lifestyle-1.jpg",
+                    image_url: null,
+                    view_key: "pi_1",
+                    created_at: 10,
+                  },
+                  {
+                    product_key: "todify-tee",
+                    image_r2_key: null,
+                    image_url: "https://cdn.example.com/lifestyle-2.jpg",
+                    view_key: "pi_2",
+                    created_at: 20,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("manufacturer_eazpire_blueprints")) return { results: [] };
+            return { results: [] };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(
+      mfgDb,
+      { PUBLIC_FILE_BASE_URL: "https://creator-engine.eazpire.workers.dev" },
+      { manufacturerId: "mfg_todify", filter: "preview" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.items[0].mock_images[0]).toContain("mockup-r2?k=");
+    expect(result.items[0].mock_images[0]).toContain("lifestyle-1.jpg");
+    expect(result.items[0].mock_images[1]).toBe("https://cdn.example.com/lifestyle-2.jpg");
+    expect(result.items[0].mock_images).toContain("https://catalog/fallback-mock.png");
+    expect(result.items[0].mock_images.indexOf("https://catalog/fallback-mock.png")).toBeGreaterThan(1);
   });
 
   it("extracts mock images and print areas from blueprint json", async () => {

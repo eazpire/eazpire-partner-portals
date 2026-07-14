@@ -422,7 +422,7 @@ function buildMockCarouselHtml(images, rowId) {
   if (!urls.length) return `<div class="cs-mock-carousel cs-mock-carousel--empty">${mockPlaceholderSvg()}</div>`;
   if (urls.length === 1) {
     return `<div class="cs-mock-carousel cs-mock-carousel--single" data-images="${escapeHtml(JSON.stringify(urls))}" data-row-id="${escapeHtml(rowId)}">
-      <button type="button" class="cs-mock-carousel__open" data-idx="0" aria-label="View mockup">
+      <button type="button" class="cs-mock-carousel__open" data-idx="0" aria-label="View image">
         <img src="${escapeHtml(urls[0])}" alt="" loading="lazy" decoding="async" />
       </button>
     </div>`;
@@ -430,7 +430,7 @@ function buildMockCarouselHtml(images, rowId) {
   const slides = urls
     .map(
       (url, i) =>
-        `<div class="cs-mock-carousel__slide"><button type="button" class="cs-mock-carousel__open" data-idx="${i}" aria-label="View mockup ${i + 1}"><img src="${escapeHtml(url)}" alt="" loading="${i === 0 ? "eager" : "lazy"}" decoding="async" /></button></div>`
+        `<div class="cs-mock-carousel__slide"><button type="button" class="cs-mock-carousel__open" data-idx="${i}" aria-label="View image ${i + 1}"><img src="${escapeHtml(url)}" alt="" loading="${i === 0 ? "eager" : "lazy"}" decoding="async" /></button></div>`
     )
     .join("");
   const dots = urls
@@ -438,8 +438,8 @@ function buildMockCarouselHtml(images, rowId) {
     .join("");
   return `<div class="cs-mock-carousel" data-count="${urls.length}" data-images="${escapeHtml(JSON.stringify(urls))}" data-row-id="${escapeHtml(rowId)}">
     <div class="cs-mock-carousel__track">${slides}</div>
-    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--prev" aria-label="Previous mockup">&#8249;</button>
-    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--next" aria-label="Next mockup">&#8250;</button>
+    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--prev" aria-label="Previous image">&#8249;</button>
+    <button type="button" class="cs-mock-carousel__arrow cs-mock-carousel__arrow--next" aria-label="Next image">&#8250;</button>
     <div class="cs-mock-carousel__dots">${dots}</div>
   </div>`;
 }

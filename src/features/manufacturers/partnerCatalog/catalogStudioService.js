@@ -21,6 +21,7 @@ import {
   fetchAllPrintProviders,
 } from "../adapters/printify/printifyCatalogClient.js";
 import { normalizeCountryCode } from "../../catalog/resolveProviderOriginCountries.js";
+import { publicFileUrl } from "../partnerProductEditorService.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -595,6 +596,49 @@ async function loadMockImagesByProductKey(db, productKeys) {
   return map;
 }
 
+/**
+ * Partner/Todify lifestyle gallery images (Mockups → Preview Images).
+ * Linked via manufacturer_products.eazpire_product_key → manufacturer_mockup_templates (mockup_set = preview_images).
+ */
+async function loadPartnerPreviewImagesByProductKey(db, env, productKeys) {
+  const map = new Map();
+  if (!productKeys.length || !db) return map;
+
+  const placeholders = productKeys.map(() => "?").join(",");
+  let rows = [];
+  try {
+    rows = await queryAll(
+      db,
+      `SELECT mp.eazpire_product_key AS product_key, mt.image_r2_key, mt.image_url, mt.view_key, mt.created_at
+       FROM manufacturer_mockup_templates mt
+       INNER JOIN manufacturer_products mp ON mp.id = mt.manufacturer_product_id
+       WHERE mp.eazpire_product_key IN (${placeholders})
+         AND COALESCE(mt.mockup_set, '') = 'preview_images'
+       ORDER BY mt.created_at ASC, mt.view_key ASC`,
+      ...productKeys
+    );
+  } catch (e) {
+    // Column/table may be missing on older DBs — Catalog Studio list still works without lifestyle thumbs.
+    if (!String(e?.message || e).includes("no such")) throw e;
+    return map;
+  }
+
+  for (const row of rows) {
+    const key = row.product_key;
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    let url = null;
+    const r2Key = row.image_r2_key ? String(row.image_r2_key).trim() : "";
+    if (r2Key) {
+      url = publicFileUrl(env, r2Key);
+    } else if (row.image_url) {
+      url = String(row.image_url).trim() || null;
+    }
+    pushImageUrl(map.get(key), url);
+  }
+  return map;
+}
+
 async function loadPrintAreasByProductKey(db, productKeys) {
   const map = new Map();
   if (!productKeys.length) return map;
@@ -1019,6 +1063,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   const productKeys = products.map((p) => p.product_key);
   const mockImagesMap = await loadMockImagesByProductKey(db, productKeys);
+  const partnerPreviewMap = await loadPartnerPreviewImagesByProductKey(db, env, productKeys);
   const printAreasMap = await loadPrintAreasByProductKey(db, productKeys);
   const templateAreasMap = await loadPrintAreasFromTemplateProducts(db, productKeys);
   const shippingCountryCodesMap = await loadShippingCountriesByProductKey(db, env, products);
@@ -1052,12 +1097,17 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   const items = products.map((p) => {
     const blueprintEnrichment = blueprintEnrichmentMap.get(p.product_key) || {};
+    const partnerPreviews = partnerPreviewMap.get(p.product_key) || [];
     const mockFromDb = mockImagesMap.get(p.product_key) || [];
     const areasFromDb = printAreasMap.get(p.product_key) || [];
     const templateAreas = templateAreasMap.get(p.product_key) || [];
     const extId = blueprintExternalIds.get(p.product_key);
+    // Prefer partner Preview Images (lifestyle gallery) first, then catalog/blueprint mockups.
     const merged = mergeEnrichment(
-      mergeEnrichment({ mock_images: mockFromDb, print_areas: areasFromDb }, blueprintEnrichment),
+      mergeEnrichment(
+        mergeEnrichment({ mock_images: partnerPreviews, print_areas: areasFromDb }, { mock_images: mockFromDb }),
+        blueprintEnrichment
+      ),
       {
         print_areas: [
           ...(templateAreasMap.get(p.product_key) || []),
