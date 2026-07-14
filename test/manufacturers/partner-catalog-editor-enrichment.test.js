@@ -7,6 +7,9 @@ import {
   enrichMockupsBundleFromPartner,
   enrichVariantsBundleFromPartner,
   enrichPrintAreaBundleFromPartner,
+  enrichVersionsDisplayNamesFromPartner,
+  resolvePartnerCatalogDisplayTitle,
+  isPlaceholderVersionDisplayName,
 } from "../../src/features/manufacturers/partnerCatalog/partnerCatalogEditorEnrichment.js";
 
 describe("partnerCatalogEditorEnrichment", () => {
@@ -116,5 +119,32 @@ describe("partnerCatalogEditorEnrichment", () => {
     );
     expect(variantsBundle.product_data.variants).toHaveLength(1);
     expect(variantsBundle._partner_variants).toBeUndefined();
+  });
+
+  it("resolves partner catalog title and replaces Standard version labels for Todify", () => {
+    expect(isPlaceholderVersionDisplayName("Standard")).toBe(true);
+    expect(isPlaceholderVersionDisplayName("KNL print")).toBe(false);
+    expect(
+      resolvePartnerCatalogDisplayTitle({
+        title: "KNL print",
+        productTitle: "Standard",
+        profileTitle: "Standard",
+      })
+    ).toBe("KNL print");
+
+    const versions = enrichVersionsDisplayNamesFromPartner(
+      [{ id: 1, display_name: "Standard" }, { id: 2, display_name: "Custom Cut" }],
+      "KNL print",
+      { sourceSystem: "todify" }
+    );
+    expect(versions[0].display_name).toBe("KNL print");
+    expect(versions[1].display_name).toBe("Custom Cut");
+
+    const printifyLeftAlone = enrichVersionsDisplayNamesFromPartner(
+      [{ id: 1, display_name: "Standard" }],
+      "KNL print",
+      { sourceSystem: "printify" }
+    );
+    expect(printifyLeftAlone[0].display_name).toBe("Standard");
   });
 });

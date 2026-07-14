@@ -26,6 +26,10 @@ import {
   enrichMockupsBundleFromPartner,
   enrichVariantsBundleFromPartner,
   enrichPrintAreaBundleFromPartner,
+  enrichVersionsDisplayNamesFromPartner,
+  isPlaceholderVersionDisplayName,
+  isPartnerCatalogSourceSystem,
+  resolvePartnerCatalogDisplayTitle,
   mockupDefaultsFromPartnerPrintAreas,
 } from "./partnerCatalogEditorEnrichment.js";
 
@@ -127,6 +131,16 @@ function profileRowToEditor(row) {
   };
 }
 
+function resolvePatDisplayName(pat, linkedEazVersion = null) {
+  const patName = String(pat?.display_name || pat?.title || "").trim();
+  const eazName = String(linkedEazVersion?.display_name || "").trim();
+  // Auto-seeded PAT is often "Standard"; prefer manufacturer version title when linked (Todify).
+  if (eazName && isPlaceholderVersionDisplayName(patName) && !isPlaceholderVersionDisplayName(eazName)) {
+    return eazName;
+  }
+  return patName || eazName || "Standard";
+}
+
 function patRowToVersion(pat, linkedEazVersion = null) {
   const ppId = pat.print_provider_id != null ? Number(pat.print_provider_id) : null;
   const linkedExt = linkedEazVersion?.external_provider_id;
@@ -146,7 +160,7 @@ function patRowToVersion(pat, linkedEazVersion = null) {
     id: linkedEazVersion?.id || `pat-${pat.id}`,
     product_key: pat.product_key,
     fulfillment_provider_id: linkedEazVersion?.fulfillment_provider_id || null,
-    display_name: pat.display_name || pat.title || "Standard",
+    display_name: resolvePatDisplayName(pat, linkedEazVersion),
     description: pat.description ?? linkedEazVersion?.description ?? null,
     sort_order: pat.sort_order ?? linkedEazVersion?.sort_order ?? 0,
     studio_config: patRowToStudioConfig(pat),
@@ -163,6 +177,111 @@ function patRowToVersion(pat, linkedEazVersion = null) {
     provider_name: linkedEazVersion?.provider_name || null,
     _ops_source: "catalog-db",
   };
+}
+
+function matchEazVersionForPat(pat, eazVersions, usedIds) {
+  const byPat = eazVersions.find(
+    (v) => v.catalog_pat_id != null && Number(v.catalog_pat_id) === Number(pat.id) && !usedIds.has(v.id)
+  );
+  if (byPat) return byPat;
+  const pp = pat.print_provider_id != null ? String(pat.print_provider_id) : "";
+  if (!pp) return null;
+  return (
+    eazVersions.find(
+      (v) =>
+        !usedIds.has(v.id) &&
+        v.catalog_pat_id == null &&
+        String(v.external_provider_id || "") === pp
+    ) || null
+  );
+}
+
+/**
+ * Persist partner title onto placeholder "Standard" PAT / catalog / profile rows so publish uses it too.
+ * @param {any} env
+ * @param {string} productKey
+ * @param {string} title
+ */
+async function healPartnerPlaceholderTitlesInCatalog(env, productKey, title) {
+  const db = env?.CATALOG_DB;
+  const name = String(title || "").trim();
+  if (!db || !productKey || !name || isPlaceholderVersionDisplayName(name)) return;
+
+  const now = Date.now();
+  try {
+    const pats = await queryAll(
+      db,
+      `SELECT id, display_name FROM print_area_printify_templates WHERE product_key = ?`,
+      productKey
+    );
+    for (const pat of pats) {
+      if (!isPlaceholderVersionDisplayName(pat.display_name)) continue;
+      await db
+        .prepare(`UPDATE print_area_printify_templates SET display_name = ?, updated_at = ? WHERE id = ?`)
+        .bind(name, now, pat.id)
+        .run();
+    }
+
+    const cat = await db
+      .prepare(`SELECT title FROM product_catalog WHERE product_key = ? LIMIT 1`)
+      .bind(productKey)
+      .first();
+    if (cat && isPlaceholderVersionDisplayName(cat.title)) {
+      await db
+        .prepare(`UPDATE product_catalog SET title = ?, updated_at = ? WHERE product_key = ?`)
+        .bind(name, now, productKey)
+        .run();
+    }
+
+    const profiles = await queryAll(
+      db,
+      `SELECT id, title, standard_product_display_name, source_system FROM product_publish_profiles WHERE product_key = ?`,
+      productKey
+    );
+    for (const profile of profiles) {
+      const partnerProfile = isPartnerCatalogSourceSystem(profile.source_system);
+      if (!partnerProfile) continue;
+      const nextTitle = isPlaceholderVersionDisplayName(profile.title) ? name : profile.title;
+      const nextStd = isPlaceholderVersionDisplayName(profile.standard_product_display_name)
+        ? name
+        : profile.standard_product_display_name;
+      if (nextTitle === profile.title && nextStd === profile.standard_product_display_name) continue;
+      await db
+        .prepare(
+          `UPDATE product_publish_profiles
+           SET title = ?, standard_product_display_name = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(nextTitle, nextStd, now, profile.id)
+        .run();
+    }
+  } catch (e) {
+    console.warn("[catalog-ops] heal partner titles:", e?.message || e);
+  }
+
+  if (env.MANUFACTURER_DB) {
+    try {
+      const eazVersions = await listProductVersions(env.MANUFACTURER_DB, productKey);
+      for (const v of eazVersions) {
+        if (!isPlaceholderVersionDisplayName(v.display_name)) continue;
+        await env.MANUFACTURER_DB.prepare(
+          `UPDATE eazpire_product_versions SET display_name = ?, updated_at = ? WHERE id = ?`
+        )
+          .bind(name, now, v.id)
+          .run();
+      }
+      const eaz = await getEazpireProduct(env.MANUFACTURER_DB, productKey);
+      if (eaz && isPlaceholderVersionDisplayName(eaz.title)) {
+        await env.MANUFACTURER_DB.prepare(
+          `UPDATE eazpire_products SET title = ?, updated_at = ? WHERE product_key = ?`
+        )
+          .bind(name, now, productKey)
+          .run();
+      }
+    } catch (e) {
+      console.warn("[catalog-ops] heal partner eaz titles:", e?.message || e);
+    }
+  }
 }
 
 async function resolveProductLink(env, productKey) {
@@ -234,12 +353,14 @@ export async function listCatalogOpsProductVersions(env, productKey) {
   if (env.MANUFACTURER_DB) {
     eazVersions = await listProductVersions(env.MANUFACTURER_DB, productKey);
   }
-  const byPatId = new Map(
-    eazVersions.filter((v) => v.catalog_pat_id != null).map((v) => [Number(v.catalog_pat_id), v])
-  );
 
   if (patRows.length) {
-    return patRows.map((pat) => patRowToVersion(pat, byPatId.get(Number(pat.id)) || null));
+    const used = new Set();
+    return patRows.map((pat) => {
+      const linked = matchEazVersionForPat(pat, eazVersions, used);
+      if (linked?.id) used.add(linked.id);
+      return patRowToVersion(pat, linked);
+    });
   }
 
   // Todify / partner products may have manufacturer versions before any PAT row exists.
@@ -296,10 +417,36 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
 
   const sourceSystem =
     publishProfileRows.find((r) => String(r.source_system || "").trim())?.source_system || null;
-  const product = {
+  let product = {
     ...base.product,
     source_system: sourceSystem || base.product?.source_system || null,
   };
+
+  // Todify/partner: replace auto-seeded "Standard" version/product labels with Partner Portal title.
+  // Printify catalog products keep legitimate blueprint "Standard" naming.
+  const partnerSource = await loadPartnerEditorSource(env, productKey);
+  const preferredTitle = resolvePartnerCatalogDisplayTitle({
+    title: partnerSource?.title,
+    productTitle: product.title,
+    profileTitle:
+      publishProfilesList.find((p) => !isPlaceholderVersionDisplayName(p.title))?.title ||
+      publishProfilesList.find((p) => !isPlaceholderVersionDisplayName(p.standard_product_display_name))
+        ?.standard_product_display_name ||
+      publishProfilesList[0]?.title ||
+      publishProfilesList[0]?.standard_product_display_name,
+    eazVersionTitles: versions.map((v) => v.display_name),
+  });
+  const treatAsPartner = !!partnerSource || isPartnerCatalogSourceSystem(product.source_system);
+  if (treatAsPartner && preferredTitle) {
+    versions = enrichVersionsDisplayNamesFromPartner(versions, preferredTitle, {
+      forcePartner: true,
+      sourceSystem: product.source_system,
+    });
+    if (isPlaceholderVersionDisplayName(product.title)) {
+      product = { ...product, title: preferredTitle };
+    }
+    await healPartnerPlaceholderTitlesInCatalog(env, productKey, preferredTitle);
+  }
 
   // Align version configs with product-level catalog_status (Catalog Studio SoT).
   // Stale version config "offline" was causing the editor footer to disagree with the list badge.
@@ -441,7 +588,14 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
 
   const partner = await loadPartnerEditorSource(env, productKey);
   if (partner) {
-    bundle = enrichVariantsBundleFromPartner(bundle, partner, { title: profile?.title || productKey });
+    const partnerTitle =
+      resolvePartnerCatalogDisplayTitle({
+        title: partner.title,
+        profileTitle: profile?.title || profile?.standard_product_display_name,
+      }) ||
+      profile?.title ||
+      productKey;
+    bundle = enrichVariantsBundleFromPartner(bundle, partner, { title: partnerTitle });
   }
   return bundle;
 }

@@ -535,6 +535,17 @@ async function fulfillmentProviderIdForPrintProvider(db, printProviderId) {
   return fp?.id || null;
 }
 
+async function resolveDefaultVersionDisplayName(db, productKey) {
+  try {
+    const product = await getEazpireProduct(db, productKey);
+    const title = String(product?.title || "").trim();
+    if (title && !/^standard$/i.test(title)) return title;
+  } catch {
+    /* fall through */
+  }
+  return "Standard";
+}
+
 async function ensureStandardVersionForProvider(db, productKey, printProviderId, now) {
   const fpId = await fulfillmentProviderIdForPrintProvider(db, printProviderId);
   if (!fpId) return null;
@@ -543,10 +554,11 @@ async function ensureStandardVersionForProvider(db, productKey, printProviderId,
   const forProvider = versions.filter((v) => String(v.external_provider_id) === String(printProviderId));
   if (forProvider.length > 0) return forProvider.sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))[0];
 
+  const displayName = await resolveDefaultVersionDisplayName(db, productKey);
   return upsertProductVersion(db, {
     product_key: productKey,
     fulfillment_provider_id: fpId,
-    display_name: "Standard",
+    display_name: displayName,
     sort_order: 0,
     external_template_product_id: "",
     publish_enabled: true,

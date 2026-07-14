@@ -1,5 +1,26 @@
+function isPlaceholderTitle(name) {
+  const s = String(name || "").trim();
+  return !s || /^standard$/i.test(s);
+}
+
+function isPartnerBundle(bundle) {
+  const src = String(bundle?.product?.source_system || "").trim().toLowerCase();
+  if (src === "todify" || src === "direct_shopify") return true;
+  const profiles = bundle?.publish_profiles;
+  const list = Array.isArray(profiles)
+    ? profiles
+    : profiles && typeof profiles.values === "function"
+      ? [...profiles.values()]
+      : [];
+  return list.some((p) => {
+    const s = String(p?.source_system || "").trim().toLowerCase();
+    return s === "todify" || s === "direct_shopify";
+  });
+}
+
 /** Product title shown in editor chrome — first active version display_name, else legacy product.title. */
 export function editorProductTitle(bundle, productKey = "") {
+  const productTitle = String(bundle?.product?.title || "").trim();
   const versions = (bundle?.versions || [])
     .slice()
     .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
@@ -8,11 +29,17 @@ export function editorProductTitle(bundle, productKey = "") {
   );
   const activeVersions = versions.filter((v) => activeIds.has(String(v.external_provider_id)));
   const pool = activeVersions.length ? activeVersions : versions;
+  const partner = isPartnerBundle(bundle);
   for (const v of pool) {
     const name = String(v.display_name || "").trim();
-    if (name) return name;
+    if (!name) continue;
+    // Partner/Todify: skip auto-seeded "Standard" so Details title wins in the header.
+    if (partner && isPlaceholderTitle(name) && productTitle && !isPlaceholderTitle(productTitle)) {
+      continue;
+    }
+    return name;
   }
-  return String(bundle?.product?.title || productKey || "").trim() || productKey;
+  return productTitle || productKey || "";
 }
 
 export function publishProfileForProvider(bundle, printProviderId) {

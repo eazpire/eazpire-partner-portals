@@ -3,7 +3,7 @@
  * (Mockups / Variants / Print Area), when catalog-db shadow is empty or incomplete.
  */
 
-import { listVariants, listPrintAreas } from "../catalogService.js";
+import { listVariants, listPrintAreas, getProduct } from "../catalogService.js";
 import {
   findManufacturerProductByCatalogKey,
   listMockupSlots,
@@ -23,6 +23,60 @@ import {
   catalogPlaceholdersFromPartnerPrintAreas,
 } from "./partnerCatalogPlaceholders.js";
 
+const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
+
+/** Auto-seeded Printify PAT label — not the partner Details title. */
+export function isPlaceholderVersionDisplayName(name) {
+  const s = String(name || "").trim();
+  return !s || /^standard$/i.test(s);
+}
+
+/**
+ * Prefer partner Details title (meta.display_name), then catalog/profile titles that are not "Standard".
+ * @param {{ title?: string|null, productTitle?: string|null, profileTitle?: string|null, eazVersionTitles?: string[] }} opts
+ */
+export function resolvePartnerCatalogDisplayTitle(opts = {}) {
+  const candidates = [
+    opts.title,
+    opts.productTitle,
+    opts.profileTitle,
+    ...(Array.isArray(opts.eazVersionTitles) ? opts.eazVersionTitles : []),
+  ];
+  for (const raw of candidates) {
+    const s = String(raw || "").trim();
+    if (s && !isPlaceholderVersionDisplayName(s)) return s;
+  }
+  return null;
+}
+
+export function isPartnerCatalogSourceSystem(sourceSystem) {
+  return PARTNER_SOURCE_SYSTEMS.has(String(sourceSystem || "").trim().toLowerCase());
+}
+
+/**
+ * Replace placeholder "Standard" version labels with the partner product title.
+ * Printify products (no partner source / non-partner source_system) are left alone.
+ * @param {any[]} versions
+ * @param {string|null} preferredTitle
+ * @param {{ forcePartner?: boolean, sourceSystem?: string|null }} [opts]
+ */
+export function enrichVersionsDisplayNamesFromPartner(versions, preferredTitle, opts = {}) {
+  const title = String(preferredTitle || "").trim();
+  if (!title || isPlaceholderVersionDisplayName(title)) {
+    return Array.isArray(versions) ? versions.slice() : [];
+  }
+  const partnerish =
+    opts.forcePartner === true || isPartnerCatalogSourceSystem(opts.sourceSystem);
+  if (!partnerish) {
+    return Array.isArray(versions) ? versions.slice() : [];
+  }
+  return (Array.isArray(versions) ? versions : []).map((v) => {
+    if (!v || typeof v !== "object") return v;
+    if (!isPlaceholderVersionDisplayName(v.display_name)) return v;
+    return { ...v, display_name: title };
+  });
+}
+
 /**
  * @param {any} env
  * @param {string} productKey
@@ -35,17 +89,22 @@ export async function loadPartnerEditorSource(env, productKey) {
   if (!link?.product_id) return null;
 
   const { manufacturer_id: manufacturerId, product_id: productId } = link;
-  const [variants, printAreas, mockups, views] = await Promise.all([
+  const [product, variants, printAreas, mockups, views] = await Promise.all([
+    getProduct(env.MANUFACTURER_DB, manufacturerId, productId),
     listVariants(env.MANUFACTURER_DB, manufacturerId, productId),
     listPrintAreas(env.MANUFACTURER_DB, manufacturerId, productId),
     listMockupSlots(env.MANUFACTURER_DB, env, productId),
     listViews(env.MANUFACTURER_DB, productId),
   ]);
 
+  const title = String(product?.meta?.display_name || product?.title || "").trim() || null;
+
   return {
     manufacturer_id: manufacturerId,
     product_id: productId,
     product_key: key,
+    title,
+    product,
     variants,
     print_areas: printAreas,
     mockups,

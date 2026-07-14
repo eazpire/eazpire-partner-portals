@@ -26,6 +26,20 @@ import {
 import { publishPlanForProvider } from "../editor-product-title.js";
 import { mergeVisibilityIntoVersionConfig, refreshVisibilityTriSwitch } from "../editor-visibility.js";
 import { resolveActivePrintProviderIds } from "../active-provider-ids.js";
+import { isPartnerOrTodifyProduct } from "../print-area/helpers.js";
+
+function defaultNewVersionDisplayName(ctx, idx = 0) {
+  if (isPartnerOrTodifyProduct(ctx)) {
+    const title = String(
+      ctx?.bundle?.product?.title ||
+        ctx?.partnerReview?.product?.meta?.display_name ||
+        ctx?.partnerReview?.product?.title ||
+        ""
+    ).trim();
+    if (title && !/^standard$/i.test(title)) return title;
+  }
+  return idx === 0 ? "Standard" : `Version ${idx + 1}`;
+}
 
 const CE_PROV_SIDEBAR_KEY = "admin_catalog_editor_prov_sidebar_collapsed";
 
@@ -863,9 +877,10 @@ function stateActivate(ctx, pid) {
   const versions = versionsForProvider(state, pid);
   if (!versions.length) {
     const tempId = `new_std_${pid}_${Date.now()}`;
+    const displayName = defaultNewVersionDisplayName(ctx, 0);
     const std = {
       _tempId: tempId,
-      display_name: "Standard",
+      display_name: displayName,
       sort_order: 0,
       external_provider_id: String(pid),
       product_version_config: { placeholders_by_position: {}, design_types: [] },
@@ -874,7 +889,7 @@ function stateActivate(ctx, pid) {
     state.pendingNewVersions.push({
       _tempId: tempId,
       print_provider_id: pid,
-      display_name: "Standard",
+      display_name: displayName,
       sort_order: 0,
       product_version_config: { placeholders_by_position: {}, design_types: [] },
     });
@@ -972,7 +987,7 @@ export function collectProvidersTabState(ctx) {
     for (let idx = 0; idx < versions.length; idx++) {
       const v = versions[idx];
       const vid = v.id || v._tempId;
-      const displayName = v.display_name || (idx === 0 ? "Standard" : "Version");
+      const displayName = v.display_name || defaultNewVersionDisplayName(ctx, idx);
       let product_version_config = v.product_version_config;
       if (state.selectedPid === pid && root) {
         product_version_config = collectVersionConfigPanel(root, product_version_config, vid);

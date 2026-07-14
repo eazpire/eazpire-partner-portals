@@ -215,6 +215,35 @@ export async function upsertCatalogPublishProfile(catalogDbRef, productKey, prin
   return insertResult.meta?.last_row_id ?? null;
 }
 
+async function resolveDefaultPatDisplayName(env, productKey) {
+  const db = catalogDb(env);
+  // Prefer partner Details title over auto-seeded "Standard" for Todify drafts.
+  try {
+    const {
+      loadPartnerEditorSource,
+      resolvePartnerCatalogDisplayTitle,
+      isPlaceholderVersionDisplayName,
+    } = await import("./partnerCatalogEditorEnrichment.js");
+    const partner = await loadPartnerEditorSource(env, productKey);
+    const cat = await queryFirst(db, `SELECT title FROM product_catalog WHERE product_key = ? LIMIT 1`, productKey);
+    const profile = await queryFirst(
+      db,
+      `SELECT title, standard_product_display_name, source_system
+       FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`,
+      productKey
+    );
+    const title = resolvePartnerCatalogDisplayTitle({
+      title: partner?.title,
+      productTitle: cat?.title,
+      profileTitle: profile?.title || profile?.standard_product_display_name,
+    });
+    if (title && !isPlaceholderVersionDisplayName(title)) return title;
+  } catch (e) {
+    console.warn("[catalog-ops] resolve default PAT name:", e?.message || e);
+  }
+  return "Standard";
+}
+
 async function ensureStandardPatForProvider(env, productKey, printProviderId, now) {
   const db = catalogDb(env);
   const pid = Number(printProviderId);
@@ -228,13 +257,14 @@ async function ensureStandardPatForProvider(env, productKey, printProviderId, no
   );
   if (existing) return existing;
 
+  const displayName = await resolveDefaultPatDisplayName(env, productKey);
   const insertResult = await db
     .prepare(
       `INSERT INTO print_area_printify_templates
         (product_key, print_provider_id, display_name, sort_order, is_active, publish_enabled, created_at, updated_at)
-       VALUES (?, ?, 'Standard', 0, 1, 1, ?, ?)`
+       VALUES (?, ?, ?, 0, 1, 1, ?, ?)`
     )
-    .bind(productKey, pid, now, now)
+    .bind(productKey, pid, displayName, now, now)
     .run();
   const patId = insertResult.meta?.last_row_id;
   return patId ? getPatRow(env, patId) : null;
@@ -369,7 +399,7 @@ export async function updateCatalogProductMeta(env, productKey, body) {
   return { ok: true, product: product.ok ? product.product : null, _ops_source: "catalog-db" };
 }
 
-async function syncCatalogProductDerivedFromProviders(db, productKey, activeIds, body, now) {
+async function syncCatalogProductDerivedFromProviders(env, db, productKey, activeIds, body, now) {
   const designTypes = new Set();
   const countryCodes = new Set();
 
@@ -407,10 +437,16 @@ async function syncCatalogProductDerivedFromProviders(db, productKey, activeIds,
       pid
     );
     const name = String(row?.display_name || "").trim();
-    if (name) {
+    // Prefer a real product title over auto-seeded "Standard" when both exist.
+    if (name && !/^standard$/i.test(name)) {
       productTitle = name;
       break;
     }
+    if (name && !productTitle) productTitle = name;
+  }
+  if (!productTitle || /^standard$/i.test(productTitle)) {
+    const preferred = await resolveDefaultPatDisplayName(env, productKey);
+    if (preferred && !/^standard$/i.test(preferred)) productTitle = preferred;
   }
 
   const regions = regionCodesFromCountryCodes([...countryCodes]);
@@ -443,7 +479,10 @@ async function syncCatalogProductDerivedFromProviders(db, productKey, activeIds,
       productKey,
       pid
     );
-    const stdName = String(row?.display_name || "").trim();
+    let stdName = String(row?.display_name || "").trim();
+    if ((!stdName || /^standard$/i.test(stdName)) && productTitle && !/^standard$/i.test(productTitle)) {
+      stdName = productTitle;
+    }
     if (!stdName) continue;
     const profile = await queryFirst(
       db,
@@ -624,7 +663,7 @@ export async function saveCatalogProviders(env, productKey, body) {
     }
   }
 
-  await syncCatalogProductDerivedFromProviders(db, productKey, activeIds, body, now);
+  await syncCatalogProductDerivedFromProviders(env, db, productKey, activeIds, body, now);
 
   return { ok: true, _ops_source: "catalog-db" };
 }
