@@ -1016,6 +1016,109 @@ describe("catalog studio service", () => {
     expect(result.ok).toBe(true);
     expect(result.items.map((i) => i.printify_blueprint_id)).toEqual([2]);
   });
+
+  it("lists Todify/KNL products for opaque provider id ma-1 under catalog-ops", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const { productKeysForProviderFromCatalog } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogOpsReadService.js"
+    );
+
+    expect(await productKeysForProviderFromCatalog({ prepare: () => ({}) }, "ma-1")).toEqual([]);
+
+    const catalogQueries = [];
+    const catalogDb = {
+      prepare: (sql) => ({
+        bind: (...args) => ({
+          all: async () => {
+            catalogQueries.push({ sql, args });
+            if (sql.includes("FROM product_catalog") && sql.includes("is_active")) {
+              return {
+                results: [
+                  {
+                    product_key: "todify-todify-hooded-tank",
+                    title: "Black Hooded Gym Tank",
+                    is_active: 1,
+                    regions_json: '["MA"]',
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("product_active_print_providers")) {
+              // Number("ma-1") is NaN — must never reach here with opaque ids
+              return { results: [] };
+            }
+            if (sql.includes("print_area_printify_templates")) return { results: [] };
+            return { results: [] };
+          },
+          first: async () => null,
+        }),
+      }),
+    };
+
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => {
+            if (sql.includes("FROM manufacturers")) {
+              return { id: "mfg_todify", slug: "todify", name: "Todify" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products") && sql.includes("manufacturer_id")) {
+              return {
+                results: [
+                  {
+                    product_key: "todify-todify-hooded-tank",
+                    title: "Black Hooded Gym Tank",
+                    catalog_status: "preview",
+                    catalog_category_leaf: "Tank",
+                    catalog_category_group: "Kleidung",
+                    version_count: 1,
+                    manufacturer_name: "Todify",
+                    blueprint_title: null,
+                    blueprint_category: null,
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            if (
+              sql.includes("eazpire_product_versions") &&
+              sql.includes("manufacturer_fulfillment_providers") &&
+              sql.includes("external_provider_id")
+            ) {
+              expect(handler._args).toEqual(["mfg_todify", "ma-1"]);
+              return { results: [{ product_key: "todify-todify-hooded-tank" }] };
+            }
+            return { results: [] };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(
+      mfgDb,
+      { CATALOG_DB: catalogDb, CATALOG_OPS_MASTER_READ: "1", MANUFACTURER_DB: mfgDb },
+      {
+        manufacturerId: "mfg_todify",
+        providerExternalId: "ma-1",
+        filter: "preview",
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.items.map((i) => i.product_key)).toEqual(["todify-todify-hooded-tank"]);
+    expect(catalogQueries.some((q) => q.sql.includes("product_active_print_providers"))).toBe(false);
+  });
 });
 
 describe("mirror drift status shape", () => {

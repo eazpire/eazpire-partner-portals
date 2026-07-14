@@ -5,6 +5,13 @@
 export const PRINTIFY_PARTNER_ID = "mfg_printify";
 export const PRINTIFY_PARTNER_SLUG = "printify";
 
+/**
+ * Official Printify brand assets (printify.com — favicon.ico returns 404).
+ * Prefer square favicon PNG for Catalog Studio avatars; SVG wordmark for wide placements.
+ */
+export const PRINTIFY_LOGO_URL = "https://printify.com/app/assets/svg/logo.svg";
+export const PRINTIFY_ICON_URL = "https://printify.com/pfh/assets/png/favicon-300x300.png";
+
 /** Dogfood / Morocco POD partner — listings go to Shopify without Printify API. */
 export const TODIFY_PARTNER_ID = "mfg_todify";
 export const TODIFY_PARTNER_SLUG = "todify";

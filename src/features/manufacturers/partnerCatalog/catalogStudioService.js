@@ -14,7 +14,14 @@ import {
 } from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
 import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
-import { PRINTIFY_PARTNER_SLUG, TODIFY_PARTNER_SLUG, TODIFY_ICON_URL, TODIFY_LOGO_URL } from "./constants.js";
+import {
+  PRINTIFY_PARTNER_SLUG,
+  PRINTIFY_ICON_URL,
+  PRINTIFY_LOGO_URL,
+  TODIFY_PARTNER_SLUG,
+  TODIFY_ICON_URL,
+  TODIFY_LOGO_URL,
+} from "./constants.js";
 import {
   fetchBlueprint,
   buildPrintifyCatalogProductUrl,
@@ -35,7 +42,8 @@ const PRINT_AREAS_API_FETCH_MAX = 30;
 
 /** Known partner logos by slug (fallback when DB has no logo_url). */
 const PARTNER_LOGO_BY_SLUG = {
-  printify: "https://www.printify.com/favicon.ico",
+  // printify.com/favicon.ico is 404 — use official PFH favicon PNG
+  [PRINTIFY_PARTNER_SLUG]: PRINTIFY_ICON_URL || PRINTIFY_LOGO_URL,
   // Todify.ma official CloudFront logo/icon (apple-touch for square tree avatars)
   [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
 };
@@ -1174,12 +1182,33 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
       : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
 
+  // Partner-direct products (Todify / KNL): union manufacturer eazpire rows so catalog-ops
+  // gaps (or missing product_catalog rows) cannot hide approved partner listings.
+  if (shouldUseCatalogOps(env) && env?.CATALOG_DB && db) {
+    const mfgProducts = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
+    if (mfgProducts.length) {
+      const seen = new Set(products.map((p) => p.product_key));
+      for (const p of mfgProducts) {
+        if (!seen.has(p.product_key)) {
+          products.push(p);
+          seen.add(p.product_key);
+        }
+      }
+    }
+  }
+
+  // Partner opaque ids (e.g. Todify "ma-1") are not numeric Printify provider ids.
+  // product_active_print_providers only stores integers — always include manufacturer version keys.
   if (providerId) {
-    const keysForProvider =
-      shouldUseCatalogOps(env) && env?.CATALOG_DB
+    const numericPid = Number(providerId);
+    const isNumericProvider =
+      Number.isFinite(numericPid) && String(numericPid) === String(providerId).trim();
+    const catalogKeys =
+      isNumericProvider && shouldUseCatalogOps(env) && env?.CATALOG_DB
         ? await productKeysForProviderFromCatalog(env.CATALOG_DB, providerId)
-        : await productKeysForProvider(db, manufacturerId, providerId);
-    const keySet = new Set(keysForProvider);
+        : [];
+    const mfgKeys = await productKeysForProvider(db, manufacturerId, providerId);
+    const keySet = new Set([...catalogKeys, ...mfgKeys]);
     products = products.filter((p) => keySet.has(p.product_key));
   }
 

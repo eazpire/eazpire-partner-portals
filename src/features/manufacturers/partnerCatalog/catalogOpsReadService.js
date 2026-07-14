@@ -500,10 +500,13 @@ export async function getCatalogOpsPrintAreaBundle(env, productKey, { printProvi
 
 export async function productKeysForProviderFromCatalog(catalogDb, providerExternalId) {
   if (!catalogDb) return [];
+  // Opaque partner ids like Todify "ma-1" → Number(...) is NaN; never query with NaN.
+  const pid = Number(providerExternalId);
+  if (!Number.isFinite(pid)) return [];
   const rows = await queryAll(
     catalogDb,
     `SELECT DISTINCT product_key FROM product_active_print_providers WHERE print_provider_id = ? ORDER BY product_key ASC`,
-    Number(providerExternalId)
+    pid
   );
   return rows.map((r) => r.product_key);
 }
