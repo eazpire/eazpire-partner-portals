@@ -553,6 +553,43 @@ async function applyEazpireShadowSchemaPatches(db) {
   await ensureColumn(db, "eazpire_template_products", "printify_variants_product_id", "TEXT");
   await ensureColumn(db, "eazpire_template_products", "printify_print_areas_product_id", "TEXT");
   await ensureColumn(db, "eazpire_product_mockup_images", "mockup_set", "TEXT NOT NULL DEFAULT 'clean'");
+
+  // Partner product editor (0019)
+  await ensureColumn(db, "manufacturer_products", "sku_base", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "design_types_json", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "print_technique", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "regions_json", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "meta_json", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "eazpire_product_key", "TEXT");
+  await ensureColumn(db, "manufacturer_products", "review_note", "TEXT");
+  await runSchemaPatch(
+    db,
+    "manufacturer_product_views",
+    `CREATE TABLE IF NOT EXISTS manufacturer_product_views (
+      id TEXT PRIMARY KEY,
+      manufacturer_product_id TEXT NOT NULL,
+      view_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      printable INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (manufacturer_product_id) REFERENCES manufacturer_products(id)
+    )`
+  );
+  await runSchemaPatch(
+    db,
+    "idx_manufacturer_product_views_unique",
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_mfg_product_views_unique
+      ON manufacturer_product_views (manufacturer_product_id, view_key)`
+  );
+  await ensureColumn(db, "manufacturer_mockup_templates", "mockup_set", "TEXT");
+  await ensureColumn(db, "manufacturer_mockup_templates", "color_key", "TEXT");
+  await ensureColumn(db, "manufacturer_print_areas", "view_key", "TEXT");
+  await ensureColumn(db, "manufacturer_print_areas", "print_rect_json", "TEXT");
+  await ensureColumn(db, "manufacturer_print_areas", "placeholders_json", "TEXT");
+  await ensureColumn(db, "manufacturer_print_areas", "image_r2_key", "TEXT");
+  await ensureColumn(db, "manufacturer_print_areas", "image_url", "TEXT");
 }
 
 export async function ensureManufacturerSchema(env) {

@@ -117,6 +117,15 @@ const PARTNER_OPS = new Set([
   "manufacturer-product-create",
   "manufacturer-product-update",
   "manufacturer-product-submit-review",
+  "manufacturer-product-editor-bundle",
+  "manufacturer-product-editor-save-header",
+  "manufacturer-product-editor-save-views",
+  "manufacturer-product-editor-save-variants",
+  "manufacturer-product-editor-save-mockups",
+  "manufacturer-product-editor-save-print-areas",
+  "manufacturer-product-editor-save-meta",
+  "manufacturer-product-editor-upload",
+  "manufacturer-product-editor-submit",
   "manufacturer-variant-list",
   "manufacturer-variant-create",
   "manufacturer-print-area-list",
@@ -160,6 +169,8 @@ const ADMIN_OPS = new Set([
   "admin-manufacturer-remove",
   "admin-manufacturer-product-list",
   "admin-manufacturer-product-review",
+  "admin-manufacturer-product-editor-bundle",
+  "admin-manufacturer-product-approve-to-catalog",
   "admin-test-order-create",
   "admin-manufacturer-orders-board",
   "admin-certification-review",
@@ -405,6 +416,24 @@ export async function handleManufacturerRouter(request, env) {
       });
       if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
       return json({ ok: true, product }, 200, cors);
+    }
+    if (op === "admin-manufacturer-product-editor-bundle" && request.method === "GET") {
+      const productId = url.searchParams.get("product_id");
+      const row = await db.prepare(`SELECT manufacturer_id FROM manufacturer_products WHERE id = ?`).bind(productId).first();
+      if (!row) return json({ ok: false, error: "not_found" }, 404, cors);
+      const { getPartnerProductEditorBundle } = await import("./partnerProductEditorService.js");
+      const result = await getPartnerProductEditorBundle(env, row.manufacturer_id, productId);
+      return json(result, result.ok ? 200 : 404, cors);
+    }
+    if (op === "admin-manufacturer-product-approve-to-catalog" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { adminApprovePartnerProductToCatalog } = await import("./partnerProductEditorService.js");
+      const result = await adminApprovePartnerProductToCatalog(env, body.product_id, admin.owner_id, {
+        changesRequested: !!body.changes_requested,
+        note: body.note,
+      });
+      if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
+      return json(result, 200, cors);
     }
     if (op === "admin-test-order-create" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
@@ -1158,7 +1187,105 @@ export async function handleManufacturerRouter(request, env) {
   if (op === "manufacturer-product-submit-review" && request.method === "POST") {
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const result = await submitProductForReview(db, mfgId, body.product_id);
+    const { submitPartnerProductForReview } = await import("./partnerProductEditorService.js");
+    const result = await submitPartnerProductForReview(env, mfgId, body.product_id);
+    if (!result.ok) return json({ ok: false, errors: result.errors }, 400, cors);
+    return json({ ok: true, product: result.product }, 200, cors);
+  }
+
+  if (op === "manufacturer-product-editor-bundle" && request.method === "GET") {
+    const productId = url.searchParams.get("product_id");
+    const { getPartnerProductEditorBundle } = await import("./partnerProductEditorService.js");
+    const result = await getPartnerProductEditorBundle(env, mfgId, productId);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-header" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductHeader } = await import("./partnerProductEditorService.js");
+    let productId = body.product_id;
+    if (!productId) {
+      const created = await createProduct(db, mfgId, {
+        title: body.title || "Untitled product",
+        description: body.description,
+        category: body.category,
+        currency: body.currency || "EUR",
+      });
+      productId = created.id;
+    }
+    const product = await savePartnerProductHeader(db, mfgId, productId, body);
+    if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
+    return json({ ok: true, product }, 200, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-views" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductViews } = await import("./partnerProductEditorService.js");
+    const result = await savePartnerProductViews(db, mfgId, body.product_id, body.views);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-variants" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductVariants } = await import("./partnerProductEditorService.js");
+    const result = await savePartnerProductVariants(db, mfgId, body.product_id, body);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-mockups" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductMockups } = await import("./partnerProductEditorService.js");
+    const result = await savePartnerProductMockups(db, mfgId, body.product_id, body.slots);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-print-areas" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductPrintAreas } = await import("./partnerProductEditorService.js");
+    const result = await savePartnerProductPrintAreas(db, mfgId, body.product_id, body.print_areas);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-save-meta" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { savePartnerProductMeta } = await import("./partnerProductEditorService.js");
+    const result = await savePartnerProductMeta(db, mfgId, body.product_id, body.meta);
+    return json(result, result.ok ? 200 : 404, cors);
+  }
+
+  if (op === "manufacturer-product-editor-upload" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const productId = url.searchParams.get("product_id") || "";
+    const ct = request.headers.get("content-type") || "";
+    if (!ct.includes("multipart/form-data")) {
+      return json({ ok: false, error: "multipart_required" }, 400, cors);
+    }
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return json({ ok: false, error: "file_required" }, 400, cors);
+    }
+    const bytes = await file.arrayBuffer();
+    const { uploadPartnerProductImage } = await import("./partnerProductEditorService.js");
+    const result = await uploadPartnerProductImage(env, mfgId, productId || form.get("product_id"), {
+      bytes,
+      contentType: file.type || "image/png",
+      filename: file.name || "upload.png",
+    });
+    return json(result, result.ok ? 200 : 400, cors);
+  }
+
+  if (op === "manufacturer-product-editor-submit" && request.method === "POST") {
+    if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
+    const body = await request.json().catch(() => ({}));
+    const { submitPartnerProductForReview } = await import("./partnerProductEditorService.js");
+    const result = await submitPartnerProductForReview(env, mfgId, body.product_id);
     if (!result.ok) return json({ ok: false, errors: result.errors }, 400, cors);
     return json({ ok: true, product: result.product }, 200, cors);
   }

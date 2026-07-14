@@ -24,6 +24,33 @@ export async function partnerFetch(op, { method = "GET", body, query = {} } = {}
   return data;
 }
 
+/** Multipart file upload (no JSON content-type). */
+export async function partnerUpload(op, file, { query = {}, formFields = {} } = {}) {
+  const url = new URL(partnerApiBase());
+  url.searchParams.set("op", op);
+  for (const [k, v] of Object.entries(query)) {
+    if (v != null && v !== "") url.searchParams.set(k, v);
+  }
+  const form = new FormData();
+  form.append("file", file);
+  for (const [k, v] of Object.entries(formFields)) {
+    if (v != null) form.append(k, String(v));
+  }
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    const err = new Error(data.message || data.detail || data.error || `http_${res.status}`);
+    err.data = data;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 export function badgeForStatus(status) {
   const map = {
     verified: "badge-success",
@@ -31,6 +58,7 @@ export function badgeForStatus(status) {
     shipped: "badge-success",
     approved: "badge-success",
     pending_email_verification: "badge-neutral",
+    changes_requested: "badge-warning",
     pending_review: "badge-warning",
     in_production: "badge-warning",
     received: "badge-neutral",

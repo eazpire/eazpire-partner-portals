@@ -1,5 +1,6 @@
 import { partnerFetch, badgeForStatus, escapeHtml } from "/shared/js/partner-api.js";
 import { initShell, openModal, closeModal, showToast, renderTable, setTopbarExtra } from "/shared/js/partner-shell.js";
+import { openProductEditor } from "./product-editor/shell.js";
 
 const PAGE_LABELS = {
   "/": "Overview",
@@ -368,7 +369,9 @@ async function renderCatalog() {
   });
 
   document.getElementById("btn-catalog-primary")?.addEventListener("click", () =>
-    tab === "blueprints" ? openBlueprintWizard() : openProductModal()
+    tab === "blueprints"
+      ? openBlueprintWizard()
+      : openProductEditor(null, { onClose: () => renderCatalog() })
   );
 
   const panel = document.getElementById("catalog-panel");
@@ -390,7 +393,7 @@ async function renderProductList(panel) {
     ).join("") || '<tr><td colspan="4" class="empty">No products yet</td></tr>'
   )}</div></div>`;
   panel.querySelectorAll(".btn-product").forEach((btn) => {
-    btn.onclick = () => openProductModal(btn.dataset.id);
+    btn.onclick = () => openProductEditor(btn.dataset.id, { onClose: () => renderCatalog() });
   });
 }
 
@@ -587,87 +590,7 @@ function readBlueprintWizardForm(draft) {
   };
 }
 async function openProductModal(productId) {
-  let product = { title: "", sku_base: "", description: "" };
-  let variants = [];
-  let print_areas = [];
-  if (productId) {
-    const data = await partnerFetch("manufacturer-product-get", { query: { product_id: productId } });
-    product = data.product;
-    variants = data.variants || [];
-    print_areas = data.print_areas || [];
-  }
-
-  openModal({
-    title: productId ? "Edit product" : "Add product",
-    bodyHtml: `
-      <div class="field"><label>Title</label><input class="input" id="p-title" value="${escapeHtml(product.title)}" /></div>
-      <div class="field"><label>SKU base</label><input class="input" id="p-sku" value="${escapeHtml(product.sku_base || "")}" /></div>
-      <div class="field"><label>Description</label><textarea class="textarea" id="p-desc">${escapeHtml(product.description || "")}</textarea></div>
-      ${productId ? `
-        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
-        <p><strong>Variants</strong> (${variants.length})</p>
-        <div class="field"><label>New variant SKU</label><input class="input" id="v-sku" placeholder="SKU-RED-M" /></div>
-        <button type="button" class="btn btn-secondary" id="btn-add-variant">Add variant</button>
-        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
-        <p><strong>Print area</strong></p>
-        <div class="split-row">
-          <div class="field"><label>Width px</label><input class="input" id="pa-w" type="number" value="${escapeHtml(print_areas[0]?.width_px || 4500)}" /></div>
-          <div class="field"><label>Height px</label><input class="input" id="pa-h" type="number" value="${escapeHtml(print_areas[0]?.height_px || 5400)}" /></div>
-        </div>
-        <button type="button" class="btn btn-secondary" id="btn-save-print-area">Save print area</button>
-        <button type="button" class="btn btn-warning" id="btn-submit-review" style="margin-left:8px">Submit for review</button>
-      ` : ""}`,
-    onSave: async () => {
-      const body = {
-        title: document.getElementById("p-title").value,
-        sku_base: document.getElementById("p-sku").value,
-        description: document.getElementById("p-desc").value,
-      };
-      if (productId) {
-        body.product_id = productId;
-        await partnerFetch("manufacturer-product-update", { method: "POST", body });
-      } else {
-        await partnerFetch("manufacturer-product-create", { method: "POST", body });
-      }
-      showToast("Product saved", "");
-      await renderCatalog();
-    },
-  });
-
-  if (productId) {
-    document.getElementById("btn-add-variant")?.addEventListener("click", async () => {
-      await partnerFetch("manufacturer-variant-create", {
-        method: "POST",
-        body: { product_id: productId, sku: document.getElementById("v-sku").value, title: document.getElementById("v-sku").value },
-      });
-      showToast("Variant added", "");
-      openProductModal(productId);
-    });
-    document.getElementById("btn-save-print-area")?.addEventListener("click", async () => {
-      await partnerFetch("manufacturer-print-area-upsert", {
-        method: "POST",
-        body: {
-          product_id: productId,
-          placement_key: "front",
-          width_px: Number(document.getElementById("pa-w").value),
-          height_px: Number(document.getElementById("pa-h").value),
-          dpi: 300,
-          safe_zone: { x: 0, y: 0, width: Number(document.getElementById("pa-w").value), height: Number(document.getElementById("pa-h").value) },
-        },
-      });
-      showToast("Print area saved", "");
-    });
-    document.getElementById("btn-submit-review")?.addEventListener("click", async () => {
-      try {
-        await partnerFetch("manufacturer-product-submit-review", { method: "POST", body: { product_id: productId } });
-        showToast("Submitted", "Product sent for Eazpire review");
-        closeModal();
-        await renderCatalog();
-      } catch (e) {
-        showToast("Review blocked", (e.data?.errors || [e.message]).join(", "));
-      }
-    });
-  }
+  await openProductEditor(productId || null, { onClose: () => renderCatalog() });
 }
 
 async function renderOrders() {

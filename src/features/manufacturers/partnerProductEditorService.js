@@ -1,0 +1,673 @@
+/**
+ * Partner Product Editor — bundle load/save, readiness, mockup upload, admin approve→catalog
+ */
+
+import { getManufacturerDb, newId, parseJson, rowToProduct, slugify } from "./db.js";
+import {
+  listVariants,
+  listPrintAreas,
+  getProduct,
+  createProduct,
+  updateProduct,
+} from "./catalogService.js";
+import { validatePrintArea } from "./printAreaValidation.js";
+import { writeAuditLog } from "./rbac.js";
+import { upsertEazpireProduct } from "./partnerCatalog/eazpireProductService.js";
+
+const MOCKUP_SETS = ["clean", "shop_preview", "calibration"];
+const DEFAULT_VIEWS = [
+  { view_key: "front", label: "Front", sort_order: 0, printable: 1 },
+  { view_key: "back", label: "Back", sort_order: 1, printable: 1 },
+];
+
+export function publicFileUrl(env, r2Key) {
+  const key = String(r2Key || "").trim();
+  if (!key) return null;
+  const base = String(env?.PUBLIC_FILE_BASE_URL || "https://creator-engine.eazpire.workers.dev").replace(/\/$/, "");
+  return `${base}/file/${encodeURIComponent(key)}`;
+}
+
+async function ensureEditorColumns(db) {
+  const cols = [
+    ["sku_base", "TEXT"],
+    ["design_types_json", "TEXT"],
+    ["print_technique", "TEXT"],
+    ["regions_json", "TEXT"],
+    ["meta_json", "TEXT"],
+    ["eazpire_product_key", "TEXT"],
+    ["review_note", "TEXT"],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      await db.prepare(`ALTER TABLE manufacturer_products ADD COLUMN ${col} ${def}`).run();
+    } catch (_) {}
+  }
+  try {
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS manufacturer_product_views (
+          id TEXT PRIMARY KEY,
+          manufacturer_product_id TEXT NOT NULL,
+          view_key TEXT NOT NULL,
+          label TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          printable INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (manufacturer_product_id) REFERENCES manufacturer_products(id),
+          UNIQUE (manufacturer_product_id, view_key)
+        )`
+      )
+      .run();
+  } catch (_) {}
+  for (const [col, def] of [
+    ["mockup_set", "TEXT"],
+    ["color_key", "TEXT"],
+  ]) {
+    try {
+      await db.prepare(`ALTER TABLE manufacturer_mockup_templates ADD COLUMN ${col} ${def}`).run();
+    } catch (_) {}
+  }
+  for (const [col, def] of [
+    ["view_key", "TEXT"],
+    ["print_rect_json", "TEXT"],
+    ["placeholders_json", "TEXT"],
+    ["image_r2_key", "TEXT"],
+    ["image_url", "TEXT"],
+  ]) {
+    try {
+      await db.prepare(`ALTER TABLE manufacturer_print_areas ADD COLUMN ${col} ${def}`).run();
+    } catch (_) {}
+  }
+}
+
+export async function listViews(db, productId) {
+  const res = await db
+    .prepare(
+      `SELECT * FROM manufacturer_product_views
+       WHERE manufacturer_product_id = ?
+       ORDER BY sort_order ASC, created_at ASC`
+    )
+    .bind(productId)
+    .all();
+  return (res?.results || []).map((row) => ({
+    id: row.id,
+    view_key: row.view_key,
+    label: row.label,
+    sort_order: Number(row.sort_order || 0),
+    printable: !!row.printable,
+  }));
+}
+
+export async function listMockupSlots(db, env, productId) {
+  const res = await db
+    .prepare(
+      `SELECT * FROM manufacturer_mockup_templates
+       WHERE manufacturer_product_id = ?
+       ORDER BY mockup_set ASC, view_key ASC, color_key ASC`
+    )
+    .bind(productId)
+    .all();
+  return (res?.results || []).map((row) => ({
+    id: row.id,
+    view_key: row.view_key,
+    color_key: row.color_key || "",
+    mockup_set: row.mockup_set || "clean",
+    image_r2_key: row.image_r2_key || null,
+    image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
+    status: row.status,
+  }));
+}
+
+function mapPrintArea(row, env) {
+  return {
+    id: row.id,
+    area_key: row.area_key,
+    view_key: row.view_key || row.area_key,
+    label: row.label,
+    width_px: row.width_px,
+    height_px: row.height_px,
+    dpi: row.dpi,
+    safe_zone: parseJson(row.safe_zone_json, {}),
+    position: parseJson(row.position_json, {}),
+    print_rect: parseJson(row.print_rect_json, {}),
+    placeholders: parseJson(row.placeholders_json, {}),
+    image_r2_key: row.image_r2_key || null,
+    image_url: row.image_url || (row.image_r2_key ? publicFileUrl(env, row.image_r2_key) : null),
+    supported_file_types: parseJson(row.supported_file_types_json, ["png"]),
+    supports_transparency: !!row.supports_transparency,
+    default_fit: row.default_fit,
+    status: row.status,
+  };
+}
+
+export async function getPartnerProductEditorBundle(env, manufacturerId, productId) {
+  const db = getManufacturerDb(env);
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  await ensureEditorColumns(db);
+
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+
+  let views = await listViews(db, productId);
+  if (!views.length) {
+    const now = Date.now();
+    for (const v of DEFAULT_VIEWS) {
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO manufacturer_product_views
+            (id, manufacturer_product_id, view_key, label, sort_order, printable, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(newId("mpv"), productId, v.view_key, v.label, v.sort_order, v.printable, now, now)
+        .run();
+    }
+    views = await listViews(db, productId);
+  }
+
+  const [variants, printAreas, mockups] = await Promise.all([
+    listVariants(db, manufacturerId, productId),
+    listPrintAreas(db, manufacturerId, productId),
+    listMockupSlots(db, env, productId),
+  ]);
+
+  const colors = [...new Set(variants.map((v) => String(v.color || "").trim()).filter(Boolean))];
+  const sizes = [...new Set(variants.map((v) => String(v.size || "").trim()).filter(Boolean))];
+
+  return {
+    ok: true,
+    product,
+    views,
+    variants,
+    colors,
+    sizes,
+    mockups,
+    print_areas: printAreas.map((a) => {
+      const row = a;
+      return {
+        ...a,
+        view_key: a.view_key || a.area_key,
+        print_rect: a.print_rect || a.position || {},
+        placeholders: a.placeholders || {},
+      };
+    }),
+    readiness: await buildPartnerProductReadiness(db, env, manufacturerId, productId),
+  };
+}
+
+export async function buildPartnerProductReadiness(db, env, manufacturerId, productId) {
+  const product = await getProduct(db, manufacturerId, productId);
+  const views = await listViews(db, productId);
+  const variants = await listVariants(db, manufacturerId, productId);
+  const mockups = await listMockupSlots(db, env, productId);
+  const areas = await listPrintAreas(db, manufacturerId, productId);
+  const errors = [];
+
+  if (!product?.title?.trim()) errors.push("title_required");
+  if (!views.length) errors.push("views_required");
+  if (!variants.length) errors.push("variants_required");
+  const missingCost = variants.some((v) => !Number(v.base_cost_cents) || Number(v.base_cost_cents) <= 0);
+  if (variants.length && missingCost) errors.push("variant_cost_required");
+  if (!areas.length) errors.push("print_area_required");
+  for (const area of areas) {
+    const v = validatePrintArea(area);
+    if (!v.ok) errors.push(...v.errors.map((e) => `print_area_${e}`));
+  }
+  const frontClean = mockups.some(
+    (m) => m.mockup_set === "clean" && m.view_key === "front" && (m.image_r2_key || m.image_url)
+  );
+  if (!frontClean) errors.push("clean_front_mockup_required");
+  const meta = product?.meta || {};
+  if (!String(meta.display_name || product?.title || "").trim()) errors.push("meta_display_name_required");
+
+  return { ok: errors.length === 0, errors };
+}
+
+export async function savePartnerProductHeader(db, manufacturerId, productId, body) {
+  await ensureEditorColumns(db);
+  const existing = await getProduct(db, manufacturerId, productId);
+  if (!existing && !body.create) return null;
+
+  let id = productId;
+  if (!existing) {
+    const created = await createProduct(db, manufacturerId, {
+      title: body.title || "Untitled product",
+      description: body.description,
+      category: body.category,
+      currency: body.currency || "EUR",
+      base_cost_cents: body.base_cost_cents || 0,
+    });
+    id = created.id;
+  }
+
+  const now = Date.now();
+  await db
+    .prepare(
+      `UPDATE manufacturer_products SET
+        title = ?, description = ?, category = ?, normalized_category = ?,
+        sku_base = ?, design_types_json = ?, print_technique = ?, regions_json = ?,
+        meta_json = ?, currency = ?, updated_at = ?
+       WHERE id = ? AND manufacturer_id = ?`
+    )
+    .bind(
+      body.title ?? existing?.title ?? "Untitled",
+      body.description ?? existing?.description ?? null,
+      body.category ?? existing?.category ?? null,
+      body.category ?? existing?.normalized_category ?? null,
+      body.sku_base ?? existing?.sku_base ?? null,
+      JSON.stringify(body.design_types ?? existing?.design_types ?? []),
+      body.print_technique ?? existing?.print_technique ?? null,
+      JSON.stringify(body.regions ?? existing?.regions ?? []),
+      JSON.stringify(body.meta ?? existing?.meta ?? {}),
+      body.currency ?? existing?.currency ?? "EUR",
+      now,
+      id,
+      manufacturerId
+    )
+    .run();
+
+  return getProduct(db, manufacturerId, id);
+}
+
+export async function savePartnerProductViews(db, manufacturerId, productId, views) {
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  await ensureEditorColumns(db);
+  const now = Date.now();
+  const list = Array.isArray(views) ? views : [];
+  await db.prepare(`DELETE FROM manufacturer_product_views WHERE manufacturer_product_id = ?`).bind(productId).run();
+  let i = 0;
+  for (const v of list) {
+    const key = String(v.view_key || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-");
+    if (!key) continue;
+    await db
+      .prepare(
+        `INSERT INTO manufacturer_product_views
+          (id, manufacturer_product_id, view_key, label, sort_order, printable, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        newId("mpv"),
+        productId,
+        key,
+        String(v.label || key),
+        Number(v.sort_order ?? i),
+        v.printable === false || v.printable === 0 ? 0 : 1,
+        now,
+        now
+      )
+      .run();
+    i += 1;
+  }
+  return { ok: true, views: await listViews(db, productId) };
+}
+
+export async function savePartnerProductVariants(db, manufacturerId, productId, body) {
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  const colors = Array.isArray(body.colors) ? body.colors.map((c) => String(c).trim()).filter(Boolean) : [];
+  const sizes = Array.isArray(body.sizes) ? body.sizes.map((s) => String(s).trim()).filter(Boolean) : [];
+  const currency = String(body.currency || product.currency || "EUR").trim() || "EUR";
+  const costs = body.costs && typeof body.costs === "object" ? body.costs : {};
+  const now = Date.now();
+
+  await db.prepare(`DELETE FROM manufacturer_variants WHERE manufacturer_product_id = ?`).bind(productId).run();
+
+  const colorList = colors.length ? colors : ["Default"];
+  const sizeList = sizes.length ? sizes : ["One Size"];
+
+  for (const color of colorList) {
+    for (const size of sizeList) {
+      const costKey = `${color}||${size}`;
+      const colorCostKey = color;
+      let cents = Number(costs[costKey] ?? costs[colorCostKey] ?? body.default_cost_cents ?? 0);
+      if (!Number.isFinite(cents)) cents = 0;
+      // Allow decimal major units via costs_major
+      if (body.costs_major && body.costs_major[costKey] != null) {
+        cents = Math.round(Number(body.costs_major[costKey]) * 100);
+      } else if (body.costs_major && body.costs_major[colorCostKey] != null) {
+        cents = Math.round(Number(body.costs_major[colorCostKey]) * 100);
+      }
+      await db
+        .prepare(
+          `INSERT INTO manufacturer_variants
+            (id, manufacturer_product_id, sku, color, size, material, base_cost_cents, currency, available, attributes_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 1, '{}', ?, ?)`
+        )
+        .bind(newId("mvar"), productId, `${product.sku_base || product.id}-${color}-${size}`.slice(0, 100), color, size, cents, currency, now, now)
+        .run();
+    }
+  }
+
+  await db
+    .prepare(`UPDATE manufacturer_products SET currency = ?, updated_at = ? WHERE id = ? AND manufacturer_id = ?`)
+    .bind(currency, now, productId, manufacturerId)
+    .run();
+
+  return { ok: true, variants: await listVariants(db, manufacturerId, productId) };
+}
+
+export async function savePartnerProductMockups(db, manufacturerId, productId, slots) {
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  await ensureEditorColumns(db);
+  const now = Date.now();
+  await db.prepare(`DELETE FROM manufacturer_mockup_templates WHERE manufacturer_product_id = ?`).bind(productId).run();
+  for (const s of Array.isArray(slots) ? slots : []) {
+    const set = MOCKUP_SETS.includes(s.mockup_set) ? s.mockup_set : "clean";
+    const viewKey = String(s.view_key || "").trim();
+    if (!viewKey) continue;
+    await db
+      .prepare(
+        `INSERT INTO manufacturer_mockup_templates
+          (id, manufacturer_product_id, variant_id, view_key, image_r2_key, image_url, overlay_json, status, created_at, updated_at, mockup_set, color_key)
+         VALUES (?, ?, NULL, ?, ?, ?, '{}', 'draft', ?, ?, ?, ?)`
+      )
+      .bind(
+        newId("mmock"),
+        productId,
+        viewKey,
+        s.image_r2_key || null,
+        s.image_url || null,
+        now,
+        now,
+        set,
+        String(s.color_key || ""),
+      )
+      .run();
+  }
+  return { ok: true };
+}
+
+export async function savePartnerProductPrintAreas(db, manufacturerId, productId, areas) {
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  await ensureEditorColumns(db);
+  const now = Date.now();
+  await db.prepare(`DELETE FROM manufacturer_print_areas WHERE manufacturer_product_id = ?`).bind(productId).run();
+  for (const a of Array.isArray(areas) ? areas : []) {
+    const viewKey = String(a.view_key || a.area_key || "").trim();
+    if (!viewKey) continue;
+    const width = Number(a.width_px);
+    const height = Number(a.height_px);
+    await db
+      .prepare(
+        `INSERT INTO manufacturer_print_areas
+          (id, manufacturer_product_id, area_key, label, width_px, height_px, dpi, safe_zone_json, position_json,
+           supported_file_types_json, supports_transparency, default_fit, status, created_at, updated_at,
+           view_key, print_rect_json, placeholders_json, image_r2_key, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'contain', 'draft', ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        newId("mpa"),
+        productId,
+        viewKey,
+        a.label || viewKey,
+        width,
+        height,
+        Number(a.dpi || 300),
+        JSON.stringify(a.safe_zone || { x: 0, y: 0, width, height }),
+        JSON.stringify(a.print_rect || a.position || {}),
+        JSON.stringify(a.supported_file_types || ["png"]),
+        now,
+        now,
+        viewKey,
+        JSON.stringify(a.print_rect || {}),
+        JSON.stringify(a.placeholders || {}),
+        a.image_r2_key || null,
+        a.image_url || null
+      )
+      .run();
+  }
+  return { ok: true, print_areas: await listPrintAreas(db, manufacturerId, productId) };
+}
+
+export async function savePartnerProductMeta(db, manufacturerId, productId, meta) {
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  await ensureEditorColumns(db);
+  const now = Date.now();
+  await db
+    .prepare(`UPDATE manufacturer_products SET meta_json = ?, updated_at = ? WHERE id = ? AND manufacturer_id = ?`)
+    .bind(JSON.stringify(meta || {}), now, productId, manufacturerId)
+    .run();
+  return { ok: true, product: await getProduct(db, manufacturerId, productId) };
+}
+
+export async function submitPartnerProductForReview(env, manufacturerId, productId) {
+  const db = getManufacturerDb(env);
+  await ensureEditorColumns(db);
+  const readiness = await buildPartnerProductReadiness(db, env, manufacturerId, productId);
+  if (!readiness.ok) return { ok: false, errors: readiness.errors };
+  const now = Date.now();
+  await db
+    .prepare(`UPDATE manufacturer_products SET status = 'pending_review', updated_at = ? WHERE id = ? AND manufacturer_id = ?`)
+    .bind(now, productId, manufacturerId)
+    .run();
+  return { ok: true, product: await getProduct(db, manufacturerId, productId) };
+}
+
+export async function uploadPartnerProductImage(env, manufacturerId, productId, { bytes, contentType, filename }) {
+  const db = getManufacturerDb(env);
+  const product = await getProduct(db, manufacturerId, productId);
+  if (!product) return { ok: false, error: "not_found" };
+  const bucket = env.MOCKUP_R2 || env.R2;
+  if (!bucket) return { ok: false, error: "r2_unavailable" };
+  const safeName = String(filename || "upload.png").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const r2Key = `partner-products/${manufacturerId}/${productId}/${Date.now()}_${safeName}`;
+  await bucket.put(r2Key, bytes, {
+    httpMetadata: { contentType: contentType || "image/png" },
+  });
+  return { ok: true, image_r2_key: r2Key, image_url: publicFileUrl(env, r2Key) };
+}
+
+/**
+ * Admin approve → eazpire_product + minimal catalog-db draft (source_system=todify)
+ */
+export async function adminApprovePartnerProductToCatalog(env, productId, adminOwnerId, { changesRequested, note } = {}) {
+  const db = getManufacturerDb(env);
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  await ensureEditorColumns(db);
+
+  const row = await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first();
+  if (!row) return { ok: false, error: "not_found" };
+  const manufacturerId = row.manufacturer_id;
+
+  if (changesRequested) {
+    const now = Date.now();
+    await db
+      .prepare(
+        `UPDATE manufacturer_products SET status = 'changes_requested', review_note = ?, updated_at = ? WHERE id = ?`
+      )
+      .bind(String(note || ""), now, productId)
+      .run();
+    await writeAuditLog(env, {
+      manufacturer_id: manufacturerId,
+      user_id: adminOwnerId,
+      action: "admin_product_changes_requested",
+      entity_type: "manufacturer_product",
+      entity_id: productId,
+    });
+    return { ok: true, status: "changes_requested", product: rowToProduct(await db.prepare(`SELECT * FROM manufacturer_products WHERE id = ?`).bind(productId).first()) };
+  }
+
+  const readiness = await buildPartnerProductReadiness(db, env, manufacturerId, productId);
+  if (!readiness.ok) return { ok: false, error: "not_ready", errors: readiness.errors };
+
+  const product = rowToProduct(row);
+  const mfg = await db.prepare(`SELECT slug, name FROM manufacturers WHERE id = ?`).bind(manufacturerId).first();
+  const baseKey =
+    product.eazpire_product_key ||
+    slugify(`${mfg?.slug || "partner"}-${product.sku_base || product.title || productId}`).slice(0, 80) ||
+    `partner-${productId}`;
+
+  let productKey = baseKey;
+  if (env.CATALOG_DB) {
+    const clash = await env.CATALOG_DB.prepare(`SELECT product_key FROM product_catalog WHERE product_key = ?`)
+      .bind(productKey)
+      .first();
+    if (clash && product.eazpire_product_key !== productKey) {
+      productKey = `${baseKey}-${String(productId).slice(-6)}`;
+    }
+  }
+
+  const meta = product.meta || {};
+  const title = String(meta.display_name || product.title || productKey);
+  const regions = product.regions?.length ? product.regions : ["EU"];
+
+  await upsertEazpireProduct(db, {
+    product_key: productKey,
+    manufacturer_id: manufacturerId,
+    title,
+    regions,
+    catalog_status: "preview",
+    catalog_category_group: product.category || null,
+    catalog_category_leaf: product.category || null,
+    visible_design_types: product.design_types || [],
+  });
+
+  // One version (V1) under partner fulfillment provider when available
+  try {
+    const { listFulfillmentProviders } = await import("./partnerCatalog/fulfillmentProviderService.js");
+    const { upsertProductVersion } = await import("./partnerCatalog/eazpireProductVersionService.js");
+    const providers = await listFulfillmentProviders(db, manufacturerId);
+    const fp = providers[0];
+    if (fp?.id) {
+      await upsertProductVersion(db, {
+        product_key: productKey,
+        fulfillment_provider_id: fp.id,
+        display_name: title,
+        external_template_product_id: productId,
+        sort_order: 0,
+        is_active: true,
+        publish_enabled: true,
+        studio_config: {
+          source: "partner_product_editor",
+          manufacturer_product_id: productId,
+          cost_currency: product.currency || "EUR",
+        },
+      });
+    }
+  } catch (e) {
+    console.warn("[approve-to-catalog] version seed:", e?.message);
+  }
+
+  if (env.CATALOG_DB) {
+    const now = Date.now();
+    const cat = await env.CATALOG_DB.prepare(`SELECT product_key FROM product_catalog WHERE product_key = ?`)
+      .bind(productKey)
+      .first();
+    if (!cat) {
+      await env.CATALOG_DB.prepare(
+        `INSERT INTO product_catalog (product_key, title, regions_json, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`
+      )
+        .bind(productKey, title, JSON.stringify(regions), now, now)
+        .run();
+    } else {
+      await env.CATALOG_DB.prepare(
+        `UPDATE product_catalog SET title = ?, regions_json = ?, is_active = 1, updated_at = ? WHERE product_key = ?`
+      )
+        .bind(title, JSON.stringify(regions), now, productKey)
+        .run();
+    }
+
+    // Seed a minimal publish profile if none
+    const prof = await env.CATALOG_DB.prepare(
+      `SELECT id FROM product_publish_profiles WHERE product_key = ? LIMIT 1`
+    )
+      .bind(productKey)
+      .first();
+    if (!prof) {
+      const variants = await listVariants(db, manufacturerId, productId);
+      const variantsJson = JSON.stringify(
+        variants.map((v, idx) => ({
+          id: 900000 + idx,
+          title: `${v.color} / ${v.size}`,
+          options: { color: v.color, size: v.size },
+          price: v.base_cost_cents,
+          is_enabled: true,
+          sku: v.sku,
+        }))
+      );
+      const prices = {};
+      variants.forEach((v, idx) => {
+        prices[String(900000 + idx)] = v.base_cost_cents;
+      });
+      const insertResult = await env.CATALOG_DB.prepare(
+        `INSERT INTO product_publish_profiles
+          (product_key, title, source_system, source_product_id, standard_product_display_name,
+           variants_json, prices_json, product_features, care_instructions, size_table_html, gpsr_html,
+           is_active, collected_at, updated_at)
+         VALUES (?, ?, 'todify', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      )
+        .bind(
+          productKey,
+          title,
+          productId,
+          title,
+          variantsJson,
+          JSON.stringify(prices),
+          meta.product_features || null,
+          meta.care_instructions || null,
+          meta.size_table_html || null,
+          meta.gpsr_html || null,
+          now,
+          now
+        )
+        .run();
+
+      const profileId = insertResult?.meta?.last_row_id;
+      if (profileId) {
+        const providerName = mfg?.name || "Todify";
+        try {
+          await env.CATALOG_DB.prepare(
+            `INSERT INTO product_publish_map
+              (product_key, region_codes_json, provider_name, country_codes_json, priority, publish_profile_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 100, ?, ?, ?)`
+          )
+            .bind(
+              productKey,
+              JSON.stringify(regions),
+              providerName,
+              JSON.stringify(["MA", "DE", "FR"]),
+              profileId,
+              now,
+              now
+            )
+            .run();
+        } catch (e) {
+          console.warn("[approve-to-catalog] publish map:", e?.message);
+        }
+      }
+    }
+  }
+
+  const now = Date.now();
+  await db
+    .prepare(
+      `UPDATE manufacturer_products SET status = 'approved', eazpire_product_key = ?, review_note = ?, updated_at = ? WHERE id = ?`
+    )
+    .bind(productKey, String(note || ""), now, productId)
+    .run();
+
+  await writeAuditLog(env, {
+    manufacturer_id: manufacturerId,
+    user_id: adminOwnerId,
+    action: "admin_product_approved_to_catalog",
+    entity_type: "manufacturer_product",
+    entity_id: productId,
+    after_json: { product_key: productKey },
+  });
+
+  return {
+    ok: true,
+    product_key: productKey,
+    status: "approved",
+    catalog_status: "preview",
+    product: await getProduct(db, manufacturerId, productId),
+  };
+}

@@ -3,6 +3,7 @@ import { initShell, openModal, closeModal, confirmAction, openActionModeModal, s
 import { initAdminAppDrawer } from "/partner/shared/js/admin-app-drawer.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
 import { mountCatalogStudio } from "./catalog-studio.js";
+import { renderPartnerProductReviews } from "./product-reviews.js";
 
 const NAV_CORE = [
   { route: "/partner", label: "Command Center", icon: "⌘" },
@@ -256,7 +257,8 @@ async function renderCommand() {
           )
           .join("") || '<tr><td colspan="6" class="empty">No manufacturers yet</td></tr>'
       )}
-    </div>`;
+    </div>
+    <div id="partner-product-reviews" style="margin-top:18px"></div>`;
 
   el.querySelectorAll("[data-command-time]").forEach((btn) => {
     btn.onclick = () => {
@@ -268,6 +270,8 @@ async function renderCommand() {
   el.querySelectorAll(".btn-open-mfg").forEach((btn) => {
     btn.onclick = () => navigateToManufacturers();
   });
+
+  await renderPartnerProductReviews(document.getElementById("partner-product-reviews"));
 }
 
 function navigateToManufacturers() {

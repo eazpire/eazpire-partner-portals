@@ -160,6 +160,11 @@ export async function listPrintAreas(db, manufacturerId, productId) {
     ...row,
     safe_zone: parseJson(row.safe_zone_json, {}),
     position: parseJson(row.position_json, {}),
+    print_rect: parseJson(row.print_rect_json, {}),
+    placeholders: parseJson(row.placeholders_json, {}),
+    view_key: row.view_key || row.area_key,
+    image_r2_key: row.image_r2_key || null,
+    image_url: row.image_url || null,
     supported_file_types: parseJson(row.supported_file_types_json, ["png"]),
     supports_transparency: !!row.supports_transparency,
   }));

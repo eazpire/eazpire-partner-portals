@@ -6609,3 +6609,111 @@ html[data-portal="admin"] .cr-pd-expand {
   }
 }
 
+/* Partner Product Editor */
+.pe-editor .pe-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.pe-foot-readiness {
+  flex: 1;
+  min-width: 180px;
+  font-size: 13px;
+}
+.pe-readiness-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--muted, #64748b);
+}
+.pe-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pe-mock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.pe-mock-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-2, #f8fafc);
+}
+.pe-mock-card__label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.pe-mock-card__preview {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+}
+.pe-mock-card__preview img,
+.pe-pa-preview img {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+.pe-pa-block {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.pe-matrix-wrap {
+  overflow-x: auto;
+}
+.pe-cost-matrix th,
+.pe-cost-matrix td {
+  white-space: nowrap;
+}
+.pe-products-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.pe-products-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface, #fff);
+}
+.pe-products-card__thumb {
+  aspect-ratio: 1;
+  background: var(--surface-2, #f1f5f9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pe-products-card__body {
+  padding: 10px;
+  font-size: 13px;
+}
+.pe-products-card__body strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
