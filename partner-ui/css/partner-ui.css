@@ -4610,13 +4610,15 @@ body.catalog-editor-open #partner-toast {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  /* Above .ce-save-loading (30) so success feedback is never covered */
-  z-index: 40;
+  /* Above .ce-save-loading (30) and tab chrome so mid-modal ✓ always wins */
+  z-index: 100;
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.2s ease;
+  background: transparent;
 }
 .ce-save-flash--show {
   opacity: 1;
+  background: color-mix(in srgb, var(--surface) 35%, transparent);
 }
 .ce-save-flash-inner {
   display: flex;

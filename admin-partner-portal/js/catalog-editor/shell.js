@@ -120,10 +120,14 @@ function hideSaveLoading() {
   el.removeAttribute("aria-busy");
 }
 
+let saveFlashTimer = null;
+
 function showSaveFlash() {
   const editor = overlayEl?.querySelector(".catalog-editor");
   if (!editor) return;
-  let flash = editor.querySelector(".ce-save-flash");
+  // Prefer a flash attached directly on .catalog-editor (not nested under .catalog-editor-main
+  // leftovers from older builds that loadActiveTab remounts could leave orphaned).
+  let flash = [...editor.children].find((el) => el.classList?.contains("ce-save-flash"));
   if (!flash) {
     flash = document.createElement("div");
     flash.className = "ce-save-flash";
@@ -132,10 +136,17 @@ function showSaveFlash() {
     flash.innerHTML = `<div class="ce-save-flash-inner"><span class="ce-save-flash-icon" aria-hidden="true">✓</span><span>Saved</span></div>`;
     editor.appendChild(flash);
   }
+  if (saveFlashTimer) {
+    window.clearTimeout(saveFlashTimer);
+    saveFlashTimer = null;
+  }
   flash.classList.remove("ce-save-flash--show");
   void flash.offsetWidth;
   flash.classList.add("ce-save-flash--show");
-  window.setTimeout(() => flash.classList.remove("ce-save-flash--show"), 1200);
+  saveFlashTimer = window.setTimeout(() => {
+    flash.classList.remove("ce-save-flash--show");
+    saveFlashTimer = null;
+  }, 1800);
 }
 
 function refreshDirtyBeforeClose(ctx) {
@@ -564,13 +575,19 @@ async function saveCurrentTab() {
     await runMirror(true);
     ctx.bundle = await fetchEditorBundle(ctx.productKey);
     updateDriftBadge(ctx);
-    resetDirtyAfterSave(getCurrentTabDirtyState(ctx) ?? {});
-    await loadActiveTab(ctx);
-    // Hide loading first — flash used to fire under .ce-save-loading (higher z-index)
-    // and timed out before the overlay cleared, so success feedback never appeared.
+    // Success feedback MUST run before post-save remount. Provider remount (providers
+    // bundle + catalog detail) is much slower than Variants; waiting for it meant the
+    // flash either never ran (snapshot/reload throw) or appeared only after a long
+    // "Saving…" and was easy to miss. Flash lives on .catalog-editor, outside #ce-body.
     hideSaveLoading();
     showSaveFlash();
     showToast("Saved", "Tab saved and mirrored to publish index");
+    try {
+      resetDirtyAfterSave(getCurrentTabDirtyState(ctx) ?? {});
+      await loadActiveTab(ctx);
+    } catch (reloadErr) {
+      console.warn("[catalog-editor] post-save reload", reloadErr);
+    }
   } catch (err) {
     showToast("Save failed", err.message || "Unknown error");
   } finally {

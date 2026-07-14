@@ -18,13 +18,26 @@ import { normalizeDesignType } from "../../../admin/designStyleType.js";
 
 export async function handlePartnerTestTodifyCreate(request, env) {
   const cors = getCorsHeaders(request);
-  const auth = await requireAdminPartnerSession(request, env);
-  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+  try {
+    const auth = await requireAdminPartnerSession(request, env);
+    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
 
-  const body = await request.json().catch(() => ({}));
-  const actor = auth.session?.email || auth.email || "partner-admin";
-  const randomDesign = body.random_design === true || body.design_id == null;
-  return createTestTodifyProduct(env, { ...body, random_design: randomDesign }, actor, cors);
+    const body = await request.json().catch(() => ({}));
+    const actor = auth.session?.email || auth.email || "partner-admin";
+    const randomDesign = body.random_design === true || body.design_id == null;
+    return await createTestTodifyProduct(env, { ...body, random_design: randomDesign }, actor, cors);
+  } catch (e) {
+    console.error("[admin-eazpire-test-todify-create]", e?.message || e);
+    return json(
+      {
+        ok: false,
+        error: "create_failed",
+        message: e?.message || String(e) || "Failed to create Todify test product.",
+      },
+      500,
+      cors
+    );
+  }
 }
 
 export async function handlePartnerTestTodifyList(request, env) {

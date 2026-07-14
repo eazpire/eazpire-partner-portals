@@ -42,6 +42,21 @@ function isPartnerCtx(ctx, data) {
   return isPartnerOrTodifyProduct(ctx, data || ctx?.printAreaData);
 }
 
+/** Prefer API message over bare http_500 from partnerFetch. */
+function testProductErrorMessage(err) {
+  const data = err?.data;
+  const msg = String(data?.message || data?.detail || "").trim();
+  if (msg) return msg.length > 220 ? `${msg.slice(0, 217)}…` : msg;
+  const code = String(data?.error || "").trim();
+  if (code && !/^http_\d+$/i.test(code)) {
+    return code.replace(/_/g, " ");
+  }
+  const fallback = String(err?.message || "").trim();
+  if (fallback && !/^http_\d+$/i.test(fallback)) return fallback;
+  if (err?.status) return `Server error (${err.status}). Try again or check Worker logs.`;
+  return fallback || "Create failed";
+}
+
 async function apiCreateTestProduct(ctx, body, data) {
   if (isPartnerCtx(ctx, data)) return createTestTodifyProduct(body);
   return createTestPrintifyProduct(body);
@@ -313,7 +328,7 @@ export async function loadSidebarTestProductsGrid(ctx, root, callbacks = {}) {
     grid.innerHTML = "";
     if (err) {
       err.hidden = false;
-      err.textContent = e?.message || "Failed to load test products";
+      err.textContent = testProductErrorMessage(e) || e?.message || "Failed to load test products";
     }
   }
 }
@@ -581,7 +596,7 @@ export async function createTestProductFromPrintArea(
   }
   const res = await apiCreateTestProduct(ctx, body, placementData);
   if (!res?.ok) {
-    throw new Error(res?.message || res?.error || "Create failed");
+    throw new Error(testProductErrorMessage({ data: res, message: res?.message || res?.error || "Create failed" }));
   }
   onStatus?.(
     partner
@@ -812,7 +827,7 @@ async function runCreateWithRandom() {
     createChooserCallbacks = callbacks;
     await afterCreateSuccess(res, callbacks);
   } catch (e) {
-    onStatus?.(e?.message || "Create failed");
+    onStatus?.(testProductErrorMessage(e));
   }
 }
 
@@ -851,7 +866,7 @@ async function runCreateWithDesign(designId, designRow) {
     await afterCreateSuccess(res, callbacks);
   } catch (e) {
     if (st.sessionTestDesign) st.sessionTestDesign.testProductCreating = false;
-    onStatus?.(e?.message || "Create failed");
+    onStatus?.(testProductErrorMessage(e));
   }
 }
 
