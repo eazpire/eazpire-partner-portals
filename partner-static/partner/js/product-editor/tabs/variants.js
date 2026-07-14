@@ -418,35 +418,115 @@ function rememberCollapse(ctx, root) {
 function openViewModal(ctx, editIdx = null) {
   const existing = editIdx != null ? ensureViews(ctx)[editIdx] : null;
   const isEdit = !!existing;
+  const printableDefault = existing?.printable === false || existing?.printable === 0 ? false : true;
+  const technique = String(existing?.print_technique || "").trim();
+  const height = existing?.print_height != null && existing.print_height !== "" ? Number(existing.print_height) : 750;
+  const width = existing?.print_width != null && existing.print_width !== "" ? Number(existing.print_width) : 750;
+  const unit = String(existing?.print_unit || "mm").toLowerCase() || "mm";
+  const techniqueOpts = [
+    { value: "", label: "Select…" },
+    { value: "dtf", label: "DTF" },
+    { value: "dtg", label: "DTG" },
+    { value: "embroidery", label: "Embroidery" },
+    { value: "sublimation", label: "Sublimation" },
+    { value: "screen_print", label: "Screen print" },
+    { value: "uv", label: "UV" },
+    { value: "other", label: "Other" },
+  ];
+  const knownTechniques = new Set(techniqueOpts.map((o) => o.value).filter(Boolean));
+  const techniqueSelectValue = knownTechniques.has(technique.toLowerCase()) ? technique.toLowerCase() : technique ? "other" : "";
+  const techniqueCustom = techniqueSelectValue === "other" ? technique : "";
+
   openModal({
     title: isEdit ? "Edit View" : "Add View",
     bodyHtml: `
-      <div class="field">
-        <label for="pe-view-modal-key">View key</label>
-        <input class="input" id="pe-view-modal-key" value="${escapeHtml(existing?.view_key || "")}" placeholder="e.g. lifestyle" ${isEdit ? "readonly" : ""} />
+      <div class="pe-view-modal-core split-row">
+        <div class="field">
+          <label for="pe-view-modal-key">View key</label>
+          <input class="input" id="pe-view-modal-key" value="${escapeHtml(existing?.view_key || "")}" placeholder="e.g. front" ${isEdit ? "readonly" : ""} />
+        </div>
+        <div class="field">
+          <label for="pe-view-modal-label">Label</label>
+          <input class="input" id="pe-view-modal-label" value="${escapeHtml(existing?.label || "")}" placeholder="Display name" />
+        </div>
+        <div class="field pe-view-modal-printable-field">
+          <label for="pe-view-modal-printable">Printable</label>
+          <label class="pe-chip pe-view-modal-printable">
+            <input type="checkbox" id="pe-view-modal-printable" ${printableDefault ? "checked" : ""} /> Printable
+          </label>
+        </div>
       </div>
-      <div class="field">
-        <label for="pe-view-modal-label">Label</label>
-        <input class="input" id="pe-view-modal-label" value="${escapeHtml(existing?.label || "")}" placeholder="Display name" />
-      </div>
-      <label class="pe-chip" style="margin-top:8px">
-        <input type="checkbox" id="pe-view-modal-printable" ${existing?.printable === false ? "" : "checked"} /> Printable
-      </label>`,
+      <div class="pe-view-modal-print">
+        <p class="ce-hint pe-view-modal-print__hint">Print area size for this view (used in Print Area tab)</p>
+        <div class="split-row pe-view-modal-print__row">
+          <div class="field">
+            <label for="pe-view-modal-technique">Print technique</label>
+            <select class="input" id="pe-view-modal-technique">
+              ${techniqueOpts
+                .map(
+                  (o) =>
+                    `<option value="${escapeHtml(o.value)}" ${techniqueSelectValue === o.value ? "selected" : ""}>${escapeHtml(o.label)}</option>`
+                )
+                .join("")}
+            </select>
+            <input class="input pe-view-modal-technique-custom" id="pe-view-modal-technique-custom" value="${escapeHtml(techniqueCustom)}" placeholder="Custom technique" ${techniqueSelectValue === "other" ? "" : "hidden"} style="margin-top:8px" />
+          </div>
+          <div class="field">
+            <label for="pe-view-modal-height">Height</label>
+            <input class="input" id="pe-view-modal-height" type="number" min="0" step="any" value="${escapeHtml(Number.isFinite(height) ? height : 750)}" />
+          </div>
+          <div class="field pe-view-modal-times" aria-hidden="true"><label>&nbsp;</label><span class="pe-view-modal-times__mark">×</span></div>
+          <div class="field">
+            <label for="pe-view-modal-width">Width</label>
+            <input class="input" id="pe-view-modal-width" type="number" min="0" step="any" value="${escapeHtml(Number.isFinite(width) ? width : 750)}" />
+          </div>
+          <div class="field">
+            <label for="pe-view-modal-unit">Unit</label>
+            <select class="input" id="pe-view-modal-unit">
+              ${["mm", "cm", "px", "in"]
+                .map((u) => `<option value="${u}" ${unit === u ? "selected" : ""}>${u === "in" ? "in (inch)" : u}</option>`)
+                .join("")}
+            </select>
+          </div>
+        </div>
+      </div>`,
     onSave: async () => {
       const key = slugViewKey(document.getElementById("pe-view-modal-key")?.value);
       const label = document.getElementById("pe-view-modal-label")?.value?.trim() || key;
       const printable = document.getElementById("pe-view-modal-printable")?.checked !== false;
+      let print_technique = String(document.getElementById("pe-view-modal-technique")?.value || "").trim();
+      if (print_technique === "other") {
+        print_technique = String(document.getElementById("pe-view-modal-technique-custom")?.value || "").trim() || "other";
+      }
+      const print_height = Number(document.getElementById("pe-view-modal-height")?.value);
+      const print_width = Number(document.getElementById("pe-view-modal-width")?.value);
+      const print_unit = String(document.getElementById("pe-view-modal-unit")?.value || "mm").trim().toLowerCase() || "mm";
       if (!key) throw new Error("View key is required");
       const list = ensureViews(ctx);
+      const printFields = {
+        print_technique,
+        print_height: Number.isFinite(print_height) && print_height > 0 ? print_height : null,
+        print_width: Number.isFinite(print_width) && print_width > 0 ? print_width : null,
+        print_unit,
+      };
       if (isEdit) {
-        list[editIdx] = { ...list[editIdx], view_key: key, label, printable };
+        list[editIdx] = { ...list[editIdx], view_key: key, label, printable, ...printFields };
       } else {
         if (list.some((v) => v.view_key === key)) throw new Error("A view with this key already exists");
-        list.push({ view_key: key, label, sort_order: list.length, printable });
+        list.push({ view_key: key, label, sort_order: list.length, printable, ...printFields });
       }
       ctx.markDirty?.();
       ctx.reloadTab?.();
     },
+  });
+
+  const techSelect = document.getElementById("pe-view-modal-technique");
+  const techCustom = document.getElementById("pe-view-modal-technique-custom");
+  techSelect?.addEventListener("change", () => {
+    if (!techCustom) return;
+    const show = techSelect.value === "other";
+    techCustom.hidden = !show;
+    if (show) techCustom.focus();
   });
 }
 

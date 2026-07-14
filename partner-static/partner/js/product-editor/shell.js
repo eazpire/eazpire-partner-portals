@@ -267,10 +267,18 @@ async function saveCurrentTab() {
       ctx.localMockups = refreshedMockups;
       ctx.bundle.mockups = refreshedMockups;
     } else if (ctx.activeTab === "print_area") {
-      const areas = snapshotPrintAreaTab();
+      const areas = snapshotPrintAreaTab(ctx);
+      // Persist view print technique / physical size alongside print rects
+      const viewsSnap = Array.isArray(ctx.localViews) ? ctx.localViews : ctx.bundle?.views || [];
+      if (viewsSnap.length) {
+        const viewsRes = await saveViews(ctx.productId, viewsSnap);
+        ctx.localViews = viewsRes.views || viewsSnap;
+        ctx.bundle.views = ctx.localViews;
+      }
       const res = await savePrintAreas(ctx.productId, areas);
-      ctx.localPrintAreas = areas;
-      ctx.bundle.print_areas = res.print_areas || areas;
+      ctx.localPrintAreas = res.print_areas || areas;
+      ctx.bundle.print_areas = ctx.localPrintAreas;
+      if (ctx.paUi) ctx.paUi.rects = {};
     } else if (ctx.activeTab === "meta") {
       const meta = snapshotMetaTab();
       const res = await saveMeta(ctx.productId, meta);
@@ -291,7 +299,9 @@ async function saveCurrentTab() {
     if (ctx.activeTab === "variants") ctx.localVariantTree = null;
     renderReadiness(refreshed.readiness);
     clearDirty();
-    if (ctx.activeTab === "mockups" || ctx.activeTab === "variants") await loadActiveTab(ctx);
+    if (ctx.activeTab === "mockups" || ctx.activeTab === "variants" || ctx.activeTab === "print_area") {
+      await loadActiveTab(ctx);
+    }
     showToast("Saved", "Tab changes stored");
   } catch (e) {
     showToast("Save failed", e.message || String(e));

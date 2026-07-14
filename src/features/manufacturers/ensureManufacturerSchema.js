@@ -583,6 +583,10 @@ async function applyEazpireShadowSchemaPatches(db) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_mfg_product_views_unique
       ON manufacturer_product_views (manufacturer_product_id, view_key)`
   );
+  await ensureColumn(db, "manufacturer_product_views", "print_technique", "TEXT");
+  await ensureColumn(db, "manufacturer_product_views", "print_height", "REAL");
+  await ensureColumn(db, "manufacturer_product_views", "print_width", "REAL");
+  await ensureColumn(db, "manufacturer_product_views", "print_unit", "TEXT");
   await ensureColumn(db, "manufacturer_mockup_templates", "mockup_set", "TEXT");
   await ensureColumn(db, "manufacturer_mockup_templates", "color_key", "TEXT");
   await ensureColumn(db, "manufacturer_print_areas", "view_key", "TEXT");

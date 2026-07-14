@@ -61,6 +61,16 @@ async function ensureEditorColumns(db) {
       .run();
   } catch (_) {}
   for (const [col, def] of [
+    ["print_technique", "TEXT"],
+    ["print_height", "REAL"],
+    ["print_width", "REAL"],
+    ["print_unit", "TEXT"],
+  ]) {
+    try {
+      await db.prepare(`ALTER TABLE manufacturer_product_views ADD COLUMN ${col} ${def}`).run();
+    } catch (_) {}
+  }
+  for (const [col, def] of [
     ["mockup_set", "TEXT"],
     ["color_key", "TEXT"],
   ]) {
@@ -96,6 +106,10 @@ export async function listViews(db, productId) {
     label: row.label,
     sort_order: Number(row.sort_order || 0),
     printable: !!row.printable,
+    print_technique: row.print_technique || "",
+    print_height: row.print_height != null && row.print_height !== "" ? Number(row.print_height) : null,
+    print_width: row.print_width != null && row.print_width !== "" ? Number(row.print_width) : null,
+    print_unit: row.print_unit || "mm",
   }));
 }
 
@@ -299,11 +313,21 @@ export async function savePartnerProductViews(db, manufacturerId, productId, vie
       .toLowerCase()
       .replace(/[^a-z0-9_-]+/g, "-");
     if (!key) continue;
+    const printHeight =
+      v.print_height != null && v.print_height !== "" && Number.isFinite(Number(v.print_height))
+        ? Number(v.print_height)
+        : null;
+    const printWidth =
+      v.print_width != null && v.print_width !== "" && Number.isFinite(Number(v.print_width))
+        ? Number(v.print_width)
+        : null;
+    const printUnit = String(v.print_unit || "mm").trim().toLowerCase() || "mm";
     await db
       .prepare(
         `INSERT INTO manufacturer_product_views
-          (id, manufacturer_product_id, view_key, label, sort_order, printable, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, manufacturer_product_id, view_key, label, sort_order, printable,
+           print_technique, print_height, print_width, print_unit, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         newId("mpv"),
@@ -312,6 +336,10 @@ export async function savePartnerProductViews(db, manufacturerId, productId, vie
         String(v.label || key),
         Number(v.sort_order ?? i),
         v.printable === false || v.printable === 0 ? 0 : 1,
+        String(v.print_technique || "").trim() || null,
+        printHeight,
+        printWidth,
+        printUnit,
         now,
         now
       )
