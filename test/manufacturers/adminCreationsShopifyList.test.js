@@ -62,6 +62,32 @@ describe("adminCreationsShopifyList", () => {
     expect(
       isPrintifySourcedProduct({ id: "gid://shopify/Product/3", mfProvider: { value: "gelato" } }, links, publishedIds)
     ).toBe(false);
+
+    expect(
+      isPrintifySourcedProduct(
+        {
+          id: "gid://shopify/Product/77",
+          mfProvider: { value: "todify" },
+          mfListingOrigin: { value: "creator" },
+        },
+        links,
+        publishedIds
+      )
+    ).toBe(false);
+  });
+
+  it("isTodifyPartnerShopifyProduct and isShopifyTabProduct include Todify listings", async () => {
+    const { isTodifyPartnerShopifyProduct, isShopifyTabProduct } = await import(
+      "../../src/features/manufacturers/adminCreationsShopifyList.js"
+    );
+    const todifyNode = {
+      id: "gid://shopify/Product/55",
+      mfProvider: { value: "Todify" },
+      mfListingOrigin: { value: "creator" },
+    };
+    expect(isTodifyPartnerShopifyProduct(todifyNode)).toBe(true);
+    expect(isShopifyTabProduct(todifyNode, new Set(["55"]))).toBe(true);
+    expect(isShopifyTabProduct({ isGiftCard: true }, new Set())).toBe(true);
   });
 
   it("hasPrintifyMetafield only checks printify_product_id metafield", () => {

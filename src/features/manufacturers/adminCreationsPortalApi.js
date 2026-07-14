@@ -12,8 +12,7 @@ import {
   loadPublishedDesignsShopifyIndex,
   isCustomerStudioShopifyProduct,
   isPrintifySourcedProduct,
-  isNativeShopifyStoreProduct,
-  NATIVE_SHOPIFY_STORE_QUERY,
+  isShopifyTabProduct,
   normalizeShopifyProductId,
 } from "./adminCreationsShopifyList.js";
 
@@ -247,7 +246,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
   }
 }
 
-/** Shopify = native store offerings only (gift cards + sample templates with custom.sample). */
+/** Shopify tab = native store offerings + Todify/partner-direct creator listings. */
 export async function handleAdminCreationsShopifyProducts(request, env) {
   const cors = getCorsHeaders(request);
   if (!env.SHOPIFY_ACCESS_TOKEN) {
@@ -259,19 +258,24 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const { printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
+    const { printifyLinks, creatorPublishedIds } = await loadPublishedDesignsShopifyIndex(env);
 
+    // Scan broader than native-only query so Todify listings are included.
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      queryStr: NATIVE_SHOPIFY_STORE_QUERY,
-      matchFn: (node) => isNativeShopifyStoreProduct(node),
+      maxScan: 3000,
+      matchFn: (node) => isShopifyTabProduct(node, creatorPublishedIds),
     });
 
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "shopify", printifyLinks));
 
     if (q) {
       products = products.filter((p) =>
-        [p.title, p.product_key, p.category, p.vendor].filter(Boolean).join(" ").toLowerCase().includes(q)
+        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
       );
     }
 

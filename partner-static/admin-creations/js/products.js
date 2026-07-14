@@ -181,7 +181,7 @@ function emptyMessageForSource() {
     return "No Printify-sourced Shopify listings found (products with a Printify link).";
   }
   if (state.source === "shopify") {
-    return "No native Shopify store products found (gift cards and sample templates with custom.sample = yes).";
+    return "No Shopify-tab products found (gift cards, sample templates, or Todify/partner-direct listings).";
   }
   if (state.source === "customer") {
     return "No Shop Design Studio customer products found.";

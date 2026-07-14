@@ -242,6 +242,13 @@ async function applyPartnerCatalogSchemaPatches(db) {
     console.warn("[ensureManufacturerSchema] printify partner seed skipped:", e?.message || e);
   }
 
+  try {
+    const { ensureTodifyPartnerSetup } = await import("./partnerCatalog/todifyPartnerSeed.js");
+    await ensureTodifyPartnerSetup(db);
+  } catch (e) {
+    console.warn("[ensureManufacturerSchema] todify partner seed skipped:", e?.message || e);
+  }
+
   await applyEazpireShadowSchemaPatches(db);
 }
 

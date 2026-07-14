@@ -176,6 +176,7 @@ const ADMIN_OPS = new Set([
   "admin-partner-fulfillment-providers",
   "admin-partner-catalog-blueprints",
   "admin-partner-sync-printify",
+  "admin-todify-dogfood-setup",
   "admin-catalog-studio-tree",
   "admin-catalog-studio-products",
   "admin-catalog-studio-set-status",
@@ -545,6 +546,27 @@ export async function handleManufacturerRouter(request, env) {
         console.error("[admin-partner-sync-printify]", err);
         return json(
           { ok: false, error: "sync_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
+    }
+    if (op === "admin-todify-dogfood-setup" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const { runTodifyDogfoodSetup } = await import("./adapters/todify/todifyDogfoodSetup.js");
+        const result = await runTodifyDogfoodSetup(env, {
+          source_key: body?.source_key,
+          target_key: body?.target_key,
+          owner_email: body?.owner_email,
+          send_magic_link: body?.send_magic_link,
+        });
+        if (!result.ok) return json(result, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-todify-dogfood-setup]", err);
+        return json(
+          { ok: false, error: "todify_dogfood_setup_failed", detail: String(err?.message || err) },
           500,
           cors
         );

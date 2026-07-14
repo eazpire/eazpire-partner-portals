@@ -149,11 +149,14 @@ export const NATIVE_SHOPIFY_STORE_QUERY =
 
 /**
  * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.
+ * Explicit Todify/partner-direct products are excluded (they appear under the Shopify tab).
  * @param {object} node
  * @param {Map<string, string>|null|undefined} printifyLinks shopify_product_id → printify_product_id
  * @param {Set<string>|null|undefined} [creatorPublishedIds] all published_designs shopify_product_id values
  */
 export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) {
+  if (isTodifyPartnerShopifyProduct(node)) return false;
+
   const printifyId = printifyIdFromNode(node);
   if (printifyId) return true;
 
@@ -167,6 +170,35 @@ export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedId
   if (sid && printifyLinks?.has(sid)) return true;
   if (sid && creatorPublishedIds?.has(sid)) return true;
 
+  return false;
+}
+
+/**
+ * Partner-direct Shopify listings (Todify dogfood / future non-Printify partners).
+ * Detected via custom.provider metafield.
+ */
+export function isTodifyPartnerShopifyProduct(node) {
+  const provider = providerFromNode(node);
+  return provider === "todify";
+}
+
+/**
+ * Native store products OR partner-direct (Todify) creator listings for Creations → Products → Shopify.
+ * @param {object} node
+ * @param {Set<string>|null|undefined} [creatorPublishedIds]
+ */
+export function isShopifyTabProduct(node, creatorPublishedIds) {
+  if (isNativeShopifyStoreProduct(node)) return true;
+  if (isTodifyPartnerShopifyProduct(node)) return true;
+  // Creator publish without Printify id but recorded in published_designs (provider may lag)
+  const printifyId = printifyIdFromNode(node);
+  if (printifyId) return false;
+  const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value).toLowerCase();
+  const sid = normalizeShopifyProductId(node?.id);
+  if (listingOrigin === "creator" && sid && creatorPublishedIds?.has(sid) && !printifyId) {
+    const provider = providerFromNode(node);
+    if (provider === "todify") return true;
+  }
   return false;
 }
 
@@ -186,6 +218,13 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   const imageUrl = imageUrlFromNode(node);
   const printifyFromMf = printifyIdFromNode(node);
   const printifyFromD1 = shopifyId && printifyLinks?.get(shopifyId);
+  const provider = providerFromNode(node);
+  let sourceLabel = source;
+  if (provider === "todify") sourceLabel = "Todify";
+  else if (source === "printify") sourceLabel = "Printify";
+  else if (source === "shopify" && isNativeShopifyStoreProduct(node)) sourceLabel = "Shopify";
+  else if (source === "shopify") sourceLabel = provider || "Shopify";
+
   return {
     id: shopifyId,
     product_key: productKey,
@@ -199,7 +238,9 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     shopify_product_id: shopifyId,
     printify_product_id: printifyFromMf || printifyFromD1 || null,
     listing_origin: parseMetafieldValue(node?.mfListingOrigin?.value) || null,
+    provider: provider || null,
     source,
+    source_label: sourceLabel,
   };
 }
 

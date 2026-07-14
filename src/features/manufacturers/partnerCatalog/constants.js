@@ -5,6 +5,19 @@
 export const PRINTIFY_PARTNER_ID = "mfg_printify";
 export const PRINTIFY_PARTNER_SLUG = "printify";
 
+/** Dogfood / Morocco POD partner — listings go to Shopify without Printify API. */
+export const TODIFY_PARTNER_ID = "mfg_todify";
+export const TODIFY_PARTNER_SLUG = "todify";
+export const TODIFY_FULFILLMENT_EXTERNAL_ID = "ma-1";
+export const TODIFY_PROVIDER_DISPLAY_NAME = "Todify";
+
+/** Publish profiles with these source_system values skip Printify and create Shopify directly. */
+export const DIRECT_SHOPIFY_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
+
+export function isDirectShopifySourceSystem(sourceSystem) {
+  return DIRECT_SHOPIFY_SOURCE_SYSTEMS.has(String(sourceSystem || "").trim().toLowerCase());
+}
+
 export const CATALOG_STATUS_TO_IS_ACTIVE = {
   offline: 0,
   preview: 1,
