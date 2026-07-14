@@ -897,9 +897,14 @@ export async function deleteProductVersion(env, versionId) {
 
 export async function saveVersionConfig(env, versionId, body) {
   if (isCatalogOpsMasterWrite(env)) {
-    return saveCatalogVersionConfig(env, versionId, body);
+    const catalogResult = await saveCatalogVersionConfig(env, versionId, body);
+    // Todify/partner versions often have no PAT yet — fall through to manufacturer write.
+    if (catalogResult?.ok || catalogResult?.error !== "not_found") {
+      return catalogResult;
+    }
   }
   const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
   const version = await updateProductVersion(db, versionId, {
     display_name: body.display_name,
     product_version_config: body.product_version_config,
@@ -910,6 +915,16 @@ export async function saveVersionConfig(env, versionId, body) {
   const st = String(body.product_version_config?.catalog_status || "").toLowerCase();
   if (["offline", "preview", "online"].includes(st)) {
     await updateEazpireProduct(db, version.product_key, { catalog_status: st });
+    if (env.CATALOG_DB) {
+      const { catalogStatusToIsActive } = await import("../constants.js");
+      const now = Date.now();
+      await env.CATALOG_DB.prepare(
+        `UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`
+      )
+        .bind(catalogStatusToIsActive(st), now, version.product_key)
+        .run()
+        .catch(() => {});
+    }
   }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
   return { ok: true, version };
@@ -1054,28 +1069,45 @@ export async function saveVariants(env, productKey, printProviderId, body) {
     return saveCatalogVariants(env, productKey, printProviderId, body);
   }
   const db = env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
   const now = Date.now();
+  const pid = Number(printProviderId);
   if (body.config != null) {
-    const existing = await queryFirst(
-      db,
-      `SELECT id FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
-      productKey,
-      Number(printProviderId)
-    );
-    const configJson = JSON.stringify(body.config);
-    if (existing?.id) {
-      await db
-        .prepare(`UPDATE eazpire_product_variant_config SET config_json = ?, updated_at = ? WHERE id = ?`)
-        .bind(configJson, now, existing.id)
-        .run();
-    } else {
-      await db
-        .prepare(
-          `INSERT INTO eazpire_product_variant_config (id, product_key, print_provider_id, config_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .bind(newId(), productKey, Number(printProviderId), configJson, now, now)
-        .run();
+    if (!Number.isFinite(pid)) {
+      return {
+        ok: false,
+        error: "print_provider_id_required",
+        detail: "variant_config_requires_numeric_print_provider_id",
+      };
+    }
+    try {
+      const existing = await queryFirst(
+        db,
+        `SELECT id FROM eazpire_product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        pid
+      );
+      const configJson = JSON.stringify(body.config);
+      if (existing?.id) {
+        await db
+          .prepare(`UPDATE eazpire_product_variant_config SET config_json = ?, updated_at = ? WHERE id = ?`)
+          .bind(configJson, now, existing.id)
+          .run();
+      } else {
+        await db
+          .prepare(
+            `INSERT INTO eazpire_product_variant_config (id, product_key, print_provider_id, config_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .bind(newId(), productKey, pid, configJson, now, now)
+          .run();
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error: "variant_config_save_failed",
+        detail: String(err?.message || err),
+      };
     }
   }
   if (body.prices_json != null || body.variants_json != null) {
@@ -1083,7 +1115,7 @@ export async function saveVariants(env, productKey, printProviderId, body) {
       db,
       `SELECT id FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ?`,
       productKey,
-      Number(printProviderId)
+      Number.isFinite(pid) ? pid : -1
     );
     if (profile?.id) {
       await db

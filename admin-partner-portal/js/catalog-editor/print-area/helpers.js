@@ -625,6 +625,53 @@ export function resolvePrintAreaUseMockups(ctx, data) {
   return !!ctx.bundle?.product?.print_area_edit_use_mocks;
 }
 
+const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
+
+function collectSourceSystemCandidates(ctx, data) {
+  const out = [];
+  const push = (v) => {
+    const s = String(v || "")
+      .trim()
+      .toLowerCase();
+    if (s) out.push(s);
+  };
+  push(ctx?.bundle?.product?.source_system);
+  push(data?.product?.source_system);
+  push(data?.source_system);
+
+  const profiles = ctx?.bundle?.publish_profiles;
+  if (Array.isArray(profiles)) {
+    for (const p of profiles) push(p?.source_system);
+  } else if (profiles && typeof profiles.values === "function") {
+    for (const p of profiles.values()) push(p?.source_system);
+  } else if (profiles && typeof profiles === "object") {
+    for (const p of Object.values(profiles)) {
+      if (p && typeof p === "object" && !Array.isArray(p)) push(p.source_system);
+    }
+  }
+  return out;
+}
+
+/**
+ * True for Todify / manufacturer partner catalog products (no Printify dual-viewer branding).
+ * Printify catalog items stay on the classic “Printify Mock” right panel.
+ */
+export function isPartnerOrTodifyProduct(ctx, data = null) {
+  if (collectSourceSystemCandidates(ctx, data).some((s) => PARTNER_SOURCE_SYSTEMS.has(s))) return true;
+  if (data?._partner_print_areas || data?._partner_mockups) return true;
+  if (String(ctx?.bundle?.markets_mode || "").toLowerCase() === "partner") return true;
+
+  const mfg = String(
+    ctx?.bundle?.product?.manufacturer_id || ctx?.partnerReview?.product?.manufacturer_id || ""
+  ).toLowerCase();
+  if (mfg === "mfg_todify" || mfg.includes("todify")) return true;
+
+  const imgs = data?.mockup_images || [];
+  if (imgs.some((i) => String(i?._source || "").toLowerCase().includes("partner"))) return true;
+
+  return false;
+}
+
 export function createInitialPrintAreaState(ctx, data) {
   const designTypes = visibleDesignTypes(ctx);
   const rawConfig = getPublishProfileConfig(ctx);

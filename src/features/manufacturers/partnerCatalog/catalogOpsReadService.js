@@ -10,7 +10,11 @@ import {
   MOCKUP_SET_CALIBRATION,
   MOCKUP_SET_PREVIEW_IMAGES,
 } from "./mockupSet.js";
-import { catalogStatusToIsActive, isActiveToCatalogStatus } from "./constants.js";
+import {
+  catalogStatusToIsActive,
+  isActiveToCatalogStatus,
+  coerceVariantConfigProviderId,
+} from "./constants.js";
 import { getEazpireProduct } from "./eazpireProductService.js";
 import { listProductVersions, patRowToStudioConfig, patRowToAutoPublishConfig } from "./eazpireProductVersionService.js";
 import { ensurePrintifyPartner } from "./printifyPartnerSeed.js";
@@ -111,6 +115,7 @@ function profileRowToEditor(row) {
     print_areas_config_json: parseJson(row.print_areas_config_json, null),
     qr_logo_mapping_json: parseJson(row.qr_logo_mapping_json, null),
     blueprint_id: row.blueprint_id ?? null,
+    source_system: row.source_system || null,
   };
 }
 
@@ -211,7 +216,12 @@ export async function listCatalogOpsProductVersions(env, productKey) {
     eazVersions.filter((v) => v.catalog_pat_id != null).map((v) => [Number(v.catalog_pat_id), v])
   );
 
-  return patRows.map((pat) => patRowToVersion(pat, byPatId.get(Number(pat.id)) || null));
+  if (patRows.length) {
+    return patRows.map((pat) => patRowToVersion(pat, byPatId.get(Number(pat.id)) || null));
+  }
+
+  // Todify / partner products may have manufacturer versions before any PAT row exists.
+  return eazVersions;
 }
 
 export async function getCatalogOpsEditorBundle(env, productKey) {
@@ -262,9 +272,16 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
       }
     : null;
 
+  const sourceSystem =
+    publishProfileRows.find((r) => String(r.source_system || "").trim())?.source_system || null;
+  const product = {
+    ...base.product,
+    source_system: sourceSystem || base.product?.source_system || null,
+  };
+
   return {
     ok: true,
-    product: base.product,
+    product,
     versions,
     providers,
     active_providers: activeProviders.map((r) => ({
@@ -337,7 +354,10 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
   const creatorDb = env.CREATOR_DB;
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
-  const pid = Number(printProviderId);
+  const pidRaw = Number(printProviderId);
+  const pid = Number.isFinite(pidRaw) ? pidRaw : NaN;
+  const variantPid = coerceVariantConfigProviderId(printProviderId);
+
   let profile = Number.isFinite(pid)
     ? await catalogDb
         .prepare(`SELECT * FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`)
@@ -361,10 +381,10 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
     : null;
 
   let variantConfig = null;
-  if (creatorDb && Number.isFinite(pid)) {
+  if (creatorDb && Number.isFinite(variantPid)) {
     variantConfig = await creatorDb
       .prepare(`SELECT * FROM product_variant_config WHERE product_key = ? AND print_provider_id = ? LIMIT 1`)
-      .bind(productKey, pid)
+      .bind(productKey, variantPid)
       .first();
   }
 

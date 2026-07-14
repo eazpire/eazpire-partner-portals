@@ -546,7 +546,13 @@ function sessionDesignHtml(sd) {
   return `<img class="ce-pa-session-design__img" src="${escapeHtml(sd.previewUrl)}" alt="" draggable="false" />`;
 }
 
-function renderSessionDesignEl(sd, dirty) {
+function renderSessionDesignEl(sd, dirty, readOnly = false) {
+  if (readOnly) {
+    return `
+    <div class="ce-pa-rect ce-pa-rect--session-design ce-pa-rect--session-design-preview" data-session-design title="${escapeHtml(sd.title || "Design preview")}">
+      ${sessionDesignHtml(sd)}
+    </div>`;
+  }
   return `
     <div class="ce-pa-rect ce-pa-rect--session-design is-active" data-session-design title="${escapeHtml(sd.title || "Test design")}">
       ${sessionDesignHtml(sd)}
@@ -559,7 +565,7 @@ function renderSessionDesignEl(sd, dirty) {
     </div>`;
 }
 
-export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyChange } = {}) {
+export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyChange, readOnly = false } = {}) {
   const layer = stageInner?.querySelector?.("[data-session-design-layer]");
   if (!layer) return null;
 
@@ -572,10 +578,12 @@ export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyCha
   }
 
   layer.hidden = false;
+  layer.classList.toggle("ce-pa-session-design-layer--preview", !!readOnly);
   const dirty = isSessionDesignDirty(st);
   let el = layer.querySelector("[data-session-design]");
-  if (!el) {
-    layer.innerHTML = renderSessionDesignEl(sd, dirty);
+  const needsRebuild = !el || el.classList.contains("ce-pa-rect--session-design-preview") !== !!readOnly;
+  if (needsRebuild) {
+    layer.innerHTML = renderSessionDesignEl(sd, dirty, readOnly);
     el = layer.querySelector("[data-session-design]");
   } else {
     const img = el.querySelector(".ce-pa-session-design__img");
@@ -586,7 +594,11 @@ export function refreshSessionDesignLayer(stageInner, st, { onChange, onDirtyCha
       saveBtn.classList.toggle("is-dirty", dirty);
     }
   }
-  drawSessionRect(layer, el, sd.rect, true, dirty);
+  drawSessionRect(layer, el, sd.rect, !readOnly, dirty, false);
+  if (readOnly) {
+    toggleHandles(el, false);
+    el?.classList.remove("is-active");
+  }
   onDirtyChange?.(dirty);
   return el;
 }
@@ -770,11 +782,12 @@ function bindSessionDesignEl(el, st, stageInner, { onChange, onSave, onAlign, pr
 
 export function mountSessionDesignLayer(stageInner, st, callbacks = {}) {
   if (!stageInner) return { refresh() {}, destroy() {} };
+  const readOnly = !!callbacks.readOnly;
   let layer = stageInner.querySelector("[data-session-design-layer]");
   if (!layer) {
     stageInner.insertAdjacentHTML(
       "beforeend",
-      `<div class="ce-pa-session-design-layer" data-session-design-layer hidden></div>`
+      `<div class="ce-pa-session-design-layer${readOnly ? " ce-pa-session-design-layer--preview" : ""}" data-session-design-layer hidden></div>`
     );
     layer = stageInner.querySelector("[data-session-design-layer]");
   }
@@ -782,8 +795,8 @@ export function mountSessionDesignLayer(stageInner, st, callbacks = {}) {
   const refresh = () => {
     unbind?.();
     unbind = null;
-    const el = refreshSessionDesignLayer(stageInner, st, callbacks);
-    if (el) {
+    const el = refreshSessionDesignLayer(stageInner, st, { ...callbacks, readOnly });
+    if (el && !readOnly) {
       const destroyFn = bindSessionDesignEl(el, st, stageInner, callbacks);
       if (typeof destroyFn === "function") unbind = destroyFn;
     }

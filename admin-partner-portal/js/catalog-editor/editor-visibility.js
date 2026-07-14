@@ -53,14 +53,20 @@ export function getVersionForVisibility(ctx) {
   );
 }
 
+function productCatalogStatusFallback(ctx) {
+  const raw = String(ctx?.bundle?.product?.catalog_status || "").toLowerCase();
+  return CATALOG_STATUSES.includes(raw) ? raw : "offline";
+}
+
 export function getVisibilityForVersion(ctx, version) {
-  if (!version) {
-    return String(ctx.bundle?.product?.catalog_status || "offline").toLowerCase();
-  }
+  const productFallback = productCatalogStatusFallback(ctx);
+  if (!version) return productFallback;
   const map = ensureVisibilityState(ctx);
   const key = versionKey(version);
   if (map.has(key)) return map.get(key);
-  const fromConfig = readCatalogStatusFromConfig(version.product_version_config, "offline");
+  // Partner approve sets product.catalog_status=preview but may omit version config —
+  // fall back to product so list Preview and footer VISIBILITY stay aligned.
+  const fromConfig = readCatalogStatusFromConfig(version.product_version_config, productFallback);
   map.set(key, fromConfig);
   return fromConfig;
 }
@@ -169,8 +175,9 @@ export function bindCatalogEditorTriSwitch(ctx, onChange) {
 export function initVisibilityFromBundle(ctx) {
   const map = ensureVisibilityState(ctx);
   map.clear();
+  const productFallback = productCatalogStatusFallback(ctx);
   for (const v of ctx.bundle?.versions || []) {
-    const status = readCatalogStatusFromConfig(v.product_version_config, "offline");
+    const status = readCatalogStatusFromConfig(v.product_version_config, productFallback);
     map.set(versionKey(v), status);
   }
 }

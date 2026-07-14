@@ -102,6 +102,17 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
     const autoFields = autoPublishConfigToPatFields(auto);
     const printProviderId = Number(patFields.print_provider_id || v.external_provider_id);
 
+    // Partner / Todify opaque ids (e.g. ma-1) are not numeric Printify provider ids —
+    // never INSERT/UPDATE PAT with NaN (D1 type error → HTTP 500 on “mirror to publish index”).
+    if (!Number.isFinite(printProviderId)) {
+      console.warn(
+        "[mirror] skip PAT row — non-numeric print_provider_id",
+        productKey,
+        v.external_provider_id
+      );
+      continue;
+    }
+
     if (v.catalog_pat_id) {
       await catalogDb
         .prepare(

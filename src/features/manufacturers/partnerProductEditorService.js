@@ -1208,6 +1208,7 @@ export async function adminApprovePartnerProductToCatalog(
           cost_currency: product.currency || "EUR",
         },
         product_version_config: {
+          catalog_status: "preview",
           placeholders_by_position: byPosConfig,
           design_types: Array.isArray(product.design_types) ? product.design_types : [],
         },

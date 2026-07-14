@@ -45,6 +45,7 @@ export function renderUploadGrids(st, data) {
 export function renderMockCarousels(st, data) {
   const byView = st.mockupImagesByView || buildMockupImagesByView(data.mockup_images || []);
   const activeColor = activeMockColor(st);
+  const partnerish = !!(data?._partner_mockups || data?._partner_print_areas);
 
   return st.viewKeys
     .map((vk) => {
@@ -53,7 +54,11 @@ export function renderMockCarousels(st, data) {
         return `
     <div class="ce-pa-img-view" data-view="${escapeHtml(vk)}">
       <div class="ce-pa-img-view-head">${escapeHtml(vk)}</div>
-      <p class="ce-hint">No Printify mocks for this view. Use refresh in the Printify viewer.</p>
+      <p class="ce-hint">${
+        partnerish
+          ? "No clean mocks for this view yet."
+          : "No Printify mocks for this view. Use refresh in the Printify viewer."
+      }</p>
     </div>`;
       }
 
@@ -146,12 +151,18 @@ export function bindImageGrids(root, ctx, st, data, callbacks = {}) {
   });
 }
 
-export function resolveLeftViewerImage(st, data, viewKey) {
-  if (st.useMockups) {
+export function resolveLeftViewerImage(st, data, viewKey, options = {}) {
+  const preferCleanMock = !!options.preferCleanMock;
+  if (st.useMockups || preferCleanMock) {
     const group = st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId);
     const colorTitle = group?.title;
     const fromMock = pickMockUrlForView(st.mockupImagesByView, viewKey, colorTitle);
     if (fromMock) return fromMock;
+    // Fall through to template only when preferCleanMock is off (Printify / uploads mode).
+    if (preferCleanMock) {
+      const mdPrefer = getMockupDefaultForView(data.mockup_defaults, viewKey);
+      return printAreaTemplateImageUrl(mdPrefer);
+    }
   }
   const md = getMockupDefaultForView(data.mockup_defaults, viewKey);
   return printAreaTemplateImageUrl(md);
@@ -173,9 +184,11 @@ export function resolvePrintifyMockUrl(st, viewKey) {
     if (st.sessionMockUrlsByView[vk]) return st.sessionMockUrlsByView[vk];
     if (viewKey && st.sessionMockUrlsByView[viewKey]) return st.sessionMockUrlsByView[viewKey];
   }
-  if (st.mockUrlsByView?.[vk]) return st.mockUrlsByView[vk];
-  if (viewKey && st.mockUrlsByView?.[viewKey]) return st.mockUrlsByView[viewKey];
   if (useSession) return "";
   const group = st.variantGroups.groups.find((g) => g.id === st.activeVariantGroupId);
-  return pickMockUrlForView(st.mockupImagesByView, vk, group?.title);
+  const fromPick = pickMockUrlForView(st.mockupImagesByView, vk, group?.title);
+  if (fromPick) return fromPick;
+  if (st.mockUrlsByView?.[vk]) return st.mockUrlsByView[vk];
+  if (viewKey && st.mockUrlsByView?.[viewKey]) return st.mockUrlsByView[viewKey];
+  return "";
 }

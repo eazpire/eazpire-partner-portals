@@ -1,6 +1,9 @@
 /**
  * Resolve which print providers are active for a product (provider tab + subnav).
  * Primary source: active_providers table rows. Fallbacks when table is empty/out of sync.
+ *
+ * Numeric Printify ids stay numbers. Opaque partner ids (Todify "ma-1") stay strings —
+ * never coerce trailing digits (ma-1 → 1), which breaks matching and saves.
  */
 
 export function publishPlanIsEnabled(plan) {
@@ -34,14 +37,29 @@ export function publishProfileIsActive(profile) {
   return Number(v) !== 0;
 }
 
+/** @returns {number|string|null} */
+export function normalizeProviderId(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0 && String(n) === s) return n;
+  // Opaque partner ids (e.g. Todify ma-1)
+  if (/^[a-z][\w.-]*$/i.test(s)) return s;
+  return null;
+}
+
 function rowPrintProviderId(row) {
-  if (row == null) return NaN;
-  if (typeof row === "number" || typeof row === "string") return Number(row);
-  return Number(row.print_provider_id ?? row.provider_id ?? row.external_provider_id);
+  if (row == null) return null;
+  if (typeof row === "number" || typeof row === "string") return normalizeProviderId(row);
+  return normalizeProviderId(row.print_provider_id ?? row.provider_id ?? row.external_provider_id);
 }
 
 function mergedRowPid(row) {
-  return Number(row?.print_provider_id ?? row?.catalogData?.id ?? row?.external_provider_id);
+  return normalizeProviderId(row?.print_provider_id ?? row?.catalogData?.id ?? row?.external_provider_id);
 }
 
 /**
@@ -50,21 +68,21 @@ function mergedRowPid(row) {
  * @param {Array} [data.merged_providers]
  * @param {Array} [data.publish_plans]
  * @param {Array} [data.versions]
- * @returns {Set<number>}
+ * @returns {Set<number|string>}
  */
 export function resolveActivePrintProviderIds(data = {}) {
   const ids = new Set();
 
   for (const row of data.active_providers || []) {
     const pid = rowPrintProviderId(row);
-    if (Number.isFinite(pid) && pid > 0) ids.add(pid);
+    if (pid != null) ids.add(pid);
   }
   if (ids.size) return ids;
 
   for (const row of data.merged_providers || []) {
     if (row?.type !== "configured") continue;
     const pid = mergedRowPid(row);
-    if (!Number.isFinite(pid) || pid <= 0) continue;
+    if (pid == null) continue;
     if (row.is_enabled) ids.add(pid);
   }
   if (ids.size) return ids;
@@ -73,14 +91,14 @@ export function resolveActivePrintProviderIds(data = {}) {
     if (!publishPlanIsEnabled(plan)) continue;
     const profile = plan.profile;
     if (profile && !publishProfileIsActive(profile)) continue;
-    const pid = Number(profile?.print_provider_id ?? plan.print_provider_id);
-    if (Number.isFinite(pid) && pid > 0) ids.add(pid);
+    const pid = normalizeProviderId(profile?.print_provider_id ?? plan.print_provider_id);
+    if (pid != null) ids.add(pid);
   }
   if (ids.size) return ids;
 
   for (const v of data.versions || []) {
-    const pid = Number(v.external_provider_id);
-    if (Number.isFinite(pid) && pid > 0) ids.add(pid);
+    const pid = normalizeProviderId(v.external_provider_id);
+    if (pid != null) ids.add(pid);
   }
 
   return ids;

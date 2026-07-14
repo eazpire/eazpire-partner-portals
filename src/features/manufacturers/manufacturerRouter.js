@@ -813,11 +813,25 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-eazpire-catalog-mirror-run" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const productKey = body.product_key || url.searchParams.get("product_key");
-      const result = productKey
-        ? await mirrorEazpireProductToCatalogDb(env, productKey)
-        : await mirrorAllEazpireProductsToCatalogDb(env);
-      if (!result.ok) return json(result, 400, cors);
-      return json(result, 200, cors);
+      try {
+        const result = productKey
+          ? await mirrorEazpireProductToCatalogDb(env, productKey)
+          : await mirrorAllEazpireProductsToCatalogDb(env);
+        if (!result.ok) return json(result, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-catalog-mirror-run]", err);
+        return json(
+          {
+            ok: false,
+            error: "mirror_failed",
+            detail: String(err?.message || err),
+            message: "Failed to sync to publish index",
+          },
+          500,
+          cors
+        );
+      }
     }
 
     const editor = await import("./partnerCatalog/editor/productEditorService.js");
@@ -899,8 +913,18 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-eazpire-variants-save" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const result = await editor.saveVariants(env, body.product_key, body.print_provider_id, body);
-      return json(result, 200, cors);
+      try {
+        const result = await editor.saveVariants(env, body.product_key, body.print_provider_id, body);
+        if (!result?.ok) return json(result || { ok: false, error: "variants_save_failed" }, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-variants-save]", err);
+        return json(
+          { ok: false, error: "variants_save_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
     }
     if (op === "admin-eazpire-template-bundle" && request.method === "GET") {
       const productKey = url.searchParams.get("product_key");

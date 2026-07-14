@@ -1,7 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { savePrintAreaRect } from "../api.js";
 import { getPlaceholderSlotsForView } from "../version-config-panel.js";
-import { printAreaCatalogDetail, resolvePrintAreaVersion } from "./helpers.js";
+import { printAreaCatalogDetail, resolvePrintAreaVersion, isPartnerOrTodifyProduct } from "./helpers.js";
 import {
   getMockupDefaultForView,
   aspectRatioFromDefault,
@@ -77,8 +77,13 @@ function stageInnerBox(stageInner) {
 }
 
 function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
-  const { showMagnify = true, showSyncFromPrintify = false, stageId = "ce-pa-stage-left", showGreenRect = true } =
-    options;
+  const {
+    showMagnify = true,
+    showSyncFromPrintify = false,
+    stageId = "ce-pa-stage-left",
+    showGreenRect = true,
+    emptyMessage = "No print area image — upload in sidebar",
+  } = options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
     : "";
@@ -95,7 +100,7 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
       <div class="ce-pa-stage" id="${escapeHtml(stageId)}" data-layer="${escapeHtml(st.activeLayer)}">
         <div class="ce-pa-stage-inner" data-stage-inner="left">
           <img class="ce-pa-stage-img" data-stage-img="left" alt="" ${leftImg ? `src="${escapeHtml(leftImg)}"` : "hidden"} />
-          ${leftImg ? "" : `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">No print area image — upload in sidebar</div>`}
+          ${leftImg ? "" : `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">${escapeHtml(emptyMessage)}</div>`}
           <div class="ce-pa-rect ce-pa-rect--bounds ${st.boundsLocked ? "is-locked" : ""}" data-rect="red" title="Print area bounds">
             <button type="button" class="ce-pa-lock-btn" data-bounds-lock aria-label="Lock bounds">${st.boundsLocked ? "🔒" : "🔓"}</button>
             ${rectHandlesHtml("red")}
@@ -117,10 +122,30 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
 }
 
 function mockStageHtml(st, mockImg, options = {}) {
-  const { showMagnify = true, sessionTestProduct = false } = options;
+  const { showMagnify = true, sessionTestProduct = false, partnerMode = false } = options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" data-magnify="mock" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
     : "";
+  if (partnerMode) {
+    return `
+    <div class="ce-pa-viewer ce-pa-viewer--mock ce-pa-viewer--preview">
+      <div class="ce-pa-viewer-head">
+        <span class="ce-pa-viewer-title">Preview</span>
+        ${magnifyBtn}
+        <button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action" id="ce-pa-mock-refresh" title="Refresh clean mock" aria-label="Refresh clean mock">↻</button>
+      </div>
+      <div class="ce-pa-stage" id="ce-pa-stage-mock">
+        <div class="ce-pa-stage-inner ce-pa-stage-inner--mock" data-stage-inner="mock">
+          ${
+            mockImg
+              ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
+              : `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">No clean mock for this view/color</div>`
+          }
+          <div class="ce-pa-session-design-layer ce-pa-session-design-layer--preview" data-session-design-layer data-preview-design-layer hidden></div>
+        </div>
+      </div>
+    </div>`;
+  }
   const refreshTitle = sessionTestProduct
     ? "Refresh test product mock from Printify"
     : "Refresh catalog template mock from Printify";
@@ -151,16 +176,25 @@ function placementHtml(ctx, st, data, brandAssets) {
 }
 
 function stageInnerHtml(st, data, ctx, brandAssets, options = {}) {
-  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
+  const partnerMode = !!options.partnerMode || isPartnerOrTodifyProduct(ctx, data);
+  const leftImg = resolveLeftViewerImage(st, data, st.activeView, { preferCleanMock: partnerMode });
   const mockImg = resolvePrintifyMockUrl(st, st.activeView);
   const overlays = placementHtml(ctx, st, data, brandAssets);
   const showGreenRect = shouldShowGreenRect(ctx, st, data);
   const sessionTestProduct = !!options.sessionTestProduct;
+  const emptyMessage = partnerMode
+    ? "No clean mock for this view/color"
+    : "No print area image — upload in sidebar";
   return `
     <div class="ce-pa-viewers-wrap">
       <div class="ce-pa-viewers">
-        ${printAreaStageHtml(st, data, leftImg, overlays, { showGreenRect, sessionTestProduct, showSyncFromPrintify: sessionTestProduct })}
-        ${mockStageHtml(st, mockImg, { sessionTestProduct })}
+        ${printAreaStageHtml(st, data, leftImg, overlays, {
+          showGreenRect,
+          sessionTestProduct,
+          showSyncFromPrintify: sessionTestProduct && !partnerMode,
+          emptyMessage,
+        })}
+        ${mockStageHtml(st, mockImg, { sessionTestProduct, partnerMode })}
       </div>
     </div>`;
 }
@@ -171,17 +205,18 @@ export function renderDualViewer(st, data, ctx, brandAssets, options = {}) {
 
 export function mountPrintAreaStage(container, ctx, st, data, callbacks = {}) {
   const { onStateChange, brandAssets } = callbacks;
-  const leftImg = resolveLeftViewerImage(st, data, st.activeView);
+  const partnerMode = isPartnerOrTodifyProduct(ctx, data);
+  const leftImg = resolveLeftViewerImage(st, data, st.activeView, { preferCleanMock: partnerMode });
   const overlays = placementHtml(ctx, st, data, brandAssets);
   const showGreenRect = shouldShowGreenRect(ctx, st, data);
   container.innerHTML = printAreaStageHtml(st, data, leftImg, overlays, {
     showMagnify: false,
-    showSyncFromPrintify: !!callbacks.hasSessionTestProduct?.(),
+    showSyncFromPrintify: !!callbacks.hasSessionTestProduct?.() && !partnerMode,
     stageId: "ce-pa-fs-stage",
     showGreenRect,
   });
 
-  return bindStageInteractions(container, ctx, st, data, callbacks);
+  return bindStageInteractions(container, ctx, st, data, { ...callbacks, partnerMode });
 }
 
 function bindSyncFromPrintifyBtn(root, callbacks = {}) {
@@ -193,6 +228,7 @@ function bindSyncFromPrintifyBtn(root, callbacks = {}) {
 function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
   const { onStateChange, onSessionDesignSave, onSyncFromPrintify } = callbacks;
   let brandAssets = callbacks.brandAssets;
+  const partnerMode = !!callbacks.partnerMode || isPartnerOrTodifyProduct(ctx, data);
 
   let md = getMockupDefaultForView(data.mockup_defaults, st.activeView);
   let aspect = aspectRatioFromDefault(md, data, st.activeView);
@@ -254,7 +290,9 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     md = getMockupDefaultForView(nextData.mockup_defaults, nextSt.activeView);
     aspect = aspectRatioFromDefault(md, nextData, nextSt.activeView);
     const imgEl = root.querySelector('[data-stage-img="left"]');
-    const leftImg = resolveLeftViewerImage(nextSt, nextData, nextSt.activeView);
+    const leftImg = resolveLeftViewerImage(nextSt, nextData, nextSt.activeView, {
+      preferCleanMock: partnerMode,
+    });
     const stageInnerEl = root.querySelector('[data-stage-inner="left"]');
     let emptyEl = root.querySelector('[data-stage-empty="left"]');
     if (imgEl) {
@@ -268,7 +306,11 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
         if (stageInnerEl && !emptyEl) {
           stageInnerEl.insertAdjacentHTML(
             "beforeend",
-            `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">No print area image — upload in sidebar</div>`
+            `<div class="ce-pa-mock-empty ce-pa-stage-empty" data-stage-empty="left">${
+              partnerMode
+                ? "No clean mock for this view/color"
+                : "No print area image — upload in sidebar"
+            }</div>`
           );
           emptyEl = root.querySelector('[data-stage-empty="left"]');
         } else if (emptyEl) {
@@ -656,39 +698,86 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   const main = root.querySelector("#ce-pa-main");
   if (!main) return { destroy() {} };
 
+  const partnerMode = isPartnerOrTodifyProduct(ctx, data);
   const sessionTestProduct = hasSessionTestProduct?.() ?? false;
-  main.innerHTML = renderDualViewer(st, data, ctx, brandAssets, { sessionTestProduct });
+  main.innerHTML = renderDualViewer(st, data, ctx, brandAssets, { sessionTestProduct, partnerMode });
+
+  let previewSessionHandle = null;
+
+  const notifyStateChange = () => {
+    previewSessionHandle?.refresh?.();
+    onStateChange?.();
+  };
 
   const stageHandle = bindStageInteractions(main, ctx, st, data, {
-    onStateChange,
+    onStateChange: notifyStateChange,
     brandAssets,
     onSessionDesignSave: callbacks.onSessionDesignSave,
+    partnerMode,
   });
+
+  const mockInner = main.querySelector(".ce-pa-stage-inner--mock");
+  if (partnerMode && mockInner) {
+    previewSessionHandle = mountSessionDesignLayer(mockInner, st, {
+      readOnly: true,
+      printAreaData: data,
+    });
+  }
 
   const refreshPatternLayer = () => stageHandle.refreshPattern?.();
 
   const updatePrintAreaImage = () => stageHandle.refresh?.(st, data);
 
+  const setMockPanelImage = (inner, mockImg, emptyMessage) => {
+    if (!inner) return;
+    const designLayer = inner.querySelector("[data-preview-design-layer], [data-session-design-layer]");
+    let imgEl = inner.querySelector("#ce-pa-img-mock");
+    let emptyEl = inner.querySelector("#ce-pa-mock-empty");
+    if (mockImg) {
+      emptyEl?.remove();
+      if (imgEl) {
+        if (imgEl.src !== mockImg) imgEl.src = mockImg;
+        imgEl.hidden = false;
+      } else {
+        const html = `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`;
+        if (designLayer) designLayer.insertAdjacentHTML("beforebegin", html);
+        else inner.insertAdjacentHTML("afterbegin", html);
+      }
+    } else {
+      imgEl?.remove();
+      if (!emptyEl) {
+        const html = `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">${escapeHtml(emptyMessage)}</div>`;
+        if (designLayer) designLayer.insertAdjacentHTML("beforebegin", html);
+        else inner.insertAdjacentHTML("afterbegin", html);
+      } else {
+        emptyEl.textContent = emptyMessage;
+        emptyEl.hidden = false;
+      }
+    }
+  };
+
   const updatePrintifyPanel = () => {
     const inner = main.querySelector(".ce-pa-stage-inner--mock");
     if (!inner) return;
-    const sessionActive = hasSessionTestProduct?.() ?? !!st.useSessionTestProductMock;
-    const label = main.querySelector("[data-mock-source-label]");
-    if (label) label.textContent = sessionActive ? "Test product" : "Template";
-    const refreshBtn = main.querySelector("#ce-pa-mock-refresh");
-    if (refreshBtn) {
-      const title = sessionActive
-        ? "Refresh test product mock from Printify"
-        : "Refresh catalog template mock from Printify";
-      refreshBtn.title = title;
-      refreshBtn.setAttribute("aria-label", title);
+    if (!partnerMode) {
+      const sessionActive = hasSessionTestProduct?.() ?? !!st.useSessionTestProductMock;
+      const label = main.querySelector("[data-mock-source-label]");
+      if (label) label.textContent = sessionActive ? "Test product" : "Template";
+      const refreshBtn = main.querySelector("#ce-pa-mock-refresh");
+      if (refreshBtn) {
+        const title = sessionActive
+          ? "Refresh test product mock from Printify"
+          : "Refresh catalog template mock from Printify";
+        refreshBtn.title = title;
+        refreshBtn.setAttribute("aria-label", title);
+      }
     }
     const mockImg = resolvePrintifyMockUrl(st, st.activeView);
-    if (mockImg) {
-      inner.innerHTML = `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`;
-    } else {
-      inner.innerHTML = `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">Click refresh to load Printify mock</div>`;
-    }
+    const emptyMessage = partnerMode
+      ? "No clean mock for this view/color"
+      : "Click refresh to load Printify mock";
+    setMockPanelImage(inner, mockImg, emptyMessage);
+    previewSessionHandle?.refresh?.();
   };
 
   main.querySelectorAll(".ce-pa-magnify-btn").forEach((btn) => {
@@ -706,7 +795,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   const updateSyncFromPrintifyBtn = () => {
     const sessionActive = hasSessionTestProduct?.() ?? !!st.useSessionTestProductMock;
     const syncBtn = main.querySelector("[data-sync-printify-placement]");
-    if (syncBtn) syncBtn.hidden = !sessionActive;
+    if (syncBtn) syncBtn.hidden = !sessionActive || partnerMode;
   };
   updateSyncFromPrintifyBtn();
 
@@ -716,18 +805,30 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
       Object.assign(st, nextSt);
       stageHandle.refresh?.(st, nextData);
       updatePrintAreaImage();
+      updatePrintifyPanel();
       updateSyncFromPrintifyBtn();
     },
     refreshPrintify: () => {
       updatePrintifyPanel();
       updateSyncFromPrintifyBtn();
     },
-    redraw: () => stageHandle.redraw?.(),
-    redrawStageRects: () => stageHandle.redrawStageRects?.(),
+    redraw: () => {
+      stageHandle.redraw?.();
+      previewSessionHandle?.refresh?.();
+    },
+    redrawStageRects: () => {
+      stageHandle.redrawStageRects?.();
+      previewSessionHandle?.refresh?.();
+    },
     refreshOverlays: () => stageHandle.refreshOverlays?.(),
-    refreshSessionDesign: () => stageHandle.refreshSessionDesign?.(),
+    refreshSessionDesign: () => {
+      stageHandle.refreshSessionDesign?.();
+      previewSessionHandle?.refresh?.();
+    },
+    refreshPreviewDesign: () => previewSessionHandle?.refresh?.(),
     setBrandAssets: (next) => stageHandle.setBrandAssets?.(next),
     destroy() {
+      previewSessionHandle?.destroy?.();
       stageHandle.destroy?.();
     },
   };

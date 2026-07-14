@@ -32,6 +32,7 @@ import {
   readPublishLogicFromConfig,
   writePublishLogicToConfig,
   printAreaVersionSlug,
+  isPartnerOrTodifyProduct,
 } from "../print-area/helpers.js";
 import {
   renderPrintAreaSidebar,
@@ -102,6 +103,8 @@ function mergeTabData(printArea, mockups, variants) {
     mockup_images_by_view: buildMockupImagesByView(mockups?.images || []),
     variants_json: variants?.variants_json || null,
     product_data: productData,
+    _partner_mockups: !!(mockups?._partner_mockups || printArea?._partner_mockups),
+    _partner_print_areas: !!(printArea?._partner_print_areas || mockups?._partner_print_areas),
   };
 }
 
@@ -585,6 +588,7 @@ export function bindPrintAreaTab(ctx, root) {
     });
     ctx.printAreaViewerHandle?.refreshSessionDesign?.();
     refreshPrintAreaViewer();
+    refreshPrintifyViewer();
     if (st.sessionTestDesign?.testProductRowId) {
       try {
         await refreshSessionTestProductMock(st, viewKey, {
@@ -673,6 +677,25 @@ async function refreshPrintifyMock(ctx, refreshPrintifyViewer) {
         statusEl.hidden = false;
         statusEl.textContent = err?.message || "Mock refresh failed";
       }
+    }
+    return;
+  }
+
+  if (isPartnerOrTodifyProduct(ctx, ctx.printAreaData)) {
+    try {
+      const data = await loadPrintAreaTabData(ctx);
+      ctx.printAreaData = data;
+      st.mockupImagesByView = data.mockup_images_by_view || buildMockupImagesByView(data.mockup_images || []);
+      for (const vk of st.viewKeys) {
+        st.mockUrlsByView[vk] = pickMockUrlForView(st.mockupImagesByView, vk, getActiveColorTitle(st));
+      }
+      refreshPrintifyViewer?.();
+      ctx.printAreaViewerHandle?.refreshPrintArea?.(st, data);
+      if (ctx.printAreaRoot) {
+        refreshImagesGrids(ctx.printAreaRoot, ctx, st, data, ctx.printAreaImageGridCallbacks || {});
+      }
+    } catch (err) {
+      console.error("Partner clean mock refresh failed", err);
     }
     return;
   }

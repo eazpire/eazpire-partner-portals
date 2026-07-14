@@ -43,4 +43,12 @@ describe("resolveActivePrintProviderIds", () => {
     });
     expect([...ids].sort()).toEqual([30, 99]);
   });
+
+  it("keeps opaque partner ids like Todify ma-1 (no trailing-digit coerce)", () => {
+    const ids = resolveActivePrintProviderIds({
+      active_providers: [],
+      versions: [{ external_provider_id: "ma-1" }],
+    });
+    expect([...ids]).toEqual(["ma-1"]);
+  });
 });

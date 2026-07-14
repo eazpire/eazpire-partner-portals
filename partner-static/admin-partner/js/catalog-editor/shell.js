@@ -658,7 +658,9 @@ async function runMirror(silent = false) {
     updateDriftBadge(editorState);
     if (!silent) showToast("Mirrored", "Publish index updated");
   } catch (err) {
-    if (!silent) showToast("Mirror failed", err.message || "");
+    // Save path must surface publish-index failures (previous silent swallow hid HTTP 500s).
+    if (silent) throw err;
+    showToast("Mirror failed", err.message || "");
   }
 }
 

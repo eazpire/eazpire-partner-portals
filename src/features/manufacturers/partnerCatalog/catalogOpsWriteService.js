@@ -3,8 +3,7 @@
  * variant config → CREATOR_DB per architecture decision.
  */
 
-import { newId } from "../db.js";
-import { catalogStatusToIsActive } from "./constants.js";
+import { catalogStatusToIsActive, coerceVariantConfigProviderId } from "./constants.js";
 import {
   studioConfigToPatFields,
   autoPublishConfigToPatFields,
@@ -835,37 +834,82 @@ export async function saveCatalogVariants(env, productKey, printProviderId, body
   if (!catDb) return { ok: false, error: "catalog_db_unavailable" };
 
   const now = Date.now();
-  const pid = Number(printProviderId);
+  const rawNumericPid = Number(printProviderId);
+  const pid = coerceVariantConfigProviderId(printProviderId);
+  // CREATOR_DB.print_provider_id is INTEGER — map known opaque partner ids (ma-1 → sentinel).
+  if (body.config != null && !Number.isFinite(pid)) {
+    return {
+      ok: false,
+      error: "print_provider_id_required",
+      detail: "variant_config_requires_numeric_print_provider_id",
+    };
+  }
 
   if (body.config != null && crDb) {
-    const existing = await queryFirst(
-      crDb,
-      `SELECT id FROM product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
-      productKey,
-      pid
-    );
-    const configJson = JSON.stringify(body.config);
-    if (existing?.id) {
-      await crDb
-        .prepare(`UPDATE product_variant_config SET config_json = ?, updated_at = ? WHERE id = ?`)
-        .bind(configJson, now, existing.id)
-        .run();
-    } else {
-      await crDb
-        .prepare(
-          `INSERT INTO product_variant_config (id, product_key, print_provider_id, config_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .bind(newId(), productKey, pid, configJson, now, now)
-        .run();
+    try {
+      const existing = await queryFirst(
+        crDb,
+        `SELECT id FROM product_variant_config WHERE product_key = ? AND print_provider_id = ?`,
+        productKey,
+        pid
+      );
+      const configJson = JSON.stringify(body.config);
+      if (existing?.id) {
+        await crDb
+          .prepare(`UPDATE product_variant_config SET config_json = ?, updated_at = ? WHERE id = ?`)
+          .bind(configJson, now, existing.id)
+          .run();
+      } else {
+        // id is INTEGER PRIMARY KEY AUTOINCREMENT — never bind UUID/newId()
+        await crDb
+          .prepare(
+            `INSERT INTO product_variant_config (product_key, print_provider_id, config_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)`
+          )
+          .bind(productKey, pid, configJson, now, now)
+          .run();
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error: "variant_config_save_failed",
+        detail: String(err?.message || err),
+      };
     }
   }
 
   if (body.prices_json != null || body.variants_json != null) {
-    await upsertCatalogPublishProfile(catDb, productKey, pid, {
-      prices_json: body.prices_json ?? undefined,
-      variants_json: body.variants_json ?? undefined,
-    });
+    // Opaque partner ids must not create publish profiles with sentinel provider ids.
+    if (!Number.isFinite(rawNumericPid) || rawNumericPid <= 0) {
+      // Todify profiles are often seeded without print_provider_id — update the first profile.
+      const anyProfile = await queryFirst(
+        catDb,
+        `SELECT id FROM product_publish_profiles WHERE product_key = ? ORDER BY id ASC LIMIT 1`,
+        productKey
+      );
+      if (anyProfile?.id) {
+        await catDb
+          .prepare(
+            `UPDATE product_publish_profiles SET
+              prices_json = COALESCE(?, prices_json),
+              variants_json = COALESCE(?, variants_json),
+              updated_at = ?
+             WHERE id = ?`
+          )
+          .bind(
+            body.prices_json != null ? JSON.stringify(body.prices_json) : null,
+            body.variants_json != null ? JSON.stringify(body.variants_json) : null,
+            now,
+            anyProfile.id
+          )
+          .run();
+      }
+    } else {
+      await upsertCatalogPublishProfile(catDb, productKey, rawNumericPid, {
+        prices_json: body.prices_json ?? undefined,
+        variants_json: body.variants_json ?? undefined,
+      });
+    }
   }
 
   return { ok: true, _ops_source: "catalog-db" };

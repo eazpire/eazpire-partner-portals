@@ -5461,6 +5461,22 @@ a.ce-tpl-draft-head__id:hover {
 .ce-pa-rect--session-design.is-active {
   z-index: 8;
 }
+.ce-pa-session-design-layer--preview {
+  z-index: 5;
+  pointer-events: none;
+}
+.ce-pa-rect--session-design-preview {
+  pointer-events: none;
+  cursor: default;
+  border-color: color-mix(in srgb, #7c4dff 55%, transparent);
+  background: transparent;
+  box-shadow: none;
+}
+.ce-pa-rect--session-design-preview .ce-pa-resize-handle,
+.ce-pa-rect--session-design-preview .ce-pa-rotate-handle,
+.ce-pa-rect--session-design-preview .ce-pa-move-handle {
+  display: none !important;
+}
 .ce-pa-session-design__img {
   width: 100%;
   height: 100%;

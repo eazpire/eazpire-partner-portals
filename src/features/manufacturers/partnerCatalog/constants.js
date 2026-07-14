@@ -24,6 +24,22 @@ export const TODIFY_PRINT_PROVIDER_DISPLAY_NAME = "KNL print";
 export const TODIFY_LOCATION_ID = "mloc_todify_ma_1";
 
 /**
+ * INTEGER print_provider_id columns (CREATOR_DB.product_variant_config, etc.) cannot store
+ * opaque partner ids. Map known opaque ids to reserved numeric sentinels outside Printify ranges.
+ */
+export const OPAQUE_VARIANT_PROVIDER_IDS = Object.freeze({
+  [TODIFY_FULFILLMENT_EXTERNAL_ID]: 910001,
+});
+
+/** Coerce Printify numeric ids or known opaque partner ids for INTEGER storage. */
+export function coerceVariantConfigProviderId(printProviderId) {
+  const n = Number(printProviderId);
+  if (Number.isFinite(n) && n > 0) return n;
+  const s = String(printProviderId || "").trim();
+  if (OPAQUE_VARIANT_PROVIDER_IDS[s] != null) return OPAQUE_VARIANT_PROVIDER_IDS[s];
+  return NaN;
+}
+/**
  * Official Todify brand assets (sourced from https://todify.ma CDN / CloudFront).
  * Prefer square icon for Catalog Studio avatars; logo SVG for wide placements.
  */

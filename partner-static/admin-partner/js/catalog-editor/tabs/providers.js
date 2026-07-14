@@ -41,9 +41,11 @@ function providerId(fp) {
     fp?.profile?.print_provider_id ??
     fp?.id;
   const n = Number(raw);
-  if (Number.isFinite(n) && n > 0) return n;
-  const m = String(raw ?? "").match(/(?:^new_)?(\d+)$/);
-  return m ? Number(m[1]) : NaN;
+  if (Number.isFinite(n) && n > 0 && String(n) === String(raw).trim()) return n;
+  const s = String(raw ?? "").trim();
+  // Opaque partner ids (Todify ma-1) — keep string; never strip to trailing digits.
+  if (/^[a-z][\w.-]*$/i.test(s)) return s;
+  return NaN;
 }
 
 function rowFromBlueprintProvider(cp) {
@@ -61,7 +63,12 @@ function rowFromBlueprintProvider(cp) {
 }
 
 function rowFromFulfillmentProvider(fp) {
-  const pid = Number(fp.external_provider_id);
+  const raw = fp.external_provider_id;
+  const n = Number(raw);
+  const pid =
+    Number.isFinite(n) && n > 0 && String(n) === String(raw).trim()
+      ? n
+      : String(raw || "").trim() || null;
   return {
     type: "configured",
     print_provider_id: pid,
@@ -74,13 +81,21 @@ function rowFromFulfillmentProvider(fp) {
 
 function buildProviderList(data) {
   const merged = Array.isArray(data.merged_providers) ? data.merged_providers : [];
-  if (merged.length) return merged.filter((p) => Number.isFinite(providerId(p)));
+  if (merged.length) {
+    return merged.filter((p) => {
+      const id = providerId(p);
+      return id != null && id !== "" && !(typeof id === "number" && !Number.isFinite(id));
+    });
+  }
 
   const fromBlueprint = (data.blueprint_providers || []).map(rowFromBlueprintProvider);
   if (fromBlueprint.length) return fromBlueprint;
 
   const fromFulfillment = (data.providers || []).map(rowFromFulfillmentProvider);
-  return fromFulfillment.filter((p) => Number.isFinite(providerId(p)));
+  return fromFulfillment.filter((p) => {
+    const id = providerId(p);
+    return id != null && id !== "" && !(typeof id === "number" && !Number.isFinite(id));
+  });
 }
 
 function initProvidersState(ctx, data) {
