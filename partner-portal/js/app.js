@@ -317,27 +317,30 @@ async function renderCompany() {
     showToast("Saved", "Company profile updated");
   };
 
-  document.getElementById("btn-add-location").onclick = () => {
-    openModal({
-      title: "Add location",
-      bodyHtml: `
+  const addLocBtn = document.getElementById("btn-add-location");
+  if (addLocBtn) {
+    addLocBtn.onclick = () => {
+      openModal({
+        title: "Add location",
+        bodyHtml: `
         <div class="field"><label>Name</label><input class="input" id="loc-name" /></div>
         <div class="field"><label>Country</label><input class="input" id="loc-country" /></div>
         <div class="field"><label>City</label><input class="input" id="loc-city" /></div>`,
-      onSave: async () => {
-        await partnerFetch("manufacturer-location-create", {
-          method: "POST",
-          body: {
-            name: document.getElementById("loc-name").value,
-            country: document.getElementById("loc-country").value,
-            city: document.getElementById("loc-city").value,
-          },
-        });
-        showToast("Location added", "");
-        await renderCompany();
-      },
-    });
-  };
+        onSave: async () => {
+          await partnerFetch("manufacturer-location-create", {
+            method: "POST",
+            body: {
+              name: document.getElementById("loc-name").value,
+              country: document.getElementById("loc-country").value,
+              city: document.getElementById("loc-city").value,
+            },
+          });
+          showToast("Location added", "");
+          await renderCompany();
+        },
+      });
+    };
+  }
 }
 
 function field(key, label, value) {
@@ -364,8 +367,9 @@ async function renderCatalog() {
     };
   });
 
-  document.getElementById("btn-catalog-primary").onclick = () =>
-    tab === "blueprints" ? openBlueprintWizard() : openProductModal();
+  document.getElementById("btn-catalog-primary")?.addEventListener("click", () =>
+    tab === "blueprints" ? openBlueprintWizard() : openProductModal()
+  );
 
   const panel = document.getElementById("catalog-panel");
   if (tab === "blueprints") await renderBlueprintList(panel);
@@ -747,11 +751,11 @@ async function renderCertification() {
       (c) => `<div class="check-item order-card"><div><strong>${escapeHtml(c.title || c.certification_key)}</strong><p>${escapeHtml(c.description || "")}</p></div><span class="badge ${badgeForStatus(c.status)}">${escapeHtml(c.status)}</span></div>`
     ).join("") || '<div class="empty">No certification items yet</div>'}</div></div>
     <button type="button" class="btn btn-primary" id="btn-request-cert" style="margin-top:14px">Request review</button>`;
-  document.getElementById("btn-request-cert").onclick = async () => {
+  document.getElementById("btn-request-cert")?.addEventListener("click", async () => {
     await partnerFetch("manufacturer-certification-request", { method: "POST", body: { certification_key: "verified_manufacturer" } });
     showToast("Review requested", "");
     await renderCertification();
-  };
+  });
 }
 
 const ROUTE_RENDERERS = {
