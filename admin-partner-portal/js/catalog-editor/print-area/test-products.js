@@ -581,7 +581,12 @@ export async function createTestProductFromPrintArea(
 
   onStatus?.("Saving print area settings…");
   const { savePrintAreaTab } = await import("../tabs/print-area.js");
-  await savePrintAreaTab(ctx);
+  try {
+    await savePrintAreaTab(ctx);
+  } catch (e) {
+    const msg = testProductErrorMessage(e);
+    throw new Error(`Could not save print area before create: ${msg}`);
+  }
 
   const placementData = data ?? ctx?.printAreaData;
   const body = buildTestContext(ctx, st, placementData, { randomDesign, designId, brandAssetsOnly, title });
@@ -594,9 +599,14 @@ export async function createTestProductFromPrintArea(
         : `Creating test product with design #${body.design_id}…`
     );
   }
-  const res = await apiCreateTestProduct(ctx, body, placementData);
+  let res;
+  try {
+    res = await apiCreateTestProduct(ctx, body, placementData);
+  } catch (e) {
+    throw new Error(testProductErrorMessage(e));
+  }
   if (!res?.ok) {
-    throw new Error(testProductErrorMessage({ data: res, message: res?.message || res?.error || "Create failed" }));
+    throw new Error(testProductErrorMessage({ data: res, message: res?.message || res?.error || "Create failed", status: 500 }));
   }
   onStatus?.(
     partner

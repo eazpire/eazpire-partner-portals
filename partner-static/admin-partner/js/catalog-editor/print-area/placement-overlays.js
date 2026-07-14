@@ -93,7 +93,8 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
   });
 }
 
-export function renderPlacementOverlaysHtml(overlays) {
+export function renderPlacementOverlaysHtml(overlays, options = {}) {
+  const readOnly = !!options.readOnly;
   return (overlays || [])
     .map((ov) => {
       const cls =
@@ -109,16 +110,21 @@ export function renderPlacementOverlaysHtml(overlays) {
         ov.imageUrl && (ov.type === "qr" || ov.type === "logo")
           ? `<img src="${escapeHtml(ov.imageUrl)}" alt="" />`
           : "";
-      return `<div class="ce-pa-rect ce-pa-rect--overlay ${cls}" data-ph-type="${escapeHtml(ov.type)}" data-ph-index="${ov.index}"
-        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}">
-        <button type="button" class="ce-pa-snap-btn" data-snap-overlay aria-label="Snap to print area" title="Snap to print area">⊞</button>
-        ${img}${rectHandlesHtml(`overlay-${ov.type}-${ov.index}`)}</div>`;
+      const snapBtn = readOnly
+        ? ""
+        : `<button type="button" class="ce-pa-snap-btn" data-snap-overlay aria-label="Snap to print area" title="Snap to print area">⊞</button>`;
+      const handles = readOnly ? "" : rectHandlesHtml(`overlay-${ov.type}-${ov.index}`);
+      const previewCls = readOnly ? " ce-pa-rect--overlay-preview" : "";
+      return `<div class="ce-pa-rect ce-pa-rect--overlay ${cls}${previewCls}" data-ph-type="${escapeHtml(ov.type)}" data-ph-index="${ov.index}"
+        style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}"${readOnly ? ' aria-hidden="true"' : ""}>
+        ${snapBtn}${img}${handles}</div>`;
     })
     .join("");
 }
 
-export function refreshPlacementOverlayLayer(container, overlays) {
-  const layer = container?.querySelector?.(".ce-pa-placement-layer");
+export function refreshPlacementOverlayLayer(container, overlays, options = {}) {
+  const selector = options.selector || ".ce-pa-placement-layer";
+  const layer = container?.querySelector?.(selector);
   if (!layer) return;
-  layer.innerHTML = renderPlacementOverlaysHtml(overlays);
+  layer.innerHTML = renderPlacementOverlaysHtml(overlays, options);
 }

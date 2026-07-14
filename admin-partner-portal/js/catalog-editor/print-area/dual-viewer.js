@@ -121,8 +121,21 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
     </div>`;
 }
 
+function previewBoundsHtml(st) {
+  const r = st?.redRect || {};
+  const angle = Number(r.angle) || 0;
+  const transform = angle ? ` transform: rotate(${angle}deg);` : "";
+  return `<div class="ce-pa-rect ce-pa-rect--bounds ce-pa-rect--preview-mirror ${st?.boundsLocked ? "is-locked" : ""}" data-rect="red-preview" aria-hidden="true"
+    style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}"></div>`;
+}
+
 function mockStageHtml(st, mockImg, options = {}) {
-  const { showMagnify = true, sessionTestProduct = false, partnerMode = false } = options;
+  const {
+    showMagnify = true,
+    sessionTestProduct = false,
+    partnerMode = false,
+    previewOverlaysHtml = "",
+  } = options;
   const magnifyBtn = showMagnify
     ? `<button type="button" class="btn btn-ghost btn-xs ce-pa-viewer-head-action ce-pa-magnify-btn" data-magnify="mock" title="Fullscreen magnifier" aria-label="Fullscreen magnifier">🔍</button>`
     : "";
@@ -141,6 +154,8 @@ function mockStageHtml(st, mockImg, options = {}) {
               ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
               : `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">No clean mock for this view/color</div>`
           }
+          ${previewBoundsHtml(st)}
+          <div class="ce-pa-placement-layer ce-pa-placement-layer--preview" data-placement-layer-preview>${previewOverlaysHtml || ""}</div>
           <div class="ce-pa-session-design-layer ce-pa-session-design-layer--preview" data-session-design-layer data-preview-design-layer hidden></div>
         </div>
       </div>
@@ -169,17 +184,29 @@ function mockStageHtml(st, mockImg, options = {}) {
     </div>`;
 }
 
-function placementHtml(ctx, st, data, brandAssets) {
+function placementHtml(ctx, st, data, brandAssets, options = {}) {
   const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
   const overlays = resolvePlacementOverlays(ctx, st, data, slice, brandAssets);
-  return renderPlacementOverlaysHtml(overlays);
+  return renderPlacementOverlaysHtml(overlays, options);
+}
+
+/** Partner Preview: same clean mock as Print Area when Printify-style mock URL is missing. */
+function resolvePartnerPreviewImage(st, data, viewKey) {
+  const mockImg = resolvePrintifyMockUrl(st, viewKey);
+  if (mockImg) return mockImg;
+  return resolveLeftViewerImage(st, data, viewKey, { preferCleanMock: true }) || "";
 }
 
 function stageInnerHtml(st, data, ctx, brandAssets, options = {}) {
   const partnerMode = !!options.partnerMode || isPartnerOrTodifyProduct(ctx, data);
   const leftImg = resolveLeftViewerImage(st, data, st.activeView, { preferCleanMock: partnerMode });
-  const mockImg = resolvePrintifyMockUrl(st, st.activeView);
+  const mockImg = partnerMode
+    ? resolvePartnerPreviewImage(st, data, st.activeView)
+    : resolvePrintifyMockUrl(st, st.activeView);
   const overlays = placementHtml(ctx, st, data, brandAssets);
+  const previewOverlaysHtml = partnerMode
+    ? placementHtml(ctx, st, data, brandAssets, { readOnly: true })
+    : "";
   const showGreenRect = shouldShowGreenRect(ctx, st, data);
   const sessionTestProduct = !!options.sessionTestProduct;
   const emptyMessage = partnerMode
@@ -194,7 +221,7 @@ function stageInnerHtml(st, data, ctx, brandAssets, options = {}) {
           showSyncFromPrintify: sessionTestProduct && !partnerMode,
           emptyMessage,
         })}
-        ${mockStageHtml(st, mockImg, { sessionTestProduct, partnerMode })}
+        ${mockStageHtml(st, mockImg, { sessionTestProduct, partnerMode, previewOverlaysHtml })}
       </div>
     </div>`;
 }
@@ -284,6 +311,7 @@ function bindStageInteractions(root, ctx, st, data, callbacks = {}) {
     if (patternLayer) patternLayer.innerHTML = renderPatternOverlayHtml(st);
     refreshOverlays();
     sessionDesignHandle.refresh?.();
+    callbacks.onStageRefresh?.();
   };
 
   const refresh = (nextSt = st, nextData = data) => {
@@ -703,15 +731,36 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   main.innerHTML = renderDualViewer(st, data, ctx, brandAssets, { sessionTestProduct, partnerMode });
 
   let previewSessionHandle = null;
+  let liveBrandAssets = brandAssets;
+  let liveData = data;
+
+  const syncPartnerPreviewMirror = () => {
+    if (!partnerMode) return;
+    const mockInner = main.querySelector(".ce-pa-stage-inner--mock");
+    if (!mockInner) return;
+    const redEl = mockInner.querySelector('[data-rect="red-preview"]');
+    if (redEl) {
+      drawRect(redEl, st.redRect, false);
+      redEl.classList.toggle("is-locked", !!st.boundsLocked);
+    }
+    const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
+    const overlays = resolvePlacementOverlays(ctx, st, liveData, slice, liveBrandAssets);
+    refreshPlacementOverlayLayer(mockInner, overlays, {
+      selector: "[data-placement-layer-preview]",
+      readOnly: true,
+    });
+  };
 
   const notifyStateChange = () => {
+    syncPartnerPreviewMirror();
     previewSessionHandle?.refresh?.();
     onStateChange?.();
   };
 
   const stageHandle = bindStageInteractions(main, ctx, st, data, {
     onStateChange: notifyStateChange,
-    brandAssets,
+    onStageRefresh: syncPartnerPreviewMirror,
+    brandAssets: liveBrandAssets,
     onSessionDesignSave: callbacks.onSessionDesignSave,
     partnerMode,
   });
@@ -720,8 +769,9 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   if (partnerMode && mockInner) {
     previewSessionHandle = mountSessionDesignLayer(mockInner, st, {
       readOnly: true,
-      printAreaData: data,
+      printAreaData: liveData,
     });
+    syncPartnerPreviewMirror();
   }
 
   const refreshPatternLayer = () => stageHandle.refreshPattern?.();
@@ -731,6 +781,9 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   const setMockPanelImage = (inner, mockImg, emptyMessage) => {
     if (!inner) return;
     const designLayer = inner.querySelector("[data-preview-design-layer], [data-session-design-layer]");
+    const previewOverlayLayer = inner.querySelector("[data-placement-layer-preview]");
+    const previewBounds = inner.querySelector('[data-rect="red-preview"]');
+    const insertBeforeRef = previewBounds || previewOverlayLayer || designLayer;
     let imgEl = inner.querySelector("#ce-pa-img-mock");
     let emptyEl = inner.querySelector("#ce-pa-mock-empty");
     if (mockImg) {
@@ -740,14 +793,14 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
         imgEl.hidden = false;
       } else {
         const html = `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`;
-        if (designLayer) designLayer.insertAdjacentHTML("beforebegin", html);
+        if (insertBeforeRef) insertBeforeRef.insertAdjacentHTML("beforebegin", html);
         else inner.insertAdjacentHTML("afterbegin", html);
       }
     } else {
       imgEl?.remove();
       if (!emptyEl) {
         const html = `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">${escapeHtml(emptyMessage)}</div>`;
-        if (designLayer) designLayer.insertAdjacentHTML("beforebegin", html);
+        if (insertBeforeRef) insertBeforeRef.insertAdjacentHTML("beforebegin", html);
         else inner.insertAdjacentHTML("afterbegin", html);
       } else {
         emptyEl.textContent = emptyMessage;
@@ -772,11 +825,14 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
         refreshBtn.setAttribute("aria-label", title);
       }
     }
-    const mockImg = resolvePrintifyMockUrl(st, st.activeView);
+    const mockImg = partnerMode
+      ? resolvePartnerPreviewImage(st, liveData, st.activeView)
+      : resolvePrintifyMockUrl(st, st.activeView);
     const emptyMessage = partnerMode
       ? "No clean mock for this view/color"
       : "Click refresh to load Printify mock";
     setMockPanelImage(inner, mockImg, emptyMessage);
+    syncPartnerPreviewMirror();
     previewSessionHandle?.refresh?.();
   };
 
@@ -803,6 +859,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     refreshPattern: refreshPatternLayer,
     refreshPrintArea: (nextSt = st, nextData = data) => {
       Object.assign(st, nextSt);
+      liveData = nextData;
       stageHandle.refresh?.(st, nextData);
       updatePrintAreaImage();
       updatePrintifyPanel();
@@ -814,19 +871,28 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     },
     redraw: () => {
       stageHandle.redraw?.();
+      syncPartnerPreviewMirror();
       previewSessionHandle?.refresh?.();
     },
     redrawStageRects: () => {
       stageHandle.redrawStageRects?.();
+      syncPartnerPreviewMirror();
       previewSessionHandle?.refresh?.();
     },
-    refreshOverlays: () => stageHandle.refreshOverlays?.(),
+    refreshOverlays: () => {
+      stageHandle.refreshOverlays?.();
+      syncPartnerPreviewMirror();
+    },
     refreshSessionDesign: () => {
       stageHandle.refreshSessionDesign?.();
       previewSessionHandle?.refresh?.();
     },
     refreshPreviewDesign: () => previewSessionHandle?.refresh?.(),
-    setBrandAssets: (next) => stageHandle.setBrandAssets?.(next),
+    setBrandAssets: (next) => {
+      liveBrandAssets = next;
+      stageHandle.setBrandAssets?.(next);
+      syncPartnerPreviewMirror();
+    },
     destroy() {
       previewSessionHandle?.destroy?.();
       stageHandle.destroy?.();

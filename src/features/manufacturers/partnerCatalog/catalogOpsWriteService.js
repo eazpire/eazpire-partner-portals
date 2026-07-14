@@ -135,6 +135,12 @@ async function getPatRow(env, patId) {
 export async function upsertCatalogPublishProfile(catalogDbRef, productKey, printProviderId, patch) {
   const now = Date.now();
   const pid = Number(printProviderId);
+  // Guard: D1 INTEGER binds reject NaN (opaque Todify ids like "ma-1" → Number NaN).
+  if (!Number.isFinite(pid)) {
+    throw new Error(
+      `invalid_print_provider_id: expected numeric Printify id, got "${printProviderId}"`
+    );
+  }
   const row = await queryFirst(
     catalogDbRef,
     `SELECT * FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,

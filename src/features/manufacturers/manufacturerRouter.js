@@ -1029,15 +1029,34 @@ export async function handleManufacturerRouter(request, env) {
     }
     if (op === "admin-eazpire-print-areas-config-save" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const result = await editorExt.savePrintAreasConfig(
-        env,
-        body.product_key,
-        body.print_provider_id,
-        body.config,
-        body.auto_mirror !== false
-      );
-      if (!result.ok) return json(result, 400, cors);
-      return json(result, 200, cors);
+      try {
+        const result = await editorExt.savePrintAreasConfig(
+          env,
+          body.product_key,
+          body.print_provider_id,
+          body.config,
+          body.auto_mirror !== false
+        );
+        if (!result?.ok) {
+          return json(
+            result || { ok: false, error: "print_areas_config_save_failed" },
+            result?.error === "print_areas_config_save_failed" ? 500 : 400,
+            cors
+          );
+        }
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-print-areas-config-save]", err?.message || err);
+        return json(
+          {
+            ok: false,
+            error: "print_areas_config_save_failed",
+            message: String(err?.message || err),
+          },
+          500,
+          cors
+        );
+      }
     }
     if (op === "admin-eazpire-variants-refresh-from-template" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));

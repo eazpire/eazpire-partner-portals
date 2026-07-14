@@ -122,11 +122,17 @@ async function printifyGet(env, endpoint) {
 
 async function upsertPublishProfile(db, productKey, printProviderId, patch) {
   const now = Date.now();
+  const pid = Number(printProviderId);
+  if (!Number.isFinite(pid)) {
+    throw new Error(
+      `invalid_print_provider_id: expected numeric Printify id, got "${printProviderId}"`
+    );
+  }
   const row = await queryFirst(
     db,
     `SELECT * FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`,
     productKey,
-    Number(printProviderId)
+    pid
   );
   if (row?.id) {
     await db
@@ -171,7 +177,7 @@ async function upsertPublishProfile(db, productKey, printProviderId, patch) {
       patch.title || "Publish profile",
       patch.source_product_id || "",
       patch.blueprint_id ?? null,
-      Number(printProviderId),
+      pid,
       patch.variants_json != null ? JSON.stringify(patch.variants_json) : null,
       patch.prices_json != null ? JSON.stringify(patch.prices_json) : null,
       patch.product_data_json != null ? JSON.stringify(patch.product_data_json) : null,
@@ -524,21 +530,41 @@ export async function savePrintAreaRect(
 export async function savePrintAreasConfig(env, productKey, printProviderId, config, autoMirror = false) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
-  if (isCatalogOpsMasterWrite(env)) {
-    const catalogDb = env.CATALOG_DB;
-    if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
-    await upsertCatalogPublishProfile(catalogDb, productKey, Number(printProviderId), {
-      print_areas_config_json: config || {},
-    });
-    return { ok: true };
+  // Printify ids are numeric integers. Opaque partner ids (Todify "ma-1") must not be
+  // Number()-coerced — that yields NaN and D1 rejects the bind as a Worker 500.
+  // Partner print-area geometry is persisted via version_updates / mockup rects instead.
+  const rawPid = String(printProviderId).trim();
+  const numericPid = Number(rawPid);
+  const isNumericPrintifyId = Number.isFinite(numericPid) && String(numericPid) === rawPid;
+  if (!isNumericPrintifyId) {
+    console.warn(`[savePrintAreasConfig] skip profile upsert for opaque provider "${rawPid}"`);
+    return { ok: true, skipped: "opaque_print_provider_id" };
   }
 
-  const db = env.MANUFACTURER_DB;
-  if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+  try {
+    if (isCatalogOpsMasterWrite(env)) {
+      const catalogDb = env.CATALOG_DB;
+      if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
+      await upsertCatalogPublishProfile(catalogDb, productKey, numericPid, {
+        print_areas_config_json: config || {},
+      });
+      return { ok: true };
+    }
 
-  await upsertPublishProfile(db, productKey, Number(printProviderId), { print_areas_config_json: config || {} });
-  if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
-  return { ok: true };
+    const db = env.MANUFACTURER_DB;
+    if (!db) return { ok: false, error: "manufacturer_db_unavailable" };
+
+    await upsertPublishProfile(db, productKey, numericPid, { print_areas_config_json: config || {} });
+    if (autoMirror) await mirrorEazpireProductToCatalogDb(env, productKey);
+    return { ok: true };
+  } catch (e) {
+    console.error("[savePrintAreasConfig]", e?.message || e);
+    return {
+      ok: false,
+      error: "print_areas_config_save_failed",
+      message: e?.message || String(e) || "Failed to save print areas config.",
+    };
+  }
 }
 
 export async function refreshVariantsFromTemplate(
