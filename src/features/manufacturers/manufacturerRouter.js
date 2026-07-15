@@ -262,6 +262,8 @@ const ADMIN_OPS = new Set([
   "admin-creations-printify-products",
   "admin-creations-customer-products",
   "admin-creations-shopify-products",
+  "admin-creations-todify-products",
+  "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
 ]);
 
@@ -1277,6 +1279,14 @@ export async function handleManufacturerRouter(request, env) {
     if (op === "admin-creations-shopify-products" && request.method === "GET") {
       const { handleAdminCreationsShopifyProducts } = await import("./adminCreationsPortalApi.js");
       return handleAdminCreationsShopifyProducts(request, env);
+    }
+    if (op === "admin-creations-todify-products" && request.method === "GET") {
+      const { handleAdminCreationsTodifyProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsTodifyProducts(request, env);
+    }
+    if (op === "admin-creations-samples-products" && request.method === "GET") {
+      const { handleAdminCreationsSamplesProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsSamplesProducts(request, env);
     }
     if (op === "admin-creations-shopify-product-detail" && request.method === "GET") {
       const { handleAdminCreationsShopifyProductDetail } = await import(

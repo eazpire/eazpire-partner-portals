@@ -133,29 +133,37 @@ export function isSampleShopifyProduct(node) {
 }
 
 /**
- * Native Shopify store products for the Creations admin Shopify tab (strict whitelist).
- * Gift cards + sample templates only — not creator Printify listings.
+ * Native Shopify store products that are not POD-catalog sources.
+ * Gift cards + personalizable sample templates — not creator Printify/Todify listings.
  */
 export function isNativeShopifyStoreProduct(node) {
   return isGiftCardShopifyProduct(node) || isSampleShopifyProduct(node);
 }
 
 /**
- * Shopify Admin search hint for native store products (post-filter remains authoritative).
+ * Shopify Admin search hint for residual store products (gift cards).
  * Prefer gift_card:true — matches Shopify's isGiftCard, including productType "Gutschein".
  */
 export const NATIVE_SHOPIFY_STORE_QUERY =
-  '(gift_card:true OR product_type:Gutschein OR product_type:"Gift Card" OR tag:giftcard OR tag:gift-card OR tag:gutschein OR metafields.custom.sample:yes)';
+  '(gift_card:true OR product_type:Gutschein OR product_type:"Gift Card" OR tag:giftcard OR tag:gift-card OR tag:gutschein)';
+
+/** Shopify Admin search hint for personalizable sample templates (`custom.sample` = yes). */
+export const SAMPLES_SHOPIFY_STORE_QUERY = "metafields.custom.sample:yes";
+
+/** Shopify Admin search hint for Todify/partner-direct listings. */
+export const TODIFY_SHOPIFY_STORE_QUERY = "metafields.custom.provider:todify";
 
 /**
  * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.
- * Explicit Todify/partner-direct products are excluded (they appear under the Shopify tab).
+ * Todify, gift cards, and personalizable samples belong to their own source chips.
  * @param {object} node
  * @param {Map<string, string>|null|undefined} printifyLinks shopify_product_id → printify_product_id
  * @param {Set<string>|null|undefined} [creatorPublishedIds] all published_designs shopify_product_id values
  */
 export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) {
   if (isTodifyPartnerShopifyProduct(node)) return false;
+  if (isSampleShopifyProduct(node)) return false;
+  if (isGiftCardShopifyProduct(node)) return false;
 
   const printifyId = printifyIdFromNode(node);
   if (printifyId) return true;
@@ -178,19 +186,30 @@ export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedId
  * Detected via custom.provider metafield.
  */
 export function isTodifyPartnerShopifyProduct(node) {
-  const provider = providerFromNode(node);
-  return provider === "todify";
+  if (isSampleShopifyProduct(node) || isGiftCardShopifyProduct(node)) return false;
+  return providerFromNode(node) === "todify";
 }
 
 /**
- * Native store products OR partner-direct (Todify) creator listings for Creations → Products → Shopify.
+ * Shopify residual bucket: store-native leftovers not assigned to Printify / Todify / Customer / Samples.
+ * Gift cards are the primary example.
+ */
+export function isShopifyResidualProduct(node) {
+  if (isTodifyPartnerShopifyProduct(node)) return false;
+  if (isSampleShopifyProduct(node)) return false;
+  return isGiftCardShopifyProduct(node);
+}
+
+/**
+ * @deprecated Prefer isShopifyResidualProduct — previously mixed gift cards, samples, and Todify.
  * @param {object} node
  * @param {Set<string>|null|undefined} [creatorPublishedIds]
  */
 export function isShopifyTabProduct(node, creatorPublishedIds) {
-  if (isNativeShopifyStoreProduct(node)) return true;
+  if (isShopifyResidualProduct(node)) return true;
+  if (isSampleShopifyProduct(node)) return true;
   if (isTodifyPartnerShopifyProduct(node)) return true;
-  // Creator publish without Printify id but recorded in published_designs (provider may lag)
+  // Legacy: creator publish without Printify id, provider lag, id in published_designs
   const printifyId = printifyIdFromNode(node);
   if (printifyId) return false;
   const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value).toLowerCase();
@@ -209,7 +228,7 @@ export function hasPrintifyMetafield(node) {
 
 /**
  * @param {object} node Shopify GraphQL product node
- * @param {"printify"|"shopify"} source
+ * @param {"printify"|"shopify"|"todify"|"samples"} source
  * @param {Map<string, string>|null|undefined} [printifyLinks]
  */
 export function mapShopifyNodeToProduct(node, source, printifyLinks) {
@@ -220,10 +239,17 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   const printifyFromD1 = shopifyId && printifyLinks?.get(shopifyId);
   const provider = providerFromNode(node);
   let sourceLabel = source;
-  if (provider === "todify") sourceLabel = "Todify";
+  if (source === "todify" || provider === "todify") sourceLabel = "Todify";
+  else if (source === "samples" || isSampleShopifyProduct(node)) sourceLabel = "Personalizable samples";
   else if (source === "printify") sourceLabel = "Printify";
-  else if (source === "shopify" && isNativeShopifyStoreProduct(node)) sourceLabel = "Shopify";
-  else if (source === "shopify") sourceLabel = provider || "Shopify";
+  else if (source === "shopify") sourceLabel = "Shopify";
+  else if (provider) sourceLabel = provider;
+
+  let categoryDefault = "Shopify";
+  if (source === "printify") categoryDefault = "Printify";
+  else if (source === "todify") categoryDefault = "Todify";
+  else if (source === "samples") categoryDefault = "Personalizable samples";
+  else if (isGiftCardShopifyProduct(node)) categoryDefault = "Gift card";
 
   return {
     id: shopifyId,
@@ -231,7 +257,7 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     title: node?.title || productKey,
     preview_url: imageUrl,
     images: imageUrl ? [imageUrl] : [],
-    category: node?.productType || (source === "printify" ? "Printify" : "Shopify"),
+    category: node?.productType || categoryDefault,
     status: node?.status,
     is_active: shopifyStatusToIsActive(node?.status),
     vendor: node?.vendor || "",

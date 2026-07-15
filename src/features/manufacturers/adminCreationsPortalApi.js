@@ -12,8 +12,11 @@ import {
   loadPublishedDesignsShopifyIndex,
   isCustomerStudioShopifyProduct,
   isPrintifySourcedProduct,
-  isShopifyTabProduct,
+  isShopifyResidualProduct,
+  isTodifyPartnerShopifyProduct,
+  isSampleShopifyProduct,
   normalizeShopifyProductId,
+  NATIVE_SHOPIFY_STORE_QUERY,
 } from "./adminCreationsShopifyList.js";
 
 export function proxyRequestWithAdminOwner(request, ownerId) {
@@ -246,7 +249,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
   }
 }
 
-/** Shopify tab = native store offerings + Todify/partner-direct creator listings. */
+/** Shopify residual = gift cards and other leftovers not in Printify / Todify / Customer / Samples. */
 export async function handleAdminCreationsShopifyProducts(request, env) {
   const cors = getCorsHeaders(request);
   if (!env.SHOPIFY_ACCESS_TOKEN) {
@@ -258,13 +261,13 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const { printifyLinks, creatorPublishedIds } = await loadPublishedDesignsShopifyIndex(env);
+    const { printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
 
-    // Scan broader than native-only query so Todify listings are included.
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
       maxScan: 3000,
-      matchFn: (node) => isShopifyTabProduct(node, creatorPublishedIds),
+      queryStr: NATIVE_SHOPIFY_STORE_QUERY,
+      matchFn: (node) => isShopifyResidualProduct(node),
     });
 
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "shopify", printifyLinks));
@@ -282,6 +285,92 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
     return json({ ok: true, products, total: products.length, source: "shopify" }, 200, cors);
   } catch (err) {
     console.error("[admin-creations-shopify-products]", err);
+    return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
+  }
+}
+
+/** Todify = partner-direct (custom.provider = todify) Shopify listings. */
+export async function handleAdminCreationsTodifyProducts(request, env) {
+  const cors = getCorsHeaders(request);
+  if (!env.SHOPIFY_ACCESS_TOKEN) {
+    return json({ ok: false, error: "shopify_not_configured" }, 503, cors);
+  }
+
+  const url = new URL(request.url);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
+
+  try {
+    const [customerStudioIds, { printifyLinks }] = await Promise.all([
+      loadCustomerStudioShopifyIds(env),
+      loadPublishedDesignsShopifyIndex(env),
+    ]);
+
+    const nodes = await fetchShopifyProductNodesMatching(env, {
+      limit,
+      maxScan: 3000,
+      matchFn: (node) =>
+        isTodifyPartnerShopifyProduct(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds),
+    });
+
+    let products = nodes.map((node) => mapShopifyNodeToProduct(node, "todify", printifyLinks));
+
+    if (q) {
+      products = products.filter((p) =>
+        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    return json({ ok: true, products, total: products.length, source: "todify" }, 200, cors);
+  } catch (err) {
+    console.error("[admin-creations-todify-products]", err);
+    return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
+  }
+}
+
+/** Samples = personalizable template products (`custom.sample` = yes). */
+export async function handleAdminCreationsSamplesProducts(request, env) {
+  const cors = getCorsHeaders(request);
+  if (!env.SHOPIFY_ACCESS_TOKEN) {
+    return json({ ok: false, error: "shopify_not_configured" }, 503, cors);
+  }
+
+  const url = new URL(request.url);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
+
+  try {
+    const [customerStudioIds, { printifyLinks }] = await Promise.all([
+      loadCustomerStudioShopifyIds(env),
+      loadPublishedDesignsShopifyIndex(env),
+    ]);
+
+    const nodes = await fetchShopifyProductNodesMatching(env, {
+      limit,
+      maxScan: 3000,
+      matchFn: (node) =>
+        isSampleShopifyProduct(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds),
+    });
+
+    let products = nodes.map((node) => mapShopifyNodeToProduct(node, "samples", printifyLinks));
+
+    if (q) {
+      products = products.filter((p) =>
+        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    return json({ ok: true, products, total: products.length, source: "samples" }, 200, cors);
+  } catch (err) {
+    console.error("[admin-creations-samples-products]", err);
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
   }
 }

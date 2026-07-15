@@ -3,9 +3,13 @@ import { showToast } from "/creations/shared/js/partner-shell.js";
 
 const SOURCE_FILTERS = [
   { key: "printify", label: "Printify" },
+  { key: "todify", label: "Todify" },
   { key: "customer", label: "Customer" },
+  { key: "samples", label: "Personalizable samples" },
   { key: "shopify", label: "Shopify" },
 ];
+
+const SHOPIFY_DETAIL_SOURCES = new Set(["shopify", "todify", "samples"]);
 
 const DETAIL_MENUS = [
   { key: "mockups", label: "Mockups" },
@@ -140,7 +144,7 @@ function productCardHtml(item) {
       ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" />`
       : '<span class="cr-card__noimg">No image</span>';
   const shopifyId = item.shopify_product_id || item.id || "";
-  const clickable = state.source === "shopify" && shopifyId;
+  const clickable = SHOPIFY_DETAIL_SOURCES.has(state.source) && shopifyId;
 
   return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}"${clickable ? ` data-shopify-id="${escapeHtml(String(shopifyId))}" data-product-title="${escapeHtml(title)}" tabindex="0" role="button"` : ""}>
     <div class="cr-card__title-row">
@@ -180,8 +184,14 @@ function emptyMessageForSource() {
   if (state.source === "printify") {
     return "No Printify-sourced Shopify listings found (products with a Printify link).";
   }
+  if (state.source === "todify") {
+    return "No Todify-sourced Shopify listings found (provider = Todify).";
+  }
+  if (state.source === "samples") {
+    return "No personalizable sample products found (custom.sample = yes).";
+  }
   if (state.source === "shopify") {
-    return "No Shopify-tab products found (gift cards, sample templates, or Todify/partner-direct listings).";
+    return "No residual Shopify products found (gift cards and other native leftovers).";
   }
   if (state.source === "customer") {
     return "No Shop Design Studio customer products found.";
@@ -254,15 +264,15 @@ async function loadCustomerProducts() {
   state.categoryTree = [];
 }
 
-async function loadShopifyProducts() {
+async function loadShopifyBucketProducts(op, sourceLabel, defaultCategory) {
   try {
-    const data = await partnerFetch("admin-creations-shopify-products");
+    const data = await partnerFetch(op);
     const products = Array.isArray(data.products) ? data.products : [];
     state.items = products.map((p) => ({
       ...p,
-      source_label: "Shopify",
-      is_active: p.status === "ACTIVE" ? 2 : 0,
-      category: p.category || p.product_type || "Shopify",
+      source_label: p.source_label || sourceLabel,
+      is_active: p.is_active != null ? p.is_active : p.status === "ACTIVE" ? 2 : 0,
+      category: p.category || p.product_type || defaultCategory,
     }));
     state.categoryTree = [];
   } catch (e) {
@@ -274,6 +284,22 @@ async function loadShopifyProducts() {
     }
     throw e;
   }
+}
+
+async function loadShopifyProducts() {
+  await loadShopifyBucketProducts("admin-creations-shopify-products", "Shopify", "Shopify");
+}
+
+async function loadTodifyProducts() {
+  await loadShopifyBucketProducts("admin-creations-todify-products", "Todify", "Todify");
+}
+
+async function loadSamplesProducts() {
+  await loadShopifyBucketProducts(
+    "admin-creations-samples-products",
+    "Personalizable samples",
+    "Personalizable samples"
+  );
 }
 
 function refreshToolbar(el) {
@@ -291,6 +317,8 @@ async function fetchProducts() {
   try {
     if (state.source === "customer") await loadCustomerProducts();
     else if (state.source === "shopify") await loadShopifyProducts();
+    else if (state.source === "todify") await loadTodifyProducts();
+    else if (state.source === "samples") await loadSamplesProducts();
     else await loadPrintifyProducts();
     if (gen !== state.fetchGen) return;
     state.category = "all";
@@ -640,13 +668,13 @@ function bindDetailModal(el) {
 function bindProductCards(el) {
   el.querySelector("#cr-products-grid")?.addEventListener("click", (e) => {
     const card = e.target.closest(".cr-card--product[data-shopify-id]");
-    if (!card || state.source !== "shopify") return;
+    if (!card || !SHOPIFY_DETAIL_SOURCES.has(state.source)) return;
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
   el.querySelector("#cr-products-grid")?.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     const card = e.target.closest?.(".cr-card--product[data-shopify-id]");
-    if (!card || state.source !== "shopify") return;
+    if (!card || !SHOPIFY_DETAIL_SOURCES.has(state.source)) return;
     e.preventDefault();
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });

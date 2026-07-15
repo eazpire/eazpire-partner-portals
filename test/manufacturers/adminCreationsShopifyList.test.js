@@ -76,20 +76,42 @@ describe("adminCreationsShopifyList", () => {
     ).toBe(false);
   });
 
-  it("isTodifyPartnerShopifyProduct and isShopifyTabProduct include Todify listings", async () => {
-    const { isTodifyPartnerShopifyProduct, isShopifyTabProduct } = await import(
-      "../../src/features/manufacturers/adminCreationsShopifyList.js"
-    );
+  it("isTodifyPartnerShopifyProduct and source buckets split Shopify residual", async () => {
+    const {
+      isTodifyPartnerShopifyProduct,
+      isShopifyTabProduct,
+      isShopifyResidualProduct,
+      isSampleShopifyProduct,
+    } = await import("../../src/features/manufacturers/adminCreationsShopifyList.js");
     const todifyNode = {
       id: "gid://shopify/Product/55",
       mfProvider: { value: "Todify" },
       mfListingOrigin: { value: "creator" },
     };
+    const sampleNode = { mfSample: { value: "yes" }, productType: "Poster" };
     expect(isTodifyPartnerShopifyProduct(todifyNode)).toBe(true);
+    expect(isShopifyResidualProduct(todifyNode)).toBe(false);
+    expect(isShopifyResidualProduct({ isGiftCard: true })).toBe(true);
+    expect(isShopifyResidualProduct(sampleNode)).toBe(false);
+    expect(isSampleShopifyProduct(sampleNode)).toBe(true);
     expect(isShopifyTabProduct(todifyNode, new Set(["55"]))).toBe(true);
     expect(isShopifyTabProduct({ isGiftCard: true }, new Set())).toBe(true);
   });
 
+  it("isPrintifySourcedProduct excludes samples and gift cards", () => {
+    const links = new Map();
+    const publishedIds = new Set();
+    expect(
+      isPrintifySourcedProduct(
+        { id: "gid://shopify/Product/1", mfPrintifyId: { value: "pf-1" }, mfSample: { value: "yes" } },
+        links,
+        publishedIds
+      )
+    ).toBe(false);
+    expect(
+      isPrintifySourcedProduct({ id: "gid://shopify/Product/2", isGiftCard: true }, links, publishedIds)
+    ).toBe(false);
+  });
   it("hasPrintifyMetafield only checks printify_product_id metafield", () => {
     expect(hasPrintifyMetafield({ mfPrintifyId: { value: "abc" } })).toBe(true);
     expect(hasPrintifyMetafield({ mfProvider: { value: "printify" } })).toBe(false);
