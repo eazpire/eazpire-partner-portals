@@ -10,6 +10,7 @@ import {
   enrichVersionsDisplayNamesFromPartner,
   resolvePartnerCatalogDisplayTitle,
   isPlaceholderVersionDisplayName,
+  mergePartnerMockupDefaultsIntoCatalog,
 } from "../../src/features/manufacturers/partnerCatalog/partnerCatalogEditorEnrichment.js";
 
 describe("partnerCatalogEditorEnrichment", () => {
@@ -97,6 +98,82 @@ describe("partnerCatalogEditorEnrichment", () => {
     const pa = enrichPrintAreaBundleFromPartner({ ok: true, mockup_defaults: [], variant_print_areas: [] }, partner, {});
     expect(pa.mockup_defaults).toHaveLength(1);
     expect(pa.variant_print_areas.length).toBeGreaterThan(0);
+  });
+
+  it("fills calibration rects into Todify shell mockup_defaults (empty template_r2_key)", () => {
+    const partner = {
+      product_key: "black-hooded-gym-tank",
+      print_areas: [
+        {
+          view_key: "back",
+          width_px: 4200,
+          height_px: 4800,
+          print_rect: { x: 0.22, y: 0.18, w: 0.42, h: 0.48 },
+        },
+        {
+          view_key: "front",
+          width_px: 4200,
+          height_px: 4800,
+          print_rect: { x: 0.2, y: 0.15, w: 0.45, h: 0.5 },
+        },
+      ],
+    };
+    // First-INSERT shell rows: no rect → would previously block partner synth and show defaultCenteredRect
+    const shellDefaults = [
+      {
+        product_key: "black-hooded-gym-tank",
+        print_area_key: "back",
+        template_r2_key: "",
+        print_area_rect_json: null,
+        mockup_print_area_rect_json: null,
+      },
+      {
+        product_key: "black-hooded-gym-tank",
+        print_area_key: "front",
+        template_r2_key: "",
+        // Accidental save of UI default (centered 50% after aspect fit approx)
+        print_area_rect_json: JSON.stringify({ x: 0.28125, y: 0.25, w: 0.4375, h: 0.5, angle: 0 }),
+      },
+    ];
+    const pa = enrichPrintAreaBundleFromPartner(
+      { ok: true, mockup_defaults: shellDefaults, variant_print_areas: [{ id: 1 }] },
+      partner,
+      {}
+    );
+    expect(pa._partner_print_areas).toBe(true);
+    const back = pa.mockup_defaults.find((r) => r.print_area_key === "back");
+    const front = pa.mockup_defaults.find((r) => r.print_area_key === "front");
+    expect(JSON.parse(back.print_area_rect_json)).toMatchObject({ x: 0.22, w: 0.42 });
+    expect(JSON.parse(front.print_area_rect_json)).toMatchObject({ x: 0.2, w: 0.45 });
+    expect(back.printify_print_area_width).toBe(4200);
+  });
+
+  it("keeps intentional non-default catalog rects when merging partner calibration", () => {
+    const partnerRect = { x: 0.1, y: 0.1, w: 0.3, h: 0.3 };
+    const manualRect = { x: 0.05, y: 0.4, w: 0.55, h: 0.35, angle: 0 };
+    const { rows } = mergePartnerMockupDefaultsIntoCatalog(
+      [
+        {
+          print_area_key: "front",
+          template_r2_key: "",
+          print_area_rect_json: JSON.stringify(manualRect),
+          mockup_print_area_rect_json: JSON.stringify(manualRect),
+          printify_print_area_width: 1000,
+          printify_print_area_height: 1000,
+        },
+      ],
+      [
+        {
+          print_area_key: "front",
+          print_area_rect_json: JSON.stringify(partnerRect),
+          mockup_print_area_rect_json: JSON.stringify(partnerRect),
+          printify_print_area_width: 1000,
+          printify_print_area_height: 1000,
+        },
+      ]
+    );
+    expect(JSON.parse(rows[0].print_area_rect_json)).toMatchObject(manualRect);
+    expect(JSON.parse(rows[0].mockup_print_area_rect_json)).toMatchObject(manualRect);
   });
 
   it("does not overwrite existing catalog mockups/product_data", () => {

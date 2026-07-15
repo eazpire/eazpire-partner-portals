@@ -3793,17 +3793,6 @@ body.catalog-editor-open #partner-toast {
   background: color-mix(in srgb, #e53935 8%, transparent);
   z-index: 2;
 }
-.ce-pa-rect--preview-mirror {
-  pointer-events: none !important;
-  cursor: default !important;
-  z-index: 2;
-}
-.ce-pa-rect--preview-mirror .ce-pa-lock-btn,
-.ce-pa-rect--preview-mirror .ce-pa-resize-handle,
-.ce-pa-rect--preview-mirror .ce-pa-rotate-handle,
-.ce-pa-rect--preview-mirror .ce-pa-snap-btn {
-  display: none !important;
-}
 .ce-pa-placement-layer--preview {
   z-index: 3;
   pointer-events: none;

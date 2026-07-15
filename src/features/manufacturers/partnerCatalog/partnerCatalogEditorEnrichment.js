@@ -290,6 +290,131 @@ function normalizePartnerRect(raw) {
   };
 }
 
+function parseStoredRectJson(raw) {
+  if (raw == null || raw === "") return null;
+  try {
+    const r = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return normalizePartnerRect(r);
+  } catch {
+    return null;
+  }
+}
+
+/** True when catalog row already has a usable print-area rectangle. */
+export function rowHasValidPrintAreaRect(row, field = "print_area_rect_json") {
+  return !!parseStoredRectJson(row?.[field]);
+}
+
+/**
+ * Default UI fallback is a centered ~50% box when DB rect is missing.
+ * Detect that so Todify shell rows (first INSERT with empty template_r2_key) can
+ * re-take calibration geometry from Partner Portal print_areas.
+ */
+function isLikelyDefaultCenteredRect(rect, widthPx, heightPx) {
+  if (!rect) return false;
+  const eps = 0.02;
+  const aspect =
+    Number(widthPx) > 0 && Number(heightPx) > 0 ? Number(widthPx) / Number(heightPx) : null;
+  const scale = 0.5;
+  let w;
+  let h;
+  if (!(aspect > 0)) {
+    w = scale;
+    h = scale;
+  } else if (aspect >= 1) {
+    w = scale;
+    h = scale / aspect;
+  } else {
+    h = scale;
+    w = scale * aspect;
+  }
+  const x = (1 - w) / 2;
+  const y = (1 - h) / 2;
+  return (
+    Math.abs(rect.x - x) < eps &&
+    Math.abs(rect.y - y) < eps &&
+    Math.abs(rect.w - w) < eps &&
+    Math.abs(rect.h - h) < eps
+  );
+}
+
+/**
+ * Merge partner (calibration) print rects into catalog mockup_defaults.
+ * Shell rows from Todify first-INSERT (empty template_r2_key, often null/default rect)
+ * must not block calibration geometry — previously synth was skipped once any row existed.
+ *
+ * @param {any[]} existingRows
+ * @param {any[]} partnerRows from mockupDefaultsFromPartnerPrintAreas
+ * @returns {{ rows: any[], filled: boolean }}
+ */
+export function mergePartnerMockupDefaultsIntoCatalog(existingRows, partnerRows) {
+  const byKey = new Map();
+  for (const row of Array.isArray(existingRows) ? existingRows : []) {
+    const key = String(row?.print_area_key || "")
+      .trim()
+      .toLowerCase();
+    if (!key) continue;
+    byKey.set(key, { ...row });
+  }
+
+  let filled = false;
+  for (const partner of Array.isArray(partnerRows) ? partnerRows : []) {
+    const key = String(partner?.print_area_key || "")
+      .trim()
+      .toLowerCase();
+    if (!key) continue;
+    const partnerRect = parseStoredRectJson(partner.print_area_rect_json);
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, { ...partner });
+      filled = true;
+      continue;
+    }
+
+    const existingRect = parseStoredRectJson(existing.print_area_rect_json);
+    const dimsW = existing.printify_print_area_width || partner.printify_print_area_width;
+    const dimsH = existing.printify_print_area_height || partner.printify_print_area_height;
+    const takePartnerRect =
+      !!partnerRect &&
+      (!existingRect || isLikelyDefaultCenteredRect(existingRect, dimsW, dimsH));
+
+    if (takePartnerRect) {
+      existing.print_area_rect_json = partner.print_area_rect_json;
+      if (!rowHasValidPrintAreaRect(existing, "mockup_print_area_rect_json")) {
+        existing.mockup_print_area_rect_json = partner.mockup_print_area_rect_json;
+      }
+      filled = true;
+    } else if (partnerRect && !rowHasValidPrintAreaRect(existing, "mockup_print_area_rect_json")) {
+      existing.mockup_print_area_rect_json = partner.mockup_print_area_rect_json;
+      filled = true;
+    }
+
+    if (!(Number(existing.printify_print_area_width) > 0) && Number(partner.printify_print_area_width) > 0) {
+      existing.printify_print_area_width = partner.printify_print_area_width;
+      filled = true;
+    }
+    if (!(Number(existing.printify_print_area_height) > 0) && Number(partner.printify_print_area_height) > 0) {
+      existing.printify_print_area_height = partner.printify_print_area_height;
+      filled = true;
+    }
+    if (!existing.print_area_template_url && partner.print_area_template_url) {
+      existing.print_area_template_url = partner.print_area_template_url;
+      filled = true;
+    }
+    if (!existing.print_area_template_r2_key && partner.print_area_template_r2_key) {
+      existing.print_area_template_r2_key = partner.print_area_template_r2_key;
+      filled = true;
+    }
+    if (takePartnerRect || existing._source == null) {
+      existing._partner_rect_fill = takePartnerRect ? "calibration" : existing._partner_rect_fill;
+    }
+    byKey.set(key, existing);
+  }
+
+  return { rows: [...byKey.values()], filled };
+}
+
 /**
  * Build product_mockup_defaults-shaped rows from partner print areas.
  * @param {any[]} printAreas
@@ -411,11 +536,15 @@ export function enrichVariantsBundleFromPartner(bundle, partnerSource, meta = {}
  */
 export function enrichPrintAreaBundleFromPartner(bundle, partnerSource, env) {
   const base = bundle && typeof bundle === "object" ? { ...bundle } : {};
-  if (!(base.mockup_defaults || []).length && partnerSource?.print_areas?.length) {
-    base.mockup_defaults = mockupDefaultsFromPartnerPrintAreas(partnerSource.print_areas, env).map(
+  if (partnerSource?.print_areas?.length) {
+    const partnerDefaults = mockupDefaultsFromPartnerPrintAreas(partnerSource.print_areas, env).map(
       (row) => ({ ...row, product_key: partnerSource.product_key })
     );
-    base._partner_print_areas = true;
+    const { rows, filled } = mergePartnerMockupDefaultsIntoCatalog(base.mockup_defaults || [], partnerDefaults);
+    if (filled || !(base.mockup_defaults || []).length) {
+      base.mockup_defaults = rows;
+      base._partner_print_areas = true;
+    }
   }
 
   if (!(base.variant_print_areas || []).length && partnerSource?.print_areas?.length) {

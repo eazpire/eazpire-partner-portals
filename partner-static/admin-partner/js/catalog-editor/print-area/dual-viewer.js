@@ -121,14 +121,6 @@ function printAreaStageHtml(st, data, leftImg, overlays, options = {}) {
     </div>`;
 }
 
-function previewBoundsHtml(st) {
-  const r = st?.redRect || {};
-  const angle = Number(r.angle) || 0;
-  const transform = angle ? ` transform: rotate(${angle}deg);` : "";
-  return `<div class="ce-pa-rect ce-pa-rect--bounds ce-pa-rect--preview-mirror ${st?.boundsLocked ? "is-locked" : ""}" data-rect="red-preview" aria-hidden="true"
-    style="left:${(r.x || 0) * 100}%;top:${(r.y || 0) * 100}%;width:${(r.w || 0) * 100}%;height:${(r.h || 0) * 100}%;${transform}"></div>`;
-}
-
 function mockStageHtml(st, mockImg, options = {}) {
   const {
     showMagnify = true,
@@ -154,7 +146,6 @@ function mockStageHtml(st, mockImg, options = {}) {
               ? `<img class="ce-pa-stage-img" id="ce-pa-img-mock" alt="" src="${escapeHtml(mockImg)}" />`
               : `<div class="ce-pa-mock-empty" id="ce-pa-mock-empty">No clean mock for this view/color</div>`
           }
-          ${previewBoundsHtml(st)}
           <div class="ce-pa-placement-layer ce-pa-placement-layer--preview" data-placement-layer-preview>${previewOverlaysHtml || ""}</div>
           <div class="ce-pa-session-design-layer ce-pa-session-design-layer--preview" data-session-design-layer data-preview-design-layer hidden></div>
         </div>
@@ -734,15 +725,11 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   let liveBrandAssets = brandAssets;
   let liveData = data;
 
+  /** Partner Preview: sync logo/QR overlays only — no red print-bounds rect (Print Area viewer only). */
   const syncPartnerPreviewMirror = () => {
     if (!partnerMode) return;
     const mockInner = main.querySelector(".ce-pa-stage-inner--mock");
     if (!mockInner) return;
-    const redEl = mockInner.querySelector('[data-rect="red-preview"]');
-    if (redEl) {
-      drawRect(redEl, st.redRect, false);
-      redEl.classList.toggle("is-locked", !!st.boundsLocked);
-    }
     const { slice } = getDesignTypeSlice(st.workingConfig, st.activeDesignType);
     const overlays = resolvePlacementOverlays(ctx, st, liveData, slice, liveBrandAssets);
     refreshPlacementOverlayLayer(mockInner, overlays, {
@@ -782,8 +769,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
     if (!inner) return;
     const designLayer = inner.querySelector("[data-preview-design-layer], [data-session-design-layer]");
     const previewOverlayLayer = inner.querySelector("[data-placement-layer-preview]");
-    const previewBounds = inner.querySelector('[data-rect="red-preview"]');
-    const insertBeforeRef = previewBounds || previewOverlayLayer || designLayer;
+    const insertBeforeRef = previewOverlayLayer || designLayer;
     let imgEl = inner.querySelector("#ce-pa-img-mock");
     let emptyEl = inner.querySelector("#ce-pa-mock-empty");
     if (mockImg) {

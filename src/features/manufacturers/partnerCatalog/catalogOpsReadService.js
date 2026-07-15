@@ -31,6 +31,7 @@ import {
   isPartnerCatalogSourceSystem,
   resolvePartnerCatalogDisplayTitle,
   mockupDefaultsFromPartnerPrintAreas,
+  mergePartnerMockupDefaultsIntoCatalog,
 } from "./partnerCatalogEditorEnrichment.js";
 
 const VALID_CATALOG_STATUSES = new Set(Object.keys(CATALOG_STATUS_TO_IS_ACTIVE));
@@ -652,14 +653,15 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
       productKey,
       printProviderId,
     });
-    if (!(bundle.mockup_defaults || []).length && partner.print_areas?.length) {
-      bundle.mockup_defaults = enrichMockupDefaultsRows(
-        mockupDefaultsFromPartnerPrintAreas(partner.print_areas, env).map((row) => ({
-          ...row,
-          product_key: productKey,
-        })),
-        env
-      );
+    if (partner.print_areas?.length) {
+      const partnerDefaults = mockupDefaultsFromPartnerPrintAreas(partner.print_areas, env).map((row) => ({
+        ...row,
+        product_key: productKey,
+      }));
+      const { rows, filled } = mergePartnerMockupDefaultsIntoCatalog(bundle.mockup_defaults || [], partnerDefaults);
+      if (filled || !(bundle.mockup_defaults || []).length) {
+        bundle.mockup_defaults = enrichMockupDefaultsRows(rows, env);
+      }
     }
   }
   return bundle;
