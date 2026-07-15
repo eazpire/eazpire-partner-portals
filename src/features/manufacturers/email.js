@@ -31,6 +31,35 @@ export async function sendAdminMagicLinkEmail(env, { to, verifyUrl }) {
   return { ok: true };
 }
 
+export async function sendMapMagicLinkEmail(env, { to, verifyUrl }) {
+  const key = String(env.RESEND_API_KEY || "").trim();
+  if (!key) return { ok: false, skipped: true, error: "resend_not_configured" };
+
+  const from =
+    String(env.PARTNER_FROM_EMAIL || env.ACCOUNT_DELETION_FROM_EMAIL || "").trim() ||
+    "Eazpire <noreply@eazpire.com>";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject: "Sign in to Eazpire Ecosystem Map",
+      html: `<p>Click to sign in to the eazpire Ecosystem Map:</p><p><a href="${verifyUrl}">Open map.eazpire.com</a></p><p>This link expires in 15 minutes. If you did not request this, you can ignore this email.</p>`,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return { ok: false, error: "resend_error", detail: text.slice(0, 300) };
+  }
+  return { ok: true };
+}
+
 export async function sendPartnerMagicLinkEmail(env, { to, verifyUrl }) {
   const key = String(env.RESEND_API_KEY || "").trim();
   if (!key) return { ok: false, skipped: true, error: "resend_not_configured" };
