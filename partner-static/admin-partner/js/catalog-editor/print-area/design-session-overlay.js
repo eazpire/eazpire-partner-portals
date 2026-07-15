@@ -246,6 +246,15 @@ export function hydrateSessionDesignFromTestProductPreview(
     return false;
   }
 
+  const placementVk = placement
+    ? normSessionViewKey(placement.view_key || placement.viewKey || "")
+    : "";
+  // Stored placement belongs to another print-area view — do not show/copy onto this chip.
+  if (placementVk && placementVk !== vk) {
+    removeSessionDesignForView(st, vk);
+    return false;
+  }
+
   if (!placement && !allowFallbackPlacement) {
     removeSessionDesignForView(st, vk);
     return false;

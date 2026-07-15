@@ -364,6 +364,8 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = f
   });
   const regions = ctx.bundle?.product?.regions;
   const regionCode = Array.isArray(regions) && regions.length ? regions[0] : "EU";
+  /** Active Print Area view chip — create must place the design only on this view. */
+  const viewKey = normViewKey(st.activeView || "front");
   const body = {
     product_key: ctx.productKey,
     print_provider_id: pid ?? undefined,
@@ -373,6 +375,7 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = f
     publish_profile_id: profile?.id ? Number(profile.id) : undefined,
     region_code: regionCode,
     placement_modes: { ...(st.publishLogicByPh || {}) },
+    view_key: viewKey,
   };
   const titleTrim = String(title || "").trim();
   if (titleTrim) body.title = titleTrim;
@@ -387,8 +390,11 @@ function buildTestContext(ctx, st, data = ctx?.printAreaData, { randomDesign = f
     body.design_id = Number(st.sessionTestDesign.designId);
   }
   const sessionPlacement = getSessionDesignPlacementForApi(st, data);
-  if (!randomDesign && sessionPlacement) {
-    body.design_session_placement = sessionPlacement;
+  if (sessionPlacement) {
+    body.design_session_placement = {
+      ...sessionPlacement,
+      view_key: sessionPlacement.view_key || viewKey,
+    };
   }
   return body;
 }

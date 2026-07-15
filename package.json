@@ -95,6 +95,8 @@
     "brand:dns": "node scripts/utils/ensure-brand-dns.cjs",
     "brand:secrets": "node scripts/brand/ensure-brand-worker-secrets.cjs",
     "brand:secrets:sync": "node scripts/brand/sync-secrets-via-creator.cjs",
+    "brand:create-repo": "node scripts/brand/create-brand-repo.js",
+    "brand:sync": "node scripts/brand/sync-to-brand-repo.js",
     "deploy:sync-printify-secret": "node scripts/deployment/sync-printify-api-key-to-workers.cjs",
     "deploy:sync-shopify-secret": "node scripts/deployment/sync-shopify-access-token-to-workers.cjs",
     "deploy:sync-replicate-secret": "node scripts/deployment/sync-replicate-api-token-to-workers.cjs",
