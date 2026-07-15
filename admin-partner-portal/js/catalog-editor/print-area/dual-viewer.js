@@ -725,7 +725,7 @@ export function mountDualViewer(root, ctx, st, data, callbacks = {}) {
   let liveBrandAssets = brandAssets;
   let liveData = data;
 
-  /** Partner Preview: sync logo/QR overlays only — no red print-bounds rect (Print Area viewer only). */
+  /** Partner Preview: logo/QR images only — no empty placeholder frames or print-bounds (Print Area keeps those). */
   const syncPartnerPreviewMirror = () => {
     if (!partnerMode) return;
     const mockInner = main.querySelector(".ce-pa-stage-inner--mock");

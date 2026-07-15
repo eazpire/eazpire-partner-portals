@@ -3800,11 +3800,19 @@ body.catalog-editor-open #partner-toast {
 .ce-pa-rect--overlay-preview {
   pointer-events: none !important;
   cursor: default !important;
+  /* Preview: asset image only — no placeholder / print-slot frame */
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 .ce-pa-rect--overlay-preview .ce-pa-resize-handle,
 .ce-pa-rect--overlay-preview .ce-pa-rotate-handle,
 .ce-pa-rect--overlay-preview .ce-pa-snap-btn {
   display: none !important;
+}
+.ce-pa-rect--overlay-preview.ce-pa-rect--brand img {
+  max-width: 100%;
+  max-height: 100%;
 }
 .ce-pa-rect--bounds.is-locked {
   cursor: default;
@@ -5484,7 +5492,8 @@ a.ce-tpl-draft-head__id:hover {
 .ce-pa-rect--session-design-preview {
   pointer-events: none;
   cursor: default;
-  border-color: color-mix(in srgb, #7c4dff 55%, transparent);
+  /* Preview: design image only — no violet placement frame */
+  border: none !important;
   background: transparent;
   box-shadow: none;
 }

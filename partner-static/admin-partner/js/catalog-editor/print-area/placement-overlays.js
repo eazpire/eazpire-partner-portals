@@ -93,9 +93,21 @@ export function resolvePlacementOverlays(ctx, st, data, slice, brandAssets) {
   });
 }
 
+/**
+ * Partner Preview (readOnly): only content-bearing brand assets (logo/QR with image).
+ * Empty creator/additional placeholder frames stay on Print Area only; designs use the session layer.
+ */
+function overlaysForRender(overlays, readOnly) {
+  if (!readOnly) return overlays || [];
+  return (overlays || []).filter((ov) => {
+    if (ov.type === "qr" || ov.type === "logo") return !!ov.imageUrl;
+    return false;
+  });
+}
+
 export function renderPlacementOverlaysHtml(overlays, options = {}) {
   const readOnly = !!options.readOnly;
-  return (overlays || [])
+  return overlaysForRender(overlays, readOnly)
     .map((ov) => {
       const cls =
         ov.type === "creator_design"
