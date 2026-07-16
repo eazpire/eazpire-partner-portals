@@ -911,29 +911,37 @@ async function loadPartnerWebhooks() {
       box.textContent = "No webhooks yet.";
       return;
     }
-    box.innerHTML = renderTable(
-      ["URL", "Events", "Status", "Last delivery", "Failures", ""],
-      hooks
-        .map(
-          (h) => `<tr>
-        <td style="max-width:220px;word-break:break-all">${escapeHtml(h.url)}</td>
-        <td style="max-width:200px;font-size:0.8rem">${escapeHtml((h.events || []).join(", ") || "—")}</td>
-        <td><span class="badge ${badgeForStatus(h.status === "active" ? "active" : "revoked")}">${escapeHtml(h.status)}</span></td>
-        <td>${h.last_delivery_at ? escapeHtml(new Date(h.last_delivery_at).toLocaleString()) : "—"}</td>
-        <td>${escapeHtml(String(h.failure_count ?? 0))}${h.last_error ? ` <span class="muted" title="${escapeHtml(h.last_error)}">⚠</span>` : ""}</td>
-        <td style="white-space:nowrap">
-          ${
-            h.status === "active"
-              ? `<button type="button" class="btn btn-secondary btn-test-webhook" data-id="${escapeHtml(h.id)}">Test</button>
-                 <button type="button" class="btn btn-secondary btn-disable-webhook" data-id="${escapeHtml(h.id)}">Disable</button>`
-              : `<button type="button" class="btn btn-secondary btn-enable-webhook" data-id="${escapeHtml(h.id)}">Enable</button>`
-          }
-          <button type="button" class="btn btn-secondary btn-delete-webhook" data-id="${escapeHtml(h.id)}">Delete</button>
-        </td>
-      </tr>`
-        )
-        .join("")
-    );
+    box.innerHTML = `<div class="api-webhook-list">${hooks
+      .map((h) => {
+        const events = (h.events || [])
+          .map((e) => `<code class="api-event-pill">${escapeHtml(e)}</code>`)
+          .join("");
+        const actions =
+          h.status === "active"
+            ? `<button type="button" class="btn btn-secondary btn-test-webhook" data-id="${escapeHtml(h.id)}">Test</button>
+               <button type="button" class="btn btn-secondary btn-disable-webhook" data-id="${escapeHtml(h.id)}">Disable</button>`
+            : `<button type="button" class="btn btn-secondary btn-enable-webhook" data-id="${escapeHtml(h.id)}">Enable</button>`;
+        return `<article class="api-webhook-card">
+          <div class="api-webhook-card-main">
+            <div class="api-webhook-card-top">
+              <span class="badge ${badgeForStatus(h.status === "active" ? "active" : "revoked")}">${escapeHtml(h.status)}</span>
+              <span class="muted api-webhook-meta">Failures: ${escapeHtml(String(h.failure_count ?? 0))}${
+                h.last_error ? ` · ${escapeHtml(h.last_error)}` : ""
+              }</span>
+            </div>
+            <div class="api-webhook-url" title="${escapeHtml(h.url)}">${escapeHtml(h.url)}</div>
+            <div class="api-webhook-events">${events || '<span class="muted">No events</span>'}</div>
+            <div class="muted api-webhook-meta">Last delivery: ${
+              h.last_delivery_at ? escapeHtml(new Date(h.last_delivery_at).toLocaleString()) : "—"
+            }</div>
+          </div>
+          <div class="api-row-actions">
+            ${actions}
+            <button type="button" class="btn btn-secondary btn-delete-webhook" data-id="${escapeHtml(h.id)}">Delete</button>
+          </div>
+        </article>`;
+      })
+      .join("")}</div>`;
     box.querySelectorAll(".btn-test-webhook").forEach((btn) => {
       btn.addEventListener("click", async () => {
         try {

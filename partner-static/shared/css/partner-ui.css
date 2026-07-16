@@ -451,6 +451,71 @@ body:has(.app-root:not([hidden])) { overflow: hidden; }
   font-size: 0.82rem;
   line-height: 1.4;
 }
+.api-webhook-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.api-webhook-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+  max-width: 100%;
+}
+.api-webhook-card-main {
+  min-width: 0;
+  width: 100%;
+}
+.api-webhook-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.api-webhook-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  word-break: break-all;
+  margin-bottom: 10px;
+}
+.api-webhook-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.api-event-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+}
+.api-webhook-meta {
+  font-size: 0.82rem;
+}
+.api-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+}
+.api-row-actions .btn {
+  flex: 0 0 auto;
+}
 
 /* Partner application — Typeform-style wizard (partner.eazpire.com only) */
 .partner-screen:has(.apply-wizard:not([hidden])) {
