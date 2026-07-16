@@ -683,6 +683,16 @@ const API_SCOPE_OPTIONS = [
   "products:write",
   "orders:read",
   "orders:write",
+  "webhooks:read",
+  "webhooks:write",
+];
+
+const WEBHOOK_EVENT_OPTIONS = [
+  "order.created",
+  "order.updated",
+  "order.accepted",
+  "order.rejected",
+  "order.shipped",
 ];
 
 function renderApiDocs() {
@@ -691,7 +701,7 @@ function renderApiDocs() {
   document.getElementById("view-api").innerHTML = `
     <div class="cert-hero api-hero">
       <h2>Partner API</h2>
-      <p>Connect your systems to manage products and fulfill orders. Keys are hashed at rest — the full secret is shown only once when you create it.</p>
+      <p>Connect your systems to manage products, fulfill orders, and receive webhooks. Secrets are shown only once when created.</p>
       <div class="api-hero-actions">
         <a class="btn btn-primary" href="/docs" target="_blank" rel="noopener">Open documentation</a>
       </div>
@@ -709,12 +719,12 @@ curl -sS "${location.origin}/api/v1/orders" \\
         <div class="api-endpoint-grid">
           <div class="api-endpoint-card"><strong>Products</strong><span>Create, update, submit for review</span></div>
           <div class="api-endpoint-card"><strong>Orders</strong><span>List, accept, reject, tracking</span></div>
-          <div class="api-endpoint-card"><strong>Company</strong><span>Read and update your profile</span></div>
+          <div class="api-endpoint-card"><strong>Webhooks</strong><span>Push on order.created / shipped</span></div>
         </div>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" style="margin-bottom:18px">
       <div class="panel-header"><strong>API keys</strong></div>
       <div class="panel-body">
       ${
@@ -736,6 +746,30 @@ curl -sS "${location.origin}/api/v1/orders" \\
           : `<div class="empty">Only owner or admin roles can create and revoke API keys. Contact your company owner if you need access.</div>`
       }
       </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header"><strong>Webhooks</strong></div>
+      <div class="panel-body">
+        <p class="muted" style="margin-top:0">Receive HTTPS callbacks when orders change — no polling. Signing secret is shown <strong>once</strong>. See <a href="/docs#webhooks" target="_blank" rel="noopener">webhook docs</a>.</p>
+      ${
+        canManageKeys
+          ? `<div class="api-create-row">
+        <div class="field">
+          <label for="webhook-url">Endpoint URL</label>
+          <input class="input" type="url" id="webhook-url" placeholder="https://example.com/hooks/eazpire" />
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-create-webhook">Add webhook</button>
+      </div>
+      <div class="api-scope-block">
+        <p class="muted">Events to subscribe (leave all checked for defaults).</p>
+        <div class="api-scope-grid" id="webhook-event-checks"></div>
+      </div>
+      <div id="webhook-once" hidden class="api-key-once"></div>
+      <div id="webhooks-list" class="muted">Loading webhooks…</div>`
+          : `<div class="empty">Only owner or admin roles can manage webhooks.</div>`
+      }
+      </div>
     </div>`;
 
   if (!canManageKeys) return;
@@ -755,8 +789,18 @@ curl -sS "${location.origin}/api/v1/orders" \\
     });
   }
 
+  const eventHost = document.getElementById("webhook-event-checks");
+  if (eventHost) {
+    eventHost.innerHTML = WEBHOOK_EVENT_OPTIONS.map(
+      (e) =>
+        `<label class="api-scope-chip"><input type="checkbox" class="webhook-event-opt" value="${escapeHtml(e)}" checked /> <code>${escapeHtml(e)}</code></label>`
+    ).join("");
+  }
+
   document.getElementById("btn-create-api-key")?.addEventListener("click", () => createPartnerApiKey());
+  document.getElementById("btn-create-webhook")?.addEventListener("click", () => createPartnerWebhook());
   loadPartnerApiKeys();
+  loadPartnerWebhooks();
 }
 
 function selectedPartnerApiScopes() {
@@ -847,6 +891,141 @@ async function createPartnerApiKey() {
     if (nameInput) nameInput.value = "";
     showToast("API key created", "");
     loadPartnerApiKeys();
+  } catch (err) {
+    showToast("Error", err.message || String(err));
+  }
+}
+
+function selectedWebhookEvents() {
+  const picked = [...document.querySelectorAll(".webhook-event-opt:checked")].map((el) => el.value);
+  return picked.length ? picked : [...WEBHOOK_EVENT_OPTIONS];
+}
+
+async function loadPartnerWebhooks() {
+  const box = document.getElementById("webhooks-list");
+  if (!box) return;
+  try {
+    const data = await partnerFetch("partner-api-webhooks");
+    const hooks = data.webhooks || [];
+    if (!hooks.length) {
+      box.textContent = "No webhooks yet.";
+      return;
+    }
+    box.innerHTML = renderTable(
+      ["URL", "Events", "Status", "Last delivery", "Failures", ""],
+      hooks
+        .map(
+          (h) => `<tr>
+        <td style="max-width:220px;word-break:break-all">${escapeHtml(h.url)}</td>
+        <td style="max-width:200px;font-size:0.8rem">${escapeHtml((h.events || []).join(", ") || "—")}</td>
+        <td><span class="badge ${badgeForStatus(h.status === "active" ? "active" : "revoked")}">${escapeHtml(h.status)}</span></td>
+        <td>${h.last_delivery_at ? escapeHtml(new Date(h.last_delivery_at).toLocaleString()) : "—"}</td>
+        <td>${escapeHtml(String(h.failure_count ?? 0))}${h.last_error ? ` <span class="muted" title="${escapeHtml(h.last_error)}">⚠</span>` : ""}</td>
+        <td style="white-space:nowrap">
+          ${
+            h.status === "active"
+              ? `<button type="button" class="btn btn-secondary btn-test-webhook" data-id="${escapeHtml(h.id)}">Test</button>
+                 <button type="button" class="btn btn-secondary btn-disable-webhook" data-id="${escapeHtml(h.id)}">Disable</button>`
+              : `<button type="button" class="btn btn-secondary btn-enable-webhook" data-id="${escapeHtml(h.id)}">Enable</button>`
+          }
+          <button type="button" class="btn btn-secondary btn-delete-webhook" data-id="${escapeHtml(h.id)}">Delete</button>
+        </td>
+      </tr>`
+        )
+        .join("")
+    );
+    box.querySelectorAll(".btn-test-webhook").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const res = await partnerFetch("partner-api-webhooks-test", {
+            method: "POST",
+            body: { webhook_id: btn.getAttribute("data-id") },
+          });
+          showToast(res.sent ? "Test ping sent" : "Ping failed", "");
+          loadPartnerWebhooks();
+        } catch (err) {
+          showToast("Error", err.message || String(err));
+        }
+      });
+    });
+    box.querySelectorAll(".btn-disable-webhook").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await partnerFetch("partner-api-webhooks-update", {
+            method: "POST",
+            body: { webhook_id: btn.getAttribute("data-id"), status: "disabled" },
+          });
+          showToast("Webhook disabled", "");
+          loadPartnerWebhooks();
+        } catch (err) {
+          showToast("Error", err.message || String(err));
+        }
+      });
+    });
+    box.querySelectorAll(".btn-enable-webhook").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await partnerFetch("partner-api-webhooks-update", {
+            method: "POST",
+            body: { webhook_id: btn.getAttribute("data-id"), status: "active" },
+          });
+          showToast("Webhook enabled", "");
+          loadPartnerWebhooks();
+        } catch (err) {
+          showToast("Error", err.message || String(err));
+        }
+      });
+    });
+    box.querySelectorAll(".btn-delete-webhook").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Delete this webhook permanently?")) return;
+        try {
+          await partnerFetch("partner-api-webhooks-revoke", {
+            method: "POST",
+            body: { webhook_id: btn.getAttribute("data-id"), hard: true },
+          });
+          showToast("Webhook deleted", "");
+          loadPartnerWebhooks();
+        } catch (err) {
+          showToast("Error", err.message || String(err));
+        }
+      });
+    });
+  } catch (e) {
+    box.textContent = e.message || String(e);
+  }
+}
+
+async function createPartnerWebhook() {
+  const url = String(document.getElementById("webhook-url")?.value || "").trim();
+  if (!url) {
+    showToast("Enter a webhook URL", "");
+    return;
+  }
+  try {
+    const events = selectedWebhookEvents();
+    const res = await partnerFetch("partner-api-webhooks-create", { method: "POST", body: { url, events } });
+    const once = document.getElementById("webhook-once");
+    if (once && res.secret) {
+      once.hidden = false;
+      once.innerHTML = `
+        <p><strong>Copy this signing secret now</strong> — it will not be shown again.</p>
+        <code id="webhook-secret-raw">${escapeHtml(res.secret)}</code>
+        <p class="muted">Events: ${escapeHtml((res.webhook?.events || events).join(", "))}</p>
+        <button type="button" class="btn btn-primary" id="btn-copy-webhook-secret">Copy to clipboard</button>`;
+      document.getElementById("btn-copy-webhook-secret")?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(res.secret);
+          showToast("Copied", "");
+        } catch {
+          showToast("Copy failed — select the secret manually", "");
+        }
+      });
+    }
+    const urlInput = document.getElementById("webhook-url");
+    if (urlInput) urlInput.value = "";
+    showToast("Webhook created", "");
+    loadPartnerWebhooks();
   } catch (err) {
     showToast("Error", err.message || String(err));
   }

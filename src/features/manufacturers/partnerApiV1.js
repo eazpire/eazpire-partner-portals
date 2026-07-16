@@ -7,6 +7,7 @@ const API_V1_MAP = {
   "/api/v1/company": null, // method-aware below
   "/api/v1/products": null, // method-aware below
   "/api/v1/orders": "partner-api-orders",
+  "/api/v1/webhooks": null, // method-aware below
   "/api/v1/keys": "partner-api-keys",
 };
 
@@ -96,6 +97,31 @@ export function rewritePartnerApiV1Request(request) {
       url.searchParams.set("order_id", orderId);
       return new Request(url.toString(), request);
     }
+  }
+
+  // GET/POST /api/v1/webhooks
+  if (pathname === "/api/v1/webhooks") {
+    const method = (request.method || "GET").toUpperCase();
+    const op =
+      method === "GET" || method === "HEAD"
+        ? "partner-api-webhooks"
+        : "partner-api-webhooks-create";
+    url.searchParams.set("op", op);
+    return new Request(url.toString(), request);
+  }
+
+  // POST /api/v1/webhooks/:id[/test|/revoke]
+  const webhookMatch = pathname.match(/^\/api\/v1\/webhooks\/([^/]+)(?:\/(test|revoke))?$/);
+  if (webhookMatch) {
+    const webhookId = decodeURIComponent(webhookMatch[1]);
+    const action = webhookMatch[2] || "";
+    const method = (request.method || "GET").toUpperCase();
+    url.searchParams.set("webhook_id", webhookId);
+    let op = "partner-api-webhooks-update";
+    if (action === "test") op = "partner-api-webhooks-test";
+    else if (action === "revoke" || method === "DELETE") op = "partner-api-webhooks-revoke";
+    url.searchParams.set("op", op);
+    return new Request(url.toString(), request);
   }
 
   const mapped = API_V1_MAP[pathname];

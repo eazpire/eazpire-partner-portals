@@ -19,7 +19,7 @@ export default {
     }
 
     const apiRequest = rewritePartnerApiV1Request(request) || request;
-    const mfgResp = await handleManufacturerRouter(apiRequest, env);
+    const mfgResp = await handleManufacturerRouter(apiRequest, env, ctx);
     if (mfgResp) return mfgResp;
 
     const portalResp = await handlePartnerPortalRequest(request, env);

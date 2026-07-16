@@ -21,6 +21,8 @@ export const PARTNER_API_SCOPES = {
   PRODUCTS_WRITE: "products:write",
   ORDERS_READ: "orders:read",
   ORDERS_WRITE: "orders:write",
+  WEBHOOKS_READ: "webhooks:read",
+  WEBHOOKS_WRITE: "webhooks:write",
 };
 
 /** Default scopes for newly created keys (everything except `*`). */
@@ -64,6 +66,11 @@ export const PARTNER_API_KEY_ALLOWED_OPS = new Set([
   "partner-api-order-tracking",
   "manufacturer-order-download-print-file",
   "partner-api-order-print-file",
+  "partner-api-webhooks",
+  "partner-api-webhooks-create",
+  "partner-api-webhooks-update",
+  "partner-api-webhooks-revoke",
+  "partner-api-webhooks-test",
 ]);
 
 /** Map API key scopes → portal role so canManageCatalog / canManageOrders keep working. */

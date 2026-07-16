@@ -23,6 +23,14 @@ import {
   handlePartnerApiKeysRevoke,
 } from "./partnerApiKeys.js";
 import {
+  handlePartnerWebhooksList,
+  handlePartnerWebhooksCreate,
+  handlePartnerWebhooksUpdate,
+  handlePartnerWebhooksRevoke,
+  handlePartnerWebhooksTest,
+} from "./partnerWebhooks.js";
+import { emitPartnerWebhook, orderEventForStatus } from "./partnerWebhookDelivery.js";
+import {
   handlePartnerAuthRequest,
   handlePartnerAuthVerify,
   handlePartnerAuthLogout,
@@ -138,6 +146,11 @@ const PARTNER_OPS = new Set([
   "partner-api-keys-list",
   "partner-api-keys-create",
   "partner-api-keys-revoke",
+  "partner-api-webhooks",
+  "partner-api-webhooks-create",
+  "partner-api-webhooks-update",
+  "partner-api-webhooks-revoke",
+  "partner-api-webhooks-test",
   "manufacturer-location-list",
   "manufacturer-location-create",
   "manufacturer-location-update",
@@ -319,7 +332,7 @@ function partnerSyncErrorStatus(result) {
   return 400;
 }
 
-export async function handleManufacturerRouter(request, env) {
+export async function handleManufacturerRouter(request, env, ctx) {
   const cors = getCorsHeaders(request);
   const url = new URL(request.url);
   const op = url.searchParams.get("op") || "";
@@ -562,6 +575,11 @@ export async function handleManufacturerRouter(request, env) {
         adminOwnerId: admin.owner_id,
       });
       if (!result.ok) return json(result, 400, cors);
+      if (result.order && body.manufacturer_id) {
+        emitPartnerWebhook(env, ctx, body.manufacturer_id, "order.created", {
+          order: result.order,
+        });
+      }
       return json(result, 200, cors);
     }
     if (op === "admin-manufacturer-orders-board" && request.method === "GET") {
@@ -1358,6 +1376,13 @@ export async function handleManufacturerRouter(request, env) {
   if (op === "partner-api-keys-create") return handlePartnerApiKeysCreate(request, env);
   if (op === "partner-api-keys-revoke") return handlePartnerApiKeysRevoke(request, env);
 
+  // Webhooks — session or API key with webhooks scopes
+  if (op === "partner-api-webhooks") return handlePartnerWebhooksList(request, env);
+  if (op === "partner-api-webhooks-create") return handlePartnerWebhooksCreate(request, env);
+  if (op === "partner-api-webhooks-update") return handlePartnerWebhooksUpdate(request, env);
+  if (op === "partner-api-webhooks-revoke") return handlePartnerWebhooksRevoke(request, env);
+  if (op === "partner-api-webhooks-test") return handlePartnerWebhooksTest(request, env);
+
   // ----- Partner ops (session OR API key) -----
   const auth = await requirePartnerAuth(request, env);
   if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
@@ -1642,6 +1667,9 @@ export async function handleManufacturerRouter(request, env) {
     const orderId = body.order_id || url.searchParams.get("order_id");
     if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
     const order = await updateOrderStatus(db, mfgId, orderId, "accepted");
+    if (order) {
+      emitPartnerWebhook(env, ctx, mfgId, orderEventForStatus("accepted"), { order });
+    }
     return json({ ok: true, order }, 200, cors);
   }
 
@@ -1653,6 +1681,9 @@ export async function handleManufacturerRouter(request, env) {
     const orderId = body.order_id || url.searchParams.get("order_id");
     if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
     const order = await updateOrderStatus(db, mfgId, orderId, "rejected");
+    if (order) {
+      emitPartnerWebhook(env, ctx, mfgId, orderEventForStatus("rejected"), { order });
+    }
     return json({ ok: true, order }, 200, cors);
   }
 
@@ -1666,7 +1697,11 @@ export async function handleManufacturerRouter(request, env) {
     const body = await request.json().catch(() => ({}));
     const orderId = body.order_id || url.searchParams.get("order_id");
     if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
-    const order = await updateOrderStatus(db, mfgId, orderId, body.status || "in_production");
+    const nextStatus = body.status || "in_production";
+    const order = await updateOrderStatus(db, mfgId, orderId, nextStatus);
+    if (order) {
+      emitPartnerWebhook(env, ctx, mfgId, orderEventForStatus(nextStatus), { order });
+    }
     return json({ ok: true, order }, 200, cors);
   }
 
@@ -1684,6 +1719,9 @@ export async function handleManufacturerRouter(request, env) {
       tracking_number: body.tracking_number,
       tracking_url: body.tracking_url,
     });
+    if (order) {
+      emitPartnerWebhook(env, ctx, mfgId, orderEventForStatus("shipped"), { order });
+    }
     return json({ ok: true, order }, 200, cors);
   }
 
