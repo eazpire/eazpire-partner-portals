@@ -185,6 +185,11 @@ async function mountBrandDetail() {
           </p>
           <p style="margin:10px 0 0">Owner: <strong>${escapeHtml(brand.owner_email || "—")}</strong>
             ${brand.owner_eazpire_linked ? ' · <span class="badge badge-success">eazpire account linked</span>' : ""}
+            ${
+              typeof brand.api_keys_count === "number"
+                ? ` · <span class="muted">${brand.api_keys_count} active API key${brand.api_keys_count === 1 ? "" : "s"}</span>`
+                : ""
+            }
           </p>
           ${
             isSuspended
