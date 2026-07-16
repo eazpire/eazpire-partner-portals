@@ -19,6 +19,8 @@ export const PARTNER_API_SCOPES = {
   COMPANY_WRITE: "company:write",
   PRODUCTS_READ: "products:read",
   PRODUCTS_WRITE: "products:write",
+  ORDERS_READ: "orders:read",
+  ORDERS_WRITE: "orders:write",
 };
 
 /** Default scopes for newly created keys (everything except `*`). */
@@ -29,7 +31,7 @@ export const ALLOWED_PARTNER_API_SCOPES = DEFAULT_PARTNER_API_SCOPES.concat(["*"
 
 /**
  * Ops that machine API keys may call (portal session keeps full access).
- * Editor tabs, orders, certification stay session-only for MVP.
+ * Product editor tabs + certification stay session-only for now.
  */
 export const PARTNER_API_KEY_ALLOWED_OPS = new Set([
   "manufacturer-dashboard",
@@ -48,7 +50,36 @@ export const PARTNER_API_KEY_ALLOWED_OPS = new Set([
   "partner-api-product-update",
   "manufacturer-product-submit-review",
   "partner-api-product-submit",
+  "manufacturer-order-list",
+  "partner-api-orders",
+  "manufacturer-order-get",
+  "partner-api-order-get",
+  "manufacturer-order-accept",
+  "partner-api-order-accept",
+  "manufacturer-order-reject",
+  "partner-api-order-reject",
+  "manufacturer-order-status-update",
+  "partner-api-order-status",
+  "manufacturer-order-tracking-update",
+  "partner-api-order-tracking",
+  "manufacturer-order-download-print-file",
+  "partner-api-order-print-file",
 ]);
+
+/** Map API key scopes → portal role so canManageCatalog / canManageOrders keep working. */
+export function partnerRoleFromScopes(scopes) {
+  const list = Array.isArray(scopes) ? scopes : [];
+  if (list.includes("*")) return "admin";
+  const products =
+    list.includes(PARTNER_API_SCOPES.PRODUCTS_WRITE) ||
+    list.includes(PARTNER_API_SCOPES.PRODUCTS_READ);
+  const orders =
+    list.includes(PARTNER_API_SCOPES.ORDERS_WRITE) || list.includes(PARTNER_API_SCOPES.ORDERS_READ);
+  if (products && orders) return "admin";
+  if (products) return "catalog_manager";
+  if (orders) return "order_operator";
+  return "viewer";
+}
 
 function getJwtSecret(env) {
   const s = String(env.PARTNER_JWT_SECRET || env.JWT_APP_SECRET || "").trim();
@@ -342,8 +373,6 @@ export async function requirePartnerAuth(request, env) {
     }
 
     const scopes = parsePartnerApiScopes(row.scopes);
-    const canWrite =
-      scopes.includes("*") || scopes.includes(PARTNER_API_SCOPES.PRODUCTS_WRITE);
 
     return {
       ok: true,
@@ -351,7 +380,7 @@ export async function requirePartnerAuth(request, env) {
       mode: "full",
       manufacturer_id: String(row.manufacturer_id),
       user_id: null,
-      role: canWrite ? "catalog_manager" : "viewer",
+      role: partnerRoleFromScopes(scopes),
       email: "",
       scopes,
       apiKeyId: row.id,

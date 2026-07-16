@@ -52,12 +52,34 @@ describe("rewritePartnerApiV1Request", () => {
     const out = rewritePartnerApiV1Request(new Request("https://partner.eazpire.com/api/v1/overview"));
     expect(new URL(out.url).searchParams.get("op")).toBe("partner-api-overview");
   });
+
+  it("maps orders list, get, and actions", () => {
+    const list = rewritePartnerApiV1Request(new Request("https://partner.eazpire.com/api/v1/orders"));
+    expect(new URL(list.url).searchParams.get("op")).toBe("partner-api-orders");
+
+    const get = rewritePartnerApiV1Request(
+      new Request("https://partner.eazpire.com/api/v1/orders/mord_1")
+    );
+    expect(new URL(get.url).searchParams.get("op")).toBe("partner-api-order-get");
+    expect(new URL(get.url).searchParams.get("order_id")).toBe("mord_1");
+
+    const accept = rewritePartnerApiV1Request(
+      new Request("https://partner.eazpire.com/api/v1/orders/mord_1/accept", { method: "POST" })
+    );
+    expect(new URL(accept.url).searchParams.get("op")).toBe("partner-api-order-accept");
+
+    const tracking = rewritePartnerApiV1Request(
+      new Request("https://partner.eazpire.com/api/v1/orders/mord_1/tracking", { method: "POST" })
+    );
+    expect(new URL(tracking.url).searchParams.get("op")).toBe("partner-api-order-tracking");
+  });
 });
 
 describe("partner API scopes", () => {
   it("includes MVP default scopes", () => {
     expect(DEFAULT_PARTNER_API_SCOPES).toContain(PARTNER_API_SCOPES.PRODUCTS_WRITE);
     expect(DEFAULT_PARTNER_API_SCOPES).toContain(PARTNER_API_SCOPES.COMPANY_READ);
+    expect(DEFAULT_PARTNER_API_SCOPES).toContain(PARTNER_API_SCOPES.ORDERS_WRITE);
   });
 
   it("partnerAuthHasScope respects wildcard and session", () => {
@@ -68,8 +90,9 @@ describe("partner API scopes", () => {
     expect(partnerAuthHasScope({ type: "api_key", scopes: ["*"] }, "products:write")).toBe(true);
   });
 
-  it("allows product ops for API keys", () => {
+  it("allows product and order ops for API keys", () => {
     expect(PARTNER_API_KEY_ALLOWED_OPS.has("partner-api-product-create")).toBe(true);
-    expect(PARTNER_API_KEY_ALLOWED_OPS.has("manufacturer-order-list")).toBe(false);
+    expect(PARTNER_API_KEY_ALLOWED_OPS.has("partner-api-orders")).toBe(true);
+    expect(PARTNER_API_KEY_ALLOWED_OPS.has("partner-api-order-tracking")).toBe(true);
   });
 });

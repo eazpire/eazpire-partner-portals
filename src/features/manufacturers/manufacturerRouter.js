@@ -127,6 +127,13 @@ const PARTNER_OPS = new Set([
   "partner-api-product-create",
   "partner-api-product-update",
   "partner-api-product-submit",
+  "partner-api-orders",
+  "partner-api-order-get",
+  "partner-api-order-accept",
+  "partner-api-order-reject",
+  "partner-api-order-status",
+  "partner-api-order-tracking",
+  "partner-api-order-print-file",
   "partner-api-keys",
   "partner-api-keys-list",
   "partner-api-keys-create",
@@ -1610,51 +1617,82 @@ export async function handleManufacturerRouter(request, env) {
     return json({ ok: true, print_area: area }, 200, cors);
   }
 
-  if (op === "manufacturer-order-list" && request.method === "GET") {
+  if ((op === "manufacturer-order-list" || op === "partner-api-orders") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_READ);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const orders = await listOrders(db, mfgId, { status: url.searchParams.get("status") });
     return json({ ok: true, orders }, 200, cors);
   }
 
-  if (op === "manufacturer-order-get" && request.method === "GET") {
+  if ((op === "manufacturer-order-get" || op === "partner-api-order-get") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_READ);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const order = await getOrder(db, mfgId, url.searchParams.get("order_id"));
     if (!order) return json({ ok: false, error: "not_found" }, 404, cors);
     return json({ ok: true, order }, 200, cors);
   }
 
-  if (op === "manufacturer-order-accept" && request.method === "POST") {
+  if ((op === "manufacturer-order-accept" || op === "partner-api-order-accept") && request.method === "POST") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const order = await updateOrderStatus(db, mfgId, body.order_id, "accepted");
+    const orderId = body.order_id || url.searchParams.get("order_id");
+    if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
+    const order = await updateOrderStatus(db, mfgId, orderId, "accepted");
     return json({ ok: true, order }, 200, cors);
   }
 
-  if (op === "manufacturer-order-reject" && request.method === "POST") {
+  if ((op === "manufacturer-order-reject" || op === "partner-api-order-reject") && request.method === "POST") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const order = await updateOrderStatus(db, mfgId, body.order_id, "rejected");
+    const orderId = body.order_id || url.searchParams.get("order_id");
+    if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
+    const order = await updateOrderStatus(db, mfgId, orderId, "rejected");
     return json({ ok: true, order }, 200, cors);
   }
 
-  if (op === "manufacturer-order-status-update" && request.method === "POST") {
+  if (
+    (op === "manufacturer-order-status-update" || op === "partner-api-order-status") &&
+    request.method === "POST"
+  ) {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const order = await updateOrderStatus(db, mfgId, body.order_id, body.status || "in_production");
+    const orderId = body.order_id || url.searchParams.get("order_id");
+    if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
+    const order = await updateOrderStatus(db, mfgId, orderId, body.status || "in_production");
     return json({ ok: true, order }, 200, cors);
   }
 
-  if (op === "manufacturer-order-tracking-update" && request.method === "POST") {
+  if (
+    (op === "manufacturer-order-tracking-update" || op === "partner-api-order-tracking") &&
+    request.method === "POST"
+  ) {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const order = await updateOrderStatus(db, mfgId, body.order_id, "shipped", {
+    const orderId = body.order_id || url.searchParams.get("order_id");
+    if (!orderId) return json({ ok: false, error: "order_id_required" }, 400, cors);
+    const order = await updateOrderStatus(db, mfgId, orderId, "shipped", {
       tracking_number: body.tracking_number,
       tracking_url: body.tracking_url,
     });
     return json({ ok: true, order }, 200, cors);
   }
 
-  if (op === "manufacturer-order-download-print-file" && request.method === "GET") {
+  if (
+    (op === "manufacturer-order-download-print-file" || op === "partner-api-order-print-file") &&
+    request.method === "GET"
+  ) {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.ORDERS_READ);
+    if (scopeErr) return scopeErr;
     if (!canManageOrders(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const order = await getOrder(db, mfgId, url.searchParams.get("order_id"));
     if (!order) return json({ ok: false, error: "not_found" }, 404, cors);

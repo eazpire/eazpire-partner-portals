@@ -6,10 +6,19 @@ const API_V1_MAP = {
   "/api/v1/overview": "partner-api-overview",
   "/api/v1/company": null, // method-aware below
   "/api/v1/products": null, // method-aware below
+  "/api/v1/orders": "partner-api-orders",
   "/api/v1/keys": "partner-api-keys",
 };
 
 const PRODUCT_ACTION_SEGMENTS = new Set(["submit-review"]);
+
+const ORDER_ACTION_OPS = {
+  accept: "partner-api-order-accept",
+  reject: "partner-api-order-reject",
+  status: "partner-api-order-status",
+  tracking: "partner-api-order-tracking",
+  "print-file": "partner-api-order-print-file",
+};
 
 /**
  * If request is /api/v1/..., return a cloned Request with ?op= set (unless already present).
@@ -61,6 +70,30 @@ export function rewritePartnerApiV1Request(request) {
           : "partner-api-product-update";
       url.searchParams.set("op", op);
       url.searchParams.set("product_id", segment);
+      return new Request(url.toString(), request);
+    }
+  }
+
+  // /api/v1/orders/:id/:action
+  const orderActionMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)\/([^/]+)$/);
+  if (orderActionMatch) {
+    const orderId = decodeURIComponent(orderActionMatch[1]);
+    const action = decodeURIComponent(orderActionMatch[2]);
+    const op = ORDER_ACTION_OPS[action];
+    if (op) {
+      url.searchParams.set("op", op);
+      url.searchParams.set("order_id", orderId);
+      return new Request(url.toString(), request);
+    }
+  }
+
+  // GET /api/v1/orders/:id
+  const orderMatch = pathname.match(/^\/api\/v1\/orders\/([^/]+)$/);
+  if (orderMatch) {
+    const orderId = decodeURIComponent(orderMatch[1]);
+    if (!ORDER_ACTION_OPS[orderId]) {
+      url.searchParams.set("op", "partner-api-order-get");
+      url.searchParams.set("order_id", orderId);
       return new Request(url.toString(), request);
     }
   }

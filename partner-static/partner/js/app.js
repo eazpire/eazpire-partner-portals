@@ -681,35 +681,61 @@ const API_SCOPE_OPTIONS = [
   "company:write",
   "products:read",
   "products:write",
+  "orders:read",
+  "orders:write",
 ];
 
 function renderApiDocs() {
-  setTopbarExtra("");
+  setTopbarExtra(`<a class="btn btn-secondary" href="/docs" target="_blank" rel="noopener">Documentation</a>`);
   const canManageKeys = ["owner", "admin"].includes(session?.role);
   document.getElementById("view-api").innerHTML = `
-    <div class="panel">
+    <div class="cert-hero api-hero">
       <h2>Partner API</h2>
-      <p class="muted">Machine access so partners can create and manage products outside the portal. Keys are hashed at rest; the full key is shown <strong>once</strong> when created.</p>
-      <p style="margin:0 0 12px"><a href="/docs" target="_blank" rel="noopener">View API documentation</a></p>
-      <div class="code-panel"><pre>curl -sS "${location.origin}/api/v1/products" \\
-  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY"</pre></div>
+      <p>Connect your systems to manage products and fulfill orders. Keys are hashed at rest — the full secret is shown only once when you create it.</p>
+      <div class="api-hero-actions">
+        <a class="btn btn-primary" href="/docs" target="_blank" rel="noopener">Open documentation</a>
+      </div>
     </div>
+
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-header"><strong>Quick start</strong></div>
+      <div class="panel-body">
+        <p class="muted" style="margin-top:0">Send your key as <code>Authorization: Bearer eazpire_mfg_…</code> (or header <code>X-Eazpire-Partner-Key</code>).</p>
+        <div class="code-panel"><pre>curl -sS "${location.origin}/api/v1/products" \\
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY"
+
+curl -sS "${location.origin}/api/v1/orders" \\
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY"</pre></div>
+        <div class="api-endpoint-grid">
+          <div class="api-endpoint-card"><strong>Products</strong><span>Create, update, submit for review</span></div>
+          <div class="api-endpoint-card"><strong>Orders</strong><span>List, accept, reject, tracking</span></div>
+          <div class="api-endpoint-card"><strong>Company</strong><span>Read and update your profile</span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
-      <h2>eazpire API keys</h2>
+      <div class="panel-header"><strong>API keys</strong></div>
+      <div class="panel-body">
       ${
         canManageKeys
-          ? `<div class="actions-row" style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px">
-        <input type="text" id="api-key-name" placeholder="Key name (e.g. Production)" style="min-width:200px;flex:1" />
+          ? `<div class="api-create-row">
+        <div class="field">
+          <label for="api-key-name">Key name</label>
+          <input class="input" type="text" id="api-key-name" placeholder="e.g. Production ERP" />
+        </div>
         <button type="button" class="btn btn-primary" id="btn-create-api-key">Create API key</button>
       </div>
-      <div id="api-key-scopes" style="margin-bottom:12px">
-        <p class="muted" style="margin:0 0 8px">Scopes (leave all checked for defaults, or pick a subset). <label style="margin-left:8px"><input type="checkbox" id="scope-star" /> Full access (<code>*</code>)</label></p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px 14px;font-size:0.88rem" id="scope-checks"></div>
+      <div class="api-scope-block" id="api-key-scopes">
+        <p class="muted">Choose scopes (defaults = all selected). Or enable full access.</p>
+        <label class="api-scope-star"><input type="checkbox" id="scope-star" /> Full access (<code>*</code>)</label>
+        <div class="api-scope-grid" id="scope-checks"></div>
       </div>
-      <div id="api-key-once" hidden class="panel" style="background:rgba(0,0,0,.04);margin-bottom:12px"></div>
+      <div id="api-key-once" hidden class="api-key-once"></div>
       <div id="api-keys-list" class="muted">Loading keys…</div>`
-          : `<p class="muted">Only owner or admin roles can create and revoke API keys. Contact your company owner if you need access.</p>`
+          : `<div class="empty">Only owner or admin roles can create and revoke API keys. Contact your company owner if you need access.</div>`
       }
+      </div>
     </div>`;
 
   if (!canManageKeys) return;
@@ -718,7 +744,7 @@ function renderApiDocs() {
   if (host) {
     host.innerHTML = API_SCOPE_OPTIONS.map(
       (s) =>
-        `<label><input type="checkbox" class="scope-opt" value="${escapeHtml(s)}" checked /> <code>${escapeHtml(s)}</code></label>`
+        `<label class="api-scope-chip"><input type="checkbox" class="scope-opt" value="${escapeHtml(s)}" checked /> <code>${escapeHtml(s)}</code></label>`
     ).join("");
     document.getElementById("scope-star")?.addEventListener("change", (e) => {
       const on = !!e.target.checked;
@@ -749,9 +775,9 @@ async function loadPartnerApiKeys() {
       box.textContent = "No API keys yet.";
       return;
     }
-    box.innerHTML = `<div class="table-wrap"><table class="data">
-      <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
-      <tbody>${keys
+    box.innerHTML = renderTable(
+      ["Name", "Prefix", "Scopes", "Created", "Last used", "Status", ""],
+      keys
         .map(
           (k) => `<tr>
         <td>${escapeHtml(k.name)}</td>
@@ -767,7 +793,8 @@ async function loadPartnerApiKeys() {
         }</td>
       </tr>`
         )
-        .join("")}</tbody></table></div>`;
+        .join("")
+    );
     box.querySelectorAll(".btn-revoke-key").forEach((btn) => {
       btn.addEventListener("click", async () => {
         if (!confirm("Revoke this API key? External systems using it will stop working.")) return;
@@ -804,9 +831,9 @@ async function createPartnerApiKey() {
       once.hidden = false;
       once.innerHTML = `
         <p><strong>Copy this key now</strong> — it will not be shown again.</p>
-        <p><code id="api-key-raw" style="word-break:break-all">${escapeHtml(res.api_key)}</code></p>
+        <code id="api-key-raw">${escapeHtml(res.api_key)}</code>
         <p class="muted">Scopes: ${escapeHtml((res.key?.scopes || scopes).join(", "))}</p>
-        <button type="button" class="btn btn-secondary" id="btn-copy-api-key">Copy to clipboard</button>`;
+        <button type="button" class="btn btn-primary" id="btn-copy-api-key">Copy to clipboard</button>`;
       document.getElementById("btn-copy-api-key")?.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(res.api_key);
