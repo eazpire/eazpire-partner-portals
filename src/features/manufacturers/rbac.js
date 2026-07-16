@@ -1,5 +1,5 @@
 /**
- * Partner / Admin session JWT + audit logging
+ * Partner / Admin session JWT + audit logging + Partner API key auth
  */
 
 import { SignJWT, jwtVerify } from "jose";
@@ -9,6 +9,46 @@ const PARTNER_COOKIE = "partner_session";
 const ADMIN_PARTNER_COOKIE = "admin_partner_session";
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
 const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
+
+/** Raw keys look like eazpire_mfg_<random> — never stored plaintext */
+export const PARTNER_API_KEY_PREFIX = "eazpire_mfg_";
+
+export const PARTNER_API_SCOPES = {
+  OVERVIEW_READ: "overview:read",
+  COMPANY_READ: "company:read",
+  COMPANY_WRITE: "company:write",
+  PRODUCTS_READ: "products:read",
+  PRODUCTS_WRITE: "products:write",
+};
+
+/** Default scopes for newly created keys (everything except `*`). */
+export const DEFAULT_PARTNER_API_SCOPES = Object.values(PARTNER_API_SCOPES);
+
+/** Allowed scope strings when creating a key (defaults + wildcard). */
+export const ALLOWED_PARTNER_API_SCOPES = DEFAULT_PARTNER_API_SCOPES.concat(["*"]);
+
+/**
+ * Ops that machine API keys may call (portal session keeps full access).
+ * Editor tabs, orders, certification stay session-only for MVP.
+ */
+export const PARTNER_API_KEY_ALLOWED_OPS = new Set([
+  "manufacturer-dashboard",
+  "partner-api-overview",
+  "manufacturer-get",
+  "partner-api-company",
+  "manufacturer-update",
+  "partner-api-company-update",
+  "manufacturer-product-list",
+  "partner-api-products",
+  "manufacturer-product-get",
+  "partner-api-product-get",
+  "manufacturer-product-create",
+  "partner-api-product-create",
+  "manufacturer-product-update",
+  "partner-api-product-update",
+  "manufacturer-product-submit-review",
+  "partner-api-product-submit",
+]);
 
 function getJwtSecret(env) {
   const s = String(env.PARTNER_JWT_SECRET || env.JWT_APP_SECRET || "").trim();
@@ -220,4 +260,110 @@ export function canManageCatalog(role) {
 
 export function canManageOrders(role) {
   return ["owner", "admin", "order_operator"].includes(role);
+}
+
+export function canManageApiKeys(role) {
+  return ["owner", "admin"].includes(role);
+}
+
+export function extractPartnerApiKey(request) {
+  const headerKey =
+    request.headers.get("X-Eazpire-Partner-Key") || request.headers.get("x-eazpire-partner-key");
+  if (headerKey) return String(headerKey).trim();
+  const auth = request.headers.get("Authorization") || "";
+  if (/^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, "").trim();
+  return null;
+}
+
+export function parsePartnerApiScopes(raw) {
+  if (Array.isArray(raw)) return raw.map((s) => String(s).trim()).filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map((s) => String(s).trim()).filter(Boolean);
+    } catch {
+      /* ignore */
+    }
+  }
+  return [];
+}
+
+export function partnerAuthHasScope(auth, scope) {
+  if (!auth) return false;
+  if (auth.type === "session") return true;
+  const scopes = auth.scopes || [];
+  return scopes.includes("*") || scopes.includes(scope);
+}
+
+/**
+ * Accept cookie session OR Partner API key (Bearer eazpire_mfg_… / X-Eazpire-Partner-Key).
+ * Session: portal UI (full ops). API key: machine access scoped to manufacturer_id.
+ */
+export async function requirePartnerAuth(request, env) {
+  const rawKey = extractPartnerApiKey(request);
+  if (rawKey) {
+    if (!rawKey.startsWith(PARTNER_API_KEY_PREFIX)) {
+      return { ok: false, status: 401, error: "partner_auth_required" };
+    }
+    const db = getManufacturerDb(env);
+    if (!db) return { ok: false, status: 503, error: "manufacturer_db_unavailable" };
+
+    const { ensureManufacturerSchema } = await import("./ensureManufacturerSchema.js");
+    await ensureManufacturerSchema(env);
+
+    const keyHash = await hashToken(rawKey);
+    const row = await db
+      .prepare(
+        `SELECT id, manufacturer_id, name, scopes, revoked_at
+         FROM manufacturer_api_keys WHERE key_hash = ? LIMIT 1`
+      )
+      .bind(keyHash)
+      .first();
+    if (!row || row.revoked_at) {
+      return { ok: false, status: 401, error: "partner_auth_required" };
+    }
+
+    const mfg = await db
+      .prepare(`SELECT id, status FROM manufacturers WHERE id = ? LIMIT 1`)
+      .bind(row.manufacturer_id)
+      .first();
+    if (!mfg) return { ok: false, status: 401, error: "partner_auth_required" };
+    if (["rejected", "suspended", "deleted"].includes(String(mfg.status || ""))) {
+      return { ok: false, status: 403, error: "manufacturer_inactive" };
+    }
+
+    try {
+      await db
+        .prepare(`UPDATE manufacturer_api_keys SET last_used_at = ? WHERE id = ?`)
+        .bind(Date.now(), row.id)
+        .run();
+    } catch {
+      /* non-fatal */
+    }
+
+    const scopes = parsePartnerApiScopes(row.scopes);
+    const canWrite =
+      scopes.includes("*") || scopes.includes(PARTNER_API_SCOPES.PRODUCTS_WRITE);
+
+    return {
+      ok: true,
+      type: "api_key",
+      mode: "full",
+      manufacturer_id: String(row.manufacturer_id),
+      user_id: null,
+      role: canWrite ? "catalog_manager" : "viewer",
+      email: "",
+      scopes,
+      apiKeyId: row.id,
+      apiKeyName: row.name,
+    };
+  }
+
+  const session = await requireFullPartnerSession(request, env);
+  if (!session.ok) return session;
+  return {
+    ...session,
+    type: "session",
+    scopes: ["*"],
+  };
 }

@@ -595,6 +595,46 @@ async function applyEazpireShadowSchemaPatches(db) {
   await ensureColumn(db, "manufacturer_print_areas", "placeholders_json", "TEXT");
   await ensureColumn(db, "manufacturer_print_areas", "image_r2_key", "TEXT");
   await ensureColumn(db, "manufacturer_print_areas", "image_url", "TEXT");
+
+  // Partner API keys (0021)
+  try {
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS manufacturer_api_keys (
+          id TEXT PRIMARY KEY,
+          manufacturer_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          key_prefix TEXT NOT NULL,
+          key_hash TEXT NOT NULL,
+          scopes TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          last_used_at INTEGER,
+          FOREIGN KEY (manufacturer_id) REFERENCES manufacturers(id)
+        )`
+      )
+      .run();
+  } catch (e) {
+    console.warn("[ensureManufacturerSchema] manufacturer_api_keys skipped:", e?.message || e);
+  }
+  try {
+    await db
+      .prepare(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_manufacturer_api_keys_hash ON manufacturer_api_keys(key_hash)`
+      )
+      .run();
+  } catch {
+    /* index optional */
+  }
+  try {
+    await db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_manufacturer_api_keys_mfg ON manufacturer_api_keys(manufacturer_id)`
+      )
+      .run();
+  } catch {
+    /* index optional */
+  }
 }
 
 export async function ensureManufacturerSchema(env) {

@@ -49,6 +49,10 @@ function isAdminRootHost(hostname, pathname) {
 function resolveAssetKey(hostname, pathname) {
   if (isPartnerHost(hostname)) {
     if (pathname === "/auth/verify" || pathname === "/auth/verify-application") return null;
+    // Public Partner API docs (no login)
+    if (pathname === "/docs" || pathname === "/api-docs" || pathname === "/docs.html") {
+      return "partner/docs.html";
+    }
     if (pathname.startsWith("/shared/")) return `shared${pathname.slice("/shared".length)}`;
     if (pathname.startsWith("/js/")) return `partner${pathname}`;
     if (pathname === "/" || !pathname.includes(".")) return "partner/index.html";

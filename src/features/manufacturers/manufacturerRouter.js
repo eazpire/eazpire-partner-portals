@@ -8,12 +8,20 @@ import { getManufacturerDb, manufacturerDbUnavailable } from "./db.js";
 import { ensureManufacturerSchema } from "./ensureManufacturerSchema.js";
 import {
   requirePartnerSession,
-  requireFullPartnerSession,
+  requirePartnerAuth,
   requireAdminPartnerSession,
   canManageCatalog,
   canManageOrders,
+  partnerAuthHasScope,
+  PARTNER_API_SCOPES,
+  PARTNER_API_KEY_ALLOWED_OPS,
   writeAuditLog,
 } from "./rbac.js";
+import {
+  handlePartnerApiKeysList,
+  handlePartnerApiKeysCreate,
+  handlePartnerApiKeysRevoke,
+} from "./partnerApiKeys.js";
 import {
   handlePartnerAuthRequest,
   handlePartnerAuthVerify,
@@ -111,6 +119,18 @@ const PARTNER_OPS = new Set([
   "manufacturer-get",
   "manufacturer-update",
   "manufacturer-dashboard",
+  "partner-api-overview",
+  "partner-api-company",
+  "partner-api-company-update",
+  "partner-api-products",
+  "partner-api-product-get",
+  "partner-api-product-create",
+  "partner-api-product-update",
+  "partner-api-product-submit",
+  "partner-api-keys",
+  "partner-api-keys-list",
+  "partner-api-keys-create",
+  "partner-api-keys-revoke",
   "manufacturer-location-list",
   "manufacturer-location-create",
   "manufacturer-location-update",
@@ -1324,25 +1344,55 @@ export async function handleManufacturerRouter(request, env) {
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);
   }
 
-  // ----- Partner ops (full session required) -----
-  const auth = await requireFullPartnerSession(request, env);
+  // API key management — portal session only (create / list / revoke)
+  if (op === "partner-api-keys" || op === "partner-api-keys-list") {
+    return handlePartnerApiKeysList(request, env);
+  }
+  if (op === "partner-api-keys-create") return handlePartnerApiKeysCreate(request, env);
+  if (op === "partner-api-keys-revoke") return handlePartnerApiKeysRevoke(request, env);
+
+  // ----- Partner ops (session OR API key) -----
+  const auth = await requirePartnerAuth(request, env);
   if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+  if (auth.type === "api_key" && !PARTNER_API_KEY_ALLOWED_OPS.has(op)) {
+    return json(
+      {
+        ok: false,
+        error: "api_key_op_not_allowed",
+        message:
+          "This operation requires a Partner Portal session. Use an API key only for /api/v1 product and company endpoints.",
+      },
+      403,
+      cors
+    );
+  }
   const mfgId = auth.manufacturer_id;
 
-  if (op === "manufacturer-get" && request.method === "GET") {
+  function requireScope(scope) {
+    if (partnerAuthHasScope(auth, scope)) return null;
+    return json({ ok: false, error: "insufficient_scope", required: scope }, 403, cors);
+  }
+
+  if ((op === "manufacturer-get" || op === "partner-api-company") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.COMPANY_READ);
+    if (scopeErr) return scopeErr;
     const manufacturer = await getManufacturerById(db, mfgId);
     const progress = await certificationProgress(db, mfgId);
     return json({ ok: true, manufacturer, certification_progress: progress }, 200, cors);
   }
 
-  if (op === "manufacturer-update" && request.method === "POST") {
+  if ((op === "manufacturer-update" || op === "partner-api-company-update") && request.method === "POST") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.COMPANY_WRITE);
+    if (scopeErr) return scopeErr;
     const body = await request.json().catch(() => ({}));
     const manufacturer = await updateManufacturer(db, mfgId, body);
     await writeAuditLog(env, { manufacturer_id: mfgId, user_id: auth.user_id, action: "manufacturer_update", entity_type: "manufacturer", entity_id: mfgId });
     return json({ ok: true, manufacturer }, 200, cors);
   }
 
-  if (op === "manufacturer-dashboard" && request.method === "GET") {
+  if ((op === "manufacturer-dashboard" || op === "partner-api-overview") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.OVERVIEW_READ);
+    if (scopeErr) return scopeErr;
     const dashboard = await getDashboard(db, mfgId);
     return json({ ok: true, dashboard }, 200, cors);
   }
@@ -1366,12 +1416,16 @@ export async function handleManufacturerRouter(request, env) {
     return json({ ok: true, location }, 200, cors);
   }
 
-  if (op === "manufacturer-product-list" && request.method === "GET") {
+  if ((op === "manufacturer-product-list" || op === "partner-api-products") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.PRODUCTS_READ);
+    if (scopeErr) return scopeErr;
     const products = await listProducts(db, mfgId, { status: url.searchParams.get("status") });
     return json({ ok: true, products }, 200, cors);
   }
 
-  if (op === "manufacturer-product-get" && request.method === "GET") {
+  if ((op === "manufacturer-product-get" || op === "partner-api-product-get") && request.method === "GET") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.PRODUCTS_READ);
+    if (scopeErr) return scopeErr;
     const productId = url.searchParams.get("product_id");
     const product = await getProduct(db, mfgId, productId);
     if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
@@ -1380,26 +1434,42 @@ export async function handleManufacturerRouter(request, env) {
     return json({ ok: true, product, variants, print_areas }, 200, cors);
   }
 
-  if (op === "manufacturer-product-create" && request.method === "POST") {
+  if ((op === "manufacturer-product-create" || op === "partner-api-product-create") && request.method === "POST") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.PRODUCTS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
+    if (!String(body.title || "").trim()) {
+      return json({ ok: false, error: "title_required" }, 400, cors);
+    }
     const product = await createProduct(db, mfgId, body);
     return json({ ok: true, product }, 200, cors);
   }
 
-  if (op === "manufacturer-product-update" && request.method === "POST") {
+  if ((op === "manufacturer-product-update" || op === "partner-api-product-update") && request.method === "POST") {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.PRODUCTS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
-    const product = await updateProduct(db, mfgId, body.product_id, body);
+    const productId = body.product_id || url.searchParams.get("product_id");
+    if (!productId) return json({ ok: false, error: "product_id_required" }, 400, cors);
+    const product = await updateProduct(db, mfgId, productId, body);
     if (!product) return json({ ok: false, error: "not_found" }, 404, cors);
     return json({ ok: true, product }, 200, cors);
   }
 
-  if (op === "manufacturer-product-submit-review" && request.method === "POST") {
+  if (
+    (op === "manufacturer-product-submit-review" || op === "partner-api-product-submit") &&
+    request.method === "POST"
+  ) {
+    const scopeErr = requireScope(PARTNER_API_SCOPES.PRODUCTS_WRITE);
+    if (scopeErr) return scopeErr;
     if (!canManageCatalog(auth.role)) return json({ ok: false, error: "forbidden" }, 403, cors);
     const body = await request.json().catch(() => ({}));
+    const productId = body.product_id || url.searchParams.get("product_id");
+    if (!productId) return json({ ok: false, error: "product_id_required" }, 400, cors);
     const { submitPartnerProductForReview } = await import("./partnerProductEditorService.js");
-    const result = await submitPartnerProductForReview(env, mfgId, body.product_id);
+    const result = await submitPartnerProductForReview(env, mfgId, productId);
     if (!result.ok) return json({ ok: false, errors: result.errors }, 400, cors);
     return json({ ok: true, product: result.product }, 200, cors);
   }

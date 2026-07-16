@@ -675,11 +675,154 @@ function bindOrderActions(root) {
   });
 }
 
+const API_SCOPE_OPTIONS = [
+  "overview:read",
+  "company:read",
+  "company:write",
+  "products:read",
+  "products:write",
+];
+
 function renderApiDocs() {
   setTopbarExtra("");
+  const canManageKeys = ["owner", "admin"].includes(session?.role);
   document.getElementById("view-api").innerHTML = `
-    <div class="code-panel"><pre>POST ${location.origin}?op=manufacturer-product-list
-Cookie: partner_session=…</pre></div>`;
+    <div class="panel">
+      <h2>Partner API</h2>
+      <p class="muted">Machine access so partners can create and manage products outside the portal. Keys are hashed at rest; the full key is shown <strong>once</strong> when created.</p>
+      <p style="margin:0 0 12px"><a href="/docs" target="_blank" rel="noopener">View API documentation</a></p>
+      <div class="code-panel"><pre>curl -sS "${location.origin}/api/v1/products" \\
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY"</pre></div>
+    </div>
+    <div class="panel">
+      <h2>eazpire API keys</h2>
+      ${
+        canManageKeys
+          ? `<div class="actions-row" style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px">
+        <input type="text" id="api-key-name" placeholder="Key name (e.g. Production)" style="min-width:200px;flex:1" />
+        <button type="button" class="btn btn-primary" id="btn-create-api-key">Create API key</button>
+      </div>
+      <div id="api-key-scopes" style="margin-bottom:12px">
+        <p class="muted" style="margin:0 0 8px">Scopes (leave all checked for defaults, or pick a subset). <label style="margin-left:8px"><input type="checkbox" id="scope-star" /> Full access (<code>*</code>)</label></p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 14px;font-size:0.88rem" id="scope-checks"></div>
+      </div>
+      <div id="api-key-once" hidden class="panel" style="background:rgba(0,0,0,.04);margin-bottom:12px"></div>
+      <div id="api-keys-list" class="muted">Loading keys…</div>`
+          : `<p class="muted">Only owner or admin roles can create and revoke API keys. Contact your company owner if you need access.</p>`
+      }
+    </div>`;
+
+  if (!canManageKeys) return;
+
+  const host = document.getElementById("scope-checks");
+  if (host) {
+    host.innerHTML = API_SCOPE_OPTIONS.map(
+      (s) =>
+        `<label><input type="checkbox" class="scope-opt" value="${escapeHtml(s)}" checked /> <code>${escapeHtml(s)}</code></label>`
+    ).join("");
+    document.getElementById("scope-star")?.addEventListener("change", (e) => {
+      const on = !!e.target.checked;
+      host.querySelectorAll(".scope-opt").forEach((el) => {
+        el.checked = on ? false : true;
+        el.disabled = on;
+      });
+    });
+  }
+
+  document.getElementById("btn-create-api-key")?.addEventListener("click", () => createPartnerApiKey());
+  loadPartnerApiKeys();
+}
+
+function selectedPartnerApiScopes() {
+  if (document.getElementById("scope-star")?.checked) return ["*"];
+  const picked = [...document.querySelectorAll(".scope-opt:checked")].map((el) => el.value);
+  return picked.length ? picked : [...API_SCOPE_OPTIONS];
+}
+
+async function loadPartnerApiKeys() {
+  const box = document.getElementById("api-keys-list");
+  if (!box) return;
+  try {
+    const data = await partnerFetch("partner-api-keys");
+    const keys = data.keys || [];
+    if (!keys.length) {
+      box.textContent = "No API keys yet.";
+      return;
+    }
+    box.innerHTML = `<div class="table-wrap"><table class="data">
+      <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>${keys
+        .map(
+          (k) => `<tr>
+        <td>${escapeHtml(k.name)}</td>
+        <td><code>${escapeHtml(k.key_prefix)}…</code></td>
+        <td style="max-width:220px;font-size:0.8rem">${escapeHtml((k.scopes || []).join(", ") || "—")}</td>
+        <td>${k.created_at ? escapeHtml(new Date(k.created_at).toLocaleString()) : "—"}</td>
+        <td>${k.last_used_at ? escapeHtml(new Date(k.last_used_at).toLocaleString()) : "—"}</td>
+        <td><span class="badge ${badgeForStatus(k.active ? "active" : "revoked")}">${k.active ? "active" : "revoked"}</span></td>
+        <td>${
+          k.active
+            ? `<button type="button" class="btn btn-secondary btn-revoke-key" data-id="${escapeHtml(k.id)}">Revoke</button>`
+            : ""
+        }</td>
+      </tr>`
+        )
+        .join("")}</tbody></table></div>`;
+    box.querySelectorAll(".btn-revoke-key").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Revoke this API key? External systems using it will stop working.")) return;
+        try {
+          await partnerFetch("partner-api-keys-revoke", {
+            method: "POST",
+            body: { key_id: btn.getAttribute("data-id") },
+          });
+          showToast("API key revoked", "");
+          const once = document.getElementById("api-key-once");
+          if (once) once.hidden = true;
+          loadPartnerApiKeys();
+        } catch (err) {
+          showToast("Error", err.message || String(err));
+        }
+      });
+    });
+  } catch (e) {
+    box.textContent = e.message || String(e);
+  }
+}
+
+async function createPartnerApiKey() {
+  const name = String(document.getElementById("api-key-name")?.value || "").trim();
+  if (!name) {
+    showToast("Enter a key name", "");
+    return;
+  }
+  try {
+    const scopes = selectedPartnerApiScopes();
+    const res = await partnerFetch("partner-api-keys-create", { method: "POST", body: { name, scopes } });
+    const once = document.getElementById("api-key-once");
+    if (once && res.api_key) {
+      once.hidden = false;
+      once.innerHTML = `
+        <p><strong>Copy this key now</strong> — it will not be shown again.</p>
+        <p><code id="api-key-raw" style="word-break:break-all">${escapeHtml(res.api_key)}</code></p>
+        <p class="muted">Scopes: ${escapeHtml((res.key?.scopes || scopes).join(", "))}</p>
+        <button type="button" class="btn btn-secondary" id="btn-copy-api-key">Copy to clipboard</button>`;
+      document.getElementById("btn-copy-api-key")?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(res.api_key);
+          showToast("Copied", "");
+        } catch {
+          showToast("Copy failed — select the key manually", "");
+        }
+      });
+    }
+    const nameInput = document.getElementById("api-key-name");
+    if (nameInput) nameInput.value = "";
+    showToast("API key created", "");
+    loadPartnerApiKeys();
+  } catch (err) {
+    showToast("Error", err.message || String(err));
+  }
 }
 
 async function renderCertification() {

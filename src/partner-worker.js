@@ -9,6 +9,7 @@
 import { json, getCorsHeaders } from "./utils/response.js";
 import { handleManufacturerRouter } from "./features/manufacturers/manufacturerRouter.js";
 import { handlePartnerPortalRequest } from "./features/manufacturers/partnerPortalHost.js";
+import { rewritePartnerApiV1Request } from "./features/manufacturers/partnerApiV1.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -17,7 +18,8 @@ export default {
       return new Response(null, { status: 204, headers: cors });
     }
 
-    const mfgResp = await handleManufacturerRouter(request, env);
+    const apiRequest = rewritePartnerApiV1Request(request) || request;
+    const mfgResp = await handleManufacturerRouter(apiRequest, env);
     if (mfgResp) return mfgResp;
 
     const portalResp = await handlePartnerPortalRequest(request, env);

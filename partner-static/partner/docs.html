@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Partner API Documentation — Eazpire</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/shared/css/partner-ui.css" />
+  <style>
+    .docs-page {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    .docs-hero {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      margin-bottom: 28px;
+    }
+    .docs-hero h1 { margin: 0 0 6px; font-size: 1.75rem; }
+    .docs-hero p { margin: 0; color: var(--muted); }
+    .docs-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 28px;
+    }
+    .docs-nav a {
+      text-decoration: none;
+      color: var(--brand);
+      background: rgba(109, 93, 252, 0.1);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .docs-section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius, 14px);
+      padding: 20px 22px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+    }
+    .docs-section h2 {
+      margin: 0 0 10px;
+      font-size: 1.15rem;
+    }
+    .docs-section h3 {
+      margin: 18px 0 8px;
+      font-size: 0.95rem;
+    }
+    .docs-section p, .docs-section li { color: var(--text); line-height: 1.55; }
+    .docs-section .muted { color: var(--muted); }
+    table.docs-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    table.docs-table th,
+    table.docs-table td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    table.docs-table th { color: var(--muted); font-weight: 600; }
+    code, .code-inline {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.84em;
+      background: var(--surface-2, #f8fafc);
+      padding: 1px 6px;
+      border-radius: 6px;
+    }
+    pre.docs-code {
+      margin: 10px 0 0;
+      padding: 14px 16px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 12px;
+      overflow: auto;
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+    .method {
+      display: inline-block;
+      min-width: 3.2rem;
+      font-weight: 700;
+      font-size: 0.75rem;
+      color: var(--brand);
+    }
+    .badge-soon {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: rgba(245, 158, 11, 0.15);
+      color: #b45309;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-left: 6px;
+    }
+    .docs-footer {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="docs-page">
+    <div class="docs-hero">
+      <div>
+        <h1>Partner API Documentation</h1>
+        <p>Machine access for manufacturers on <strong>partner.eazpire.com</strong> — create and manage catalog products, then submit them for review.</p>
+      </div>
+    </div>
+
+    <div class="docs-nav">
+      <a href="#auth">Authentication</a>
+      <a href="#scopes">Scopes</a>
+      <a href="#endpoints">Endpoints</a>
+      <a href="#errors">Errors</a>
+      <a href="#examples">Examples</a>
+      <a href="/api">Portal API keys</a>
+    </div>
+
+    <section class="docs-section" id="auth">
+      <h2>Authentication</h2>
+      <p>Create an <strong>eazpire Partner API key</strong> in the Partner Portal under <a href="/api">API</a>. The full key is shown <strong>once</strong>.</p>
+      <p>Send the key on every request:</p>
+      <ul>
+        <li><code>Authorization: Bearer eazpire_mfg_…</code></li>
+        <li>or <code>X-Eazpire-Partner-Key: eazpire_mfg_…</code></li>
+      </ul>
+      <p class="muted">Portal browser sessions use a cookie instead and have full access (<code>*</code>). Keys are scoped to one manufacturer and never store the raw secret after creation.</p>
+    </section>
+
+    <section class="docs-section" id="scopes">
+      <h2>Scopes</h2>
+      <p>When creating a key you can pick scopes, or leave defaults (all listed scopes). Use <code>*</code> for full API access.</p>
+      <table class="docs-table">
+        <thead>
+          <tr><th>Scope</th><th>Allows</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>overview:read</code></td><td>Dashboard / overview stats</td></tr>
+          <tr><td><code>company:read</code></td><td>Read company profile</td></tr>
+          <tr><td><code>company:write</code></td><td>Update company profile</td></tr>
+          <tr><td><code>products:read</code></td><td>List / get products</td></tr>
+          <tr><td><code>products:write</code></td><td>Create / update products and submit for review</td></tr>
+          <tr><td><code>*</code></td><td>All scopes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="docs-section" id="endpoints">
+      <h2>Endpoints</h2>
+      <p class="muted">Base URL: <code>https://partner.eazpire.com</code>. Prefer versioned paths; <code>?op=</code> aliases still work.</p>
+
+      <h3>Overview &amp; company</h3>
+      <table class="docs-table">
+        <thead><tr><th>Method / path</th><th>Scope</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="method">GET</span> <code>/api/v1/overview</code></td>
+            <td><code>overview:read</code></td>
+            <td>Dashboard counts and status</td>
+          </tr>
+          <tr>
+            <td><span class="method">GET</span> <code>/api/v1/company</code></td>
+            <td><code>company:read</code></td>
+            <td>Manufacturer profile + certification progress</td>
+          </tr>
+          <tr>
+            <td><span class="method">POST</span> <code>/api/v1/company</code></td>
+            <td><code>company:write</code></td>
+            <td>Update company fields (same body as portal company form)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Products</h3>
+      <table class="docs-table">
+        <thead><tr><th>Method / path</th><th>Scope</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="method">GET</span> <code>/api/v1/products</code></td>
+            <td><code>products:read</code></td>
+            <td>Optional <code>?status=draft|in_review|approved|…</code></td>
+          </tr>
+          <tr>
+            <td><span class="method">POST</span> <code>/api/v1/products</code></td>
+            <td><code>products:write</code></td>
+            <td>Create draft. Body: <code>{ title }</code> required; optional <code>description</code>, <code>category</code>, <code>currency</code>, <code>base_cost_cents</code>, …</td>
+          </tr>
+          <tr>
+            <td><span class="method">GET</span> <code>/api/v1/products/{id}</code></td>
+            <td><code>products:read</code></td>
+            <td>Product + variants + print areas</td>
+          </tr>
+          <tr>
+            <td><span class="method">POST</span> <code>/api/v1/products/{id}</code></td>
+            <td><code>products:write</code></td>
+            <td>Update product metadata</td>
+          </tr>
+          <tr>
+            <td><span class="method">POST</span> <code>/api/v1/products/{id}/submit-review</code></td>
+            <td><code>products:write</code></td>
+            <td>Submit for Eazpire review (requires valid print areas)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Coming soon</h3>
+      <p>Orders &amp; tracking API <span class="badge-soon">soon</span> — accept/reject/status/tracking will follow the Manufacturer Order API design.</p>
+      <p>Webhooks <span class="badge-soon">soon</span> — outbound events for new orders and status changes.</p>
+      <p class="muted">Full product editor tabs (variants, mockups, print-area geometry) remain in the Partner Portal UI for now. API key CRUD requires a portal session (owner/admin).</p>
+    </section>
+
+    <section class="docs-section" id="errors">
+      <h2>Errors</h2>
+      <table class="docs-table">
+        <thead><tr><th>Code</th><th>HTTP</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>partner_auth_required</code></td><td>401</td><td>Missing/invalid key or session</td></tr>
+          <tr><td><code>insufficient_scope</code></td><td>403</td><td>Key lacks required scope (<code>required</code> field)</td></tr>
+          <tr><td><code>api_key_op_not_allowed</code></td><td>403</td><td>Op needs portal session (not exposed to API keys)</td></tr>
+          <tr><td><code>manufacturer_inactive</code></td><td>403</td><td>Manufacturer suspended or inactive</td></tr>
+          <tr><td><code>title_required</code></td><td>400</td><td>Product create without title</td></tr>
+          <tr><td><code>not_found</code></td><td>404</td><td>Unknown product</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="docs-section" id="examples">
+      <h2>Examples</h2>
+      <h3>List products</h3>
+      <pre class="docs-code">curl -sS "https://partner.eazpire.com/api/v1/products" \
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY"</pre>
+
+      <h3>Create a product</h3>
+      <pre class="docs-code">curl -sS -X POST "https://partner.eazpire.com/api/v1/products" \
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Classic Hoodie","category":"apparel","currency":"EUR","base_cost_cents":1200}'</pre>
+
+      <h3>Update a product</h3>
+      <pre class="docs-code">curl -sS -X POST "https://partner.eazpire.com/api/v1/products/mprod_…" \
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Classic Hoodie v2","description":"Soft midweight fleece"}'</pre>
+
+      <h3>Submit for review</h3>
+      <pre class="docs-code">curl -sS -X POST "https://partner.eazpire.com/api/v1/products/mprod_…/submit-review" \
+  -H "Authorization: Bearer eazpire_mfg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'</pre>
+    </section>
+
+    <p class="docs-footer">
+      Engineering reference: <code>docs/strategy/EAZPIRE_MANUFACTURER_NETWORK.md</code> §16 (orders) + IDEA-010.
+      · <a href="/">Back to Partner Portal</a>
+    </p>
+  </div>
+</body>
+</html>
