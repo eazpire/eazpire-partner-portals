@@ -16,6 +16,13 @@ export const ADMIN_APPS = [
     iconSvg:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3c-1.5 2.4-3.6 4.1-6 5.2V11c0 5 3.8 9.4 9 10.8 5.2-1.4 9-5.8 9-10.8V8.2C17.6 7.1 15.5 5.4 14 3c-1.2 1.9-3 3.3-5 4.1 2 .8 3.8 2.2 5 4.1 1.2-1.9 3-3.3 5-4.1-2-.8-3.8-2.2-5-4.1Z"/></svg>',
   },
+  {
+    id: "brands",
+    label: "Brands",
+    route: "/brands",
+    iconSvg:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 19V5h4.4c2.6 0 4.2 1.3 4.2 3.4 0 1.3-.7 2.3-1.8 2.8 1.4.5 2.3 1.7 2.3 3.3 0 2.3-1.8 3.5-4.6 3.5H4Zm2.4-2h2.2c1.5 0 2.3-.7 2.3-1.8s-.8-1.7-2.3-1.7H6.4V17Zm0-5.3h2c1.3 0 2.1-.6 2.1-1.6s-.8-1.5-2.1-1.5h-2v3.1ZM14.2 19l3.7-13h2.6l3.7 13h-2.5l-.8-2.7h-3.5L16.7 19h-2.5Zm3.5-4.7h2.6l-1.3-4.7-1.3 4.7Z"/></svg>',
+  },
 ];
 
 const DOTS_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" class="app-drawer-dots__svg">
