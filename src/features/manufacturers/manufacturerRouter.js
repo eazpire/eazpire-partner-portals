@@ -265,6 +265,11 @@ const ADMIN_OPS = new Set([
   "admin-creations-todify-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
+  "admin-brand-list",
+  "admin-brand-get",
+  "admin-brand-suspend",
+  "admin-brand-activate",
+  "admin-brand-force-unpublish",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1293,6 +1298,27 @@ export async function handleManufacturerRouter(request, env) {
         "./adminCreationsShopifyProductDetail.js"
       );
       return handleAdminCreationsShopifyProductDetail(request, env);
+    }
+
+    if (op === "admin-brand-list" && request.method === "GET") {
+      const { handleAdminBrandList } = await import("../brands/adminBrandOps.js");
+      return handleAdminBrandList(request, env);
+    }
+    if (op === "admin-brand-get" && request.method === "GET") {
+      const { handleAdminBrandGet } = await import("../brands/adminBrandOps.js");
+      return handleAdminBrandGet(request, env);
+    }
+    if (op === "admin-brand-suspend" && request.method === "POST") {
+      const { handleAdminBrandSuspend } = await import("../brands/adminBrandOps.js");
+      return handleAdminBrandSuspend(request, env, admin);
+    }
+    if (op === "admin-brand-activate" && request.method === "POST") {
+      const { handleAdminBrandActivate } = await import("../brands/adminBrandOps.js");
+      return handleAdminBrandActivate(request, env);
+    }
+    if (op === "admin-brand-force-unpublish" && request.method === "POST") {
+      const { handleAdminBrandForceUnpublish } = await import("../brands/adminBrandOps.js");
+      return handleAdminBrandForceUnpublish(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

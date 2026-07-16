@@ -1,5 +1,5 @@
 /**
- * Serve partner / admin-partner SPAs from inline bundle (fast) or PARTNER_ASSETS.
+ * Serve partner / admin-partner / admin-creations / admin-brands SPAs from inline bundle (fast) or PARTNER_ASSETS.
  */
 
 import { getPartnerStaticFallback } from "./partnerStaticFallback.js";
@@ -22,6 +22,13 @@ function isAdminCreationsHost(hostname, pathname) {
   return (
     (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
     (pathname === "/creations" || pathname.startsWith("/creations/"))
+  );
+}
+
+function isAdminBrandsHost(hostname, pathname) {
+  return (
+    (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
+    (pathname === "/brands" || pathname.startsWith("/brands/"))
   );
 }
 
@@ -61,6 +68,13 @@ function resolveAssetKey(hostname, pathname) {
     if (sub === "/" || !sub.includes(".")) return "admin-creations/index.html";
     return `admin-creations${sub}`;
   }
+  if (isAdminBrandsHost(hostname, pathname)) {
+    const sub = pathname.replace(/^\/brands\/?/, "/") || "/";
+    if (sub.startsWith("/shared/")) return `shared${sub.slice("/shared".length)}`;
+    if (sub.startsWith("/js/")) return `admin-brands${sub}`;
+    if (sub === "/" || !sub.includes(".")) return "admin-brands/index.html";
+    return `admin-brands${sub}`;
+  }
   return null;
 }
 
@@ -86,6 +100,7 @@ export function isPartnerPortalHost(hostname, pathname) {
     isPartnerHost(hostname) ||
     isAdminPartnerHost(hostname, pathname) ||
     isAdminCreationsHost(hostname, pathname) ||
+    isAdminBrandsHost(hostname, pathname) ||
     isAdminRootHost(hostname, pathname)
   );
 }
@@ -115,7 +130,11 @@ export async function handlePartnerPortalRequest(request, env) {
     return handleAdminAuthVerify(request, env);
   }
 
-  // Future: more admin sections at admin.eazpire.com/other — add routes here.
+  if (isAdminBrandsHost(url.hostname, url.pathname) && url.pathname === "/brands/auth/verify") {
+    const { handleAdminAuthVerify } = await import("./adminPartnerAuth.js");
+    return handleAdminAuthVerify(request, env);
+  }
+
   if (isAdminRootHost(url.hostname, url.pathname)) {
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -137,6 +156,7 @@ export async function handlePartnerPortalRequest(request, env) {
     <p>Worker-hosted admin console. More sections will appear here over time.</p>
     <p><a href="/partner">Partner Ops →</a></p>
     <p><a href="/creations">Creations Admin →</a></p>
+    <p><a href="/brands">Brands Admin →</a></p>
   </div>
 </body>
 </html>`;

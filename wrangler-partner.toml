@@ -69,10 +69,17 @@ binding = "CUSTOMER_DB"
 database_name = "customer-db"
 database_id = "b82071cb-35fb-4efc-8167-ae7e0be52219"
 
+# Brand Portal entities (Admin Brands at /brands — no connection secrets exposed)
+[[d1_databases]]
+binding = "BRAND_DB"
+database_name = "brand-db"
+database_id = "43852317-b5a2-442c-b323-b63b0e5d5e00"
+migrations_dir = "migrations-brand"
+
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
-run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*"]
+run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*"]
 
 [[r2_buckets]]
 binding = "R2"
