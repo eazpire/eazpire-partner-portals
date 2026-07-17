@@ -5,6 +5,7 @@ import { snapshotMetaTab } from "./tabs/meta.js";
 import { snapshotMockupsTab } from "./tabs/mockups.js";
 import { snapshotVariantsTab } from "./tabs/variants.js";
 import { snapshotAutomationsTab } from "./tabs/automations.js";
+import { snapshotCreatorSettingsTab } from "./tabs/creator-settings.js";
 import { snapshotVisibilityState } from "./editor-visibility.js";
 
 function withVisibility(ctx, base) {
@@ -40,6 +41,8 @@ export function snapshotActiveTab(ctx) {
       return withVisibility(ctx, snapshotVariantsTab());
     case "automations":
       return withVisibility(ctx, snapshotAutomationsTab());
+    case "creator_settings":
+      return withVisibility(ctx, snapshotCreatorSettingsTab(ctx));
     default:
       return withVisibility(ctx, null);
   }

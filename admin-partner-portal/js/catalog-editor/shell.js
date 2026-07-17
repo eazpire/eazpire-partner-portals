@@ -13,6 +13,11 @@ import { loadVariantsTab, saveVariantsTab, bindVariantsTab } from "./tabs/varian
 import { loadPrintAreaTab, bindPrintAreaTab, savePrintAreaTab } from "./tabs/print-area.js";
 import { loadProductsTab, bindProductsTab, saveProductsTab } from "./tabs/products.js";
 import { renderAutomationsTab, bindAutomationsTab, saveAutomationsTab } from "./tabs/automations.js";
+import {
+  loadCreatorSettingsTab,
+  bindCreatorSettingsTab,
+  saveCreatorSettingsTab,
+} from "./tabs/creator-settings.js";
 import { loadPartnerReviewBundle, renderReviewTab, bindReviewTab } from "./tabs/review.js";
 import {
   registerDirtyListener,
@@ -62,6 +67,7 @@ const CORE_TABS = [
   { id: "print_area", label: "Print Area", icon: "⬚", needsProvider: true },
   { id: "meta_data", label: "Meta", icon: "◎", needsProvider: false },
   { id: "products", label: "Products", icon: "▤", needsProvider: false },
+  { id: "creator_settings", label: "Creator Settings", icon: "★", needsProvider: false },
   { id: "automations", label: "Automations", icon: "⚙", needsProvider: true },
 ];
 
@@ -436,6 +442,9 @@ async function loadActiveTab(ctx) {
       case "products":
         html = await loadProductsTab(ctx);
         break;
+      case "creator_settings":
+        html = await loadCreatorSettingsTab(ctx);
+        break;
       case "automations":
         html = renderAutomationsTab(ctx);
         break;
@@ -457,6 +466,7 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "automations") bindAutomationsTab(ctx, body);
     if (ctx.activeTab === "mockups") bindMockupsTab(ctx, body);
     if (ctx.activeTab === "variants") bindVariantsTab(ctx, body);
+    if (ctx.activeTab === "creator_settings") bindCreatorSettingsTab(ctx, body);
     captureTabDirtySnapshot(ctx);
     captureVisibilityBaseline(ctx);
     refreshVisibilityTriSwitch(ctx);
@@ -562,6 +572,9 @@ async function saveCurrentTab() {
         break;
       case "products":
         await saveProductsTab(ctx);
+        break;
+      case "creator_settings":
+        await saveCreatorSettingsTab(ctx);
         break;
       case "automations":
         await saveAutomationsTab(ctx);

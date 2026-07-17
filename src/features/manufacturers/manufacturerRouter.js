@@ -249,6 +249,9 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-catalog-mirror-status-v2",
   "admin-eazpire-product-editor-bundle",
   "admin-eazpire-product-meta-save",
+  "admin-eazpire-creator-settings-get",
+  "admin-eazpire-creator-settings-save",
+  "admin-eazpire-creator-settings-image-upload",
   "admin-eazpire-product-providers-bundle",
   "admin-eazpire-product-providers-save",
   "admin-eazpire-provider-catalog-detail",
@@ -910,6 +913,27 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const body = await request.json().catch(() => ({}));
       const result = await editor.saveProductMeta(env, body.product_key, body);
       if (!result.ok) return json(result, 404, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-creator-settings-get" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const { getProductCreatorSettings } = await import("../creatorJourney/productCreatorSettings.js");
+      const result = await getProductCreatorSettings(env, productKey);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-creator-settings-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { saveProductCreatorSettings } = await import("../creatorJourney/productCreatorSettings.js");
+      const result = await saveProductCreatorSettings(env, body.product_key, body);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-creator-settings-image-upload" && request.method === "POST") {
+      const productKey = url.searchParams.get("product_key");
+      const { uploadProductCreatorPreviewImage } = await import("../creatorJourney/productCreatorSettings.js");
+      const result = await uploadProductCreatorPreviewImage(env, request, productKey);
+      if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-product-providers-bundle" && request.method === "GET") {

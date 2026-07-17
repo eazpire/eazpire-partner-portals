@@ -22,6 +22,17 @@ export async function saveMeta(productKey, body) {
   });
 }
 
+export async function fetchCreatorSettings(productKey) {
+  return partnerFetch("admin-eazpire-creator-settings-get", { query: { product_key: productKey } });
+}
+
+export async function saveCreatorSettings(productKey, body) {
+  return partnerFetch("admin-eazpire-creator-settings-save", {
+    method: "POST",
+    body: { product_key: productKey, ...body },
+  });
+}
+
 export async function fetchProvidersBundle(productKey) {
   return partnerFetch("admin-eazpire-product-providers-bundle", { query: { product_key: productKey } });
 }
