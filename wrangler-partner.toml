@@ -76,10 +76,16 @@ database_name = "brand-db"
 database_id = "43852317-b5a2-442c-b323-b63b0e5d5e00"
 migrations_dir = "migrations-brand"
 
+# Search / hero analytics for Audience admin (Plan · Reality · Gaps)
+[[d1_databases]]
+binding = "ANALYTICS_DB"
+database_name = "analytics-db"
+database_id = "0e1f5a29-8d34-45ae-a9eb-f98a6ba7f0fd"
+
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
-run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*"]
+run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*"]
 
 [[r2_buckets]]
 binding = "R2"

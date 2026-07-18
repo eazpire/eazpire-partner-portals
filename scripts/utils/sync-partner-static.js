@@ -16,6 +16,7 @@ const COPY_MAP = [
   { from: "admin-partner-portal", to: "admin-partner" },
   { from: "admin-creations-portal", to: "admin-creations" },
   { from: "admin-brands-portal", to: "admin-brands" },
+  { from: "admin-audience-portal", to: "admin-audience" },
 ];
 
 function rmrf(dir) {

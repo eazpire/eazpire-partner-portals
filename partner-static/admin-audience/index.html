@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en" data-portal="admin">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Eazpire Audience Admin</title>
+  <link rel="icon" href="/audience/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700;750;800;850&display=swap" rel="stylesheet" />
+  <style>[hidden]{display:none!important}.modal-backdrop:not(.show){display:none!important}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--panel, #171a21);border:1px solid var(--border,#2a3140);border-radius:12px;padding:14px}
+  .kpi__label{font-size:.75rem;color:var(--muted,#b8c0d0);text-transform:uppercase;letter-spacing:.04em}
+  .kpi__value{font-size:1.4rem;font-weight:700;margin-top:4px}
+  .chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(91,140,255,.15);color:#9db7ff;font-size:.8rem;margin:2px}
+  .gap-match{color:#34d399}.gap-weak{color:#fbbf24}.gap-mismatch{color:#f87171}
+  .filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  </style>
+  <link rel="stylesheet" href="/audience/shared/css/partner-ui.css" />
+</head>
+<body>
+  <div id="app-shell" class="app-root" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="sidebar-content">
+          <div class="brand-block">
+            <button type="button" class="app-drawer-trigger" id="app-drawer-trigger" aria-label="Eazpire apps" aria-expanded="false" aria-controls="app-drawer"></button>
+            <div>
+              <div class="brand-name">Eazpire Audience</div>
+              <div class="brand-sub">Plan · Reality · Gaps</div>
+            </div>
+          </div>
+          <div id="app-drawer" class="app-drawer" hidden></div>
+          <nav id="partner-nav"></nav>
+          <div class="sidebar-card">
+            <h4>Audience Ops</h4>
+            <p>Plan design-theme priors by segment, compare with real search demand, and review cultural event windows.</p>
+          </div>
+        </div>
+        <button type="button" class="sidebar-rail" id="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <span class="sidebar-rail__arrow-zone" aria-hidden="true"><span class="sidebar-rail__arrow">‹</span></span>
+          <span class="sidebar-rail__labels">
+            <span class="sidebar-rail__section">Menu</span>
+            <span class="sidebar-rail__action">Collapse</span>
+          </span>
+        </button>
+      </div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <header class="topbar">
+      <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
+      <div class="topbar-start">
+        <h1 class="page-title" id="page-title">Audience</h1>
+      </div>
+      <div class="topbar-actions">
+        <div id="topbar-extra"></div>
+        <button type="button" class="btn btn-secondary" id="btn-logout">Sign out</button>
+      </div>
+    </header>
+    <main class="main">
+      <section class="view active layout-stage" data-route="/audience" id="view-overview"></section>
+      <section class="view layout-stage" data-route="/audience/plan" id="view-plan"></section>
+      <section class="view layout-stage" data-route="/audience/reality" id="view-reality"></section>
+      <section class="view layout-stage" data-route="/audience/gaps" id="view-gaps"></section>
+    </main>
+  </div>
+
+  <div id="app-login" class="partner-screen" hidden>
+    <div class="login-card admin-login-card" id="login-panel">
+      <div class="brand-block login-brand">
+        <button type="button" class="app-drawer-trigger app-drawer-trigger--static" disabled aria-hidden="true"></button>
+        <div>
+          <div class="brand-name" style="color:var(--text)">Eazpire Audience</div>
+          <div class="brand-sub" style="color:var(--muted)">Admin Ops</div>
+        </div>
+      </div>
+      <h1>Sign in to Audience Admin</h1>
+      <p>Enter your authorized admin email. We will send a secure magic link — no Shopify login required.</p>
+      <form id="login-form">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input class="input" id="login-email" type="email" required autocomplete="email" placeholder="you@eazpire.com" />
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Send magic link</button>
+      </form>
+      <p id="login-message" class="login-message"></p>
+      <p class="muted" style="margin-top:12px;font-size:0.85rem">First-time magic links open Partner Ops; then use the app drawer → Audience. Existing sessions work immediately.</p>
+    </div>
+  </div>
+
+  <div id="app-loading" class="partner-screen" hidden>
+    <div class="login-card admin-login-card">
+      <h1>Audience Admin</h1>
+      <p>Checking admin session…</p>
+    </div>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3 id="modal-title">Modal</h3>
+        <button type="button" class="icon-btn" id="modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+  <div id="partner-toast" class="toast"><strong></strong><span></span></div>
+  <script>window.__PARTNER_API_BASE__ = window.location.origin + "/audience";</script>
+  <script type="module" src="/audience/js/app.js"></script>
+</body>
+</html>

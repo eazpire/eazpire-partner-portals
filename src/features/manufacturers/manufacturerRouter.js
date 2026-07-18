@@ -315,6 +315,13 @@ const ADMIN_OPS = new Set([
   "admin-brand-suspend",
   "admin-brand-activate",
   "admin-brand-force-unpublish",
+  "audience-overview",
+  "audience-reality",
+  "audience-plan-get",
+  "audience-plan-save",
+  "audience-events-list",
+  "audience-events-save",
+  "audience-gap",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1407,6 +1414,35 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-brand-force-unpublish" && request.method === "POST") {
       const { handleAdminBrandForceUnpublish } = await import("../brands/adminBrandOps.js");
       return handleAdminBrandForceUnpublish(request, env);
+    }
+
+    if (op === "audience-overview" && request.method === "GET") {
+      const { handleAudienceOverview } = await import("../audience/audienceAdminOps.js");
+      return handleAudienceOverview(request, env);
+    }
+    if (op === "audience-reality" && request.method === "GET") {
+      const { handleAudienceReality } = await import("../audience/audienceAdminOps.js");
+      return handleAudienceReality(request, env);
+    }
+    if (op === "audience-plan-get" && request.method === "GET") {
+      const { handleAudiencePlanGet } = await import("../audience/audienceAdminOps.js");
+      return handleAudiencePlanGet(request, env);
+    }
+    if (op === "audience-plan-save" && request.method === "POST") {
+      const { handleAudiencePlanSave } = await import("../audience/audienceAdminOps.js");
+      return handleAudiencePlanSave(request, env, admin);
+    }
+    if (op === "audience-events-list" && request.method === "GET") {
+      const { handleAudienceEventsList } = await import("../audience/audienceAdminOps.js");
+      return handleAudienceEventsList(request, env);
+    }
+    if (op === "audience-events-save" && request.method === "POST") {
+      const { handleAudienceEventsSave } = await import("../audience/audienceAdminOps.js");
+      return handleAudienceEventsSave(request, env);
+    }
+    if (op === "audience-gap" && request.method === "GET") {
+      const { handleAudienceGap } = await import("../audience/audienceAdminOps.js");
+      return handleAudienceGap(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

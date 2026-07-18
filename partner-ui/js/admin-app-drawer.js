@@ -23,6 +23,13 @@ export const ADMIN_APPS = [
     iconSvg:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 19V5h4.4c2.6 0 4.2 1.3 4.2 3.4 0 1.3-.7 2.3-1.8 2.8 1.4.5 2.3 1.7 2.3 3.3 0 2.3-1.8 3.5-4.6 3.5H4Zm2.4-2h2.2c1.5 0 2.3-.7 2.3-1.8s-.8-1.7-2.3-1.7H6.4V17Zm0-5.3h2c1.3 0 2.1-.6 2.1-1.6s-.8-1.5-2.1-1.5h-2v3.1ZM14.2 19l3.7-13h2.6l3.7 13h-2.5l-.8-2.7h-3.5L16.7 19h-2.5Zm3.5-4.7h2.6l-1.3-4.7-1.3 4.7Z"/></svg>',
   },
+  {
+    id: "audience",
+    label: "Audience",
+    route: "/audience",
+    iconSvg:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM9 13c-2.7 0-8 1.3-8 4v2h10v-2c0-1.2.5-2.2 1.3-3-.1 0-.2 0-.3 0Zm6 0c-.4 0-.8 0-1.2.1 1.1.8 1.8 2 1.8 3.4v1.5H22v-1.5c0-2.7-5.3-4-8-4Z"/></svg>',
+  },
 ];
 
 const DOTS_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" class="app-drawer-dots__svg">
