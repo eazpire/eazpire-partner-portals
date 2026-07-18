@@ -266,6 +266,8 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-template-save",
   "admin-eazpire-mockups-bundle",
   "admin-eazpire-mockups-save",
+  "admin-eazpire-mockup-image-upload",
+  "admin-eazpire-mockup-image-delete",
   "admin-eazpire-automations-save",
   "admin-eazpire-published-bundle",
   "admin-eazpire-published-update",
@@ -1039,6 +1041,23 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-eazpire-mockups-save" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const result = await editor.saveMockups(env, body.product_key, body);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-mockup-image-upload" && request.method === "POST") {
+      const { uploadCatalogMockupImage } = await import("./partnerCatalog/uploadCatalogMockupImage.js");
+      const result = await uploadCatalogMockupImage(env, request);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-mockup-image-delete" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { deleteCatalogMockupImage } = await import("./partnerCatalog/uploadCatalogMockupImage.js");
+      const result = await deleteCatalogMockupImage(env, {
+        productKey: body.product_key,
+        imageId: body.id || body.image_id,
+        mockupSet: body.mockup_set,
+      });
+      if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-automations-save" && request.method === "POST") {

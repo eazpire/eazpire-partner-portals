@@ -130,6 +130,28 @@ export async function saveMockups(productKey, body) {
   });
 }
 
+export async function uploadMockupImage(productKey, file, { mockupSet, printProviderId, viewKey, colorName } = {}) {
+  const { partnerUpload } = await import("/partner/shared/js/partner-api.js");
+  const formFields = {
+    product_key: productKey,
+    mockup_set: mockupSet || "shop_preview",
+  };
+  if (printProviderId != null) formFields.print_provider_id = String(printProviderId);
+  if (viewKey) formFields.view_key = viewKey;
+  if (colorName) formFields.color_name = colorName;
+  return partnerUpload("admin-eazpire-mockup-image-upload", file, {
+    query: { product_key: productKey },
+    formFields,
+  });
+}
+
+export async function deleteMockupImage(productKey, imageId, mockupSet) {
+  return partnerFetch("admin-eazpire-mockup-image-delete", {
+    method: "POST",
+    body: { product_key: productKey, id: imageId, mockup_set: mockupSet },
+  });
+}
+
 export async function saveAutomations(versionId, body) {
   return partnerFetch("admin-eazpire-automations-save", {
     method: "POST",

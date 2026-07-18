@@ -1,7 +1,8 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
-import { fetchMockupsBundle, saveMockups } from "../api.js";
+import { fetchMockupsBundle, saveMockups, uploadMockupImage, deleteMockupImage } from "../api.js";
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
+import { showToast } from "/partner/shared/js/partner-shell.js";
 
 export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
@@ -28,10 +29,11 @@ const SECTION_META = {
   [MOCKUP_SET_SHOP_PREVIEW]: {
     id: "shop_preview",
     title: "Shop Preview Mockups",
-    hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Sync via Templates or partner portal.",
-    emptyHint: "No shop preview mockups yet.",
+    hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Upload here, or sync via Templates.",
+    emptyHint: "No shop preview mockups yet. Upload images below (shop cards use these first; Preview Images are the fallback).",
     showPrintAreaToggle: false,
     showPreviewToggle: true,
+    allowUpload: true,
     internal: false,
   },
   [MOCKUP_SET_CALIBRATION]: {
@@ -46,10 +48,11 @@ const SECTION_META = {
   [MOCKUP_SET_PREVIEW_IMAGES]: {
     id: "preview_images",
     title: "Preview Images",
-    hint: "Lifestyle / gallery images from the partner portal (Catalog Studio thumbnails). Not Printify-synced.",
-    emptyHint: "No preview images yet. Partners upload these in the Product Editor → Mockups → Preview Images.",
+    hint: "Lifestyle / gallery images (Catalog Studio + Skill Tree cards). Also used as shop-card fallback when Shop Preview is empty.",
+    emptyHint: "No preview images yet. Upload below or via the partner portal.",
     showPrintAreaToggle: false,
     showPreviewToggle: false,
+    allowUpload: true,
     internal: false,
   },
 };
@@ -98,17 +101,24 @@ function formatViewLabel(viewKey) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle) {
+function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle, allowDelete) {
   const viewEsc = escapeHtml(viewKey);
   const isPreviewView = showPreviewToggle && slides.some((s) => String(s.id) === String(previewId));
   const slideHtml = slides
     .map((img) => {
       const isPreview = showPreviewToggle && String(img.id) === String(previewId);
+      const delBtn =
+        allowDelete && img.id
+          ? `<button type="button" class="ce-mock-slide-remove" data-mock-delete="${escapeHtml(String(img.id))}" data-mock-set="${escapeHtml(mockupSet)}" aria-label="Remove image">×</button>`
+          : "";
       return `
-        <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)} — click to enlarge" aria-label="View mockup ${escapeHtml(img.color_name || viewKey)}">
-          <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
-          <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
-        </button>`;
+        <div class="ce-mock-carousel__slide-wrap">
+          <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)} — click to enlarge" aria-label="View mockup ${escapeHtml(img.color_name || viewKey)}">
+            <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
+            <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
+          </button>
+          ${delBtn}
+        </div>`;
     })
     .join("");
 
@@ -154,11 +164,12 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
     mockupSet === MOCKUP_SET_SHOP_PREVIEW ? ui.shop_preview_mock_id : ui.preview_mock_id;
   const previewRow = (images || []).find((img) => Number(img.is_default) === 1);
   const previewId = savedPreviewId || previewRow?.id || null;
+  const allowUpload = !!meta.allowUpload;
   const grouped = groupImagesByView(images);
   const carousels = grouped.length
     ? grouped
         .map(([viewKey, slides]) =>
-          renderCarousel(mockupSet, viewKey, slides, previewId, meta.showPreviewToggle !== false)
+          renderCarousel(mockupSet, viewKey, slides, previewId, meta.showPreviewToggle !== false, allowUpload)
         )
         .join("")
     : `<p class="ce-hint">${escapeHtml(meta.emptyHint)}</p>`;
@@ -166,6 +177,14 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
   const printAreaField = meta.showPrintAreaToggle
     ? `<div class="field ce-mock-print-area-field">
         <label><input type="checkbox" id="ce-mock-use-mocks" ${ui.print_area_edit_use_mocks ? "checked" : ""} /> Print area edit uses mockups</label>
+      </div>`
+    : "";
+
+  const uploadBar = allowUpload
+    ? `<div class="ce-mock-upload-bar">
+        <button type="button" class="btn btn-secondary" id="ce-mock-upload-btn">Upload images</button>
+        <input type="file" id="ce-mock-upload-file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+        <span class="ce-hint">PNG / JPEG / WebP · added to this set</span>
       </div>`
     : "";
 
@@ -181,6 +200,7 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
       </div>
       <p class="ce-hint">${escapeHtml(meta.hint)}</p>
       ${printAreaField}
+      ${uploadBar}
       <div class="ce-mock-views">${carousels}</div>
     </section>`;
 }
@@ -282,7 +302,7 @@ function bindMockupSetCarousels(ctx, mockupSet) {
     const viewKey = carousel.dataset.view;
     const slides = [...carousel.querySelectorAll(".ce-mock-carousel__slide")];
 
-    slides.forEach((slide, index) => {
+    slides.forEach((slide) => {
       slide.addEventListener("click", () => {
         setActiveSlide(carousel, slide);
         const toggle = document.querySelector(
@@ -292,6 +312,7 @@ function bindMockupSetCarousels(ctx, mockupSet) {
           syncPreviewHiddenInput(mockupSet, viewKey, slide.getAttribute("data-id") || "");
           syncMockupsUiFromDom(ctx);
         }
+        const index = slides.indexOf(slide);
         openMockViewer(collectCarouselViewerItems(carousel), index);
       });
     });
@@ -354,10 +375,76 @@ export function switchMockSection(ctx, mockupSet) {
   updateMockSectionSubnav(ctx);
 }
 
+async function reloadMockupsPanel(ctx) {
+  const data = await fetchMockupsBundle(ctx.productKey, ctx.selectedPrintProviderId);
+  ctx.mockupsData = data;
+  const ui = ensureMockupsUiState(ctx);
+  const cleanDefault = (data.images || []).find((img) => Number(img.is_default) === 1);
+  const shopDefault = (data.shop_preview_images || []).find((img) => Number(img.is_default) === 1);
+  ui.preview_mock_id = cleanDefault?.id || null;
+  ui.shop_preview_mock_id = shopDefault?.id || null;
+  const body = document.getElementById("ce-body");
+  if (!body) return;
+  body.innerHTML = renderMockupsTabHtml(ctx, data);
+  bindMockupsTab(ctx, body);
+  updateMockSectionSubnav(ctx);
+}
+
+function bindMockupUpload(ctx, root) {
+  const mockupSet = resolveActiveMockSection(ctx);
+  const meta = SECTION_META[mockupSet];
+  if (!meta?.allowUpload) return;
+  const btn = root.querySelector("#ce-mock-upload-btn");
+  const input = root.querySelector("#ce-mock-upload-file");
+  if (!btn || !input) return;
+  btn.onclick = () => input.click();
+  input.onchange = async () => {
+    const files = [...(input.files || [])];
+    input.value = "";
+    if (!files.length) return;
+    btn.disabled = true;
+    try {
+      for (const file of files) {
+        await uploadMockupImage(ctx.productKey, file, {
+          mockupSet,
+          printProviderId: ctx.selectedPrintProviderId || 0,
+          colorName: "Default",
+        });
+      }
+      showToast?.("Uploaded", `${files.length} image(s) added to ${meta.title}.`);
+      await reloadMockupsPanel(ctx);
+    } catch (err) {
+      console.error("[mockups] upload failed", err);
+      showToast?.("Upload failed", err?.message || "Could not upload image.");
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  root.querySelectorAll("[data-mock-delete]").forEach((el) => {
+    el.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = el.getAttribute("data-mock-delete");
+      const set = el.getAttribute("data-mock-set") || mockupSet;
+      if (!id) return;
+      try {
+        await deleteMockupImage(ctx.productKey, id, set);
+        showToast?.("Removed", "Mockup image deleted.");
+        await reloadMockupsPanel(ctx);
+      } catch (err) {
+        console.error("[mockups] delete failed", err);
+        showToast?.("Delete failed", err?.message || "Could not delete image.");
+      }
+    };
+  });
+}
+
 export function bindMockupsTab(ctx, root) {
   bindTabDirtyInputs(root || document, ctx);
   bindMockupSetCarousels(ctx, resolveActiveMockSection(ctx));
   bindMockSectionSubnav(ctx);
+  bindMockupUpload(ctx, root || document);
 }
 
 export async function saveMockupsTab(ctx) {

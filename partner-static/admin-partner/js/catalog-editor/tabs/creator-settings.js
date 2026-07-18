@@ -1,5 +1,5 @@
 /**
- * Catalog editor → Creator Settings (Skill Tree, preview images, level, EAZV costs).
+ * Catalog editor → Creator Settings (Skill Tree, preview images, print areas, metadata, EAZV).
  */
 import { escapeHtml, partnerUpload } from "/partner/shared/js/partner-api.js";
 import { fetchCreatorSettings, saveCreatorSettings } from "../api.js";
@@ -14,7 +14,11 @@ function ensureState(ctx) {
       cost_eaz: 180,
       preview_images: [],
       variant_costs: [],
+      print_areas: [],
+      skill_meta: { provider_brand: "", base_product_model: "", audience: [] },
       variantsOpen: true,
+      printAreasOpen: true,
+      metaOpen: true,
     };
   }
   return ctx.creatorSettingsState;
@@ -85,6 +89,49 @@ function variantCostsHtml(variants, open) {
     </details>`;
 }
 
+function printAreasHtml(areas, open) {
+  if (!areas?.length) {
+    return `<p class="ce-hint">No print areas found for this product yet (configure on Print Area / Templates).</p>`;
+  }
+  const rows = areas
+    .map((a) => {
+      const key = a.key || a.position;
+      const checked = a.enabled !== false ? " checked" : "";
+      return `<label class="ce-cs-print-row">
+        <input type="checkbox" class="ce-cs-print-check" data-print-area="${escapeHtml(key)}"${checked} />
+        <span>${escapeHtml(a.label || key)}</span>
+      </label>`;
+    })
+    .join("");
+  return `
+    <details class="ce-cs-print-areas" ${open ? "open" : ""}>
+      <summary class="ce-cs-print-areas__summary">Print Areas (${areas.length})</summary>
+      <p class="ce-hint">Enabled areas appear in the Creator Journey product skill info → Print Areas tab.</p>
+      <div class="ce-cs-print-areas__list">${rows}</div>
+    </details>`;
+}
+
+function skillMetaHtml(meta, open) {
+  const audienceStr = Array.isArray(meta?.audience) ? meta.audience.join(", ") : String(meta?.audience || "");
+  return `
+    <details class="ce-cs-skill-meta" ${open ? "open" : ""}>
+      <summary class="ce-cs-skill-meta__summary">Skill Info Metadata</summary>
+      <p class="ce-hint">Shown in the product skill info modal (Overview). Leave blank to use catalog/blueprint defaults.</p>
+      <div class="field">
+        <label for="ce-cs-meta-brand">Base product brand</label>
+        <input class="input" id="ce-cs-meta-brand" value="${escapeHtml(meta?.provider_brand || "")}" placeholder="e.g. Gildan" />
+      </div>
+      <div class="field">
+        <label for="ce-cs-meta-model">Base product model</label>
+        <input class="input" id="ce-cs-meta-model" value="${escapeHtml(meta?.base_product_model || "")}" placeholder="e.g. Softstyle" />
+      </div>
+      <div class="field">
+        <label for="ce-cs-meta-audience">Audience (comma-separated)</label>
+        <input class="input" id="ce-cs-meta-audience" value="${escapeHtml(audienceStr)}" placeholder="e.g. Men, Women, Unisex" />
+      </div>
+    </details>`;
+}
+
 export async function loadCreatorSettingsTab(ctx) {
   const state = ensureState(ctx);
   const data = await fetchCreatorSettings(ctx.productKey);
@@ -94,6 +141,8 @@ export async function loadCreatorSettingsTab(ctx) {
   state.cost_eaz = Number(data.cost_eaz) || 180;
   state.preview_images = (data.preview_images || []).map((p) => (typeof p === "string" ? p : p.url)).filter(Boolean);
   state.variant_costs = Array.isArray(data.variant_costs) ? data.variant_costs : [];
+  state.print_areas = Array.isArray(data.print_areas) ? data.print_areas : [];
+  state.skill_meta = data.skill_meta || { provider_brand: "", base_product_model: "", audience: [] };
 
   const softstyleLocked = !!data.skill_tree?.softstyle_locked_starter;
   const skill = data.skill_tree || {};
@@ -120,7 +169,7 @@ export async function loadCreatorSettingsTab(ctx) {
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Preview Image</h3>
-        <p class="ce-hint">Skill Tree card images. Upload placeholder stays first; defaults list current mockups.</p>
+        <p class="ce-hint">Skill Tree card image — first image wins. Defaults come from Admin Mockups → Preview Images.</p>
         ${previewGridHtml(state.preview_images)}
       </section>
 
@@ -145,6 +194,12 @@ export async function loadCreatorSettingsTab(ctx) {
         </div>
         ${variantCostsHtml(state.variant_costs, state.variantsOpen)}
       </section>
+
+      <section class="ce-meta-card">
+        <h3 class="ce-section-title">Print Areas & Metadata</h3>
+        ${printAreasHtml(state.print_areas, state.printAreasOpen)}
+        ${skillMetaHtml(state.skill_meta, state.metaOpen)}
+      </section>
     </div>`;
 }
 
@@ -160,18 +215,34 @@ export function snapshotCreatorSettingsTab(ctx) {
       cost_eaz: Number(input.value) || 0,
     });
   });
+  const printEnabled = [];
+  document.querySelectorAll(".ce-cs-print-check:checked").forEach((input) => {
+    const key = input.getAttribute("data-print-area");
+    if (key) printEnabled.push(key);
+  });
+  const brand = document.getElementById("ce-cs-meta-brand")?.value || "";
+  const model = document.getElementById("ce-cs-meta-model")?.value || "";
+  const audienceRaw = document.getElementById("ce-cs-meta-audience")?.value || "";
+  const audience = audienceRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     creator_level: levelEl?.value || state.creator_level || "starter",
     cost_eaz: Number(costEl?.value) || 0,
     preview_images: [...(state.preview_images || [])],
     variant_costs: variants,
+    print_areas_enabled: printEnabled,
+    skill_meta: {
+      provider_brand: brand,
+      base_product_model: model,
+      audience,
+    },
   };
 }
 
 async function refreshPreviewGrid(ctx, root) {
   const state = ensureState(ctx);
-  const gridHost = root.querySelector(".ce-cs-preview-grid")?.parentElement;
-  if (!gridHost) return;
   const sections = root.querySelectorAll(".ce-meta-card");
   const previewSection = [...sections].find((s) => s.querySelector(".ce-cs-preview-grid"));
   if (!previewSection) return;
@@ -181,7 +252,7 @@ async function refreshPreviewGrid(ctx, root) {
     (title ? title.outerHTML : '<h3 class="ce-section-title">Preview Image</h3>') +
     (hint
       ? hint.outerHTML
-      : '<p class="ce-hint">Skill Tree card images. Upload placeholder stays first; defaults list current mockups.</p>') +
+      : '<p class="ce-hint">Skill Tree card image — first image wins. Defaults come from Admin Mockups → Preview Images.</p>') +
     previewGridHtml(state.preview_images);
   bindPreviewControls(ctx, root);
   notifyActiveTabDirty(ctx);
@@ -245,6 +316,18 @@ export function bindCreatorSettingsTab(ctx, root) {
       state.variantsOpen = details.open;
     });
   }
+  const printDetails = root.querySelector(".ce-cs-print-areas");
+  if (printDetails) {
+    printDetails.addEventListener("toggle", () => {
+      state.printAreasOpen = printDetails.open;
+    });
+  }
+  const metaDetails = root.querySelector(".ce-cs-skill-meta");
+  if (metaDetails) {
+    metaDetails.addEventListener("toggle", () => {
+      state.metaOpen = metaDetails.open;
+    });
+  }
 }
 
 export async function saveCreatorSettingsTab(ctx) {
@@ -254,6 +337,8 @@ export async function saveCreatorSettingsTab(ctx) {
     cost_eaz: snap.cost_eaz,
     preview_images: snap.preview_images,
     variant_costs: snap.variant_costs,
+    print_areas_enabled: snap.print_areas_enabled,
+    skill_meta: snap.skill_meta,
   });
   ctx.creatorSettingsState = null;
 }
