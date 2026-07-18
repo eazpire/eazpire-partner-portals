@@ -108,11 +108,13 @@ function shipsFromHtml(shipsFrom, opts = {}) {
 
   const networkBlock = networkChips
     ? `<div class="ce-ship-network">
-        <h4 class="ce-ship-network__title">Network partners (optional)</h4>
-        <p class="ce-hint">Other Softstyle print providers on this blueprint. Click + to include as Ships from — not auto-selected for Printify Choice.</p>
+        <h4 class="ce-ship-network__title">Network partners (not yet in Ships from)</h4>
+        <p class="ce-hint">Click + to add. After Sync, partners are usually already included under Ships from.</p>
         <div class="ce-ship-from-grid">${networkChips}</div>
       </div>`
-    : "";
+    : network.length
+      ? `<p class="ce-hint">All known network partner countries are already included in Ships from.</p>`
+      : "";
 
   const addOptions = (worldCountryCatalog().allCodes || [])
     .map((code) => {
@@ -340,7 +342,7 @@ export async function loadShippingTab(ctx) {
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Destination rates (USD)</h3>
-        <p class="ce-hint">1st item = first product · Additional = each extra. Zones like <strong>ROW</strong> (Rest of the World) cover countries without a dedicated rate (e.g. Germany for Printify Choice). Use “Apply to continent” to copy values.</p>
+        <p class="ce-hint">1st item = first product · Additional = each extra. Sync expands <strong>ROW</strong> (Rest of the World) onto every country without a dedicated zone (US/CA/AU keep API prices). Use “Apply to continent” to overwrite a whole group.</p>
         ${continentRatesHtml(state.continents, state.openContinents)}
       </section>
     </div>`;
