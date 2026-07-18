@@ -1,5 +1,5 @@
 /**
- * Copy RESEND_API_KEY + JWT_APP_SECRET from creator-engine env to eazpire-partner-portals
+ * Copy shared secrets from creator-engine env to eazpire-partner-portals
  * via Cloudflare Workers Secrets API (values are not readable from wrangler CLI).
  *
  * POST /apps/creator-dispatch?op=internal-sync-partner-worker-secrets
@@ -7,7 +7,12 @@
  * Body: { account_id, cloudflare_api_token, script_name? }
  */
 
-const SECRET_NAMES = ["RESEND_API_KEY", "JWT_APP_SECRET", "SHOPIFY_ACCESS_TOKEN"];
+const SECRET_NAMES = [
+  "RESEND_API_KEY",
+  "JWT_APP_SECRET",
+  "SHOPIFY_ACCESS_TOKEN",
+  "REPLICATE_API_TOKEN",
+];
 const DEFAULT_SCRIPT = "eazpire-partner-portals";
 
 export async function handleSyncPartnerWorkerSecrets(request, env) {

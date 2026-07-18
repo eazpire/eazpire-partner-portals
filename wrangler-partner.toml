@@ -9,6 +9,9 @@
 #     node scripts/deployment/sync-partner-printify-secret.cjs)
 #   SHOPIFY_ACCESS_TOKEN (Creations admin Products → Shopify source; copy from creator-engine:
 #     node scripts/deployment/sync-shopify-access-token-to-workers.cjs --partner-only)
+#   REPLICATE_API_TOKEN (Catalog Editor → Generate Preview Image; copy from creator-engine:
+#     node scripts/deployment/sync-replicate-api-token-to-workers.cjs --partner-only
+#     or: npm run deploy:sync-replicate-secret)
 
 name = "eazpire-partner-portals"
 main = "src/partner-worker.js"
