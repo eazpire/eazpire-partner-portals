@@ -14,6 +14,7 @@ import {
   MOCKUP_SET_CALIBRATION,
   templatePrintifyColumnForMockupSet,
 } from "../../src/features/manufacturers/partnerCatalog/mockupSet.js";
+import { extractPrintifyMockupEntries } from "../../src/utils/printifyShopProductMocks.js";
 
 describe("mockupSet", () => {
   it("normalizeMockupSet recognizes calibration", () => {
@@ -26,6 +27,96 @@ describe("mockupSet", () => {
   it("templatePrintifyColumnForMockupSet maps calibration column", () => {
     expect(templatePrintifyColumnForMockupSet("calibration")).toBe("printify_calibration_mockups_product_id");
     expect(templatePrintifyColumnForMockupSet("clean")).toBe("printify_mockups_product_id");
+  });
+});
+
+describe("extractPrintifyMockupEntries label axis", () => {
+  it("apparel Color×Size collapses to one tile per color (not White / M)", () => {
+    const product = {
+      options: [
+        {
+          type: "color",
+          name: "Colors",
+          values: [
+            { id: 1, title: "White", colors: ["#ffffff"] },
+            { id: 2, title: "Black", colors: ["#000000"] },
+          ],
+        },
+        {
+          type: "size",
+          name: "Sizes",
+          values: [
+            { id: 10, title: "S" },
+            { id: 11, title: "M" },
+            { id: 12, title: "XL" },
+          ],
+        },
+      ],
+      variants: [
+        { id: 101, title: "White / S", options: [1, 10] },
+        { id: 102, title: "White / M", options: [1, 11] },
+        { id: 103, title: "White / XL", options: [1, 12] },
+        { id: 201, title: "Black / M", options: [2, 11] },
+      ],
+      images: [
+        {
+          src: "https://cdn.test/back-white.png",
+          position: "back",
+          variant_ids: [101, 102, 103],
+        },
+        {
+          src: "https://cdn.test/back-black.png",
+          position: "back",
+          variant_ids: [201],
+        },
+      ],
+    };
+
+    const entries = extractPrintifyMockupEntries(product);
+    const back = entries.filter((e) => e.view_key === "back");
+    expect(back.map((e) => e.color_name).sort()).toEqual(["Black", "White"]);
+    expect(back.every((e) => !String(e.color_name).includes("/"))).toBe(true);
+  });
+
+  it("photopaper poster without color keeps one tile per size", () => {
+    const product = {
+      options: [
+        {
+          type: "paper",
+          name: "Paper",
+          values: [{ id: 5, title: "Photopaper" }],
+        },
+        {
+          type: "size",
+          name: "Sizes",
+          values: [
+            { id: 20, title: '12″ × 18″' },
+            { id: 21, title: '18″ × 24″' },
+          ],
+        },
+      ],
+      variants: [
+        { id: 301, title: 'Photopaper / 12″ × 18″', options: [5, 20] },
+        { id: 302, title: 'Photopaper / 18″ × 24″', options: [5, 21] },
+      ],
+      images: [
+        {
+          src: "https://cdn.test/poster-12x18.png",
+          position: "front",
+          variant_ids: [301],
+        },
+        {
+          src: "https://cdn.test/poster-18x24.png",
+          position: "front",
+          variant_ids: [302],
+        },
+      ],
+    };
+
+    const entries = extractPrintifyMockupEntries(product);
+    const front = entries.filter((e) => e.view_key === "front");
+    expect(front).toHaveLength(2);
+    expect(front.map((e) => e.color_name).sort()).toEqual(['12″ × 18″', '18″ × 24″']);
   });
 });
 

@@ -21,12 +21,7 @@ const COPY_MAP = [
 
 function rmrf(dir) {
   if (!fs.existsSync(dir)) return;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) rmrf(p);
-    else fs.unlinkSync(p);
-  }
-  fs.rmdirSync(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 function copyDir(src, dest) {

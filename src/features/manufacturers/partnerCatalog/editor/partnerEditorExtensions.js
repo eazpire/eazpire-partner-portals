@@ -42,6 +42,7 @@ import { buildProductPublishReadiness } from "../../../admin/adminPublishReadine
 import { fetchBlueprint, fetchBlueprintProviderVariants, fetchAllPrintProviders } from "../../adapters/printify/printifyCatalogClient.js";
 import { createPrintifyProduct, getPrintifyProduct } from "../../../../utils/printify.js";
 import { getPrintifyApiKey, PARTNER_PRINTIFY_API_KEY_MISSING_HINT } from "../../../../utils/printifyEnv.js";
+import { extractPrintifyMockupEntries } from "../../../../utils/printifyShopProductMocks.js";
 import {
   mergeProviders,
   buildPrintProviderCatalogMap,
@@ -974,35 +975,19 @@ export async function removePrintifyTemplateDraft(env, productKey, printProvider
   return { ok: true, removed_draft_id: draftId };
 }
 
+/**
+ * Catalog mockup sync (Calibration + Clean + Shop Preview): one row per view × label.
+ * Apparel with a Color option → one tile per color (ignore size suffixes like "White / M").
+ * Posters / photopaper without Color → one tile per Size (or paper/material fallback).
+ */
 function extractMockupEntries(product) {
-  const variants = Array.isArray(product?.variants) ? product.variants : [];
-  const byId = new Map(variants.map((v) => [String(v.id), v]));
-  const images = Array.isArray(product?.images) ? product.images : [];
-  const out = [];
-  const seen = new Set();
-  for (const image of images) {
-    if (!image?.src) continue;
-    const viewKey = String(image?.position || image?.camera_label || "other")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_");
-    const vids = Array.isArray(image?.variant_ids) && image.variant_ids.length ? image.variant_ids : [null];
-    for (const id of vids) {
-      const vv = id != null ? byId.get(String(id)) : null;
-      const colorName = String(vv?.title || "Default");
-      const key = `${viewKey}::${colorName}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        view_key: viewKey || "other",
-        color_name: colorName,
-        color_hex: null,
-        image_url: image.src,
-        printify_variant_ids: JSON.stringify(id != null ? [id] : []),
-      });
-    }
-  }
-  return out;
+  return extractPrintifyMockupEntries(product).map((e) => ({
+    view_key: e.view_key || "other",
+    color_name: e.color_name || "Default",
+    color_hex: e.color_hex ?? null,
+    image_url: e.image_url,
+    printify_variant_ids: JSON.stringify(e.variant_id != null ? [e.variant_id] : []),
+  }));
 }
 
 export async function setTemplatePrintAreaMarkers(
