@@ -98,8 +98,10 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
       .bind(TODIFY_PROVIDER_DISPLAY_NAME, Date.now(), targetKey)
       .run();
     await catalogDb
-      .prepare(`UPDATE product_catalog SET is_active = 2, updated_at = ? WHERE product_key = ?`)
-      .bind(Date.now(), targetKey)
+      .prepare(
+        `UPDATE product_catalog SET is_active = 2, regions_json = ?, updated_at = ? WHERE product_key = ?`
+      )
+      .bind('["MA"]', Date.now(), targetKey)
       .run();
     return { ok: true, cloned: false, product_key: targetKey, reused: true };
   }
@@ -112,7 +114,8 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
       `INSERT INTO product_catalog (product_key, title, regions_json, is_active, created_at, updated_at)
        VALUES (?, ?, ?, 2, ?, ?)`
     )
-    .bind(targetKey, title, src.regions_json || '["EU"]', now, now)
+    // Todify fulfills from Morocco — do not inherit Printify source EU regions.
+    .bind(targetKey, title, '["MA"]', now, now)
     .run();
 
   // Best-effort: copy optional columns if present on source row
@@ -295,7 +298,7 @@ export async function runTodifyDogfoodSetup(env, opts = {}) {
       product_key: targetKey,
       manufacturer_id: TODIFY_PARTNER_ID,
       title: clone.title || `Todify dogfood (${targetKey})`,
-      regions: ["EU", "MA"],
+      regions: ["MA"],
       catalog_status: "online",
       catalog_category_group: "Apparel",
       catalog_category_leaf: "T-Shirts",
