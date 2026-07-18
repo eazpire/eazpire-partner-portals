@@ -21,6 +21,8 @@ function ensureState(ctx) {
       loaded: false,
       print_provider_id: null,
       ships_from: [],
+      network_origins: [],
+      ships_from_note: null,
       continents: [],
       currency: "USD",
       last_synced_at: null,
@@ -28,10 +30,16 @@ function ensureState(ctx) {
       sync_error: null,
       sync_message: null,
       shipping_rates_url: null,
-      openContinents: new Set(["EU", "NA"]),
+      openContinents: new Set(["EU", "NA", "OTHER", "OC"]),
     };
   }
   return ctx.shippingTabState;
+}
+
+function rateCountryLabel(code, fallback) {
+  const c = String(code || "").toUpperCase();
+  if (c === "ROW") return "Rest of the World";
+  return fallback || countryDisplayName(c) || c;
 }
 
 function centsToUsdInput(cents) {
@@ -63,8 +71,9 @@ function flagHtml(code) {
   return `<img class="ce-ship-flag" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
 }
 
-function shipsFromHtml(shipsFrom) {
+function shipsFromHtml(shipsFrom, opts = {}) {
   const list = Array.isArray(shipsFrom) ? shipsFrom : [];
+  const selected = new Set(list.map((s) => String(s.code || "").toUpperCase()));
   const chips = list.length
     ? list
         .map((s) => {
@@ -79,6 +88,32 @@ function shipsFromHtml(shipsFrom) {
         .join("")
     : `<p class="ce-hint" id="ce-ship-from-empty">No ships-from countries yet. Sync from Printify or add one below.</p>`;
 
+  const network = Array.isArray(opts.network_origins) ? opts.network_origins : [];
+  const networkChips = network
+    .filter((s) => !selected.has(String(s.code || "").toUpperCase()))
+    .map((s) => {
+      const code = String(s.code || "").toUpperCase();
+      const label = s.label || countryDisplayName(code) || code;
+      return `<button type="button" class="ce-ship-from-chip ce-ship-network-add" data-network-add="${escapeHtml(code)}" title="Add as Ships from">
+        ${flagHtml(code)}
+        <span class="ce-ship-from-chip__label">${escapeHtml(label)}</span>
+        <span class="ce-ship-network-add__plus">+</span>
+      </button>`;
+    })
+    .join("");
+
+  const note = opts.ships_from_note
+    ? `<p class="ce-hint">${escapeHtml(opts.ships_from_note)}</p>`
+    : `<p class="ce-hint">These labels appear in Creator Journey Overview as “Ships from …”. Uncheck a chip to remove it before saving.</p>`;
+
+  const networkBlock = networkChips
+    ? `<div class="ce-ship-network">
+        <h4 class="ce-ship-network__title">Network partners (optional)</h4>
+        <p class="ce-hint">Other Softstyle print providers on this blueprint. Click + to include as Ships from — not auto-selected for Printify Choice.</p>
+        <div class="ce-ship-from-grid">${networkChips}</div>
+      </div>`
+    : "";
+
   const addOptions = (worldCountryCatalog().allCodes || [])
     .map((code) => {
       const cc = String(code).toUpperCase();
@@ -88,6 +123,8 @@ function shipsFromHtml(shipsFrom) {
 
   return `
     <div class="ce-ship-from-grid" id="ce-ship-from-grid">${chips}</div>
+    ${note}
+    ${networkBlock}
     <div class="ce-ship-add-row">
       <label>Add ships-from country
         <select class="input" id="ce-ship-from-add-select">
@@ -97,7 +134,6 @@ function shipsFromHtml(shipsFrom) {
       </label>
       <button type="button" class="btn btn-secondary" id="ce-ship-from-add-btn">Add</button>
     </div>
-    <p class="ce-hint">These labels appear in Creator Journey Overview as “Ships from …”. Uncheck a chip to remove it before saving.</p>
   `;
 }
 
@@ -105,8 +141,8 @@ function continentRatesHtml(continents, openSet) {
   if (!continents?.length) {
     return `<p class="ce-hint" id="ce-ship-empty-rates">No destination rates yet. Use <strong>Sync from Printify</strong> or add countries manually below.</p>
       <div class="ce-ship-add-row">
-        <label>Add country (ISO)
-          <input type="text" class="input" id="ce-ship-add-code" maxlength="2" placeholder="DE" />
+        <label>Add country / zone
+          <input type="text" class="input" id="ce-ship-add-code" maxlength="3" placeholder="DE or ROW" />
         </label>
         <button type="button" class="btn btn-secondary" id="ce-ship-add-country">Add country</button>
       </div>
@@ -119,10 +155,11 @@ function continentRatesHtml(continents, openSet) {
       const countries = cont.countries || [];
       const rows = countries
         .map((c) => {
+          const label = rateCountryLabel(c.code, c.label);
           return `<div class="ce-ship-rate-row" data-country="${escapeHtml(c.code)}">
             <div class="ce-ship-rate-row__country">
               ${flagHtml(c.code)}
-              <span>${escapeHtml(c.label || countryDisplayName(c.code) || c.code)}</span>
+              <span>${escapeHtml(label)}</span>
               <code>${escapeHtml(c.code)}</code>
             </div>
             <label class="ce-ship-rate-field">
@@ -164,8 +201,8 @@ function continentRatesHtml(continents, openSet) {
 
   return `
     <div class="ce-ship-add-row">
-      <label>Add country (ISO)
-        <input type="text" class="input" id="ce-ship-add-code" maxlength="2" placeholder="DE" />
+      <label>Add country / zone
+        <input type="text" class="input" id="ce-ship-add-code" maxlength="3" placeholder="DE or ROW" />
       </label>
       <button type="button" class="btn btn-secondary" id="ce-ship-add-country">Add country</button>
     </div>
@@ -213,7 +250,7 @@ function readRatesFromDom(root) {
     const addEl = row.querySelector(".ce-ship-additional");
     rates.push({
       country_code: code,
-      country_label: countryDisplayName(code) || code,
+      country_label: rateCountryLabel(code),
       shipping_first_cents: usdInputToCents(firstEl?.value),
       shipping_additional_cents: usdInputToCents(addEl?.value),
     });
@@ -231,18 +268,18 @@ function rebuildContinentsFromRates(rates) {
   }
   const byCont = new Map();
   for (const r of rates) {
-    const contCode = codeToCont.get(r.country_code) || "OTHER";
+    const contCode = r.country_code === "ROW" ? "OTHER" : codeToCont.get(r.country_code) || "OTHER";
     if (!byCont.has(contCode)) {
       const g = groups.find((x) => x.id === contCode);
       byCont.set(contCode, {
         code: contCode,
-        title: g?.label || contCode,
+        title: contCode === "OTHER" ? "Other / zones" : g?.label || contCode,
         countries: [],
       });
     }
     byCont.get(contCode).countries.push({
       code: r.country_code,
-      label: r.country_label,
+      label: rateCountryLabel(r.country_code, r.country_label),
       shipping_first_cents: r.shipping_first_cents,
       shipping_additional_cents: r.shipping_additional_cents,
     });
@@ -270,6 +307,8 @@ export async function loadShippingTab(ctx) {
   state.loaded = true;
   state.print_provider_id = pid;
   state.ships_from = Array.isArray(data.ships_from) ? data.ships_from : [];
+  state.network_origins = Array.isArray(data.network_origins) ? data.network_origins : [];
+  state.ships_from_note = data.ships_from_note || null;
   state.continents = Array.isArray(data.continents) ? data.continents : [];
   state.currency = data.currency || "USD";
   state.last_synced_at = data.last_synced_at ?? null;
@@ -284,7 +323,7 @@ export async function loadShippingTab(ctx) {
     <div class="ce-tab-panel ce-ship-panel">
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Printify sync</h3>
-        <p class="ce-hint">Load ships-from countries and destination rates (USD) for <strong>${escapeHtml(pname)}</strong> (provider ${pid}).</p>
+        <p class="ce-hint">Load official ships-from + destination rates (USD) for <strong>${escapeHtml(pname)}</strong> (provider ${pid}).</p>
         <div class="ce-ship-sync-bar">
           <button type="button" class="btn btn-primary" id="ce-ship-sync">Sync from Printify</button>
         </div>
@@ -293,12 +332,15 @@ export async function loadShippingTab(ctx) {
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Ships from</h3>
-        ${shipsFromHtml(state.ships_from)}
+        ${shipsFromHtml(state.ships_from, {
+          network_origins: state.network_origins,
+          ships_from_note: state.ships_from_note,
+        })}
       </section>
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Destination rates (USD)</h3>
-        <p class="ce-hint">1st item = first product in the order · Additional = each extra product. Use “Apply to continent” to copy values to every country in that group.</p>
+        <p class="ce-hint">1st item = first product · Additional = each extra. Zones like <strong>ROW</strong> (Rest of the World) cover countries without a dedicated rate (e.g. Germany for Printify Choice). Use “Apply to continent” to copy values.</p>
         ${continentRatesHtml(state.continents, state.openContinents)}
       </section>
     </div>`;
@@ -369,8 +411,8 @@ function bindRatesControls(ctx, root) {
       const code = String(addInput.value || "")
         .trim()
         .toUpperCase();
-      if (!/^[A-Z]{2}$/.test(code)) {
-        showToast("Invalid country", "Enter a 2-letter ISO code (e.g. DE)");
+      if (!(code === "ROW" || /^[A-Z]{2}$/.test(code))) {
+        showToast("Invalid code", "Enter a 2-letter ISO code (e.g. DE) or ROW");
         return;
       }
       const rates = readRatesFromDom(root);
@@ -380,7 +422,7 @@ function bindRatesControls(ctx, root) {
       }
       rates.push({
         country_code: code,
-        country_label: countryDisplayName(code) || code,
+        country_label: rateCountryLabel(code),
         shipping_first_cents: 0,
         shipping_additional_cents: 0,
       });
@@ -391,32 +433,51 @@ function bindRatesControls(ctx, root) {
   }
 }
 
+function remountShipsFromSection(ctx, root) {
+  const state = ensureState(ctx);
+  const shipsCard = [...root.querySelectorAll(".ce-meta-card")].find((c) =>
+    c.querySelector("#ce-ship-from-grid")
+  );
+  if (!shipsCard) return;
+  const title = shipsCard.querySelector(".ce-section-title");
+  shipsCard.innerHTML =
+    (title ? title.outerHTML : '<h3 class="ce-section-title">Ships from</h3>') +
+    shipsFromHtml(state.ships_from, {
+      network_origins: state.network_origins,
+      ships_from_note: state.ships_from_note,
+    });
+  bindShipsFromControls(ctx, root);
+  notifyActiveTabDirty(ctx);
+}
+
 function bindShipsFromControls(ctx, root) {
+  const state = ensureState(ctx);
   const addBtn = root.querySelector("#ce-ship-from-add-btn");
   const select = root.querySelector("#ce-ship-from-add-select");
-  if (!addBtn || !select) return;
-  addBtn.onclick = () => {
-    const code = String(select.value || "").toUpperCase();
-    if (!/^[A-Z]{2}$/.test(code)) return;
-    const existing = readShipsFromFromDom(root);
-    if (existing.some((s) => s.code === code)) {
-      showToast("Already listed", `${code} is already a ships-from country`);
-      return;
-    }
-    const state = ensureState(ctx);
-    state.ships_from = [...existing, { code, label: countryDisplayName(code) || code }];
-    const shipsCard = [...root.querySelectorAll(".ce-meta-card")].find((c) =>
-      c.querySelector("#ce-ship-from-grid")
-    );
-    if (shipsCard) {
-      const title = shipsCard.querySelector(".ce-section-title");
-      shipsCard.innerHTML =
-        (title ? title.outerHTML : '<h3 class="ce-section-title">Ships from</h3>') +
-        shipsFromHtml(state.ships_from);
-      bindShipsFromControls(ctx, root);
-    }
-    notifyActiveTabDirty(ctx);
-  };
+  if (addBtn && select) {
+    addBtn.onclick = () => {
+      const code = String(select.value || "").toUpperCase();
+      if (!/^[A-Z]{2}$/.test(code)) return;
+      const existing = readShipsFromFromDom(root);
+      if (existing.some((s) => s.code === code)) {
+        showToast("Already listed", `${code} is already a ships-from country`);
+        return;
+      }
+      state.ships_from = [...existing, { code, label: countryDisplayName(code) || code }];
+      remountShipsFromSection(ctx, root);
+      select.value = "";
+    };
+  }
+  root.querySelectorAll("[data-network-add]").forEach((btn) => {
+    btn.onclick = () => {
+      const code = String(btn.getAttribute("data-network-add") || "").toUpperCase();
+      if (!/^[A-Z]{2}$/.test(code)) return;
+      const existing = readShipsFromFromDom(root);
+      if (existing.some((s) => s.code === code)) return;
+      state.ships_from = [...existing, { code, label: countryDisplayName(code) || code }];
+      remountShipsFromSection(ctx, root);
+    };
+  });
 }
 
 export function bindShippingTab(ctx, root) {
@@ -438,6 +499,8 @@ export function bindShippingTab(ctx, root) {
           provider_name: providerLabel(ctx, pid),
         });
         state.ships_from = Array.isArray(res.ships_from) ? res.ships_from : [];
+        state.network_origins = Array.isArray(res.network_origins) ? res.network_origins : [];
+        state.ships_from_note = res.ships_from_note || state.ships_from_note;
         state.continents = Array.isArray(res.continents) ? res.continents : [];
         state.last_synced_at = res.last_synced_at ?? null;
         state.sync_source = res.sync_source || null;
@@ -445,21 +508,13 @@ export function bindShippingTab(ctx, root) {
         state.sync_message = res.sync_message || null;
         state.shipping_rates_url = res.shipping_rates_url || null;
 
-        // Remount ships-from + rates + banner
         const cards = root.querySelectorAll(".ce-meta-card");
         const syncCard = cards[0];
-        const shipsCard = cards[1];
         if (syncCard) {
           const status = syncCard.querySelector("#ce-ship-sync-status");
           if (status) status.innerHTML = syncBannerHtml(state);
         }
-        if (shipsCard) {
-          const title = shipsCard.querySelector(".ce-section-title");
-          shipsCard.innerHTML =
-            (title ? title.outerHTML : '<h3 class="ce-section-title">Ships from</h3>') +
-            shipsFromHtml(state.ships_from);
-          bindShipsFromControls(ctx, root);
-        }
+        remountShipsFromSection(ctx, root);
         remountRatesSection(ctx, root);
         notifyActiveTabDirty(ctx);
         showToast(

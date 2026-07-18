@@ -3289,6 +3289,29 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
 .ce-ship-from-chip input {
   margin: 0;
 }
+.ce-ship-network {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ce-ship-network__title {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.ce-ship-network-add {
+  border-style: dashed;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.ce-ship-network-add:hover {
+  border-color: var(--accent, #c9a227);
+}
+.ce-ship-network-add__plus {
+  font-weight: 800;
+  color: var(--accent, #c9a227);
+}
 .ce-ship-flag {
   width: 18px;
   height: 14px;
