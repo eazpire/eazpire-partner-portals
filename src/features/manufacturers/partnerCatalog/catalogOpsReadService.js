@@ -82,12 +82,15 @@ export function enrichMockupDefaultsRows(rows, env) {
 
 function catalogRowToProduct(row, link = {}) {
   if (!row) return null;
-  // Shared SoT with Catalog Studio: prefer eazpire_products.catalog_status when linked.
-  // product_catalog.is_active can drift (offline) while manufacturer still has preview.
+  // Storefront + Catalog Studio PLP filter use product_catalog.is_active.
+  // Prefer that so admin badges match shop-create; fall back to eazpire link only when catalog row missing status.
+  const catalogStatus = isActiveToCatalogStatus(row.is_active);
   const mfgStatus = String(link.catalog_status || "").toLowerCase();
-  const status = VALID_CATALOG_STATUSES.has(mfgStatus)
-    ? mfgStatus
-    : isActiveToCatalogStatus(row.is_active);
+  const status = VALID_CATALOG_STATUSES.has(catalogStatus)
+    ? catalogStatus
+    : VALID_CATALOG_STATUSES.has(mfgStatus)
+      ? mfgStatus
+      : "offline";
   return {
     product_key: row.product_key,
     manufacturer_id: link.manufacturer_id || null,

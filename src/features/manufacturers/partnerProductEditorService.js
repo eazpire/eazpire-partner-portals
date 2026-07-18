@@ -1231,8 +1231,9 @@ export async function adminApprovePartnerProductToCatalog(
         .bind(productKey, title, JSON.stringify(regions), now, now)
         .run();
     } else {
+      // Preserve online/preview/offline — do not reset is_active on re-approve/sync.
       await env.CATALOG_DB.prepare(
-        `UPDATE product_catalog SET title = ?, regions_json = ?, is_active = 1, updated_at = ? WHERE product_key = ?`
+        `UPDATE product_catalog SET title = ?, regions_json = ?, updated_at = ? WHERE product_key = ?`
       )
         .bind(title, JSON.stringify(regions), now, productKey)
         .run();

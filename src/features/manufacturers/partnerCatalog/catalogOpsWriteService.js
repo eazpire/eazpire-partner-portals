@@ -356,6 +356,19 @@ export async function setCatalogProductStatus(env, productKey, catalogStatus) {
     .bind(isActive, now, key)
     .run();
 
+  // Keep manufacturer eazpire_products in sync so Catalog Studio badges match shop-create PLP.
+  if (env.MANUFACTURER_DB) {
+    try {
+      await env.MANUFACTURER_DB.prepare(
+        `UPDATE eazpire_products SET catalog_status = ?, updated_at = ? WHERE product_key = ?`
+      )
+        .bind(status, now, key)
+        .run();
+    } catch (e) {
+      console.warn("[setCatalogProductStatus] eazpire_products sync:", e?.message || e);
+    }
+  }
+
   const product = await getCatalogOpsProduct(env, key);
   return {
     ok: true,

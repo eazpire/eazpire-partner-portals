@@ -3081,6 +3081,148 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   max-width: 920px;
 }
 
+/* Creator Settings tab — Skill Tree placement, preview images, EAZV costs */
+.ce-cs-panel .ce-meta-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-2);
+  margin-bottom: 16px;
+  max-width: 920px;
+}
+.ce-cs-skill-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+.ce-cs-skill-summary div {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.ce-cs-skill-summary dt {
+  min-width: 140px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.ce-cs-skill-summary dd {
+  margin: 0;
+  font-weight: 600;
+}
+.ce-cs-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.ce-cs-preview-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.ce-cs-preview-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ce-cs-preview-tile--add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  border-style: dashed;
+  background: transparent;
+}
+.ce-cs-preview-tile--add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.ce-cs-preview-add-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.ce-cs-preview-add-label {
+  font-size: 0.75rem;
+}
+.ce-cs-preview-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 0.9rem;
+}
+.ce-cs-variants {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.ce-cs-variants__summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.ce-cs-variants__toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 12px 0;
+}
+.ce-cs-bulk {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.ce-cs-bulk input {
+  width: 100px;
+}
+.ce-cs-variants__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.ce-cs-variant-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.ce-cs-variant-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ce-cs-variant-kind {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.ce-cs-variant-cost {
+  width: 100%;
+}
+
 /* Provider markets — continent-grouped collapsible country picker */
 .ce-prov-markets {
   margin-top: 24px;
