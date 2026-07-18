@@ -1182,14 +1182,25 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
       : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
 
-  // Partner-direct products (Todify / KNL): union manufacturer eazpire rows so catalog-ops
-  // gaps (or missing product_catalog rows) cannot hide approved partner listings.
+  // Partner-direct products (Todify / KNL): union manufacturer rows ONLY when they have no
+  // product_catalog row yet. Never union status mismatches — product_catalog.is_active is the
+  // shop-create SoT (Admin editor + PLP). Showing eazpire=online while catalog=preview caused
+  // Catalog Studio "Online" vs editor "Preview" / missing Available cards.
   if (shouldUseCatalogOps(env) && env?.CATALOG_DB && db) {
     const mfgProducts = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
     if (mfgProducts.length) {
       const seen = new Set(products.map((p) => p.product_key));
-      for (const p of mfgProducts) {
-        if (!seen.has(p.product_key)) {
+      const missingKeys = mfgProducts.map((p) => p.product_key).filter((k) => !seen.has(k));
+      if (missingKeys.length) {
+        const placeholders = missingKeys.map(() => "?").join(",");
+        const existingCatalog = await env.CATALOG_DB.prepare(
+          `SELECT product_key FROM product_catalog WHERE product_key IN (${placeholders})`
+        )
+          .bind(...missingKeys)
+          .all();
+        const inCatalog = new Set((existingCatalog?.results || []).map((r) => r.product_key));
+        for (const p of mfgProducts) {
+          if (seen.has(p.product_key) || inCatalog.has(p.product_key)) continue;
           products.push(p);
           seen.add(p.product_key);
         }

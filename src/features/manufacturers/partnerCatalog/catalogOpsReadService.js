@@ -324,17 +324,53 @@ async function resolveBlueprintIdFromCatalog(env, productKey, link) {
   return null;
 }
 
+const STATUS_RANK = { offline: 0, preview: 1, online: 2 };
+
+/**
+ * Heal eazpire ↔ product_catalog visibility drift toward the more visible status.
+ * Catalog Studio used to show Online from eazpire while shop-create used product_catalog=preview.
+ */
+async function healVisibilityDriftIfNeeded(env, productKey, catalogRow, link) {
+  const catalogStatus = isActiveToCatalogStatus(catalogRow?.is_active);
+  const mfgStatus = String(link?.catalog_status || "").toLowerCase();
+  if (!VALID_CATALOG_STATUSES.has(mfgStatus)) return catalogRow;
+  const cRank = STATUS_RANK[catalogStatus] ?? 0;
+  const mRank = STATUS_RANK[mfgStatus] ?? 0;
+  if (cRank === mRank) return catalogRow;
+  const winner = mRank > cRank ? mfgStatus : catalogStatus;
+  try {
+    const { syncPublishIndexVisibility } = await import("./catalogOpsWriteService.js");
+    await syncPublishIndexVisibility(env, productKey, winner, {
+      title: catalogRow?.title || productKey,
+      regionsJson: catalogRow?.regions_json || null,
+    });
+    const healed = await env.CATALOG_DB.prepare(`SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`)
+      .bind(productKey)
+      .first();
+    if (healed) {
+      console.warn(
+        `[catalog-ops] healed visibility drift ${productKey}: catalog=${catalogStatus} mfg=${mfgStatus} → ${winner}`
+      );
+      return healed;
+    }
+  } catch (e) {
+    console.warn("[catalog-ops] visibility heal failed:", productKey, e?.message || e);
+  }
+  return catalogRow;
+}
+
 export async function getCatalogOpsProduct(env, productKey) {
   const catalogDb = env.CATALOG_DB;
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
-  const row = await catalogDb
+  let row = await catalogDb
     .prepare(`SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`)
     .bind(productKey)
     .first();
   if (!row) return { ok: false, error: "not_found" };
 
   const link = await resolveProductLink(env, productKey);
+  row = await healVisibilityDriftIfNeeded(env, productKey, row, link);
   const product = catalogRowToProduct(row, link);
   const printifyBlueprintId = await resolveBlueprintIdFromCatalog(env, productKey, link);
 

@@ -689,27 +689,9 @@ async function syncProductDerivedFromProviders(db, productKey, activeIds, body, 
   if (designTypes.size) productPatch.visible_design_types = [...designTypes];
   if (regions.length) productPatch.regions = regions;
 
-  const statusVersions = await queryAll(
-    db,
-    `SELECT v.product_version_config_json, v.sort_order
-     FROM eazpire_product_versions v
-     JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
-     WHERE v.product_key = ? AND fp.external_provider_id IN (${activeIds.map(() => "?").join(",") || "?"})
-     ORDER BY v.sort_order ASC, v.created_at ASC`,
-    ...(activeIds.length ? [productKey, ...activeIds.map(String)] : [productKey, "0"])
-  );
-  if (statusVersions.length) {
-    let cfg = {};
-    try {
-      cfg = JSON.parse(statusVersions[0].product_version_config_json || "{}");
-    } catch {
-      cfg = {};
-    }
-    const st = String(cfg.catalog_status || "").toLowerCase();
-    if (["offline", "preview", "online"].includes(st)) {
-      productPatch.catalog_status = st;
-    }
-  }
+  // Do NOT derive catalog_status from stale version config here.
+  // Visibility is product-level SoT (Catalog Studio / editor footer → product_catalog.is_active).
+  // Overwriting from version config caused Admin=Preview while shop/eazpire still said Online.
 
   if (Object.keys(productPatch).length) {
     await updateEazpireProduct(db, productKey, productPatch);
@@ -952,17 +934,13 @@ export async function saveVersionConfig(env, versionId, body) {
   if (!version) return { ok: false, error: "not_found" };
   const st = String(body.product_version_config?.catalog_status || "").toLowerCase();
   if (["offline", "preview", "online"].includes(st)) {
-    await updateEazpireProduct(db, version.product_key, { catalog_status: st });
-    if (env.CATALOG_DB) {
-      const { catalogStatusToIsActive } = await import("../constants.js");
-      const now = Date.now();
-      await env.CATALOG_DB.prepare(
-        `UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`
-      )
-        .bind(catalogStatusToIsActive(st), now, version.product_key)
-        .run()
-        .catch(() => {});
-    }
+    const { syncPublishIndexVisibility } = await import("../catalogOpsWriteService.js");
+    const productRow = await getEazpireProduct(db, version.product_key);
+    const regionsArr = Array.isArray(productRow?.regions) ? productRow.regions : [];
+    await syncPublishIndexVisibility(env, version.product_key, st, {
+      title: productRow?.title || version.product_key,
+      regionsJson: regionsArr.length ? JSON.stringify(regionsArr) : null,
+    });
   }
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
   return { ok: true, version };

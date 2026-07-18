@@ -1,7 +1,7 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
 import { fetchEditorBundle, mirrorProduct } from "./api.js";
-import { renderMetaTab, saveMetaTab, bindMetaTab } from "./tabs/meta.js";
+import { loadMetaTab, saveMetaTab, bindMetaTab } from "./tabs/meta.js";
 import {
   loadProvidersTab,
   bindProvidersTab,
@@ -437,7 +437,7 @@ async function loadActiveTab(ctx) {
         html = await loadPrintAreaTab(ctx);
         break;
       case "meta_data":
-        html = renderMetaTab(ctx);
+        html = await loadMetaTab(ctx);
         break;
       case "products":
         html = await loadProductsTab(ctx);

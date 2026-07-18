@@ -1,5 +1,6 @@
 /**
- * Catalog editor → Creator Settings (Skill Tree, preview images, print areas, metadata, EAZV).
+ * Catalog editor → Creator Settings (Skill Tree, preview images, print areas, EAZV).
+ * Product metadata (brand/model/audience) lives on the Meta tab.
  */
 import { escapeHtml, partnerUpload } from "/partner/shared/js/partner-api.js";
 import { fetchCreatorSettings, saveCreatorSettings } from "../api.js";
@@ -15,10 +16,8 @@ function ensureState(ctx) {
       preview_images: [],
       variant_costs: [],
       print_areas: [],
-      skill_meta: { provider_brand: "", base_product_model: "", audience: [] },
       variantsOpen: true,
       printAreasOpen: true,
-      metaOpen: true,
     };
   }
   return ctx.creatorSettingsState;
@@ -111,27 +110,6 @@ function printAreasHtml(areas, open) {
     </details>`;
 }
 
-function skillMetaHtml(meta, open) {
-  const audienceStr = Array.isArray(meta?.audience) ? meta.audience.join(", ") : String(meta?.audience || "");
-  return `
-    <details class="ce-cs-skill-meta" ${open ? "open" : ""}>
-      <summary class="ce-cs-skill-meta__summary">Skill Info Metadata</summary>
-      <p class="ce-hint">Shown in the product skill info modal (Overview). Leave blank to use catalog/blueprint defaults.</p>
-      <div class="field">
-        <label for="ce-cs-meta-brand">Base product brand</label>
-        <input class="input" id="ce-cs-meta-brand" value="${escapeHtml(meta?.provider_brand || "")}" placeholder="e.g. Gildan" />
-      </div>
-      <div class="field">
-        <label for="ce-cs-meta-model">Base product model</label>
-        <input class="input" id="ce-cs-meta-model" value="${escapeHtml(meta?.base_product_model || "")}" placeholder="e.g. Softstyle" />
-      </div>
-      <div class="field">
-        <label for="ce-cs-meta-audience">Audience (comma-separated)</label>
-        <input class="input" id="ce-cs-meta-audience" value="${escapeHtml(audienceStr)}" placeholder="e.g. Men, Women, Unisex" />
-      </div>
-    </details>`;
-}
-
 export async function loadCreatorSettingsTab(ctx) {
   const state = ensureState(ctx);
   const data = await fetchCreatorSettings(ctx.productKey);
@@ -142,7 +120,6 @@ export async function loadCreatorSettingsTab(ctx) {
   state.preview_images = (data.preview_images || []).map((p) => (typeof p === "string" ? p : p.url)).filter(Boolean);
   state.variant_costs = Array.isArray(data.variant_costs) ? data.variant_costs : [];
   state.print_areas = Array.isArray(data.print_areas) ? data.print_areas : [];
-  state.skill_meta = data.skill_meta || { provider_brand: "", base_product_model: "", audience: [] };
 
   const softstyleLocked = !!data.skill_tree?.softstyle_locked_starter;
   const skill = data.skill_tree || {};
@@ -196,9 +173,9 @@ export async function loadCreatorSettingsTab(ctx) {
       </section>
 
       <section class="ce-meta-card">
-        <h3 class="ce-section-title">Print Areas & Metadata</h3>
+        <h3 class="ce-section-title">Print Areas</h3>
         ${printAreasHtml(state.print_areas, state.printAreasOpen)}
-        ${skillMetaHtml(state.skill_meta, state.metaOpen)}
+        <p class="ce-hint">Brand / model / audience metadata is on the <strong>Meta</strong> tab.</p>
       </section>
     </div>`;
 }
@@ -220,24 +197,12 @@ export function snapshotCreatorSettingsTab(ctx) {
     const key = input.getAttribute("data-print-area");
     if (key) printEnabled.push(key);
   });
-  const brand = document.getElementById("ce-cs-meta-brand")?.value || "";
-  const model = document.getElementById("ce-cs-meta-model")?.value || "";
-  const audienceRaw = document.getElementById("ce-cs-meta-audience")?.value || "";
-  const audience = audienceRaw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
   return {
     creator_level: levelEl?.value || state.creator_level || "starter",
     cost_eaz: Number(costEl?.value) || 0,
     preview_images: [...(state.preview_images || [])],
     variant_costs: variants,
     print_areas_enabled: printEnabled,
-    skill_meta: {
-      provider_brand: brand,
-      base_product_model: model,
-      audience,
-    },
   };
 }
 
@@ -322,12 +287,6 @@ export function bindCreatorSettingsTab(ctx, root) {
       state.printAreasOpen = printDetails.open;
     });
   }
-  const metaDetails = root.querySelector(".ce-cs-skill-meta");
-  if (metaDetails) {
-    metaDetails.addEventListener("toggle", () => {
-      state.metaOpen = metaDetails.open;
-    });
-  }
 }
 
 export async function saveCreatorSettingsTab(ctx) {
@@ -338,7 +297,6 @@ export async function saveCreatorSettingsTab(ctx) {
     preview_images: snap.preview_images,
     variant_costs: snap.variant_costs,
     print_areas_enabled: snap.print_areas_enabled,
-    skill_meta: snap.skill_meta,
   });
   ctx.creatorSettingsState = null;
 }

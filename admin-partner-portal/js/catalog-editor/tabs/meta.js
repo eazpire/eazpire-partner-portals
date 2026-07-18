@@ -1,5 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { saveMeta } from "../api.js";
+import { saveMeta, fetchCreatorSettings, saveCreatorSettings } from "../api.js";
 import { bindTabDirtyInputs } from "../editor-tab-dirty.js";
 import { publishProfileForProvider } from "../editor-product-title.js";
 
@@ -11,9 +11,38 @@ function resolveMetaProviderId(ctx) {
   ) || null;
 }
 
-export function renderMetaTab(ctx) {
+function skillMetaSectionHtml(meta) {
+  const audienceStr = Array.isArray(meta?.audience) ? meta.audience.join(", ") : String(meta?.audience || "");
+  return `
+    <section class="ce-meta-card ce-meta-card--product-meta">
+      <h3 class="ce-section-title">Product metadata</h3>
+      <p class="ce-hint">General product metadata (skill info, shop facets, listing). Leave blank to use catalog/blueprint defaults.</p>
+      <div class="field">
+        <label for="ce-meta-brand">Base product brand</label>
+        <input class="input" id="ce-meta-brand" value="${escapeHtml(meta?.provider_brand || "")}" placeholder="e.g. Gildan" />
+      </div>
+      <div class="field">
+        <label for="ce-meta-model">Base product model</label>
+        <input class="input" id="ce-meta-model" value="${escapeHtml(meta?.base_product_model || "")}" placeholder="e.g. Softstyle" />
+      </div>
+      <div class="field">
+        <label for="ce-meta-audience">Audience (comma-separated)</label>
+        <input class="input" id="ce-meta-audience" value="${escapeHtml(audienceStr)}" placeholder="e.g. Men, Women, Unisex" />
+      </div>
+    </section>`;
+}
+
+export async function loadMetaTab(ctx) {
   const providerId = resolveMetaProviderId(ctx);
   const profile = publishProfileForProvider(ctx.bundle, providerId);
+
+  let skillMeta = { provider_brand: "", base_product_model: "", audience: [] };
+  try {
+    const data = await fetchCreatorSettings(ctx.productKey);
+    skillMeta = data?.skill_meta || skillMeta;
+  } catch (err) {
+    console.warn("[meta] skill_meta load failed", err);
+  }
 
   return `
     <div class="ce-tab-panel ce-meta-panel">
@@ -42,11 +71,34 @@ export function renderMetaTab(ctx) {
         </div>
         <input type="hidden" id="ce-meta-provider-id" value="${escapeHtml(String(providerId || ""))}" />
       </section>
+      ${skillMetaSectionHtml(skillMeta)}
+    </div>`;
+}
+
+/** @deprecated use loadMetaTab — kept for any external callers */
+export function renderMetaTab(ctx) {
+  const providerId = resolveMetaProviderId(ctx);
+  const profile = publishProfileForProvider(ctx.bundle, providerId);
+  return `
+    <div class="ce-tab-panel ce-meta-panel">
+      <section class="ce-meta-card ce-meta-card--shop">
+        <h3 class="ce-section-title">Shop listing content</h3>
+        <div class="field">
+          <label for="ce-meta-shopify-cat">Shopify category ID</label>
+          <input class="input" id="ce-meta-shopify-cat" value="${escapeHtml(profile?.shopify_category_id || "")}" />
+        </div>
+        <input type="hidden" id="ce-meta-provider-id" value="${escapeHtml(String(providerId || ""))}" />
+      </section>
     </div>`;
 }
 
 export function snapshotMetaTab() {
   const el = (id) => document.getElementById(id);
+  const audienceRaw = el("ce-meta-audience")?.value || "";
+  const audience = audienceRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     print_provider_id: Number(el("ce-meta-provider-id")?.value) || null,
     shopify_category_id: el("ce-meta-shopify-cat")?.value || null,
@@ -54,6 +106,11 @@ export function snapshotMetaTab() {
     care_instructions: el("ce-meta-care")?.value || null,
     size_table_html: el("ce-meta-size")?.value || null,
     gpsr_html: el("ce-meta-gpsr")?.value || null,
+    skill_meta: {
+      provider_brand: el("ce-meta-brand")?.value || "",
+      base_product_model: el("ce-meta-model")?.value || "",
+      audience,
+    },
   };
 }
 
@@ -76,5 +133,11 @@ export async function saveMetaTab(ctx) {
     size_table_html: snap.size_table_html,
     gpsr_html: snap.gpsr_html,
     auto_mirror: false,
+  });
+
+  // Persist product metadata via creator-settings API (skill_meta_json) without wiping other fields.
+  await saveCreatorSettings(ctx.productKey, {
+    skill_meta_only: true,
+    skill_meta: snap.skill_meta,
   });
 }

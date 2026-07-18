@@ -337,26 +337,38 @@ async function upsertCatalogVariantPrintAreaDimensions(env, productKey, update, 
   }
 }
 
-export async function setCatalogProductStatus(env, productKey, catalogStatus) {
+/**
+ * Write visibility to product_catalog.is_active (shop-create SoT) and eazpire_products.catalog_status.
+ * Upserts a minimal catalog row when missing so Todify/partner products never stay invisible.
+ */
+export async function syncPublishIndexVisibility(env, productKey, catalogStatus, { title = null, regionsJson = null } = {}) {
   const db = catalogDb(env);
-  if (!db) return { ok: false, error: "catalog_db_unavailable" };
-
   const key = String(productKey || "").trim();
-  if (!key) return { ok: false, error: "product_key_required" };
-
   const status = String(catalogStatus || "").toLowerCase();
+  if (!db || !key || !["offline", "preview", "online"].includes(status)) {
+    return { ok: false, error: "invalid_visibility_sync" };
+  }
   const isActive = catalogStatusToIsActive(status);
   const now = Date.now();
 
-  const existing = await queryFirst(db, `SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`, key);
-  if (!existing) return { ok: false, error: "not_found" };
+  const existing = await queryFirst(db, `SELECT product_key, title, regions_json FROM product_catalog WHERE product_key = ? LIMIT 1`, key);
+  if (existing) {
+    await db
+      .prepare(`UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`)
+      .bind(isActive, now, key)
+      .run();
+  } else {
+    const rowTitle = title || key;
+    const regions = regionsJson || JSON.stringify(["EU"]);
+    await db
+      .prepare(
+        `INSERT INTO product_catalog (product_key, title, regions_json, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .bind(key, rowTitle, regions, isActive, now, now)
+      .run();
+  }
 
-  await db
-    .prepare(`UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`)
-    .bind(isActive, now, key)
-    .run();
-
-  // Keep manufacturer eazpire_products in sync so Catalog Studio badges match shop-create PLP.
   if (env.MANUFACTURER_DB) {
     try {
       await env.MANUFACTURER_DB.prepare(
@@ -365,16 +377,40 @@ export async function setCatalogProductStatus(env, productKey, catalogStatus) {
         .bind(status, now, key)
         .run();
     } catch (e) {
-      console.warn("[setCatalogProductStatus] eazpire_products sync:", e?.message || e);
+      console.warn("[syncPublishIndexVisibility] eazpire_products:", e?.message || e);
     }
   }
+
+  return { ok: true, product_key: key, catalog_status: status, is_active: isActive };
+}
+
+export async function setCatalogProductStatus(env, productKey, catalogStatus) {
+  const db = catalogDb(env);
+  if (!db) return { ok: false, error: "catalog_db_unavailable" };
+
+  const key = String(productKey || "").trim();
+  if (!key) return { ok: false, error: "product_key_required" };
+
+  const status = String(catalogStatus || "").toLowerCase();
+  if (!["offline", "preview", "online"].includes(status)) {
+    return { ok: false, error: "invalid_catalog_status" };
+  }
+
+  const existing = await queryFirst(db, `SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`, key);
+  if (!existing) return { ok: false, error: "not_found" };
+
+  const synced = await syncPublishIndexVisibility(env, key, status, {
+    title: existing.title,
+    regionsJson: existing.regions_json,
+  });
+  if (!synced.ok) return synced;
 
   const product = await getCatalogOpsProduct(env, key);
   return {
     ok: true,
     product_key: key,
     catalog_status: status,
-    is_active: isActive,
+    is_active: synced.is_active,
     product: product.ok ? product.product : null,
     _ops_source: "catalog-db",
   };
@@ -864,10 +900,8 @@ export async function saveCatalogVersionConfig(env, versionId, body, productKey 
 
   const catalogStatus = String(nextConfig?.catalog_status || "").toLowerCase();
   if (["offline", "preview", "online"].includes(catalogStatus)) {
-    await db
-      .prepare(`UPDATE product_catalog SET is_active = ?, updated_at = ? WHERE product_key = ?`)
-      .bind(catalogStatusToIsActive(catalogStatus), now, existing.product_key)
-      .run();
+    // product_catalog.is_active is shop-create SoT — upsert so partner rows cannot drift/miss.
+    await syncPublishIndexVisibility(env, existing.product_key, catalogStatus);
     await syncPatVisibilityToManufacturerShadow(env, patId, nextConfig, existing.product_key);
   }
 
