@@ -3,6 +3,7 @@ import { openMockViewer } from "/partner/shared/js/mock-viewer.js";
 import { fetchMockupsBundle, saveMockups, uploadMockupImage, deleteMockupImage } from "../api.js";
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
+import { openPreviewImageGenerateModal } from "./preview-image-generate.js";
 
 export const MOCKUP_SET_CLEAN = "clean";
 export const MOCKUP_SET_SHOP_PREVIEW = "shop_preview";
@@ -49,7 +50,7 @@ const SECTION_META = {
     id: "preview_images",
     title: "Preview Images",
     hint: "Lifestyle / gallery images (Catalog Studio + Skill Tree cards). Also used as shop-card fallback when Shop Preview is empty.",
-    emptyHint: "No preview images yet. Upload below or via the partner portal.",
+    emptyHint: "No preview images yet. Upload or Generate below.",
     showPrintAreaToggle: false,
     showPreviewToggle: false,
     allowUpload: true,
@@ -194,9 +195,15 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
       </div>`
     : "";
 
+  const generateBtn =
+    mockupSet === MOCKUP_SET_PREVIEW_IMAGES
+      ? `<button type="button" class="btn btn-secondary" id="ce-mock-generate-btn">Generate</button>`
+      : "";
+
   const uploadBar = allowUpload
     ? `<div class="ce-mock-upload-bar">
         <button type="button" class="btn btn-secondary" id="ce-mock-upload-btn">Upload images</button>
+        ${generateBtn}
         <input type="file" id="ce-mock-upload-file" accept="image/png,image/jpeg,image/webp" multiple hidden />
         <span class="ce-hint">PNG / JPEG / WebP · added to this set</span>
       </div>`
@@ -487,6 +494,15 @@ function bindMockupUpload(ctx, root) {
       btn.disabled = false;
     }
   };
+
+  const genBtn = root.querySelector("#ce-mock-generate-btn");
+  if (genBtn && mockupSet === MOCKUP_SET_PREVIEW_IMAGES) {
+    genBtn.onclick = () => {
+      openPreviewImageGenerateModal(ctx, {
+        onSaved: () => reloadMockupsPanel(ctx),
+      });
+    };
+  }
 
   root.querySelectorAll("[data-mock-delete]").forEach((el) => {
     el.onclick = async (e) => {

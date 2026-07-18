@@ -3440,6 +3440,176 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   flex-wrap: wrap;
   margin: 10px 0 14px;
 }
+
+/* Preview Images → Generate modal (Seedream 4.5) */
+.ce-prev-gen-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ce-prev-gen-modal.is-open {
+  display: flex;
+}
+.ce-prev-gen-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+.ce-prev-gen-modal__dialog {
+  position: relative;
+  z-index: 1;
+  width: min(1040px, 96vw);
+  max-height: 92vh;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ce-prev-gen-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.ce-prev-gen-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.ce-prev-gen-modal__body {
+  position: relative;
+  padding: 14px 16px 16px;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ce-prev-gen-float-slot {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+}
+.ce-prev-gen-float-slot[hidden] {
+  display: none !important;
+}
+.ce-prev-gen-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.ce-prev-gen-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ce-prev-gen-tab {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ce-prev-gen-tab:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+}
+.ce-prev-gen-tab.is-active {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  border-color: transparent;
+  color: #fff;
+}
+.ce-prev-gen-views {
+  padding-bottom: 8px;
+}
+.ce-prev-gen-float {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(720px, 100%);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+.ce-prev-gen-float__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ce-prev-gen-stage--generating,
+.ce-prev-gen-stage--result,
+.ce-prev-gen-stage--regen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: min(62vh, 640px);
+}
+.ce-prev-gen-placeholder,
+.ce-prev-gen-result {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(56vh, 560px);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+.ce-prev-gen-placeholder__img,
+.ce-prev-gen-result__img {
+  max-width: 100%;
+  max-height: min(62vh, 620px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+.ce-prev-gen-placeholder__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.42);
+  color: #fff;
+  font-weight: 650;
+  text-align: center;
+  padding: 16px;
+}
+.ce-prev-gen-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: ce-prev-gen-spin 0.8s linear infinite;
+}
+@keyframes ce-prev-gen-spin {
+  to { transform: rotate(360deg); }
+}
 .ce-mock-carousel__slide-wrap {
   position: relative;
   display: inline-block;

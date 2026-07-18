@@ -203,6 +203,32 @@ export async function deleteMockupImage(productKey, imageId, mockupSet) {
   });
 }
 
+/** Generate a Preview Image via Replicate Seedream 4.5 (prompt + source mock URL). */
+export async function generatePreviewImage(productKey, { prompt, imageUrl }) {
+  return partnerFetch("admin-eazpire-preview-image-generate", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      prompt,
+      image_url: imageUrl,
+    },
+  });
+}
+
+/** Persist a generated image URL into the Preview Images mockup set. */
+export async function saveGeneratedPreviewImage(productKey, { imageUrl, printProviderId, viewKey, colorName }) {
+  return partnerFetch("admin-eazpire-preview-image-save", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      image_url: imageUrl,
+      print_provider_id: printProviderId,
+      view_key: viewKey,
+      color_name: colorName,
+    },
+  });
+}
+
 export async function saveAutomations(versionId, body) {
   return partnerFetch("admin-eazpire-automations-save", {
     method: "POST",

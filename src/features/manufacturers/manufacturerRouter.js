@@ -275,6 +275,8 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-mockups-save",
   "admin-eazpire-mockup-image-upload",
   "admin-eazpire-mockup-image-delete",
+  "admin-eazpire-preview-image-generate",
+  "admin-eazpire-preview-image-save",
   "admin-eazpire-automations-save",
   "admin-eazpire-published-bundle",
   "admin-eazpire-published-update",
@@ -1132,6 +1134,29 @@ export async function handleManufacturerRouter(request, env, ctx) {
         mockupSet: body.mockup_set,
       });
       if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-preview-image-generate" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { generatePreviewImage } = await import("./partnerCatalog/generatePreviewImage.js");
+      const result = await generatePreviewImage(env, {
+        prompt: body.prompt,
+        imageUrl: body.image_url || body.source_image_url,
+      });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-preview-image-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { saveGeneratedPreviewImage } = await import("./partnerCatalog/generatePreviewImage.js");
+      const result = await saveGeneratedPreviewImage(env, {
+        productKey: body.product_key,
+        imageUrl: body.image_url,
+        printProviderId: body.print_provider_id,
+        viewKey: body.view_key,
+        colorName: body.color_name,
+      });
+      if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-automations-save" && request.method === "POST") {

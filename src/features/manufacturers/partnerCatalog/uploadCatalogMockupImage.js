@@ -41,6 +41,160 @@ function slugPart(s, max = 40) {
 }
 
 /**
+ * Persist mockup image bytes to MOCKUP_R2 + product_mockup_images.
+ * Shared by multipart upload and AI-generated Preview Images save.
+ */
+export async function persistCatalogMockupImageBytes(env, {
+  productKey,
+  mockupSet: mockupSetRaw,
+  bytes,
+  mime: mimeRaw,
+  viewKey: viewKeyRaw,
+  colorName: colorNameRaw,
+  printProviderId: printProviderIdRaw,
+}) {
+  const productKeySafe = String(productKey || "").trim();
+  if (!productKeySafe) return { ok: false, error: "missing_product_key" };
+
+  const mockupSet = normalizeMockupSet(mockupSetRaw || MOCKUP_SET_SHOP_PREVIEW);
+  if (!ALLOWED_SETS.has(mockupSet)) return { ok: false, error: "unsupported_mockup_set" };
+
+  let mime = String(mimeRaw || "").split(";")[0].trim().toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+  if (!ALLOWED_TYPES.has(mime)) return { ok: false, error: "unsupported_file_type" };
+
+  const buf = bytes instanceof ArrayBuffer ? bytes : null;
+  if (!buf || buf.byteLength <= 0 || buf.byteLength > MAX_BYTES) {
+    return { ok: false, error: "file_too_large", max_bytes: MAX_BYTES };
+  }
+
+  if (!env?.MOCKUP_R2) return { ok: false, error: "storage_unavailable" };
+
+  const viewKey =
+    String(viewKeyRaw || "").trim() ||
+    (mockupSet === MOCKUP_SET_PREVIEW_IMAGES || mockupSet === MOCKUP_SET_SHOP_PREVIEW
+      ? `upload_${Date.now().toString(36)}`
+      : "front");
+  const colorName = String(colorNameRaw || "").trim() || "Default";
+
+  let printProviderId = Number(printProviderIdRaw);
+  if (!Number.isFinite(printProviderId)) printProviderId = 0;
+
+  const ext = extForMime(mime);
+  const setPart = mockupSet !== MOCKUP_SET_CLEAN ? `${mockupSet}/` : "";
+  const r2Key = `mockups/${slugPart(productKeySafe, 64)}/${setPart}mockup-images/${slugPart(viewKey, 24)}-${slugPart(colorName, 30)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+  await env.MOCKUP_R2.put(r2Key, buf, {
+    httpMetadata: { contentType: mime },
+    customMetadata: {
+      product_key: productKeySafe,
+      mockup_set: mockupSet,
+      view_key: viewKey,
+      color_name: colorName,
+    },
+  });
+
+  const imageUrl = `${mockupPublicBase(env)}/mockup/${r2Key}`;
+  const now = Date.now();
+
+  const db = isCatalogOpsMasterWrite(env) ? env.CATALOG_DB : env.MANUFACTURER_DB;
+  if (!db) return { ok: false, error: "database_unavailable" };
+
+  if (isCatalogOpsMasterWrite(env)) {
+    await ensureCatalogMockupImageSchema(db);
+    const match = mockupSetSqlMatch(mockupSet);
+    const existingCount = await db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM product_mockup_images
+         WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
+      )
+      .bind(productKeySafe, printProviderId, match.bind)
+      .first();
+    const isDefault = Number(existingCount?.c || 0) === 0 ? 1 : 0;
+
+    await db
+      .prepare(
+        `INSERT INTO product_mockup_images
+          (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex,
+           image_url, printify_variant_ids, is_default, mockup_set, created_at)
+         VALUES (?, ?, '', ?, ?, NULL, ?, NULL, ?, ?, ?)`
+      )
+      .bind(productKeySafe, printProviderId, viewKey, colorName, imageUrl, isDefault, mockupSet, now)
+      .run();
+
+    const row = await db
+      .prepare(
+        `SELECT id, product_key, print_provider_id, view_key, color_name, color_hex, image_url,
+                is_default, mockup_set, created_at
+         FROM product_mockup_images
+         WHERE product_key = ? AND print_provider_id = ? AND view_key = ? AND color_name = ?
+           AND ${match.clause}
+         ORDER BY rowid DESC LIMIT 1`
+      )
+      .bind(productKeySafe, printProviderId, viewKey, colorName, match.bind)
+      .first();
+
+    return {
+      ok: true,
+      image_url: imageUrl,
+      r2_key: r2Key,
+      mockup_set: mockupSet,
+      image: row || {
+        id: null,
+        product_key: productKeySafe,
+        print_provider_id: printProviderId,
+        view_key: viewKey,
+        color_name: colorName,
+        image_url: imageUrl,
+        is_default: isDefault,
+        mockup_set: mockupSet,
+      },
+    };
+  }
+
+  // Manufacturer DB path (legacy mirror)
+  const { newId } = await import("../db.js");
+  const id = newId();
+  const match = mockupSetSqlMatch(mockupSet);
+  const existingCount = await db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM eazpire_product_mockup_images
+       WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
+    )
+    .bind(productKeySafe, printProviderId, match.bind)
+    .first()
+    .catch(() => ({ c: 0 }));
+  const isDefault = Number(existingCount?.c || 0) === 0 ? 1 : 0;
+
+  await db
+    .prepare(
+      `INSERT INTO eazpire_product_mockup_images
+        (id, product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex,
+         image_url, printify_variant_ids, is_default, mockup_set, created_at)
+       VALUES (?, ?, ?, '', ?, ?, NULL, ?, NULL, ?, ?, ?)`
+    )
+    .bind(id, productKeySafe, printProviderId, viewKey, colorName, imageUrl, isDefault, mockupSet, now)
+    .run();
+
+  return {
+    ok: true,
+    image_url: imageUrl,
+    r2_key: r2Key,
+    mockup_set: mockupSet,
+    image: {
+      id,
+      product_key: productKeySafe,
+      print_provider_id: printProviderId,
+      view_key: viewKey,
+      color_name: colorName,
+      image_url: imageUrl,
+      is_default: isDefault,
+      mockup_set: mockupSet,
+    },
+  };
+}
+
+/**
  * @param {object} env
  * @param {Request} request — multipart form: file|image, product_key, mockup_set, view_key?, color_name?, print_provider_id?
  */
@@ -65,133 +219,21 @@ export async function uploadCatalogMockupImage(env, request) {
     return { ok: false, error: "file_too_large", max_bytes: MAX_BYTES };
   }
 
-  if (!env?.MOCKUP_R2) return { ok: false, error: "storage_unavailable" };
-
   const viewKeyRaw = String(formData.get("view_key") || "").trim();
   const colorNameRaw = String(formData.get("color_name") || "").trim();
-  const viewKey =
-    viewKeyRaw ||
-    (mockupSet === MOCKUP_SET_PREVIEW_IMAGES || mockupSet === MOCKUP_SET_SHOP_PREVIEW
-      ? `upload_${Date.now().toString(36)}`
-      : "front");
-  const colorName = colorNameRaw || "Default";
-
   const ppRaw = formData.get("print_provider_id");
   let printProviderId = ppRaw != null && String(ppRaw).trim() !== "" ? Number(ppRaw) : NaN;
   if (!Number.isFinite(printProviderId)) printProviderId = 0;
 
-  const ext = extForMime(mime);
-  const setPart = mockupSet !== MOCKUP_SET_CLEAN ? `${mockupSet}/` : "";
-  const r2Key = `mockups/${slugPart(productKey, 64)}/${setPart}mockup-images/${slugPart(viewKey, 24)}-${slugPart(colorName, 30)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-
-  await env.MOCKUP_R2.put(r2Key, bytes, {
-    httpMetadata: { contentType: mime },
-    customMetadata: {
-      product_key: productKey,
-      mockup_set: mockupSet,
-      view_key: viewKey,
-      color_name: colorName,
-    },
+  return persistCatalogMockupImageBytes(env, {
+    productKey,
+    mockupSet,
+    bytes,
+    mime,
+    viewKey: viewKeyRaw,
+    colorName: colorNameRaw,
+    printProviderId,
   });
-
-  const imageUrl = `${mockupPublicBase(env)}/mockup/${r2Key}`;
-  const now = Date.now();
-
-  const db = isCatalogOpsMasterWrite(env) ? env.CATALOG_DB : env.MANUFACTURER_DB;
-  if (!db) return { ok: false, error: "database_unavailable" };
-
-  if (isCatalogOpsMasterWrite(env)) {
-    await ensureCatalogMockupImageSchema(db);
-    const match = mockupSetSqlMatch(mockupSet);
-    const existingCount = await db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM product_mockup_images
-         WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
-      )
-      .bind(productKey, printProviderId, match.bind)
-      .first();
-    const isDefault = Number(existingCount?.c || 0) === 0 ? 1 : 0;
-
-    await db
-      .prepare(
-        `INSERT INTO product_mockup_images
-          (product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex,
-           image_url, printify_variant_ids, is_default, mockup_set, created_at)
-         VALUES (?, ?, '', ?, ?, NULL, ?, NULL, ?, ?, ?)`
-      )
-      .bind(productKey, printProviderId, viewKey, colorName, imageUrl, isDefault, mockupSet, now)
-      .run();
-
-    const row = await db
-      .prepare(
-        `SELECT id, product_key, print_provider_id, view_key, color_name, color_hex, image_url,
-                is_default, mockup_set, created_at
-         FROM product_mockup_images
-         WHERE product_key = ? AND print_provider_id = ? AND view_key = ? AND color_name = ?
-           AND ${match.clause}
-         ORDER BY rowid DESC LIMIT 1`
-      )
-      .bind(productKey, printProviderId, viewKey, colorName, match.bind)
-      .first();
-
-    return {
-      ok: true,
-      image_url: imageUrl,
-      r2_key: r2Key,
-      mockup_set: mockupSet,
-      image: row || {
-        id: null,
-        product_key: productKey,
-        print_provider_id: printProviderId,
-        view_key: viewKey,
-        color_name: colorName,
-        image_url: imageUrl,
-        is_default: isDefault,
-        mockup_set: mockupSet,
-      },
-    };
-  }
-
-  // Manufacturer DB path (legacy mirror)
-  const { newId } = await import("../db.js");
-  const id = newId();
-  const match = mockupSetSqlMatch(mockupSet);
-  const existingCount = await db
-    .prepare(
-      `SELECT COUNT(*) AS c FROM eazpire_product_mockup_images
-       WHERE product_key = ? AND print_provider_id = ? AND ${match.clause}`
-    )
-    .bind(productKey, printProviderId, match.bind)
-    .first()
-    .catch(() => ({ c: 0 }));
-  const isDefault = Number(existingCount?.c || 0) === 0 ? 1 : 0;
-
-  await db
-    .prepare(
-      `INSERT INTO eazpire_product_mockup_images
-        (id, product_key, print_provider_id, printify_product_id, view_key, color_name, color_hex,
-         image_url, printify_variant_ids, is_default, mockup_set, created_at)
-       VALUES (?, ?, ?, '', ?, ?, NULL, ?, NULL, ?, ?, ?)`
-    )
-    .bind(id, productKey, printProviderId, viewKey, colorName, imageUrl, isDefault, mockupSet, now)
-    .run();
-
-  return {
-    ok: true,
-    image_url: imageUrl,
-    r2_key: r2Key,
-    mockup_set: mockupSet,
-    image: {
-      id,
-      product_key: productKey,
-      print_provider_id: printProviderId,
-      view_key: viewKey,
-      color_name: colorName,
-      image_url: imageUrl,
-      is_default: isDefault,
-      mockup_set: mockupSet,
-    },
-  };
 }
 
 /**
