@@ -255,6 +255,10 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-shipping-get",
   "admin-eazpire-shipping-save",
   "admin-eazpire-shipping-sync",
+  "admin-eazpire-taxonomy-search",
+  "admin-eazpire-taxonomy-resolve",
+  "admin-eazpire-taxonomy-used",
+  "admin-eazpire-taxonomy-sync",
   "admin-eazpire-product-providers-bundle",
   "admin-eazpire-product-providers-save",
   "admin-eazpire-provider-catalog-detail",
@@ -977,6 +981,34 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const body = await request.json().catch(() => ({}));
       const { syncProductProviderShipping } = await import("../catalog/productProviderShipping.js");
       const result = await syncProductProviderShipping(env, body.product_key, body);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-taxonomy-search" && request.method === "GET") {
+      const q = url.searchParams.get("q") || "";
+      const limit = url.searchParams.get("limit");
+      const { searchShopifyTaxonomyCategories } = await import("../taxonomy/shopifyProductTaxonomyGithub.js");
+      const result = await searchShopifyTaxonomyCategories(env, q, { limit });
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-taxonomy-resolve" && request.method === "GET") {
+      const categoryId = url.searchParams.get("category_id") || url.searchParams.get("id") || "";
+      const { resolveShopifyTaxonomyCategory } = await import("../taxonomy/shopifyProductTaxonomyGithub.js");
+      const result = await resolveShopifyTaxonomyCategory(env, categoryId);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-taxonomy-used" && request.method === "GET") {
+      const { listUsedShopifyTaxonomyCategories } = await import("../taxonomy/shopifyProductTaxonomyGithub.js");
+      const result = await listUsedShopifyTaxonomyCategories(env);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-taxonomy-sync" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { syncShopifyTaxonomyFromGithub } = await import("../taxonomy/shopifyProductTaxonomyGithub.js");
+      const result = await syncShopifyTaxonomyFromGithub(env, { force: !!body.force });
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }

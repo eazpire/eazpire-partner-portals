@@ -114,6 +114,7 @@ function profileRowToEditor(row) {
     print_provider_id: row.print_provider_id,
     title: row.title,
     shopify_category_id: row.shopify_category_id,
+    shopify_category_name: row.shopify_category_name || null,
     standard_product_display_name: row.standard_product_display_name,
     product_features: row.product_features,
     care_instructions: row.care_instructions,

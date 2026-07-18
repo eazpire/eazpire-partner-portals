@@ -1,12 +1,14 @@
 /**
  * Catalog editor → Shipping tab.
- * Ships-from origins + per-country rates (USD), grouped by continent, Printify sync.
+ * Ships-from origins + per-country rates (USD), grouped by continent.
+ * Printify catalog products get official sync; Todify / partner products use manual entry only.
  */
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { showToast } from "/partner/shared/js/partner-shell.js";
 import { fetchShipping, saveShipping, syncShipping } from "../api.js";
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import { providerLabel } from "../editor-subnav.js";
+import { isPartnerOrTodifyProduct } from "../print-area/helpers.js";
 import {
   buildContinentGroups,
   countryDisplayName,
@@ -15,11 +17,26 @@ import {
 
 const FLAG_CDN = "https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/";
 
+/** Printify sync UI only for Printify catalog products (not Todify / direct_shopify partners). */
+function usesPrintifyShippingSync(ctx) {
+  return !isPartnerOrTodifyProduct(ctx);
+}
+
+function resolveShippingProviderId(ctx) {
+  const raw = ctx.selectedPrintProviderId;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0 && String(n) === String(raw).trim()) return n;
+  const s = String(raw ?? "").trim();
+  if (s) return s;
+  return null;
+}
+
 function ensureState(ctx) {
   if (!ctx.shippingTabState) {
     ctx.shippingTabState = {
       loaded: false,
       print_provider_id: null,
+      printifySync: false,
       ships_from: [],
       network_origins: [],
       ships_from_note: null,
@@ -72,8 +89,12 @@ function flagHtml(code) {
 }
 
 function shipsFromHtml(shipsFrom, opts = {}) {
+  const printifySync = !!opts.printifySync;
   const list = Array.isArray(shipsFrom) ? shipsFrom : [];
   const selected = new Set(list.map((s) => String(s.code || "").toUpperCase()));
+  const emptyHint = printifySync
+    ? "No ships-from countries yet. Sync from Printify or add one below."
+    : "No ships-from countries yet. Add one below.";
   const chips = list.length
     ? list
         .map((s) => {
@@ -86,9 +107,10 @@ function shipsFromHtml(shipsFrom, opts = {}) {
           </label>`;
         })
         .join("")
-    : `<p class="ce-hint" id="ce-ship-from-empty">No ships-from countries yet. Sync from Printify or add one below.</p>`;
+    : `<p class="ce-hint" id="ce-ship-from-empty">${emptyHint}</p>`;
 
-  const network = Array.isArray(opts.network_origins) ? opts.network_origins : [];
+  // Network partners are Printify Choice–specific; hide for Todify / partner products.
+  const network = printifySync && Array.isArray(opts.network_origins) ? opts.network_origins : [];
   const networkChips = network
     .filter((s) => !selected.has(String(s.code || "").toUpperCase()))
     .map((s) => {
@@ -102,9 +124,10 @@ function shipsFromHtml(shipsFrom, opts = {}) {
     })
     .join("");
 
-  const note = opts.ships_from_note
-    ? `<p class="ce-hint">${escapeHtml(opts.ships_from_note)}</p>`
-    : `<p class="ce-hint">These labels appear in Creator Journey Overview as “Ships from …”. Uncheck a chip to remove it before saving.</p>`;
+  const note =
+    printifySync && opts.ships_from_note
+      ? `<p class="ce-hint">${escapeHtml(opts.ships_from_note)}</p>`
+      : `<p class="ce-hint">These labels appear in Creator Journey Overview as “Ships from …”. Uncheck a chip to remove it before saving.</p>`;
 
   const networkBlock = networkChips
     ? `<div class="ce-ship-network">
@@ -139,9 +162,13 @@ function shipsFromHtml(shipsFrom, opts = {}) {
   `;
 }
 
-function continentRatesHtml(continents, openSet) {
+function continentRatesHtml(continents, openSet, opts = {}) {
+  const printifySync = !!opts.printifySync;
   if (!continents?.length) {
-    return `<p class="ce-hint" id="ce-ship-empty-rates">No destination rates yet. Use <strong>Sync from Printify</strong> or add countries manually below.</p>
+    const emptyHint = printifySync
+      ? `No destination rates yet. Use <strong>Sync from Printify</strong> or add countries manually below.`
+      : `No destination rates yet. Add countries manually below.`;
+    return `<p class="ce-hint" id="ce-ship-empty-rates">${emptyHint}</p>
       <div class="ce-ship-add-row">
         <label>Add country / zone
           <input type="text" class="input" id="ce-ship-add-code" maxlength="3" placeholder="DE or ROW" />
@@ -209,6 +236,24 @@ function continentRatesHtml(continents, openSet) {
       <button type="button" class="btn btn-secondary" id="ce-ship-add-country">Add country</button>
     </div>
     <div id="ce-ship-continents">${blocks}</div>`;
+}
+
+function destinationRatesHintHtml(printifySync) {
+  if (printifySync) {
+    return `<p class="ce-hint">1st item = first product · Additional = each extra. Sync expands <strong>ROW</strong> (Rest of the World) onto every country without a dedicated zone (US/CA/AU keep API prices). Use “Apply to continent” to overwrite a whole group.</p>`;
+  }
+  return `<p class="ce-hint">1st item = first product in the order · Additional = each extra product. Use “Apply to continent” to copy values to every country in that group.</p>`;
+}
+
+function printifySyncSectionHtml(state, pname, pid) {
+  return `<section class="ce-meta-card">
+        <h3 class="ce-section-title">Printify sync</h3>
+        <p class="ce-hint">Load official ships-from + destination rates (USD) for <strong>${escapeHtml(pname)}</strong> (provider ${escapeHtml(String(pid))}).</p>
+        <div class="ce-ship-sync-bar">
+          <button type="button" class="btn btn-primary" id="ce-ship-sync">Sync from Printify</button>
+        </div>
+        <div id="ce-ship-sync-status">${syncBannerHtml(state)}</div>
+      </section>`;
 }
 
 function syncBannerHtml(state) {
@@ -298,43 +343,40 @@ function rebuildContinentsFromRates(rates) {
 
 export async function loadShippingTab(ctx) {
   const state = ensureState(ctx);
-  const pid = Number(ctx.selectedPrintProviderId);
-  if (!Number.isFinite(pid) || pid <= 0) {
+  const pid = resolveShippingProviderId(ctx);
+  if (pid == null) {
     return `<div class="ce-tab-panel ce-ship-panel">
       <p class="ce-hint">Select an active provider in the subnav to configure shipping.</p>
     </div>`;
   }
 
+  const printifySync = usesPrintifyShippingSync(ctx);
   const data = await fetchShipping(ctx.productKey, pid);
   state.loaded = true;
   state.print_provider_id = pid;
+  state.printifySync = printifySync;
   state.ships_from = Array.isArray(data.ships_from) ? data.ships_from : [];
-  state.network_origins = Array.isArray(data.network_origins) ? data.network_origins : [];
-  state.ships_from_note = data.ships_from_note || null;
+  state.network_origins = printifySync && Array.isArray(data.network_origins) ? data.network_origins : [];
+  state.ships_from_note = printifySync ? data.ships_from_note || null : null;
   state.continents = Array.isArray(data.continents) ? data.continents : [];
   state.currency = data.currency || "USD";
-  state.last_synced_at = data.last_synced_at ?? null;
-  state.sync_source = data.sync_source || null;
-  state.sync_error = data.sync_error || null;
+  state.last_synced_at = printifySync ? data.last_synced_at ?? null : null;
+  state.sync_source = printifySync ? data.sync_source || null : null;
+  state.sync_error = printifySync ? data.sync_error || null : null;
   state.sync_message = null;
   state.shipping_rates_url = null;
 
   const pname = providerLabel(ctx, pid);
+  const syncSection = printifySync ? printifySyncSectionHtml(state, pname, pid) : "";
 
   return `
-    <div class="ce-tab-panel ce-ship-panel">
-      <section class="ce-meta-card">
-        <h3 class="ce-section-title">Printify sync</h3>
-        <p class="ce-hint">Load official ships-from + destination rates (USD) for <strong>${escapeHtml(pname)}</strong> (provider ${pid}).</p>
-        <div class="ce-ship-sync-bar">
-          <button type="button" class="btn btn-primary" id="ce-ship-sync">Sync from Printify</button>
-        </div>
-        <div id="ce-ship-sync-status">${syncBannerHtml(state)}</div>
-      </section>
+    <div class="ce-tab-panel ce-ship-panel${printifySync ? "" : " ce-ship-panel--manual"}">
+      ${syncSection}
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Ships from</h3>
         ${shipsFromHtml(state.ships_from, {
+          printifySync,
           network_origins: state.network_origins,
           ships_from_note: state.ships_from_note,
         })}
@@ -342,8 +384,8 @@ export async function loadShippingTab(ctx) {
 
       <section class="ce-meta-card">
         <h3 class="ce-section-title">Destination rates (USD)</h3>
-        <p class="ce-hint">1st item = first product · Additional = each extra. Sync expands <strong>ROW</strong> (Rest of the World) onto every country without a dedicated zone (US/CA/AU keep API prices). Use “Apply to continent” to overwrite a whole group.</p>
-        ${continentRatesHtml(state.continents, state.openContinents)}
+        ${destinationRatesHintHtml(printifySync)}
+        ${continentRatesHtml(state.continents, state.openContinents, { printifySync })}
       </section>
     </div>`;
 }
@@ -353,7 +395,7 @@ export function snapshotShippingTab(ctx) {
   if (!root?.querySelector(".ce-ship-panel")) return null;
   const state = ensureState(ctx);
   return {
-    print_provider_id: state.print_provider_id || Number(ctx.selectedPrintProviderId) || null,
+    print_provider_id: state.print_provider_id || resolveShippingProviderId(ctx),
     ships_from: readShipsFromFromDom(root),
     rates: readRatesFromDom(root),
     currency: "USD",
@@ -362,17 +404,14 @@ export function snapshotShippingTab(ctx) {
 
 function remountRatesSection(ctx, root) {
   const state = ensureState(ctx);
+  const printifySync = !!state.printifySync;
   const cards = root.querySelectorAll(".ce-meta-card");
   const ratesCard = [...cards].find((c) => c.querySelector("#ce-ship-continents") || c.querySelector("#ce-ship-add-country"));
   if (!ratesCard) return;
-  const title = ratesCard.querySelector(".ce-section-title");
-  const hint = ratesCard.querySelector(".ce-hint");
   ratesCard.innerHTML =
-    (title ? title.outerHTML : '<h3 class="ce-section-title">Destination rates (USD)</h3>') +
-    (hint
-      ? hint.outerHTML
-      : '<p class="ce-hint">1st item = first product · Additional = each extra product.</p>') +
-    continentRatesHtml(state.continents, state.openContinents);
+    '<h3 class="ce-section-title">Destination rates (USD)</h3>' +
+    destinationRatesHintHtml(printifySync) +
+    continentRatesHtml(state.continents, state.openContinents, { printifySync });
   bindRatesControls(ctx, root);
   notifyActiveTabDirty(ctx);
 }
@@ -437,6 +476,7 @@ function bindRatesControls(ctx, root) {
 
 function remountShipsFromSection(ctx, root) {
   const state = ensureState(ctx);
+  const printifySync = !!state.printifySync;
   const shipsCard = [...root.querySelectorAll(".ce-meta-card")].find((c) =>
     c.querySelector("#ce-ship-from-grid")
   );
@@ -445,6 +485,7 @@ function remountShipsFromSection(ctx, root) {
   shipsCard.innerHTML =
     (title ? title.outerHTML : '<h3 class="ce-section-title">Ships from</h3>') +
     shipsFromHtml(state.ships_from, {
+      printifySync,
       network_origins: state.network_origins,
       ships_from_note: state.ships_from_note,
     });
@@ -489,10 +530,10 @@ export function bindShippingTab(ctx, root) {
   bindShipsFromControls(ctx, root);
 
   const syncBtn = root.querySelector("#ce-ship-sync");
-  if (syncBtn) {
+  if (syncBtn && state.printifySync) {
     syncBtn.onclick = async () => {
-      const pid = Number(ctx.selectedPrintProviderId);
-      if (!Number.isFinite(pid)) return;
+      const pid = resolveShippingProviderId(ctx);
+      if (pid == null) return;
       syncBtn.disabled = true;
       syncBtn.textContent = "Syncing…";
       try {
@@ -510,12 +551,8 @@ export function bindShippingTab(ctx, root) {
         state.sync_message = res.sync_message || null;
         state.shipping_rates_url = res.shipping_rates_url || null;
 
-        const cards = root.querySelectorAll(".ce-meta-card");
-        const syncCard = cards[0];
-        if (syncCard) {
-          const status = syncCard.querySelector("#ce-ship-sync-status");
-          if (status) status.innerHTML = syncBannerHtml(state);
-        }
+        const status = root.querySelector("#ce-ship-sync-status");
+        if (status) status.innerHTML = syncBannerHtml(state);
         remountShipsFromSection(ctx, root);
         remountRatesSection(ctx, root);
         notifyActiveTabDirty(ctx);

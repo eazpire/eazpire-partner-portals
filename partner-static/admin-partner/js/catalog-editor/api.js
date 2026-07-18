@@ -22,6 +22,29 @@ export async function saveMeta(productKey, body) {
   });
 }
 
+export async function searchShopifyTaxonomy(q, limit = 40) {
+  return partnerFetch("admin-eazpire-taxonomy-search", {
+    query: { q: q || "", limit: String(limit) },
+  });
+}
+
+export async function resolveShopifyTaxonomy(categoryId) {
+  return partnerFetch("admin-eazpire-taxonomy-resolve", {
+    query: { category_id: categoryId || "" },
+  });
+}
+
+export async function fetchUsedShopifyTaxonomy() {
+  return partnerFetch("admin-eazpire-taxonomy-used");
+}
+
+export async function syncShopifyTaxonomy(force = false) {
+  return partnerFetch("admin-eazpire-taxonomy-sync", {
+    method: "POST",
+    body: { force: !!force },
+  });
+}
+
 export async function fetchCreatorSettings(productKey) {
   return partnerFetch("admin-eazpire-creator-settings-get", { query: { product_key: productKey } });
 }

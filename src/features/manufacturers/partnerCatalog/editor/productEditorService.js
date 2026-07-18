@@ -144,6 +144,7 @@ function rowToPublishProfile(row) {
     print_provider_id: row.print_provider_id,
     title: row.title,
     shopify_category_id: row.shopify_category_id,
+    shopify_category_name: row.shopify_category_name || null,
     standard_product_display_name: row.standard_product_display_name,
     product_features: row.product_features,
     care_instructions: row.care_instructions,
@@ -178,6 +179,7 @@ export async function saveProductMeta(env, productKey, body) {
     const fields = {
       title: body.profile_title ?? product.title,
       shopify_category_id: body.shopify_category_id ?? null,
+      shopify_category_name: body.shopify_category_name ?? null,
       standard_product_display_name: body.standard_product_display_name ?? null,
       product_features: body.product_features ?? null,
       care_instructions: body.care_instructions ?? null,
@@ -185,17 +187,26 @@ export async function saveProductMeta(env, productKey, body) {
       gpsr_html: body.gpsr_html ?? null,
       updated_at: now,
     };
+    // Best-effort name column (may be missing on older manufacturer DBs).
+    try {
+      await db
+        .prepare(`ALTER TABLE eazpire_product_publish_profiles ADD COLUMN shopify_category_name TEXT`)
+        .run();
+    } catch {
+      /* already exists */
+    }
     if (existing?.id) {
       await db
         .prepare(
           `UPDATE eazpire_product_publish_profiles SET
-            title = ?, shopify_category_id = ?, standard_product_display_name = ?,
+            title = ?, shopify_category_id = ?, shopify_category_name = ?, standard_product_display_name = ?,
             product_features = ?, care_instructions = ?, size_table_html = ?, gpsr_html = ?, updated_at = ?
            WHERE id = ?`
         )
         .bind(
           fields.title,
           fields.shopify_category_id,
+          fields.shopify_category_name,
           fields.standard_product_display_name,
           fields.product_features,
           fields.care_instructions,
@@ -210,9 +221,9 @@ export async function saveProductMeta(env, productKey, body) {
         .prepare(
           `INSERT INTO eazpire_product_publish_profiles
             (id, product_key, title, source_system, source_product_id, print_provider_id,
-             shopify_category_id, standard_product_display_name, product_features, care_instructions,
+             shopify_category_id, shopify_category_name, standard_product_display_name, product_features, care_instructions,
              size_table_html, gpsr_html, collected_at, updated_at, is_active, revision)
-           VALUES (?, ?, ?, 'printify', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
+           VALUES (?, ?, ?, 'printify', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
         )
         .bind(
           newId(),
@@ -220,6 +231,7 @@ export async function saveProductMeta(env, productKey, body) {
           fields.title,
           printProviderId,
           fields.shopify_category_id,
+          fields.shopify_category_name,
           fields.standard_product_display_name,
           fields.product_features,
           fields.care_instructions,

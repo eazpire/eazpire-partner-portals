@@ -160,6 +160,7 @@ export async function upsertCatalogPublishProfile(catalogDbRef, productKey, prin
           product_data_json = COALESCE(?, product_data_json),
           print_areas_config_json = COALESCE(?, print_areas_config_json),
           shopify_category_id = COALESCE(?, shopify_category_id),
+          shopify_category_name = COALESCE(?, shopify_category_name),
           standard_product_display_name = COALESCE(?, standard_product_display_name),
           product_features = COALESCE(?, product_features),
           care_instructions = COALESCE(?, care_instructions),
@@ -177,6 +178,7 @@ export async function upsertCatalogPublishProfile(catalogDbRef, productKey, prin
         patch.product_data_json != null ? JSON.stringify(patch.product_data_json) : null,
         patch.print_areas_config_json != null ? JSON.stringify(patch.print_areas_config_json) : null,
         patch.shopify_category_id ?? null,
+        patch.shopify_category_name ?? null,
         patch.standard_product_display_name ?? null,
         patch.product_features ?? null,
         patch.care_instructions ?? null,
@@ -194,9 +196,9 @@ export async function upsertCatalogPublishProfile(catalogDbRef, productKey, prin
       `INSERT INTO product_publish_profiles
         (product_key, title, source_system, source_product_id, blueprint_id, print_provider_id,
          variants_json, prices_json, product_data_json, print_areas_config_json,
-         shopify_category_id, standard_product_display_name, product_features, care_instructions,
+         shopify_category_id, shopify_category_name, standard_product_display_name, product_features, care_instructions,
          size_table_html, gpsr_html, collected_at, updated_at, is_active, revision)
-       VALUES (?, ?, 'printify', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
+       VALUES (?, ?, 'printify', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
     )
     .bind(
       productKey,
@@ -209,6 +211,7 @@ export async function upsertCatalogPublishProfile(catalogDbRef, productKey, prin
       patch.product_data_json != null ? JSON.stringify(patch.product_data_json) : null,
       patch.print_areas_config_json != null ? JSON.stringify(patch.print_areas_config_json) : null,
       patch.shopify_category_id ?? null,
+      patch.shopify_category_name ?? null,
       patch.standard_product_display_name ?? null,
       patch.product_features ?? null,
       patch.care_instructions ?? null,
@@ -443,6 +446,7 @@ export async function updateCatalogProductMeta(env, productKey, body) {
     await upsertCatalogPublishProfile(db, productKey, printProviderId, {
       title: body.profile_title ?? existing.title,
       shopify_category_id: body.shopify_category_id ?? null,
+      shopify_category_name: body.shopify_category_name ?? null,
       standard_product_display_name: body.standard_product_display_name ?? null,
       product_features: body.product_features ?? null,
       care_instructions: body.care_instructions ?? null,
