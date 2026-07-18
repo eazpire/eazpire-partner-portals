@@ -33,6 +33,26 @@ export async function saveCreatorSettings(productKey, body) {
   });
 }
 
+export async function fetchShipping(productKey, printProviderId) {
+  return partnerFetch("admin-eazpire-shipping-get", {
+    query: { product_key: productKey, print_provider_id: printProviderId },
+  });
+}
+
+export async function saveShipping(productKey, body) {
+  return partnerFetch("admin-eazpire-shipping-save", {
+    method: "POST",
+    body: { product_key: productKey, ...body },
+  });
+}
+
+export async function syncShipping(productKey, body) {
+  return partnerFetch("admin-eazpire-shipping-sync", {
+    method: "POST",
+    body: { product_key: productKey, ...body },
+  });
+}
+
 export async function fetchProvidersBundle(productKey) {
   return partnerFetch("admin-eazpire-product-providers-bundle", { query: { product_key: productKey } });
 }

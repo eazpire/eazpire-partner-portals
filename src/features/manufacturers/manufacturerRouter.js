@@ -252,6 +252,9 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-creator-settings-get",
   "admin-eazpire-creator-settings-save",
   "admin-eazpire-creator-settings-image-upload",
+  "admin-eazpire-shipping-get",
+  "admin-eazpire-shipping-save",
+  "admin-eazpire-shipping-sync",
   "admin-eazpire-product-providers-bundle",
   "admin-eazpire-product-providers-save",
   "admin-eazpire-provider-catalog-detail",
@@ -942,6 +945,28 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const productKey = url.searchParams.get("product_key");
       const { uploadProductCreatorPreviewImage } = await import("../creatorJourney/productCreatorSettings.js");
       const result = await uploadProductCreatorPreviewImage(env, request, productKey);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-shipping-get" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const printProviderId = url.searchParams.get("print_provider_id");
+      const { getProductProviderShipping } = await import("../catalog/productProviderShipping.js");
+      const result = await getProductProviderShipping(env, productKey, printProviderId);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-shipping-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { saveProductProviderShipping } = await import("../catalog/productProviderShipping.js");
+      const result = await saveProductProviderShipping(env, body.product_key, body);
+      if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-shipping-sync" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { syncProductProviderShipping } = await import("../catalog/productProviderShipping.js");
+      const result = await syncProductProviderShipping(env, body.product_key, body);
       if (!result.ok) return json(result, 400, cors);
       return json(result, 200, cors);
     }

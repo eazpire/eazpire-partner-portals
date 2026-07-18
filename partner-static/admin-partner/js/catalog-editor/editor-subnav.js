@@ -7,6 +7,7 @@ export const EDITOR_SUBNAV_TAB_IDS = new Set([
   "mockups",
   "variants",
   "print_area",
+  "shipping",
   "meta_data",
   "products",
   "automations",
