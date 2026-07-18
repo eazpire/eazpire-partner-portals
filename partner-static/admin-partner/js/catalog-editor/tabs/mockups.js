@@ -29,7 +29,7 @@ const SECTION_META = {
   [MOCKUP_SET_SHOP_PREVIEW]: {
     id: "shop_preview",
     title: "Shop Preview Mockups",
-    hint: "Wearing mocks for the shop — Create from Scratch and Shop Create preview cards. Upload here, or sync via Templates.",
+    hint: "Wearing mocks for the shop — Create from Scratch, Shop Create cards, and product skill Variants / Print Areas. Turn on Preview Mock for the main view, then click a color to set the main preview mock (saved as is_default).",
     emptyHint: "No shop preview mockups yet. Upload images below (shop cards use these first; Preview Images are the fallback).",
     showPrintAreaToggle: false,
     showPreviewToggle: true,
@@ -111,12 +111,20 @@ function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle
         allowDelete && img.id
           ? `<button type="button" class="ce-mock-slide-remove" data-mock-delete="${escapeHtml(String(img.id))}" data-mock-set="${escapeHtml(mockupSet)}" aria-label="Remove image">×</button>`
           : "";
+      const mainBadge = isPreview
+        ? `<span class="ce-mock-carousel__main-badge">Main preview</span>`
+        : "";
+      const pickHint = isPreviewView
+        ? " — click to set as main preview mock"
+        : " — click to enlarge";
       return `
         <div class="ce-mock-carousel__slide-wrap">
-          <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)} — click to enlarge" aria-label="View mockup ${escapeHtml(img.color_name || viewKey)}">
+          <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}${isPreviewView ? " ce-mock-carousel__slide--pickable" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)}${pickHint}" aria-label="${isPreviewView ? "Set as main preview mock" : "View mockup"} ${escapeHtml(img.color_name || viewKey)}" aria-pressed="${isPreview ? "true" : "false"}">
             <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
             <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
+            ${mainBadge}
           </button>
+          <button type="button" class="ce-mock-slide-zoom" data-mock-zoom="${escapeHtml(String(img.id))}" aria-label="Enlarge ${escapeHtml(img.color_name || viewKey)}" title="Enlarge">↗</button>
           ${delBtn}
         </div>`;
     })
@@ -136,6 +144,11 @@ function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle
         </label>`
     : "";
 
+  const pickHint =
+    showPreviewToggle && isPreviewView
+      ? `<p class="ce-mock-pick-hint">Preview Mock is on for this view — click a color to set it as the <strong>main preview mock</strong> (skill modal + shop cards).</p>`
+      : "";
+
   return `
     <article class="ce-mock-view" data-view-key="${viewEsc}">
       <header class="ce-mock-view__header">
@@ -145,6 +158,7 @@ function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle
         </div>
         ${previewToggle}
       </header>
+      ${pickHint}
       <div class="ce-mock-carousel" data-mock-set="${escapeHtml(mockupSet)}" data-view="${viewEsc}">
         <div class="ce-mock-carousel__viewport">
           <div class="ce-mock-carousel__track">${slideHtml}</div>
@@ -297,6 +311,23 @@ export function snapshotMockupsTab() {
   };
 }
 
+function refreshMainPreviewBadges(mockupSet, previewId) {
+  document.querySelectorAll(`.ce-mock-carousel[data-mock-set="${CSS.escape(mockupSet)}"] .ce-mock-carousel__slide`).forEach((slide) => {
+    const isMain = previewId && String(slide.getAttribute("data-id")) === String(previewId);
+    slide.classList.toggle("ce-mock-carousel__slide--active", isMain);
+    slide.setAttribute("aria-pressed", isMain ? "true" : "false");
+    let badge = slide.querySelector(".ce-mock-carousel__main-badge");
+    if (isMain && !badge) {
+      badge = document.createElement("span");
+      badge.className = "ce-mock-carousel__main-badge";
+      badge.textContent = "Main preview";
+      slide.appendChild(badge);
+    } else if (!isMain && badge) {
+      badge.remove();
+    }
+  });
+}
+
 function bindMockupSetCarousels(ctx, mockupSet) {
   document.querySelectorAll(`.ce-mock-carousel[data-mock-set="${CSS.escape(mockupSet)}"]`).forEach((carousel) => {
     const viewKey = carousel.dataset.view;
@@ -304,16 +335,31 @@ function bindMockupSetCarousels(ctx, mockupSet) {
 
     slides.forEach((slide) => {
       slide.addEventListener("click", () => {
-        setActiveSlide(carousel, slide);
         const toggle = document.querySelector(
           `.ce-mock-preview-switch[data-mock-set="${CSS.escape(mockupSet)}"][data-view="${CSS.escape(viewKey)}"]`
         );
         if (toggle?.checked) {
-          syncPreviewHiddenInput(mockupSet, viewKey, slide.getAttribute("data-id") || "");
+          // Preview Mock on → click picks the main preview mock (no lightbox).
+          setActiveSlide(carousel, slide);
+          const mockId = slide.getAttribute("data-id") || "";
+          syncPreviewHiddenInput(mockupSet, viewKey, mockId);
           syncMockupsUiFromDom(ctx);
+          refreshMainPreviewBadges(mockupSet, mockId);
+          notifyActiveTabDirty(ctx);
+          return;
         }
         const index = slides.indexOf(slide);
         openMockViewer(collectCarouselViewerItems(carousel), index);
+      });
+    });
+
+    carousel.querySelectorAll(".ce-mock-slide-zoom").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = btn.getAttribute("data-mock-zoom");
+        const index = slides.findIndex((s) => String(s.getAttribute("data-id")) === String(id));
+        openMockViewer(collectCarouselViewerItems(carousel), index >= 0 ? index : 0);
       });
     });
   });
@@ -324,17 +370,38 @@ function bindMockupSetCarousels(ctx, mockupSet) {
       if (!toggle.checked) {
         syncPreviewHiddenInput(mockupSet, viewKey, "");
         syncMockupsUiFromDom(ctx);
+        // Re-render so pick hint / pickable state clears for this view.
+        if (ctx.mockupsData) {
+          const body = document.getElementById("ce-body");
+          if (body) {
+            body.innerHTML = renderMockupsTabHtml(ctx, ctx.mockupsData);
+            bindMockupsTab(ctx, body);
+            updateMockSectionSubnav(ctx);
+          }
+        }
         notifyActiveTabDirty(ctx);
         return;
       }
       document.querySelectorAll(`.ce-mock-preview-switch[data-mock-set="${CSS.escape(mockupSet)}"]`).forEach((other) => {
-        if (other !== toggle) other.checked = false;
+        if (other !== toggle) {
+          other.checked = false;
+          syncPreviewHiddenInput(mockupSet, other.dataset.view, "");
+        }
       });
       const carousel = document.querySelector(
         `.ce-mock-carousel[data-mock-set="${CSS.escape(mockupSet)}"][data-view="${CSS.escape(viewKey)}"]`
       );
-      syncPreviewHiddenInput(mockupSet, viewKey, getActiveSlideId(carousel));
+      const mockId = getActiveSlideId(carousel);
+      syncPreviewHiddenInput(mockupSet, viewKey, mockId);
       syncMockupsUiFromDom(ctx);
+      if (ctx.mockupsData) {
+        const body = document.getElementById("ce-body");
+        if (body) {
+          body.innerHTML = renderMockupsTabHtml(ctx, ctx.mockupsData);
+          bindMockupsTab(ctx, body);
+          updateMockSectionSubnav(ctx);
+        }
+      }
       notifyActiveTabDirty(ctx);
     });
   });
