@@ -64,6 +64,9 @@ describe("partner catalog editor assets (smoke)", () => {
       "loadPartnerReviewBundle",
       "renderReviewTab",
     ];
+    const reviewSrc = readFileSync(join(portal, "tabs/review.js"), "utf8");
+    expect(reviewSrc).toContain("admin-manufacturer-product-editor-bundle");
+    expect(reviewSrc).toContain("linked === false");
     for (const n of needles) {
       expect(src, `shell missing: ${n}`).toContain(n);
     }

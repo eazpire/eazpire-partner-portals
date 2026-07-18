@@ -496,7 +496,8 @@ export async function handleManufacturerRouter(request, env, ctx) {
       if (!resolvedProductId && catalogKey) {
         const { findManufacturerProductByCatalogKey } = await import("./partnerProductEditorService.js");
         const link = await findManufacturerProductByCatalogKey(env, catalogKey);
-        if (!link) return json({ ok: false, error: "not_found" }, 404, cors);
+        // Catalog open probes this by product_key — missing link is normal (e.g. Printify-only).
+        if (!link) return json({ ok: true, linked: false, product: null }, 200, cors);
         manufacturerId = link.manufacturer_id;
         resolvedProductId = link.product_id;
       } else if (resolvedProductId) {
@@ -511,7 +512,16 @@ export async function handleManufacturerRouter(request, env, ctx) {
       }
       const { getPartnerProductEditorBundle } = await import("./partnerProductEditorService.js");
       const result = await getPartnerProductEditorBundle(env, manufacturerId, resolvedProductId);
-      return json(result, result.ok ? 200 : 404, cors);
+      if (!result.ok) {
+        const status =
+          result.error === "manufacturer_db_unavailable"
+            ? 503
+            : result.error === "not_found"
+              ? 404
+              : 400;
+        return json(result, status, cors);
+      }
+      return json({ ...result, linked: true }, 200, cors);
     }
     if (op === "admin-manufacturer-product-approve-to-catalog" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));

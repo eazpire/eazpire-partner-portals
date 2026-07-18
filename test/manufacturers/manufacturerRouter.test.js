@@ -28,6 +28,7 @@ describe("manufacturerRouter ops", () => {
     expect(isManufacturerOp("admin-creations-printify-products")).toBe(true);
     expect(isManufacturerOp("admin-creations-customer-products")).toBe(true);
     expect(isManufacturerOp("admin-creations-shopify-products")).toBe(true);
+    expect(isManufacturerOp("admin-manufacturer-product-editor-bundle")).toBe(true);
     expect(isManufacturerOp("unknown-op")).toBe(false);
   });
 });

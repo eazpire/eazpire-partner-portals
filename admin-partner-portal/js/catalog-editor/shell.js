@@ -788,16 +788,12 @@ export async function openProductEditor(productKeyOrOptions, maybeOptions) {
         "Partner product review";
       overlayEl.querySelector("#ce-title").textContent = title;
     } else if (productKey) {
-      // Detect linked partner submission for Review tab on Todify/partner catalog items
-      try {
-        const linkBundle = await loadPartnerReviewBundle(null, productKey);
-        if (linkBundle?.product?.id) {
-          ctx.partnerReview = linkBundle;
-          ctx.manufacturerProductId = linkBundle.product.id;
-          ctx.showReviewTab = true;
-        }
-      } catch {
-        /* no partner link — Review tab stays hidden */
+      // Optional probe: linked partner submission → show Review tab (null = none)
+      const linkBundle = await loadPartnerReviewBundle(null, productKey);
+      if (linkBundle?.product?.id) {
+        ctx.partnerReview = linkBundle;
+        ctx.manufacturerProductId = linkBundle.product.id;
+        ctx.showReviewTab = true;
       }
     }
 

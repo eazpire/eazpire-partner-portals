@@ -11,7 +11,18 @@ export async function loadPartnerReviewBundle(manufacturerProductId, productKey)
       ? { product_key: productKey }
       : null;
   if (!query) return null;
-  return partnerFetch("admin-manufacturer-product-editor-bundle", { query });
+  try {
+    const data = await partnerFetch("admin-manufacturer-product-editor-bundle", { query });
+    // product_key probe: no partner submission linked to this catalog item
+    if (data?.linked === false || !data?.product?.id) return null;
+    return data;
+  } catch (err) {
+    // Explicit product_id missing → keep throw; product_key miss used to be HTTP 404
+    if (productKey && !manufacturerProductId && (err?.status === 404 || err?.data?.error === "not_found")) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 function money(cents, currency) {
