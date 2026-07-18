@@ -105,7 +105,7 @@ function printAreasHtml(areas, open) {
   return `
     <details class="ce-cs-print-areas" ${open ? "open" : ""}>
       <summary class="ce-cs-print-areas__summary">Print Areas (${areas.length})</summary>
-      <p class="ce-hint">Enabled areas appear in the Creator Journey product skill info → Print Areas tab.</p>
+      <p class="ce-hint">Enabled areas appear in Design Studio (Front/Back tabs) and in Creator Journey → Print Areas.</p>
       <div class="ce-cs-print-areas__list">${rows}</div>
     </details>`;
 }

@@ -71,6 +71,14 @@ export async function saveVersionConfig(versionId, body) {
   });
 }
 
+/** Product-level visibility → product_catalog.is_active (sole SoT; eazpire mirrored as cache). */
+export async function saveProductCatalogStatus(productKey, catalogStatus) {
+  return partnerFetch("admin-catalog-studio-set-status", {
+    method: "POST",
+    body: { product_key: productKey, catalog_status: catalogStatus },
+  });
+}
+
 export async function fetchPrintAreaBundle(productKey, printProviderId, versionId) {
   return partnerFetch("admin-eazpire-print-area-bundle", {
     query: {

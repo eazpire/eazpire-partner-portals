@@ -127,6 +127,12 @@ function makeManufacturerDb(rows = {}) {
           if (sql.includes("eazpire_product_versions")) return { results: [] };
           return { results: [] };
         },
+        run: async () => {
+          if (sql.includes("UPDATE eazpire_products SET catalog_status")) {
+            product.catalog_status = handler._args[0];
+          }
+          return { success: true };
+        },
       };
       return handler;
     },
@@ -155,6 +161,34 @@ describe("catalogOpsReadService", () => {
     expect(result.ok).toBe(true);
     expect(result.product._ops_source).toBe("catalog-db");
     expect(result.product.catalog_status).toBe("online");
+  });
+
+  it("reads visibility only from product_catalog.is_active (ignores eazpire online)", async () => {
+    const env = {
+      CATALOG_DB: makeCatalogDb({
+        product: {
+          product_key: "test-tee",
+          title: "Test Tee",
+          is_active: 1,
+          regions_json: "[]",
+          created_at: 1,
+          updated_at: 2,
+        },
+      }),
+      MANUFACTURER_DB: makeManufacturerDb({
+        product: {
+          product_key: "test-tee",
+          title: "Test Tee",
+          catalog_status: "online",
+          manufacturer_id: "mfr_1",
+          source_blueprint_id: "eb_1",
+        },
+      }),
+    };
+    const result = await getCatalogOpsProduct(env, "test-tee");
+    expect(result.ok).toBe(true);
+    expect(result.product.catalog_status).toBe("preview");
+    expect(result.product.is_active).toBe(1);
   });
 
   it("getCatalogOpsEditorBundle loads versions and providers from catalog-db", async () => {

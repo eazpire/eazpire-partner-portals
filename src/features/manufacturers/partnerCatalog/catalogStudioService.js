@@ -5,15 +5,14 @@
 import { buildCategoryTree, CAT_REVERSE, CATEGORY_GROUPS } from "../../admin/catalogConstants.js";
 import { listPartnersForAdmin, getPartnerByIdOrSlug } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
-import { listEazpireProducts, updateEazpireProduct } from "./eazpireProductService.js";
-import { isCatalogOpsMasterWrite, shouldUseCatalogOps } from "./catalogOpsConfig.js";
+import { listEazpireProducts, updateEazpireProduct, getEazpireProduct } from "./eazpireProductService.js";
+import { shouldUseCatalogOps } from "./catalogOpsConfig.js";
 import { setCatalogProductStatus } from "./catalogOpsWriteService.js";
 import {
   listCatalogOpsStudioProductsAsEazpire,
   productKeysForProviderFromCatalog,
 } from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
-import { mirrorEazpireProductToCatalogDb } from "./mirrorToCatalogDb.js";
 import {
   PRINTIFY_PARTNER_SLUG,
   PRINTIFY_ICON_URL,
@@ -1183,9 +1182,8 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
 
   // Partner-direct products (Todify / KNL): union manufacturer rows ONLY when they have no
-  // product_catalog row yet. Never union status mismatches — product_catalog.is_active is the
-  // shop-create SoT (Admin editor + PLP). Showing eazpire=online while catalog=preview caused
-  // Catalog Studio "Online" vs editor "Preview" / missing Available cards.
+  // product_catalog row yet. Never read eazpire.catalog_status for listing — sole SoT is
+  // product_catalog.is_active (Admin, Catalog Studio, shop-create).
   if (shouldUseCatalogOps(env) && env?.CATALOG_DB && db) {
     const mfgProducts = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
     if (mfgProducts.length) {
@@ -1319,8 +1317,29 @@ export async function setCatalogStudioProductStatus(env, { productKey, catalogSt
   const key = String(productKey || "").trim();
   if (!key) return { ok: false, error: "product_key_required" };
 
-  if (isCatalogOpsMasterWrite(env)) {
-    return setCatalogProductStatus(env, key, status);
+  // Sole SoT write: always product_catalog.is_active when CATALOG_DB is present.
+  // eazpire_products.catalog_status is mirrored inside syncPublishIndexVisibility — never the write target.
+  if (env?.CATALOG_DB) {
+    const { syncPublishIndexVisibility } = await import("./catalogOpsWriteService.js");
+    const existing = await setCatalogProductStatus(env, key, status);
+    if (existing.ok || existing.error !== "not_found") return existing;
+
+    const mfgDb = env.MANUFACTURER_DB;
+    const mfg = mfgDb ? await getEazpireProduct(mfgDb, key) : null;
+    const regionsArr = Array.isArray(mfg?.regions) ? mfg.regions : [];
+    const synced = await syncPublishIndexVisibility(env, key, status, {
+      title: mfg?.title || key,
+      regionsJson: regionsArr.length ? JSON.stringify(regionsArr) : null,
+    });
+    if (!synced.ok) return synced;
+    return {
+      ok: true,
+      product_key: key,
+      catalog_status: status,
+      is_active: synced.is_active,
+      product: mfg ? { ...mfg, catalog_status: status } : null,
+      _ops_source: "catalog-db",
+    };
   }
 
   const mfgDb = env.MANUFACTURER_DB;
@@ -1328,9 +1347,6 @@ export async function setCatalogStudioProductStatus(env, { productKey, catalogSt
 
   const updated = await updateEazpireProduct(mfgDb, key, { catalog_status: status });
   if (!updated) return { ok: false, error: "product_not_found" };
-
-  const mirror = await mirrorEazpireProductToCatalogDb(env, key);
-  if (!mirror.ok) return { ok: false, error: mirror.error || "mirror_failed", product: updated };
 
   return { ok: true, product_key: key, catalog_status: status, product: updated };
 }

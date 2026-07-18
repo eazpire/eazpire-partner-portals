@@ -6,13 +6,14 @@ import { fileURLToPath } from "url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("catalog ops visibility SoT", () => {
-  it("prefers manufacturer catalog_status over product_catalog.is_active", () => {
+  it("uses product_catalog.is_active as sole SoT for catalog_status", () => {
     const src = readFileSync(
       join(root, "src/features/manufacturers/partnerCatalog/catalogOpsReadService.js"),
       "utf8"
     );
-    expect(src).toContain("link.catalog_status");
-    expect(src).toContain("VALID_CATALOG_STATUSES.has(mfgStatus)");
+    expect(src).toContain("isActiveToCatalogStatus(row.is_active)");
+    expect(src).toContain("Never fall back to eazpire_products.catalog_status");
+    expect(src).toContain("VALID_CATALOG_STATUSES.has(productStatus)");
     expect(src).toContain("cfg.catalog_status = productStatus");
   });
 

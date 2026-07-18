@@ -1,5 +1,5 @@
 import { getVersionsForProvider } from "./editor-subnav.js";
-import { saveVersionConfig } from "./api.js";
+import { saveVersionConfig, saveProductCatalogStatus } from "./api.js";
 
 export const CATALOG_STATUSES = ["offline", "preview", "online"];
 
@@ -205,7 +205,7 @@ export function mergeVisibilityIntoVersionConfig(ctx, version, config) {
   return base;
 }
 
-/** Persist visibility for versions edited via footer (non-provider tabs). */
+/** Persist visibility: product_catalog.is_active first, then version config as display mirror. */
 export async function saveVisibilityFromFooter(ctx) {
   const map = ensureVisibilityState(ctx);
   if (!map.size) return;
@@ -213,10 +213,26 @@ export async function saveVisibilityFromFooter(ctx) {
   const dirty = [...map.entries()].filter(([k, v]) => initial.get(k) !== v);
   if (!dirty.length) return;
 
+  const productKey = ctx.productKey || ctx.bundle?.product?.product_key;
+  const productStatus =
+    (ctx.bundle?.product?.catalog_status &&
+      CATALOG_STATUSES.includes(String(ctx.bundle.product.catalog_status).toLowerCase()) &&
+      String(ctx.bundle.product.catalog_status).toLowerCase()) ||
+    dirty[0]?.[1] ||
+    "offline";
+
+  if (productKey) {
+    const res = await saveProductCatalogStatus(productKey, productStatus);
+    if (!res?.ok) {
+      throw new Error(res?.error || "Failed to save catalog visibility");
+    }
+  }
+
   for (const [vid, catalog_status] of dirty) {
     if (!vid || String(vid).startsWith("new_")) continue;
     const version = (ctx.bundle?.versions || []).find((v) => versionKey(v) === vid);
     const cfg = mergeVisibilityIntoVersionConfig(ctx, version, version?.product_version_config);
+    cfg.catalog_status = catalog_status;
     await saveVersionConfig(vid, { product_version_config: cfg, auto_mirror: false });
   }
 }

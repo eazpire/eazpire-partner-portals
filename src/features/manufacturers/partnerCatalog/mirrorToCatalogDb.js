@@ -1,6 +1,7 @@
 /**
- * One-way mirror: MANUFACTURER_DB master → catalog-db publish index
- * When CATALOG_OPS_MASTER_WRITE is on, catalog-db is master — do not overwrite it from manufacturer.
+ * One-way mirror: MANUFACTURER_DB → catalog-db publish index (title/meta/etc.).
+ * Visibility SoT is product_catalog.is_active — never overwrite is_active from eazpire on UPDATE.
+ * When CATALOG_OPS_MASTER_WRITE is on, skip the whole mirror (catalog-db is master).
  */
 
 import { catalogStatusToIsActive } from "./constants.js";
@@ -35,10 +36,11 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
     .first();
 
   if (existingCatalog) {
+    // Preserve product_catalog.is_active (sole visibility SoT). Mirror only non-status fields.
     await catalogDb
       .prepare(
         `UPDATE product_catalog SET
-          title = ?, regions_json = ?, is_active = ?,
+          title = ?, regions_json = ?,
           visible_design_types_json = ?, catalog_category_group = ?,
           catalog_category_leaf = ?, catalog_audience_json = ?,
           catalog_production_type = ?, print_area_edit_use_mocks = ?, updated_at = ?
@@ -47,7 +49,6 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
       .bind(
         product.title,
         product.regions_json,
-        isActive,
         product.visible_design_types_json,
         product.catalog_category_group,
         product.catalog_category_leaf,

@@ -82,15 +82,8 @@ export function enrichMockupDefaultsRows(rows, env) {
 
 function catalogRowToProduct(row, link = {}) {
   if (!row) return null;
-  // Storefront + Catalog Studio PLP filter use product_catalog.is_active.
-  // Prefer that so admin badges match shop-create; fall back to eazpire link only when catalog row missing status.
-  const catalogStatus = isActiveToCatalogStatus(row.is_active);
-  const mfgStatus = String(link.catalog_status || "").toLowerCase();
-  const status = VALID_CATALOG_STATUSES.has(catalogStatus)
-    ? catalogStatus
-    : VALID_CATALOG_STATUSES.has(mfgStatus)
-      ? mfgStatus
-      : "offline";
+  // Sole SoT: product_catalog.is_active. Never fall back to eazpire_products.catalog_status.
+  const status = isActiveToCatalogStatus(row.is_active);
   return {
     product_key: row.product_key,
     manufacturer_id: link.manufacturer_id || null,
@@ -324,53 +317,38 @@ async function resolveBlueprintIdFromCatalog(env, productKey, link) {
   return null;
 }
 
-const STATUS_RANK = { offline: 0, preview: 1, online: 2 };
-
 /**
- * Heal eazpire ↔ product_catalog visibility drift toward the more visible status.
- * Catalog Studio used to show Online from eazpire while shop-create used product_catalog=preview.
+ * One-way mirror: product_catalog.is_active → eazpire_products.catalog_status (derived cache only).
+ * Never the reverse — catalog is the sole SoT for reads.
  */
-async function healVisibilityDriftIfNeeded(env, productKey, catalogRow, link) {
+async function mirrorCatalogVisibilityToManufacturer(env, productKey, catalogRow, link) {
   const catalogStatus = isActiveToCatalogStatus(catalogRow?.is_active);
   const mfgStatus = String(link?.catalog_status || "").toLowerCase();
-  if (!VALID_CATALOG_STATUSES.has(mfgStatus)) return catalogRow;
-  const cRank = STATUS_RANK[catalogStatus] ?? 0;
-  const mRank = STATUS_RANK[mfgStatus] ?? 0;
-  if (cRank === mRank) return catalogRow;
-  const winner = mRank > cRank ? mfgStatus : catalogStatus;
+  if (!env?.MANUFACTURER_DB || !productKey) return;
+  if (mfgStatus === catalogStatus) return;
   try {
-    const { syncPublishIndexVisibility } = await import("./catalogOpsWriteService.js");
-    await syncPublishIndexVisibility(env, productKey, winner, {
-      title: catalogRow?.title || productKey,
-      regionsJson: catalogRow?.regions_json || null,
-    });
-    const healed = await env.CATALOG_DB.prepare(`SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`)
-      .bind(productKey)
-      .first();
-    if (healed) {
-      console.warn(
-        `[catalog-ops] healed visibility drift ${productKey}: catalog=${catalogStatus} mfg=${mfgStatus} → ${winner}`
-      );
-      return healed;
-    }
+    await env.MANUFACTURER_DB.prepare(
+      `UPDATE eazpire_products SET catalog_status = ?, updated_at = ? WHERE product_key = ?`
+    )
+      .bind(catalogStatus, Date.now(), productKey)
+      .run();
   } catch (e) {
-    console.warn("[catalog-ops] visibility heal failed:", productKey, e?.message || e);
+    console.warn("[catalog-ops] mirror catalog→mfg visibility failed:", productKey, e?.message || e);
   }
-  return catalogRow;
 }
 
 export async function getCatalogOpsProduct(env, productKey) {
   const catalogDb = env.CATALOG_DB;
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
-  let row = await catalogDb
+  const row = await catalogDb
     .prepare(`SELECT * FROM product_catalog WHERE product_key = ? LIMIT 1`)
     .bind(productKey)
     .first();
   if (!row) return { ok: false, error: "not_found" };
 
   const link = await resolveProductLink(env, productKey);
-  row = await healVisibilityDriftIfNeeded(env, productKey, row, link);
+  await mirrorCatalogVisibilityToManufacturer(env, productKey, row, link);
   const product = catalogRowToProduct(row, link);
   const printifyBlueprintId = await resolveBlueprintIdFromCatalog(env, productKey, link);
 
@@ -488,8 +466,7 @@ export async function getCatalogOpsEditorBundle(env, productKey) {
     await healPartnerPlaceholderTitlesInCatalog(env, productKey, preferredTitle);
   }
 
-  // Align version configs with product-level catalog_status (Catalog Studio SoT).
-  // Stale version config "offline" was causing the editor footer to disagree with the list badge.
+  // Version config.catalog_status is display-only mirror of product_catalog.is_active (sole SoT).
   const productStatus = String(product.catalog_status || "").toLowerCase();
   if (VALID_CATALOG_STATUSES.has(productStatus)) {
     versions = versions.map((v) => {

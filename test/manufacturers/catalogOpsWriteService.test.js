@@ -249,4 +249,16 @@ describe("setCatalogStudioProductStatus write path", () => {
     expect(result.is_active).toBe(0);
     expect(catalogDb._state.product.is_active).toBe(0);
   });
+
+  it("writes product_catalog even without CATALOG_OPS_MASTER_WRITE flag", async () => {
+    const catalogDb = makeWritableCatalogDb();
+    const env = {
+      CATALOG_DB: catalogDb,
+      MANUFACTURER_DB: null,
+    };
+    const result = await setCatalogStudioProductStatus(env, { productKey: "test-tee", catalogStatus: "preview" });
+    expect(result.ok).toBe(true);
+    expect(result.is_active).toBe(1);
+    expect(catalogDb._state.product.is_active).toBe(1);
+  });
 });

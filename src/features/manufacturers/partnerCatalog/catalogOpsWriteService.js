@@ -338,7 +338,8 @@ async function upsertCatalogVariantPrintAreaDimensions(env, productKey, update, 
 }
 
 /**
- * Write visibility to product_catalog.is_active (shop-create SoT) and eazpire_products.catalog_status.
+ * Write visibility to the sole SoT: product_catalog.is_active.
+ * Also mirrors to eazpire_products.catalog_status (derived cache — never a read source).
  * Upserts a minimal catalog row when missing so Todify/partner products never stay invisible.
  */
 export async function syncPublishIndexVisibility(env, productKey, catalogStatus, { title = null, regionsJson = null } = {}) {
@@ -900,7 +901,7 @@ export async function saveCatalogVersionConfig(env, versionId, body, productKey 
 
   const catalogStatus = String(nextConfig?.catalog_status || "").toLowerCase();
   if (["offline", "preview", "online"].includes(catalogStatus)) {
-    // product_catalog.is_active is shop-create SoT — upsert so partner rows cannot drift/miss.
+    // Write sole SoT (product_catalog.is_active); eazpire is mirrored inside sync.
     await syncPublishIndexVisibility(env, existing.product_key, catalogStatus);
     await syncPatVisibilityToManufacturerShadow(env, patId, nextConfig, existing.product_key);
   }
