@@ -277,6 +277,8 @@
     "playwright:capture-service": "node scripts/playwright-print-area-capture-service.mjs",
     "secrets:meta-facebook": "node scripts/set-meta-facebook-app-credentials.js",
     "secrets:meta-facebook-page": "node scripts/set-meta-facebook-page-credentials.js",
+    "secrets:tiktok": "node scripts/set-tiktok-app-credentials.js",
+    "secrets:tiktok-brand": "node scripts/set-tiktok-brand-credentials.js",
     "dry-run:facebook-post": "node scripts/dry-run-facebook-post.mjs",
     "test:facebook-post": "node scripts/test-facebook-post.mjs",
     "auth:generate-secret": "node scripts/generate-jwt-secret.js",

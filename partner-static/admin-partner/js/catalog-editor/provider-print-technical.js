@@ -497,35 +497,25 @@ export function applyPublishBrandingSemanticsToSlotsByPosition(map) {
   }
 }
 
-export function unionPatPlaceholderPositions(variants, placeholdersByPosition) {
+/**
+ * Print-area views for the active provider: only positions that exist in the
+ * Printify catalog variants (same source as the Provider tab).
+ * `placeholdersByPosition` may decorate existing catalog keys (slot counts) but
+ * must not invent positions the provider does not offer (e.g. left_sleeve).
+ */
+export function unionPatPlaceholderPositions(variants, _placeholdersByPosition) {
   const catalog = catalogPlaceholdersFromVariants(variants);
   const seen = new Set();
   const out = [];
-  const remember = (ph, pos) => {
-    const norm = normalizePatPositionKey(pos);
-    if (!norm || seen.has(norm)) return;
-    seen.add(norm);
-    if (ph && typeof ph === "object") {
-      out.push({ ...ph, position: pos });
-      return;
-    }
-    out.push({ position: pos, decoration_method: "", width: null, height: null });
-  };
   for (const ph of catalog) {
     const pos = String(ph?.position ?? "")
       .trim()
       .toLowerCase();
     if (!pos) continue;
-    remember(ph, pos);
-  }
-  if (placeholdersByPosition && typeof placeholdersByPosition === "object") {
-    for (const k of Object.keys(placeholdersByPosition)) {
-      const pos = String(k || "")
-        .trim()
-        .toLowerCase();
-      if (!pos) continue;
-      remember(null, pos);
-    }
+    const norm = normalizePatPositionKey(pos);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(ph && typeof ph === "object" ? { ...ph, position: pos } : { position: pos });
   }
   return out;
 }

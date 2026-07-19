@@ -78,7 +78,8 @@ describe("listViewKeys OPT OnDemand catalog resolution", () => {
     const ctx = { selectedPrintProviderId: 30 };
     const data = { variants_json: savedVariantsSubset };
     const views = listViewKeys([], {}, versionWithAllPositions, printAreaCatalogDetail(ctx, data));
-    expect(views).toEqual(["back", "front", "neck", "sleeve_left", "sleeve_right"]);
+    // Only catalog positions — version config must not invent back / sleeve_right.
+    expect(views).toEqual(["front", "neck", "sleeve_left"]);
   });
 
   it("prefers live catalog variants over saved variants_json", () => {
@@ -90,23 +91,40 @@ describe("listViewKeys OPT OnDemand catalog resolution", () => {
     expect(variants).toBe(liveCatalogVariants);
   });
 
-  it("merges version config positions not present in saved catalog", () => {
+  it("does not add version config positions absent from provider catalog", () => {
     const views = listViewKeys(
       [],
       {},
       versionWithAllPositions,
       { variants: savedVariantsSubset }
     );
-    expect(views).toEqual(["back", "front", "neck", "sleeve_left", "sleeve_right"]);
+    expect(views).toEqual(["front", "neck", "sleeve_left"]);
+  });
+
+  it("matches provider catalog when only front/back/neck exist", () => {
+    const catalogFrontBackNeck = [
+      {
+        id: 1,
+        placeholders: [
+          { position: "front", width: 4200, height: 4800 },
+          { position: "back", width: 4200, height: 4800 },
+          { position: "neck", width: 750, height: 750 },
+        ],
+      },
+    ];
+    const views = listViewKeys([], {}, versionWithAllPositions, { variants: catalogFrontBackNeck });
+    expect(views).toEqual(["back", "front", "neck"]);
   });
 });
 
 describe("unionPatPlaceholderPositions alias handling", () => {
-  it("does not duplicate sleeve aliases from catalog and config", () => {
+  it("does not duplicate sleeve aliases from catalog and ignores config-only extras", () => {
     const positions = unionPatPlaceholderPositions(liveCatalogVariants, {
       sleeve_left: { qr: 1, logo: 0, creator_design: 0, additional_design: 0 },
+      hood: { qr: 0, logo: 0, creator_design: 1, additional_design: 0 },
     });
     const keys = positions.map((p) => p.position);
     expect(keys).toEqual(["front", "left_sleeve", "back", "right_sleeve", "neck"]);
+    expect(keys).not.toContain("hood");
   });
 });
