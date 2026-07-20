@@ -1,5 +1,5 @@
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
-import { showToast } from "/partner/shared/js/partner-shell.js";
+import { showToast, openModal } from "/partner/shared/js/partner-shell.js";
 import {
   fetchTemplateBundle,
   createTemplateDraft,
@@ -7,7 +7,107 @@ import {
   saveTemplateSectionProductId,
   syncTemplateSection,
   setTemplatePrintArea,
+  listTemplateCalibrationPositions,
 } from "../api.js";
+
+const CALIBRATION_POS_STORAGE_PREFIX = "ce-calibration-positions";
+
+function calibrationPositionsStorageKey(ctx) {
+  return `${CALIBRATION_POS_STORAGE_PREFIX}:${ctx.productKey}:${ctx.selectedPrintProviderId}`;
+}
+
+function loadStoredCalibrationPositions(ctx) {
+  try {
+    const raw = sessionStorage.getItem(calibrationPositionsStorageKey(ctx));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.map((p) => String(p).toLowerCase()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredCalibrationPositions(ctx, positions) {
+  const list = Array.isArray(positions) ? positions.map((p) => String(p).toLowerCase()).filter(Boolean) : [];
+  try {
+    if (list.length) sessionStorage.setItem(calibrationPositionsStorageKey(ctx), JSON.stringify(list));
+    else sessionStorage.removeItem(calibrationPositionsStorageKey(ctx));
+  } catch {
+    /* ignore */
+  }
+  return list;
+}
+
+function formatPositionLabel(pos) {
+  return String(pos || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * @returns {Promise<string[]|null>} selected positions, or null if cancelled
+ */
+function openCalibrationPositionModal(positions, preselected = []) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const selected = new Set(
+      (preselected?.length ? preselected : positions).map((p) => String(p).toLowerCase())
+    );
+    const rows = positions
+      .map((pos) => {
+        const key = String(pos).toLowerCase();
+        return `<label class="ce-tpl-cal-pos-row">
+          <input type="checkbox" name="ce-tpl-cal-pos" value="${escapeHtml(key)}" ${selected.has(key) ? "checked" : ""} />
+          <span>${escapeHtml(formatPositionLabel(key))}</span>
+        </label>`;
+      })
+      .join("");
+
+    openModal({
+      title: "Select print areas",
+      bodyHtml: `
+        <p class="ce-hint" style="margin-top:0">
+          Green markers are placed only on the selected print areas (one marker each).
+          Sync will detect geometry for those selections only — set other areas manually in Print Area Settings.
+        </p>
+        <div class="ce-tpl-cal-pos-list" role="group" aria-label="Print areas">${rows}</div>
+        <div class="ce-tpl-cal-pos-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-ghost btn-sm" id="ce-tpl-cal-pos-all">Select all</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="ce-tpl-cal-pos-none">Clear</button>
+        </div>`,
+      onSave: async () => {
+        const checked = [...document.querySelectorAll('input[name="ce-tpl-cal-pos"]:checked')].map(
+          (el) => el.value
+        );
+        if (!checked.length) {
+          throw new Error("Choose at least one print area.");
+        }
+        settle(checked);
+      },
+    });
+
+    const saveBtn = document.getElementById("modal-save");
+    if (saveBtn) saveBtn.textContent = "Continue";
+    const onDismiss = () => settle(null);
+    document.getElementById("modal-cancel")?.addEventListener("click", onDismiss, { once: true });
+    document.getElementById("modal-close")?.addEventListener("click", onDismiss, { once: true });
+    document.getElementById("ce-tpl-cal-pos-all")?.addEventListener("click", () => {
+      document.querySelectorAll('input[name="ce-tpl-cal-pos"]').forEach((el) => {
+        el.checked = true;
+      });
+    });
+    document.getElementById("ce-tpl-cal-pos-none")?.addEventListener("click", () => {
+      document.querySelectorAll('input[name="ce-tpl-cal-pos"]').forEach((el) => {
+        el.checked = false;
+      });
+    });
+  });
+}
 
 const PRINTIFY_PRODUCT_URL_BASE = "https://printify.com/app/store/products/1?searchKey=";
 
@@ -23,7 +123,7 @@ const SECTIONS = [
   {
     id: "calibration_mockup",
     title: "Calibration Mockup",
-    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Use Set Print Area to place green markers in Printify, then Sync to detect geometry.",
+    hint: "Internal placement-guide images for print-area detection (red rectangle) and personalized try-on. Use Set Print Area to choose which print areas get a green marker in Printify, then Sync to detect only those selections. Set remaining areas manually in Print Area Settings.",
     supportsSetPrintArea: true,
   },
   {
@@ -233,6 +333,31 @@ async function runSectionSync(sectionId, ctx) {
     if (sectionId === "print_areas" || sectionId === "variants") {
       if (ctx.selectedVersionId) extra.version_id = ctx.selectedVersionId;
     }
+    if (sectionId === "calibration_mockup") {
+      let stored = loadStoredCalibrationPositions(ctx);
+      if (!stored.length) {
+        setSectionState(sectionEl, "loading", "Loading print areas…");
+        const listed = await listTemplateCalibrationPositions(
+          ctx.productKey,
+          ctx.selectedPrintProviderId,
+          printifyId
+        );
+        const available = Array.isArray(listed?.positions) ? listed.positions : [];
+        sectionEl?.classList.remove("ce-tpl-section--loading");
+        const ov = sectionEl?.querySelector(".ce-tpl-section__overlay");
+        if (ov) ov.hidden = true;
+        if (available.length) {
+          stored = await openCalibrationPositionModal(available, available);
+          if (!stored?.length) {
+            if (syncBtn) syncBtn.disabled = false;
+            return;
+          }
+          saveStoredCalibrationPositions(ctx, stored);
+        }
+        setSectionState(sectionEl, "loading", "Syncing…");
+      }
+      if (stored.length) extra.detect_positions = stored;
+    }
     const result = await syncTemplateSection(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId, extra);
     setSectionState(sectionEl, "success");
     let syncMsg =
@@ -251,15 +376,19 @@ async function runSectionSync(sectionId, ctx) {
       ctx.printAreaState = null;
       ctx.printAreaData = null;
       ctx.mockupsData = null;
+      const scoped = result?.calibration_detection?.selected_positions;
+      const scopeHint = Array.isArray(scoped) && scoped.length
+        ? ` (selected: ${scoped.map(formatPositionLabel).join(", ")})`
+        : "";
       if (detected > 0 && errCount === 0) {
-        syncMsg = `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected. Reopen Print Area to see the red frames.`;
+        syncMsg = `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected${scopeHint}. Reopen Print Area to see the red frames.`;
       } else if (detected > 0 && errCount > 0) {
         toastKind = "Synced with warnings";
-        syncMsg = `Detected ${detected} print area${detected === 1 ? "" : "s"}, but ${errCount} view${errCount === 1 ? "" : "s"} failed detection. Reopen Print Area to refresh.`;
+        syncMsg = `Detected ${detected} print area${detected === 1 ? "" : "s"}, but ${errCount} view${errCount === 1 ? "" : "s"} failed detection${scopeHint}. Reopen Print Area to refresh.`;
       } else {
         toastKind = "Sync incomplete";
         const firstErr = result?.calibration_detection?.errors?.[0]?.error || "green marker not detected";
-        syncMsg = `Mockups saved, but print-area geometry was not updated (${firstErr}). Check that green markers are solid on the images, then Sync again.`;
+        syncMsg = `Mockups saved, but print-area geometry was not updated (${firstErr})${scopeHint}. Run Set Print Area for the desired views, then Sync again.`;
       }
     }
 
@@ -291,17 +420,54 @@ async function runSetPrintArea(sectionId, ctx) {
   const syncBtn = sectionEl?.querySelector(".ce-tpl-sync");
   if (actionBtn) actionBtn.disabled = true;
   if (syncBtn) syncBtn.disabled = true;
-  setSectionState(sectionEl, "loading", "Setting print area…");
 
+  let positions = null;
   try {
-    const result = await setTemplatePrintArea(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId);
+    setSectionState(sectionEl, "loading", "Loading print areas…");
+    const listed = await listTemplateCalibrationPositions(
+      ctx.productKey,
+      ctx.selectedPrintProviderId,
+      printifyId
+    );
+    const available = Array.isArray(listed?.positions) ? listed.positions : [];
+    if (!available.length) {
+      showToast(
+        "Set Print Area failed",
+        listed?.message || "No print areas found on this Printify product."
+      );
+      setSectionState(sectionEl, "error");
+      return;
+    }
+    sectionEl?.classList.remove("ce-tpl-section--loading");
+    const overlay = sectionEl?.querySelector(".ce-tpl-section__overlay");
+    if (overlay) overlay.hidden = true;
+
+    positions = await openCalibrationPositionModal(available, loadStoredCalibrationPositions(ctx));
+    if (!positions?.length) {
+      setSectionState(sectionEl, "idle");
+      return;
+    }
+    saveStoredCalibrationPositions(ctx, positions);
+
+    setSectionState(sectionEl, "loading", "Setting print area…");
+    const overlayLabel = sectionEl?.querySelector(".ce-tpl-section__overlay-text");
+    if (overlayLabel) overlayLabel.textContent = "Setting print area…";
+
+    const result = await setTemplatePrintArea(
+      ctx.productKey,
+      ctx.selectedPrintProviderId,
+      sectionId,
+      printifyId,
+      positions
+    );
     setSectionState(sectionEl, "success");
     const count = result?.placements_applied?.length || 0;
+    const labels = (result?.selected_positions || positions).map(formatPositionLabel).join(", ");
     showToast(
       "Print area set",
       count
-        ? `Green markers placed on ${count} print area${count === 1 ? "" : "s"}. Run Sync to save geometry to the database.`
-        : "Green markers placed. Run Sync to save geometry to the database."
+        ? `Green marker placed on ${count} print area${count === 1 ? "" : "s"} (${labels}). Run Sync to save geometry.`
+        : `Green markers placed (${labels}). Run Sync to save geometry.`
     );
     ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
   } catch (err) {

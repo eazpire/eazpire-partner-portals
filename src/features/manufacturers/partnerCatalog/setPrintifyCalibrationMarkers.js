@@ -205,19 +205,40 @@ export async function buildCalibrationDimensionLookup(env, product, productKey =
 }
 
 /**
+ * Normalize optional position allow-list (front, back, left_sleeve, …).
+ * @param {string[]|null|undefined} positions
+ * @returns {Set<string>|null} null = no filter (all positions)
+ */
+export function normalizeCalibrationPositionFilter(positions) {
+  if (!Array.isArray(positions) || !positions.length) return null;
+  const set = new Set();
+  for (const raw of positions) {
+    const pos = normPlaceholderPosition(raw);
+    if (pos) set.add(pos);
+  }
+  return set.size ? set : null;
+}
+
+/**
  * Collect placeholder positions that should receive a green calibration image.
  * @param {any[]} printAreas
  * @param {Map<string, { width: number, height: number }>|null} dimsByPosition
+ * @param {string[]|Set<string>|null} [positionFilter] - when set, only these positions
  */
-export function collectCalibrationPlaceholderTargets(printAreas, dimsByPosition = null) {
+export function collectCalibrationPlaceholderTargets(printAreas, dimsByPosition = null, positionFilter = null) {
   const out = new Map();
   const areas = Array.isArray(printAreas) ? printAreas : [];
+  const allow =
+    positionFilter instanceof Set
+      ? positionFilter
+      : normalizeCalibrationPositionFilter(positionFilter);
 
   for (const area of areas) {
     for (const ph of area?.placeholders || []) {
       if (!ph || typeof ph !== "object") continue;
       const pos = normPlaceholderPosition(ph.position);
       if (!pos) continue;
+      if (allow && !allow.has(pos)) continue;
       const dims = resolveCalibrationPlaceholderDimensions(ph, area, dimsByPosition);
       if (!dims) continue;
       if (!out.has(pos)) out.set(pos, dims);
@@ -228,7 +249,41 @@ export function collectCalibrationPlaceholderTargets(printAreas, dimsByPosition 
 }
 
 /**
- * Strip every placeholder image, then set only the green calibration marker per target position.
+ * Prefer the main design placeholder at a position — not QR/logo/text — so one mock
+ * does not get multiple green fills (which breaks detection).
+ * @param {any[]} placeholders
+ * @param {string} position
+ */
+export function pickPrimaryCalibrationPlaceholderIndex(placeholders, position) {
+  const pos = normPlaceholderPosition(position);
+  const list = Array.isArray(placeholders) ? placeholders : [];
+  let bestIdx = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let idx = 0; idx < list.length; idx++) {
+    const ph = list[idx];
+    if (normPlaceholderPosition(ph?.position) !== pos) continue;
+    const dims = resolveCalibrationPlaceholderDimensions(ph, null, null);
+    const area = dims ? dims.width * dims.height : 0;
+    const hint = `${ph?.name || ""} ${ph?.type || ""} ${ph?.images?.[0]?.type || ""} ${ph?.images?.[0]?.name || ""}`.toLowerCase();
+    let score = area;
+    if (hint.includes("qr") || hint.includes("logo") || hint.includes("text") || hint.includes("brand")) {
+      score -= 1e12;
+    }
+    if (hint.includes("creator") || hint.includes("design") || hint.includes("print")) {
+      score += 1e6;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = idx;
+    }
+  }
+  return bestIdx;
+}
+
+/**
+ * Strip every placeholder image, then set only the green calibration marker on the
+ * primary placeholder per selected position (avoids multiple greens on one mock).
  * @param {any[]} printAreas
  * @param {Map<string, string>} uploadIdByPosition
  * @param {Map<string, number>} scaleByPosition
@@ -236,14 +291,22 @@ export function collectCalibrationPlaceholderTargets(printAreas, dimsByPosition 
 export function applyCalibrationGreenToPrintAreas(printAreas, uploadIdByPosition, scaleByPosition) {
   const clone = JSON.parse(JSON.stringify(Array.isArray(printAreas) ? printAreas : []));
   for (const area of clone) {
-    for (const ph of area?.placeholders || []) {
-      if (!ph || typeof ph !== "object") continue;
+    const placeholders = Array.isArray(area?.placeholders) ? area.placeholders : [];
+    const primaryByPos = new Map();
+    for (const pos of uploadIdByPosition.keys()) {
+      const idx = pickPrimaryCalibrationPlaceholderIndex(placeholders, pos);
+      if (idx >= 0) primaryByPos.set(pos, idx);
+    }
+
+    placeholders.forEach((ph, idx) => {
+      if (!ph || typeof ph !== "object") return;
       const pos = normPlaceholderPosition(ph.position);
       const uploadId = uploadIdByPosition.get(pos);
+      const isPrimary = primaryByPos.get(pos) === idx;
 
-      if (!uploadId) {
+      if (!uploadId || !isPrimary) {
         ph.images = [];
-        continue;
+        return;
       }
 
       const scale = scaleByPosition.get(pos) ?? 1;
@@ -256,7 +319,7 @@ export function applyCalibrationGreenToPrintAreas(printAreas, uploadIdByPosition
           angle: 0,
         },
       ];
-    }
+    });
   }
   return clone;
 }
@@ -306,8 +369,38 @@ async function waitForPrintifyMockupRefresh(env, productId, previousImageCount, 
 }
 
 /**
+ * List printable positions available on a Printify calibration product.
  * @param {any} env
  * @param {{ productKey?: string, printifyProductId: string }} opts
+ */
+export async function listPrintifyCalibrationPositions(env, opts) {
+  const printifyProductId = String(opts?.printifyProductId || "").trim();
+  if (!printifyProductId) return { ok: false, error: "printify_product_id_required" };
+  if (!env?.PRINTIFY_API_KEY) return { ok: false, error: "printify_api_unavailable" };
+
+  const product = await getPrintifyProduct(env, printifyProductId);
+  if (!product) return { ok: false, error: "printify_product_not_found" };
+
+  const printAreas = Array.isArray(product.print_areas) ? product.print_areas : [];
+  const productKey = String(opts?.productKey || "").trim();
+  const dimsByPosition = await buildCalibrationDimensionLookup(env, product, productKey);
+  const targets = collectCalibrationPlaceholderTargets(printAreas, dimsByPosition);
+  const positions = [...targets.keys()].sort();
+  return {
+    ok: true,
+    printify_product_id: printifyProductId,
+    positions,
+    details: positions.map((position) => ({
+      position,
+      width: targets.get(position)?.width || null,
+      height: targets.get(position)?.height || null,
+    })),
+  };
+}
+
+/**
+ * @param {any} env
+ * @param {{ productKey?: string, printifyProductId: string, positions?: string[] }} opts
  */
 export async function setPrintifyCalibrationMarkersOnProduct(env, opts) {
   const printifyProductId = String(opts?.printifyProductId || "").trim();
@@ -328,15 +421,18 @@ export async function setPrintifyCalibrationMarkersOnProduct(env, opts) {
 
   const productKey = String(opts?.productKey || "").trim();
   const dimsByPosition = await buildCalibrationDimensionLookup(env, product, productKey);
-  const targets = collectCalibrationPlaceholderTargets(printAreas, dimsByPosition);
+  const positionFilter = normalizeCalibrationPositionFilter(opts?.positions);
+  const targets = collectCalibrationPlaceholderTargets(printAreas, dimsByPosition, positionFilter);
   if (!targets.size) {
     return {
       ok: false,
-      error: "no_print_area_placeholders",
-      message:
-        "Could not resolve print-area dimensions for this Printify product. Sync Print Areas on the Templates tab first, or ensure the product still has placeholder positions (front, back, …).",
+      error: positionFilter ? "no_selected_print_areas" : "no_print_area_placeholders",
+      message: positionFilter
+        ? "None of the selected print areas could be resolved on this Printify product."
+        : "Could not resolve print-area dimensions for this Printify product. Sync Print Areas on the Templates tab first, or ensure the product still has placeholder positions (front, back, …).",
       dimension_sources: dimsByPosition.size,
       placeholder_count: printAreas.reduce((n, a) => n + (a?.placeholders?.length || 0), 0),
+      selected_positions: positionFilter ? [...positionFilter] : undefined,
     };
   }
 
@@ -371,6 +467,7 @@ export async function setPrintifyCalibrationMarkersOnProduct(env, opts) {
     ok: true,
     printify_product_id: printifyProductId,
     placements_applied: applied,
+    selected_positions: applied.map((a) => a.position),
     mockup_count: Array.isArray(refreshed?.images) ? refreshed.images.length : 0,
   };
 }

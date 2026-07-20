@@ -4,6 +4,7 @@ import {
   isPartnerCalibrationPhFillImage,
   collectCalibrationPlaceholderTargets,
   applyCalibrationGreenToPrintAreas,
+  pickPrimaryCalibrationPlaceholderIndex,
   createSolidGreenPngBuffer,
   viewKeyToPrintAreaKey,
   normPlaceholderPosition,
@@ -128,6 +129,63 @@ describe("setPrintifyCalibrationMarkers", () => {
     const out = applyCalibrationGreenToPrintAreas(areas, idMap, scaleMap);
     expect(out[0].placeholders[0].images).toHaveLength(1);
     expect(out[0].placeholders[1].images).toEqual([]);
+  });
+
+  it("filters targets to selected positions only", () => {
+    const targets = collectCalibrationPlaceholderTargets(
+      [
+        {
+          placeholders: [
+            { position: "front", width: 2400, height: 3200 },
+            { position: "back", width: 2400, height: 3200 },
+            { position: "left_sleeve", width: 800, height: 1200 },
+          ],
+        },
+      ],
+      null,
+      ["back"]
+    );
+    expect([...targets.keys()]).toEqual(["back"]);
+  });
+
+  it("applies green only to the primary placeholder when several share a position", () => {
+    const areas = [
+      {
+        placeholders: [
+          {
+            position: "front",
+            width: 2400,
+            height: 3200,
+            name: "creator_design",
+            images: [{ id: "design", type: "image" }],
+          },
+          {
+            position: "front",
+            width: 400,
+            height: 400,
+            name: "qr",
+            images: [{ id: "qr1", type: "qr" }],
+          },
+          {
+            position: "front",
+            width: 300,
+            height: 300,
+            name: "logo",
+            images: [{ id: "logo1", type: "logo" }],
+          },
+        ],
+      },
+    ];
+    expect(pickPrimaryCalibrationPlaceholderIndex(areas[0].placeholders, "front")).toBe(0);
+    const out = applyCalibrationGreenToPrintAreas(
+      areas,
+      new Map([["front", "upload-green-1"]]),
+      new Map([["front", 1]])
+    );
+    expect(out[0].placeholders[0].images).toHaveLength(1);
+    expect(out[0].placeholders[0].images[0].id).toBe("upload-green-1");
+    expect(out[0].placeholders[1].images).toEqual([]);
+    expect(out[0].placeholders[2].images).toEqual([]);
   });
 
   it("maps view keys to print area keys", () => {

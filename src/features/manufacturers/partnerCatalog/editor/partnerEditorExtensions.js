@@ -990,12 +990,23 @@ function extractMockupEntries(product) {
   }));
 }
 
+export async function listTemplateCalibrationPositions(env, productKey, printProviderId, printifyProductIdOverride) {
+  if (!productKey || printProviderId == null) {
+    return { ok: false, error: "product_key_or_print_provider_id_required" };
+  }
+  const printifyProductId = String(printifyProductIdOverride || "").trim();
+  if (!printifyProductId) return { ok: false, error: "printify_product_id_required" };
+  const { listPrintifyCalibrationPositions } = await import("../setPrintifyCalibrationMarkers.js");
+  return listPrintifyCalibrationPositions(env, { productKey, printifyProductId });
+}
+
 export async function setTemplatePrintAreaMarkers(
   env,
   productKey,
   printProviderId,
   printifyProductIdOverride,
-  section = "calibration_mockup"
+  section = "calibration_mockup",
+  positions = null
 ) {
   if (!productKey || printProviderId == null) {
     return { ok: false, error: "product_key_or_print_provider_id_required" };
@@ -1008,7 +1019,11 @@ export async function setTemplatePrintAreaMarkers(
   if (!saveRes?.ok) return saveRes;
 
   const { setPrintifyCalibrationMarkersOnProduct } = await import("../setPrintifyCalibrationMarkers.js");
-  return setPrintifyCalibrationMarkersOnProduct(env, { productKey, printifyProductId });
+  return setPrintifyCalibrationMarkersOnProduct(env, {
+    productKey,
+    printifyProductId,
+    positions: Array.isArray(positions) ? positions : null,
+  });
 }
 
 export async function fetchPrintifyMockups(
@@ -1017,7 +1032,8 @@ export async function fetchPrintifyMockups(
   printProviderId,
   autoMirror = false,
   printifyProductIdOverride = null,
-  mockupSet = "clean"
+  mockupSet = "clean",
+  opts = {}
 ) {
   if (!productKey || printProviderId == null) return { ok: false, error: "product_key_or_print_provider_id_required" };
 
@@ -1070,8 +1086,18 @@ export async function fetchPrintifyMockups(
       };
     }
 
+    const detectPositions = Array.isArray(opts?.detect_positions) ? opts.detect_positions : null;
+
     if (isCatalogOpsMasterWrite(env)) {
-      return replaceCatalogMockupImages(env, productKey, Number(printProviderId), printifyProductId, entries, set);
+      return replaceCatalogMockupImages(
+        env,
+        productKey,
+        Number(printProviderId),
+        printifyProductId,
+        entries,
+        set,
+        { detect_positions: detectPositions }
+      );
     }
 
     const { persistMockupEntriesToR2 } = await import("../persistMockupImagesToR2.js");
@@ -1137,7 +1163,15 @@ export async function fetchPrintifyMockups(
     let calibration_detection = null;
     if (set === MOCKUP_SET_CALIBRATION && persistedEntries.length > 0) {
       const { persistCalibrationRectsFromMockupEntries } = await import("../persistCalibrationRectsFromMockups.js");
-      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries);
+      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries, {
+        positions: detectPositions,
+      });
+      if (detectPositions?.length) {
+        calibration_detection = {
+          ...calibration_detection,
+          selected_positions: detectPositions,
+        };
+      }
     }
 
     return {

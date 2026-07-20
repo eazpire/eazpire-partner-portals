@@ -292,6 +292,7 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-template-section-id-save",
   "admin-eazpire-fetch-printify-mockups",
   "admin-eazpire-template-set-print-area",
+  "admin-eazpire-template-calibration-positions",
   "admin-eazpire-print-area-image-upload",
   "admin-eazpire-print-area-image-clear",
   "admin-eazpire-variant-print-area-rect-save",
@@ -1310,13 +1311,19 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-eazpire-fetch-printify-mockups" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       try {
+        const detectPositions = Array.isArray(body.detect_positions)
+          ? body.detect_positions
+          : Array.isArray(body.positions)
+            ? body.positions
+            : null;
         const result = await editorExt.fetchPrintifyMockups(
           env,
           body.product_key,
           body.print_provider_id,
           body.auto_mirror !== false,
           body.printify_product_id || null,
-          body.mockup_set || "clean"
+          body.mockup_set || "clean",
+          { detect_positions: detectPositions }
         );
         if (!result.ok) return json(result, partnerSyncErrorStatus(result), cors);
         return json(result, 200, cors);
@@ -1329,15 +1336,37 @@ export async function handleManufacturerRouter(request, env, ctx) {
         );
       }
     }
+    if (op === "admin-eazpire-template-calibration-positions" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      try {
+        const result = await editorExt.listTemplateCalibrationPositions(
+          env,
+          body.product_key,
+          body.print_provider_id,
+          body.printify_product_id || null
+        );
+        if (!result.ok) return json(result, partnerSyncErrorStatus(result), cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-eazpire-template-calibration-positions]", err?.message || err);
+        return json(
+          { ok: false, error: "list_calibration_positions_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
+    }
     if (op === "admin-eazpire-template-set-print-area" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       try {
+        const positions = Array.isArray(body.positions) ? body.positions : null;
         const result = await editorExt.setTemplatePrintAreaMarkers(
           env,
           body.product_key,
           body.print_provider_id,
           body.printify_product_id || null,
-          body.section || "calibration_mockup"
+          body.section || "calibration_mockup",
+          positions
         );
         if (!result.ok) return json(result, partnerSyncErrorStatus(result), cors);
         return json(result, 200, cors);

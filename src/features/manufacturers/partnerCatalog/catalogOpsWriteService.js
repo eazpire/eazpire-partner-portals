@@ -1700,7 +1700,15 @@ export async function upsertCatalogTemplatePrintAreasFromPrintify(
   return { ok: true, _ops_source: "catalog-db" };
 }
 
-export async function replaceCatalogMockupImages(env, productKey, printProviderId, printifyProductId, entries, mockupSet = MOCKUP_SET_CLEAN) {
+export async function replaceCatalogMockupImages(
+  env,
+  productKey,
+  printProviderId,
+  printifyProductId,
+  entries,
+  mockupSet = MOCKUP_SET_CLEAN,
+  opts = {}
+) {
   const db = catalogDb(env);
   if (!db) return { ok: false, error: "catalog_db_unavailable" };
 
@@ -1772,7 +1780,16 @@ export async function replaceCatalogMockupImages(env, productKey, printProviderI
     let calibration_detection = null;
     if (set === MOCKUP_SET_CALIBRATION && persistedEntries.length > 0) {
       const { persistCalibrationRectsFromMockupEntries } = await import("./persistCalibrationRectsFromMockups.js");
-      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries);
+      const detectPositions = Array.isArray(opts?.detect_positions) ? opts.detect_positions : null;
+      calibration_detection = await persistCalibrationRectsFromMockupEntries(env, productKey, persistedEntries, {
+        positions: detectPositions,
+      });
+      if (detectPositions?.length) {
+        calibration_detection = {
+          ...calibration_detection,
+          selected_positions: detectPositions,
+        };
+      }
     }
 
     return {

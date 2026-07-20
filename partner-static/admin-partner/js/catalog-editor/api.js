@@ -286,7 +286,18 @@ export async function fetchPrintifyMockups(body) {
   return partnerFetch("admin-eazpire-fetch-printify-mockups", { method: "POST", body });
 }
 
-export async function setTemplatePrintArea(productKey, printProviderId, section, printifyProductId) {
+export async function listTemplateCalibrationPositions(productKey, printProviderId, printifyProductId) {
+  return partnerFetch("admin-eazpire-template-calibration-positions", {
+    method: "POST",
+    body: {
+      product_key: productKey,
+      print_provider_id: printProviderId,
+      printify_product_id: printifyProductId,
+    },
+  });
+}
+
+export async function setTemplatePrintArea(productKey, printProviderId, section, printifyProductId, positions = null) {
   return partnerFetch("admin-eazpire-template-set-print-area", {
     method: "POST",
     body: {
@@ -294,6 +305,7 @@ export async function setTemplatePrintArea(productKey, printProviderId, section,
       print_provider_id: printProviderId,
       section,
       printify_product_id: printifyProductId,
+      positions: Array.isArray(positions) ? positions : undefined,
       auto_mirror: false,
     },
   });

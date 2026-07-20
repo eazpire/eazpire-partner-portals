@@ -20,20 +20,40 @@ async function queryFirst(db, sql, ...binds) {
  * @param {any} env
  * @param {string} productKey
  * @param {Array<{ view_key?: string, image_url?: string, color_name?: string }>} entries
+ * @param {{ positions?: string[]|null }} [opts] - when set, only detect these print-area keys
  */
-export async function persistCalibrationRectsFromMockupEntries(env, productKey, entries) {
+export async function persistCalibrationRectsFromMockupEntries(env, productKey, entries, opts = {}) {
   if (!productKey || !entries?.length) {
     return { ok: true, detected: [], skipped: entries?.length || 0 };
   }
+
+  const allow = Array.isArray(opts?.positions) && opts.positions.length
+    ? new Set(
+        opts.positions
+          .map((p) => viewKeyToPrintAreaKey(String(p || "").trim().toLowerCase()))
+          .filter(Boolean)
+      )
+    : null;
 
   // One image per print-area key (not raw view_key) so back/back_* collapse together.
   const byPrintArea = new Map();
   for (const entry of entries) {
     const view = String(entry?.view_key || "front").trim().toLowerCase();
     const printAreaKey = viewKeyToPrintAreaKey(view);
+    if (allow && !allow.has(printAreaKey)) continue;
     if (!byPrintArea.has(printAreaKey)) {
       byPrintArea.set(printAreaKey, { viewKey: view, entry });
     }
+  }
+
+  if (!byPrintArea.size) {
+    return {
+      ok: false,
+      detected: [],
+      errors: [{ error: "no_matching_views_for_detection", selected_positions: allow ? [...allow] : undefined }],
+      detected_count: 0,
+      error_count: 1,
+    };
   }
 
   const detected = [];
