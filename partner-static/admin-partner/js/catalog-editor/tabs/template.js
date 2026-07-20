@@ -235,16 +235,35 @@ async function runSectionSync(sectionId, ctx) {
     }
     const result = await syncTemplateSection(ctx.productKey, ctx.selectedPrintProviderId, sectionId, printifyId, extra);
     setSectionState(sectionEl, "success");
-    const detected = result?.calibration_detection?.detected_count;
-    const syncMsg =
-      sectionId === "calibration_mockup" && detected > 0
-        ? `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected.`
-        : sectionId === "variants"
-          ? "Variants and placeholder settings updated from Printify."
-          : sectionId === "print_areas"
-            ? "Placeholder settings updated from Printify."
-            : `${sectionId.replace(/_/g, " ")} data updated from Printify.`;
-    showToast("Synced", syncMsg);
+    let syncMsg =
+      sectionId === "variants"
+        ? "Variants and placeholder settings updated from Printify."
+        : sectionId === "print_areas"
+          ? "Placeholder settings updated from Printify."
+          : `${sectionId.replace(/_/g, " ")} data updated from Printify.`;
+    let toastKind = "Synced";
+
+    if (sectionId === "calibration_mockup") {
+      const detected = Number(result?.calibration_detection?.detected_count) || 0;
+      const errCount = Number(result?.calibration_detection?.error_count) ||
+        (result?.calibration_detection?.errors?.length || 0);
+      // Force Print Area tab to reload rects from DB on next open.
+      ctx.printAreaState = null;
+      ctx.printAreaData = null;
+      ctx.mockupsData = null;
+      if (detected > 0 && errCount === 0) {
+        syncMsg = `Calibration sync complete — ${detected} print area${detected === 1 ? "" : "s"} detected. Reopen Print Area to see the red frames.`;
+      } else if (detected > 0 && errCount > 0) {
+        toastKind = "Synced with warnings";
+        syncMsg = `Detected ${detected} print area${detected === 1 ? "" : "s"}, but ${errCount} view${errCount === 1 ? "" : "s"} failed detection. Reopen Print Area to refresh.`;
+      } else {
+        toastKind = "Sync incomplete";
+        const firstErr = result?.calibration_detection?.errors?.[0]?.error || "green marker not detected";
+        syncMsg = `Mockups saved, but print-area geometry was not updated (${firstErr}). Check that green markers are solid on the images, then Sync again.`;
+      }
+    }
+
+    showToast(toastKind, syncMsg);
     ctx.templateData = await fetchTemplateBundle(ctx.productKey, ctx.selectedPrintProviderId);
   } catch (err) {
     setSectionState(sectionEl, "error");

@@ -916,35 +916,18 @@ export async function detectPartnerPrintAreaFromCalibration(
   }
   if (!buf) return { ok: false, error: "calibration_image_empty" };
 
-  const { detectPrintAreaFromRgba, fracFromRect } = await import("../../render/greenMarkerPrintArea.js");
-  const bytes = new Uint8Array(buf);
-  let rgba;
-  let width;
-  let height;
-
-  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
-
+  const { detectPrintAreaFromImageBuffer } = await import("../../render/greenMarkerPrintArea.js");
+  let hit;
   try {
-    if (isPng) {
-      const { decodePNGToRGBA } = await import("../../utils/png-crop.js");
-      ({ rgba, width, height } = await decodePNGToRGBA(buf));
-    } else if (isJpeg) {
-      const jpegMod = await import("jpeg-js");
-      const jpeg = jpegMod.default || jpegMod;
-      const decoded = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true });
-      rgba = decoded.data;
-      width = decoded.width;
-      height = decoded.height;
-    } else {
+    hit = await detectPrintAreaFromImageBuffer(buf, { loose: true, greenOnly: true });
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (msg === "unsupported_image_type") {
       return { ok: false, error: "unsupported_image_type", detail: "Use PNG or JPEG for Calibration mockups." };
     }
-  } catch (e) {
-    return { ok: false, error: "decode_failed", detail: String(e?.message || e) };
+    return { ok: false, error: "decode_failed", detail: msg };
   }
-
-  const hit = detectPrintAreaFromRgba(rgba, width, height, { loose: true, greenOnly: true });
-  if (!hit) {
+  if (!hit?.rect) {
     return {
       ok: false,
       error: "green_marker_not_found",
@@ -952,14 +935,14 @@ export async function detectPartnerPrintAreaFromCalibration(
     };
   }
 
-  const frac = fracFromRect(hit);
+  const r = hit.rect;
   const print_rect = {
-    x: Number((frac?.l ?? hit.x).toFixed(6)),
-    y: Number((frac?.t ?? hit.y).toFixed(6)),
-    w: Number((frac?.w ?? hit.w).toFixed(6)),
-    h: Number((frac?.h ?? hit.h).toFixed(6)),
-    width: Number((frac?.w ?? hit.w).toFixed(6)),
-    height: Number((frac?.h ?? hit.h).toFixed(6)),
+    x: Number(r.x.toFixed(6)),
+    y: Number(r.y.toFixed(6)),
+    w: Number(r.w.toFixed(6)),
+    h: Number(r.h.toFixed(6)),
+    width: Number(r.w.toFixed(6)),
+    height: Number(r.h.toFixed(6)),
     angle: 0,
   };
 

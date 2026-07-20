@@ -3,6 +3,8 @@
  * Migration 0061 UNIQUE key omitted mockup_set — shop_preview sync collided with clean rows.
  */
 
+import { canonicalizeMockupViewKey } from "../../../utils/printifyShopProductMocks.js";
+
 let catalogMockupSchemaReady = false;
 
 /** @param {string} sql */
@@ -117,12 +119,12 @@ export function dedupeMockupEntriesByViewColor(entries) {
   const seen = new Set();
   const out = [];
   for (const entry of entries || []) {
-    const view = String(entry?.view_key || "other").trim().toLowerCase();
+    const view = canonicalizeMockupViewKey(entry?.view_key || "other");
     const color = String(entry?.color_name || "Default").trim();
     const key = `${view}::${color}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(entry);
+    out.push({ ...entry, view_key: view });
   }
   return out;
 }

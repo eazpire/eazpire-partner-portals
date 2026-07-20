@@ -14,7 +14,10 @@ import {
   MOCKUP_SET_CALIBRATION,
   templatePrintifyColumnForMockupSet,
 } from "../../src/features/manufacturers/partnerCatalog/mockupSet.js";
-import { extractPrintifyMockupEntries } from "../../src/utils/printifyShopProductMocks.js";
+import {
+  extractPrintifyMockupEntries,
+  canonicalizeMockupViewKey,
+} from "../../src/utils/printifyShopProductMocks.js";
 
 describe("mockupSet", () => {
   it("normalizeMockupSet recognizes calibration", () => {
@@ -140,6 +143,23 @@ describe("mockup sync helpers", () => {
     ]);
     expect(out).toHaveLength(2);
     expect(out[0].image_url).toBe("a");
+  });
+
+  it("dedupeMockupEntriesByViewColor collapses back camera aliases", () => {
+    const out = dedupeMockupEntriesByViewColor([
+      { view_key: "back", color_name: "White", image_url: "a" },
+      { view_key: "person_2_back", color_name: "White", image_url: "b" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].view_key).toBe("back");
+    expect(out[0].image_url).toBe("a");
+  });
+
+  it("canonicalizeMockupViewKey maps back-like labels to back", () => {
+    expect(canonicalizeMockupViewKey("back")).toBe("back");
+    expect(canonicalizeMockupViewKey("person-2-back")).toBe("back");
+    expect(canonicalizeMockupViewKey("Back")).toBe("back");
+    expect(canonicalizeMockupViewKey("front")).toBe("front");
   });
 
   it("ensureCatalogMockupImageSchema rebuilds when legacy UNIQUE is present", async () => {

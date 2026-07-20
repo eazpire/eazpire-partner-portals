@@ -352,12 +352,25 @@ export function mockupImageUrl(row) {
   return mockupUrlFromR2Key(row.template_r2_key);
 }
 
+/** Collapse Printify camera aliases so print-area mock carousels aren't duplicated. */
+export function canonicalizeMockupViewKey(value) {
+  const v = String(value || "front")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!v) return "front";
+  if (/(^|_)back($|_)/.test(v)) return "back";
+  if (/(^|_)neck($|_)/.test(v) || v.includes("collar")) return "neck";
+  if (v.includes("left") && v.includes("sleeve")) return "left_sleeve";
+  if (v.includes("right") && v.includes("sleeve")) return "right_sleeve";
+  if (/(^|_)front($|_)/.test(v)) return "front";
+  return v;
+}
+
 export function buildMockupImagesByView(images) {
   const byView = {};
   for (const img of images || []) {
-    const vk = String(img.view_key || "front")
-      .trim()
-      .toLowerCase();
+    const vk = canonicalizeMockupViewKey(img.view_key || "front");
     const color = String(img.color_name || "Default").trim() || "Default";
     if (!byView[vk]) byView[vk] = {};
     let variantIds = img.printify_variant_ids;
@@ -368,6 +381,8 @@ export function buildMockupImagesByView(images) {
         variantIds = [];
       }
     }
+    const existing = byView[vk][color];
+    if (existing && !Number(img.is_default)) continue;
     byView[vk][color] = {
       image_url: img.image_url || "",
       color_hex: img.color_hex || null,

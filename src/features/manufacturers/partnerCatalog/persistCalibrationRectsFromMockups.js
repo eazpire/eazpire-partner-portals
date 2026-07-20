@@ -2,7 +2,7 @@
  * After calibration mockup sync: detect green print-area markers on mock images → catalog DB.
  */
 
-import { detectPrintAreaFromPngBuffer, fracFromRect } from "../../../render/greenMarkerPrintArea.js";
+import { detectPrintAreaFromImageBuffer, fracFromRect } from "../../../render/greenMarkerPrintArea.js";
 import { upsertCatalogMockupDefault } from "./catalogOpsWriteService.js";
 import { viewKeyToPrintAreaKey } from "./setPrintifyCalibrationMarkers.js";
 import { isCatalogOpsMasterWrite } from "./catalogOpsConfig.js";
@@ -26,36 +26,51 @@ export async function persistCalibrationRectsFromMockupEntries(env, productKey, 
     return { ok: true, detected: [], skipped: entries?.length || 0 };
   }
 
-  const byView = new Map();
+  // One image per print-area key (not raw view_key) so back/back_* collapse together.
+  const byPrintArea = new Map();
   for (const entry of entries) {
     const view = String(entry?.view_key || "front").trim().toLowerCase();
-    if (!byView.has(view)) byView.set(view, entry);
+    const printAreaKey = viewKeyToPrintAreaKey(view);
+    if (!byPrintArea.has(printAreaKey)) {
+      byPrintArea.set(printAreaKey, { viewKey: view, entry });
+    }
   }
 
   const detected = [];
   const errors = [];
 
-  for (const [viewKey, entry] of byView.entries()) {
+  for (const [printAreaKey, { viewKey, entry }] of byPrintArea.entries()) {
     const url = String(entry?.image_url || "").trim();
     if (!url) continue;
     try {
       const res = await fetch(url);
       if (!res.ok) {
-        errors.push({ view_key: viewKey, error: `fetch_${res.status}` });
+        errors.push({ view_key: viewKey, print_area_key: printAreaKey, error: `fetch_${res.status}` });
         continue;
       }
       const buf = await res.arrayBuffer();
-      const hit = await detectPrintAreaFromPngBuffer(buf);
+      // Match partner editor: JPEG mocks + loose green-only detection.
+      let hit;
+      try {
+        hit = await detectPrintAreaFromImageBuffer(buf, { loose: true, greenOnly: true });
+      } catch (decodeErr) {
+        const msg = String(decodeErr?.message || decodeErr);
+        errors.push({
+          view_key: viewKey,
+          print_area_key: printAreaKey,
+          error: msg === "unsupported_image_type" ? "unsupported_image_type" : `decode_failed:${msg}`,
+        });
+        continue;
+      }
       if (!hit?.rect) {
-        errors.push({ view_key: viewKey, error: "green_marker_not_found" });
+        errors.push({ view_key: viewKey, print_area_key: printAreaKey, error: "green_marker_not_found" });
         continue;
       }
       const frac = hit.frac || fracFromRect(hit.rect);
       if (!frac) {
-        errors.push({ view_key: viewKey, error: "invalid_frac" });
+        errors.push({ view_key: viewKey, print_area_key: printAreaKey, error: "invalid_frac" });
         continue;
       }
-      const printAreaKey = viewKeyToPrintAreaKey(viewKey);
       const rect = { x: frac.l, y: frac.t, w: frac.w, h: frac.h };
 
       if (isCatalogOpsMasterWrite(env)) {
@@ -66,7 +81,7 @@ export async function persistCalibrationRectsFromMockupEntries(env, productKey, 
       } else {
         const db = env.MANUFACTURER_DB;
         if (!db) {
-          errors.push({ view_key: viewKey, error: "manufacturer_db_unavailable" });
+          errors.push({ view_key: viewKey, print_area_key: printAreaKey, error: "manufacturer_db_unavailable" });
           continue;
         }
         const now = Date.now();
@@ -108,7 +123,7 @@ export async function persistCalibrationRectsFromMockupEntries(env, productKey, 
         rect,
       });
     } catch (e) {
-      errors.push({ view_key: viewKey, error: String(e?.message || e) });
+      errors.push({ view_key: viewKey, print_area_key: printAreaKey, error: String(e?.message || e) });
     }
   }
 
@@ -117,5 +132,6 @@ export async function persistCalibrationRectsFromMockupEntries(env, productKey, 
     detected,
     errors: errors.length ? errors : undefined,
     detected_count: detected.length,
+    error_count: errors.length,
   };
 }

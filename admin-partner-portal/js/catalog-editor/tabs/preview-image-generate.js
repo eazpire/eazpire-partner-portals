@@ -34,10 +34,24 @@ function formatViewLabel(viewKey) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function canonicalizeMockupViewKey(value) {
+  const v = String(value || "other")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!v) return "other";
+  if (/(^|_)back($|_)/.test(v)) return "back";
+  if (/(^|_)neck($|_)/.test(v) || v.includes("collar")) return "neck";
+  if (v.includes("left") && v.includes("sleeve")) return "left_sleeve";
+  if (v.includes("right") && v.includes("sleeve")) return "right_sleeve";
+  if (/(^|_)front($|_)/.test(v)) return "front";
+  return v;
+}
+
 function groupImagesByView(images) {
   const byView = new Map();
   for (const img of images || []) {
-    const viewKey = String(img.view_key || "other").trim() || "other";
+    const viewKey = canonicalizeMockupViewKey(img.view_key || "other");
     if (!byView.has(viewKey)) byView.set(viewKey, []);
     byView.get(viewKey).push(img);
   }
