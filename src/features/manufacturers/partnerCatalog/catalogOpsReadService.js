@@ -652,9 +652,28 @@ export async function getCatalogOpsMockupsBundle(env, productKey, printProviderI
     env
   );
 
+  const productOut = product
+    ? {
+        ...product,
+        print_area_edit_use_mocks: !!product.print_area_edit_use_mocks,
+        preview_card_source:
+          String(product.preview_card_source || "").toLowerCase() === "preview_images"
+            ? "preview_images"
+            : "shop_preview",
+        preview_carousel_mode_shop:
+          String(product.preview_carousel_mode_shop || "").toLowerCase() === "manual"
+            ? "manual"
+            : "auto",
+        preview_carousel_mode_skill_tree:
+          String(product.preview_carousel_mode_skill_tree || "").toLowerCase() === "manual"
+            ? "manual"
+            : "auto",
+      }
+    : product;
+
   let bundle = {
     ok: true,
-    product,
+    product: productOut,
     images: cleanImages,
     shop_preview_images: shopPreviewImages,
     calibration_images: calibrationImages,

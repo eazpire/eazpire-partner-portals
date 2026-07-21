@@ -224,8 +224,22 @@ function ensureOverlay() {
               <nav class="catalog-editor-subnav ce-subnav-row ce-subnav-row--mock-sections" id="ce-subnav-mock-sections" hidden aria-label="Mockup sections" role="tablist">
                 <button type="button" class="ce-mock-section-pill" data-mock-section="calibration" role="tab" aria-selected="false">Calibration Mockup</button>
                 <button type="button" class="ce-mock-section-pill active" data-mock-section="clean" role="tab" aria-selected="true">Clean Mockups</button>
-                <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" role="tab" aria-selected="false">Shop Preview Mockups</button>
-                <button type="button" class="ce-mock-section-pill" data-mock-section="preview_images" role="tab" aria-selected="false">Preview Images</button>
+                <span class="ce-mock-section-pill-wrap">
+                  <button type="button" class="ce-mock-section-pill" data-mock-section="shop_preview" role="tab" aria-selected="false">Shop Preview Mockups</button>
+                  <label class="ce-mock-source-switch" title="Use Shop Preview Mockups as the active card source for Shop and Skill Tree">
+                    <input type="checkbox" id="ce-mock-source-shop" data-preview-card-source="shop_preview" />
+                    <span class="ce-mock-source-switch__track" aria-hidden="true"></span>
+                    <span class="ce-mock-source-switch__text">On</span>
+                  </label>
+                </span>
+                <span class="ce-mock-section-pill-wrap">
+                  <button type="button" class="ce-mock-section-pill" data-mock-section="preview_images" role="tab" aria-selected="false">Preview Images</button>
+                  <label class="ce-mock-source-switch" title="Use Preview Images as the active card source for Shop and Skill Tree">
+                    <input type="checkbox" id="ce-mock-source-preview" data-preview-card-source="preview_images" />
+                    <span class="ce-mock-source-switch__track" aria-hidden="true"></span>
+                    <span class="ce-mock-source-switch__text">On</span>
+                  </label>
+                </span>
               </nav>
             </div>
           </div>

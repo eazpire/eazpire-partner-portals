@@ -30,8 +30,8 @@ const SECTION_META = {
   [MOCKUP_SET_SHOP_PREVIEW]: {
     id: "shop_preview",
     title: "Shop Preview Mockups",
-    hint: "Wearing mocks for the shop — Create from Scratch, Shop Create cards, and product skill Variants / Print Areas. Turn on Preview Mock for the main view, then click a color to set the main preview mock (saved as is_default).",
-    emptyHint: "No shop preview mockups yet. Upload images below (shop cards use these first; Preview Images are the fallback).",
+    hint: "Wearing mocks for Shop Create and Skill Tree when the Shop Preview source switch is On. Turn on Preview Mock for the main view, then click a color to set the main preview mock.",
+    emptyHint: "No shop preview mockups yet. Upload images below, then turn On the Shop Preview source switch.",
     showPrintAreaToggle: false,
     showPreviewToggle: true,
     allowUpload: true,
@@ -49,7 +49,7 @@ const SECTION_META = {
   [MOCKUP_SET_PREVIEW_IMAGES]: {
     id: "preview_images",
     title: "Preview Images",
-    hint: "Lifestyle / gallery images (Catalog Studio + Skill Tree cards). Also used as shop-card fallback when Shop Preview is empty.",
+    hint: "Click a mock to assign it to Skill Tree, Shop, or both. Only used when the Preview Images source switch is On.",
     emptyHint: "No preview images yet. Upload or Generate below.",
     showPrintAreaToggle: false,
     showPreviewToggle: false,
@@ -65,9 +65,31 @@ function ensureMockupsUiState(ctx) {
       print_area_edit_use_mocks: false,
       preview_mock_id: null,
       shop_preview_mock_id: null,
+      preview_card_source: MOCKUP_SET_SHOP_PREVIEW,
+      preview_carousel_mode_shop: "auto",
+      preview_carousel_mode_skill_tree: "auto",
+      /** @type {Record<string, { use_for_shop: boolean, use_for_skill_tree: boolean }>} */
+      previewAssignments: {},
     };
   }
-  return ctx.mockupsUiState;
+  const ui = ctx.mockupsUiState;
+  if (!ui.previewAssignments || typeof ui.previewAssignments !== "object") ui.previewAssignments = {};
+  if (!ui.preview_card_source) ui.preview_card_source = MOCKUP_SET_SHOP_PREVIEW;
+  if (!ui.preview_carousel_mode_shop) ui.preview_carousel_mode_shop = "auto";
+  if (!ui.preview_carousel_mode_skill_tree) ui.preview_carousel_mode_skill_tree = "auto";
+  return ui;
+}
+
+function syncPreviewAssignmentsFromImages(ui, images) {
+  for (const img of images || []) {
+    const id = String(img?.id || "");
+    if (!id) continue;
+    if (ui.previewAssignments[id]) continue;
+    ui.previewAssignments[id] = {
+      use_for_shop: Number(img.use_for_shop) === 1,
+      use_for_skill_tree: Number(img.use_for_skill_tree) === 1,
+    };
+  }
 }
 
 export function resolveActiveMockSection(ctx) {
@@ -117,9 +139,22 @@ function formatViewLabel(viewKey) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle, allowDelete) {
+function assignmentBadgesHtml(img, ui) {
+  const id = String(img?.id || "");
+  const a = ui?.previewAssignments?.[id] || {
+    use_for_shop: Number(img?.use_for_shop) === 1,
+    use_for_skill_tree: Number(img?.use_for_skill_tree) === 1,
+  };
+  const bits = [];
+  if (a.use_for_skill_tree) bits.push(`<span class="ce-mock-assign-badge ce-mock-assign-badge--skill">Skill Tree</span>`);
+  if (a.use_for_shop) bits.push(`<span class="ce-mock-assign-badge ce-mock-assign-badge--shop">Shop</span>`);
+  return bits.length ? `<span class="ce-mock-assign-badges">${bits.join("")}</span>` : "";
+}
+
+function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle, allowDelete, ui = null) {
   const viewEsc = escapeHtml(viewKey);
   const isPreviewView = showPreviewToggle && slides.some((s) => String(s.id) === String(previewId));
+  const isPreviewImagesSet = mockupSet === MOCKUP_SET_PREVIEW_IMAGES;
   const slideHtml = slides
     .map((img) => {
       const isPreview = showPreviewToggle && String(img.id) === String(previewId);
@@ -130,15 +165,19 @@ function renderCarousel(mockupSet, viewKey, slides, previewId, showPreviewToggle
       const mainBadge = isPreview
         ? `<span class="ce-mock-carousel__main-badge">Main preview</span>`
         : "";
-      const pickHint = isPreviewView
-        ? " — click to set as main preview mock"
-        : " — click to enlarge";
+      const assignBadges = isPreviewImagesSet ? assignmentBadgesHtml(img, ui) : "";
+      const pickHint = isPreviewImagesSet
+        ? " — click to assign Skill Tree / Shop"
+        : isPreviewView
+          ? " — click to set as main preview mock"
+          : " — click to enlarge";
       return `
         <div class="ce-mock-carousel__slide-wrap">
-          <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}${isPreviewView ? " ce-mock-carousel__slide--pickable" : ""}" data-id="${escapeHtml(img.id)}" title="${escapeHtml(img.color_name || viewKey)}${pickHint}" aria-label="${isPreviewView ? "Set as main preview mock" : "View mockup"} ${escapeHtml(img.color_name || viewKey)}" aria-pressed="${isPreview ? "true" : "false"}">
+          <button type="button" class="ce-mock-carousel__slide${isPreview ? " ce-mock-carousel__slide--active" : ""}${isPreviewView || isPreviewImagesSet ? " ce-mock-carousel__slide--pickable" : ""}" data-id="${escapeHtml(img.id)}" data-mock-assign="${isPreviewImagesSet ? "1" : "0"}" title="${escapeHtml(img.color_name || viewKey)}${pickHint}" aria-label="${isPreviewImagesSet ? "Assign mockup targets" : isPreviewView ? "Set as main preview mock" : "View mockup"} ${escapeHtml(img.color_name || viewKey)}" aria-pressed="${isPreview ? "true" : "false"}">
             <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.color_name || viewKey)}" loading="lazy" />
             <span class="ce-mock-carousel__color">${escapeHtml(img.color_name || "Default")}</span>
             ${mainBadge}
+            ${assignBadges}
           </button>
           <button type="button" class="ce-mock-slide-zoom" data-mock-zoom="${escapeHtml(String(img.id))}" aria-label="Enlarge ${escapeHtml(img.color_name || viewKey)}" title="Enlarge">↗</button>
           ${delBtn}
@@ -199,7 +238,15 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
   const carousels = grouped.length
     ? grouped
         .map(([viewKey, slides]) =>
-          renderCarousel(mockupSet, viewKey, slides, previewId, meta.showPreviewToggle !== false, allowUpload)
+          renderCarousel(
+            mockupSet,
+            viewKey,
+            slides,
+            previewId,
+            meta.showPreviewToggle !== false,
+            allowUpload,
+            ui
+          )
         )
         .join("")
     : `<p class="ce-hint">${escapeHtml(meta.emptyHint)}</p>`;
@@ -213,6 +260,26 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
   const generateBtn =
     mockupSet === MOCKUP_SET_PREVIEW_IMAGES
       ? `<button type="button" class="btn btn-secondary" id="ce-mock-generate-btn">Generate</button>`
+      : "";
+
+  const carouselModeField =
+    mockupSet === MOCKUP_SET_PREVIEW_IMAGES || mockupSet === MOCKUP_SET_SHOP_PREVIEW
+      ? `<div class="ce-mock-carousel-modes">
+          <label class="ce-mock-carousel-mode">
+            <span>Shop grid switch</span>
+            <select id="ce-mock-carousel-mode-shop">
+              <option value="auto" ${ui.preview_carousel_mode_shop === "auto" ? "selected" : ""}>Automatic</option>
+              <option value="manual" ${ui.preview_carousel_mode_shop === "manual" ? "selected" : ""}>Manual (arrows)</option>
+            </select>
+          </label>
+          <label class="ce-mock-carousel-mode">
+            <span>Skill Tree grid switch</span>
+            <select id="ce-mock-carousel-mode-skill">
+              <option value="auto" ${ui.preview_carousel_mode_skill_tree === "auto" ? "selected" : ""}>Automatic</option>
+              <option value="manual" ${ui.preview_carousel_mode_skill_tree === "manual" ? "selected" : ""}>Manual (arrows)</option>
+            </select>
+          </label>
+        </div>`
       : "";
 
   const uploadBar = allowUpload
@@ -236,6 +303,7 @@ function renderMockupSetPanel(mockupSet, images, data, ui) {
       </div>
       <p class="ce-hint">${escapeHtml(meta.hint)}</p>
       ${printAreaField}
+      ${carouselModeField}
       ${uploadBar}
       <div class="ce-mock-views">${carousels}</div>
     </section>`;
@@ -259,6 +327,18 @@ export async function loadMockupsTab(ctx) {
   if (data.product?.print_area_edit_use_mocks !== undefined) {
     ui.print_area_edit_use_mocks = !!data.product.print_area_edit_use_mocks;
   }
+  ui.preview_card_source =
+    String(data.product?.preview_card_source || "").toLowerCase() === MOCKUP_SET_PREVIEW_IMAGES
+      ? MOCKUP_SET_PREVIEW_IMAGES
+      : MOCKUP_SET_SHOP_PREVIEW;
+  ui.preview_carousel_mode_shop =
+    String(data.product?.preview_carousel_mode_shop || "").toLowerCase() === "manual" ? "manual" : "auto";
+  ui.preview_carousel_mode_skill_tree =
+    String(data.product?.preview_carousel_mode_skill_tree || "").toLowerCase() === "manual"
+      ? "manual"
+      : "auto";
+  ui.previewAssignments = {};
+  syncPreviewAssignmentsFromImages(ui, data.preview_images || []);
   const cleanDefault = (data.images || []).find((img) => Number(img.is_default) === 1);
   const shopDefault = (data.shop_preview_images || []).find((img) => Number(img.is_default) === 1);
   ui.preview_mock_id = cleanDefault?.id || null;
@@ -320,6 +400,14 @@ export function syncMockupsUiFromDom(ctx) {
   } else {
     ui.shop_preview_mock_id = readPreviewMockIdForSet(MOCKUP_SET_SHOP_PREVIEW);
   }
+  const shopMode = document.getElementById("ce-mock-carousel-mode-shop")?.value;
+  const skillMode = document.getElementById("ce-mock-carousel-mode-skill")?.value;
+  if (shopMode === "auto" || shopMode === "manual") ui.preview_carousel_mode_shop = shopMode;
+  if (skillMode === "auto" || skillMode === "manual") ui.preview_carousel_mode_skill_tree = skillMode;
+  const shopOn = document.getElementById("ce-mock-source-shop")?.checked;
+  const previewOn = document.getElementById("ce-mock-source-preview")?.checked;
+  if (previewOn && !shopOn) ui.preview_card_source = MOCKUP_SET_PREVIEW_IMAGES;
+  else if (shopOn) ui.preview_card_source = MOCKUP_SET_SHOP_PREVIEW;
 }
 
 export function snapshotMockupsTab() {
@@ -330,6 +418,10 @@ export function snapshotMockupsTab() {
     preview_mock_id: ui?.preview_mock_id || null,
     shop_preview_mock_id: ui?.shop_preview_mock_id || null,
     selected_mock_section: ui?.selectedSection || MOCKUP_SET_CLEAN,
+    preview_card_source: ui?.preview_card_source || MOCKUP_SET_SHOP_PREVIEW,
+    preview_carousel_mode_shop: ui?.preview_carousel_mode_shop || "auto",
+    preview_carousel_mode_skill_tree: ui?.preview_carousel_mode_skill_tree || "auto",
+    preview_assignments: { ...(ui?.previewAssignments || {}) },
   };
 }
 
@@ -350,6 +442,76 @@ function refreshMainPreviewBadges(mockupSet, previewId) {
   });
 }
 
+function openPreviewAssignModal(ctx, img) {
+  const ui = ensureMockupsUiState(ctx);
+  const id = String(img?.id || "");
+  if (!id) return;
+  const cur = ui.previewAssignments[id] || {
+    use_for_shop: Number(img.use_for_shop) === 1,
+    use_for_skill_tree: Number(img.use_for_skill_tree) === 1,
+  };
+  let root = document.getElementById("ce-mock-assign-modal");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "ce-mock-assign-modal";
+    root.className = "ce-mock-assign-modal";
+    root.hidden = true;
+    root.innerHTML = `
+      <div class="ce-mock-assign-modal__backdrop" data-ce-assign-dismiss></div>
+      <div class="ce-mock-assign-modal__card" role="dialog" aria-modal="true" aria-labelledby="ce-mock-assign-title">
+        <h3 id="ce-mock-assign-title" class="ce-mock-assign-modal__title">Assign preview mock</h3>
+        <p class="ce-hint ce-mock-assign-modal__hint">Choose where this mock appears. You can select both.</p>
+        <div class="ce-mock-assign-modal__preview"><img alt="" id="ce-mock-assign-img" /></div>
+        <label class="ce-mock-assign-check"><input type="checkbox" id="ce-mock-assign-skill" /> Skill Tree</label>
+        <label class="ce-mock-assign-check"><input type="checkbox" id="ce-mock-assign-shop" /> Shop</label>
+        <div class="ce-mock-assign-modal__actions">
+          <button type="button" class="btn btn-secondary" data-ce-assign-dismiss>Cancel</button>
+          <button type="button" class="btn btn-primary" id="ce-mock-assign-save">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+  }
+  const imgEl = root.querySelector("#ce-mock-assign-img");
+  if (imgEl) imgEl.src = img.image_url || "";
+  const skill = root.querySelector("#ce-mock-assign-skill");
+  const shop = root.querySelector("#ce-mock-assign-shop");
+  if (skill) skill.checked = !!cur.use_for_skill_tree;
+  if (shop) shop.checked = !!cur.use_for_shop;
+  root.hidden = false;
+
+  const close = () => {
+    root.hidden = true;
+  };
+  root.querySelectorAll("[data-ce-assign-dismiss]").forEach((el) => {
+    el.onclick = close;
+  });
+  const saveBtn = root.querySelector("#ce-mock-assign-save");
+  if (saveBtn) {
+    saveBtn.onclick = () => {
+      ui.previewAssignments[id] = {
+        use_for_skill_tree: !!skill?.checked,
+        use_for_shop: !!shop?.checked,
+      };
+      // Keep in-memory mockupsData in sync for re-render badges.
+      const list = ctx.mockupsData?.preview_images || [];
+      const row = list.find((r) => String(r.id) === id);
+      if (row) {
+        row.use_for_skill_tree = ui.previewAssignments[id].use_for_skill_tree ? 1 : 0;
+        row.use_for_shop = ui.previewAssignments[id].use_for_shop ? 1 : 0;
+      }
+      close();
+      notifyActiveTabDirty(ctx);
+      const body = document.getElementById("ce-body");
+      if (body && ctx.mockupsData) {
+        body.innerHTML = renderMockupsTabHtml(ctx, ctx.mockupsData);
+        bindMockupsTab(ctx, body);
+        updateMockSectionSubnav(ctx);
+        syncPreviewCardSourceSwitches(ctx);
+      }
+    };
+  }
+}
+
 function bindMockupSetCarousels(ctx, mockupSet) {
   document.querySelectorAll(`.ce-mock-carousel[data-mock-set="${CSS.escape(mockupSet)}"]`).forEach((carousel) => {
     const viewKey = carousel.dataset.view;
@@ -357,6 +519,12 @@ function bindMockupSetCarousels(ctx, mockupSet) {
 
     slides.forEach((slide) => {
       slide.addEventListener("click", () => {
+        if (slide.getAttribute("data-mock-assign") === "1") {
+          const id = slide.getAttribute("data-id");
+          const img = (ctx.mockupsData?.preview_images || []).find((r) => String(r.id) === String(id));
+          if (img) openPreviewAssignModal(ctx, img);
+          return;
+        }
         const toggle = document.querySelector(
           `.ce-mock-preview-switch[data-mock-set="${CSS.escape(mockupSet)}"][data-view="${CSS.escape(viewKey)}"]`
         );
@@ -429,6 +597,17 @@ function bindMockupSetCarousels(ctx, mockupSet) {
   });
 }
 
+export function syncPreviewCardSourceSwitches(ctx) {
+  const ui = ensureMockupsUiState(ctx);
+  const shop = document.getElementById("ce-mock-source-shop");
+  const preview = document.getElementById("ce-mock-source-preview");
+  const source = ui.preview_card_source === MOCKUP_SET_PREVIEW_IMAGES
+    ? MOCKUP_SET_PREVIEW_IMAGES
+    : MOCKUP_SET_SHOP_PREVIEW;
+  if (shop) shop.checked = source === MOCKUP_SET_SHOP_PREVIEW;
+  if (preview) preview.checked = source === MOCKUP_SET_PREVIEW_IMAGES;
+}
+
 export function updateMockSectionSubnav(ctx) {
   const activeId = SECTION_META[resolveActiveMockSection(ctx)].id;
   document.querySelectorAll("#ce-subnav-mock-sections .ce-mock-section-pill").forEach((pill) => {
@@ -436,6 +615,7 @@ export function updateMockSectionSubnav(ctx) {
     pill.classList.toggle("active", on);
     pill.setAttribute("aria-selected", on ? "true" : "false");
   });
+  syncPreviewCardSourceSwitches(ctx);
 }
 
 export function bindMockSectionSubnav(ctx) {
@@ -452,6 +632,39 @@ export function bindMockSectionSubnav(ctx) {
       switchMockSection(ctx, mockupSet);
     };
   });
+
+  const shop = document.getElementById("ce-mock-source-shop");
+  const preview = document.getElementById("ce-mock-source-preview");
+  const onSourceToggle = (which) => {
+    const ui = ensureMockupsUiState(ctx);
+    if (which === MOCKUP_SET_PREVIEW_IMAGES) {
+      ui.preview_card_source = MOCKUP_SET_PREVIEW_IMAGES;
+      if (shop) shop.checked = false;
+      if (preview) preview.checked = true;
+    } else {
+      ui.preview_card_source = MOCKUP_SET_SHOP_PREVIEW;
+      if (shop) shop.checked = true;
+      if (preview) preview.checked = false;
+    }
+    notifyActiveTabDirty(ctx);
+  };
+  if (shop) {
+    shop.onchange = () => {
+      if (shop.checked) onSourceToggle(MOCKUP_SET_SHOP_PREVIEW);
+      else {
+        // Exactly one source must stay on.
+        shop.checked = true;
+      }
+    };
+  }
+  if (preview) {
+    preview.onchange = () => {
+      if (preview.checked) onSourceToggle(MOCKUP_SET_PREVIEW_IMAGES);
+      else {
+        preview.checked = true;
+      }
+    };
+  }
 }
 
 export function switchMockSection(ctx, mockupSet) {
@@ -468,6 +681,18 @@ async function reloadMockupsPanel(ctx) {
   const data = await fetchMockupsBundle(ctx.productKey, ctx.selectedPrintProviderId);
   ctx.mockupsData = data;
   const ui = ensureMockupsUiState(ctx);
+  ui.preview_card_source =
+    String(data.product?.preview_card_source || "").toLowerCase() === MOCKUP_SET_PREVIEW_IMAGES
+      ? MOCKUP_SET_PREVIEW_IMAGES
+      : MOCKUP_SET_SHOP_PREVIEW;
+  ui.preview_carousel_mode_shop =
+    String(data.product?.preview_carousel_mode_shop || "").toLowerCase() === "manual" ? "manual" : "auto";
+  ui.preview_carousel_mode_skill_tree =
+    String(data.product?.preview_carousel_mode_skill_tree || "").toLowerCase() === "manual"
+      ? "manual"
+      : "auto";
+  ui.previewAssignments = {};
+  syncPreviewAssignmentsFromImages(ui, data.preview_images || []);
   const cleanDefault = (data.images || []).find((img) => Number(img.is_default) === 1);
   const shopDefault = (data.shop_preview_images || []).find((img) => Number(img.is_default) === 1);
   ui.preview_mock_id = cleanDefault?.id || null;
@@ -543,16 +768,41 @@ export function bindMockupsTab(ctx, root) {
   bindMockupSetCarousels(ctx, resolveActiveMockSection(ctx));
   bindMockSectionSubnav(ctx);
   bindMockupUpload(ctx, root || document);
+  syncPreviewCardSourceSwitches(ctx);
+  const shopMode = root?.querySelector?.("#ce-mock-carousel-mode-shop") || document.getElementById("ce-mock-carousel-mode-shop");
+  const skillMode = root?.querySelector?.("#ce-mock-carousel-mode-skill") || document.getElementById("ce-mock-carousel-mode-skill");
+  if (shopMode) {
+    shopMode.onchange = () => {
+      ensureMockupsUiState(ctx).preview_carousel_mode_shop = shopMode.value === "manual" ? "manual" : "auto";
+      notifyActiveTabDirty(ctx);
+    };
+  }
+  if (skillMode) {
+    skillMode.onchange = () => {
+      ensureMockupsUiState(ctx).preview_carousel_mode_skill_tree =
+        skillMode.value === "manual" ? "manual" : "auto";
+      notifyActiveTabDirty(ctx);
+    };
+  }
 }
 
 export async function saveMockupsTab(ctx) {
   syncMockupsUiFromDom(ctx);
   const ui = ensureMockupsUiState(ctx);
+  const previewAssignments = Object.entries(ui.previewAssignments || {}).map(([id, flags]) => ({
+    id: Number(id),
+    use_for_shop: !!flags.use_for_shop,
+    use_for_skill_tree: !!flags.use_for_skill_tree,
+  }));
   await saveMockups(ctx.productKey, {
     print_provider_id: ctx.selectedPrintProviderId,
     print_area_edit_use_mocks: ui.print_area_edit_use_mocks,
     preview_mock_id: ui.preview_mock_id || undefined,
     shop_preview_mock_id: ui.shop_preview_mock_id || undefined,
+    preview_card_source: ui.preview_card_source || MOCKUP_SET_SHOP_PREVIEW,
+    preview_carousel_mode_shop: ui.preview_carousel_mode_shop || "auto",
+    preview_carousel_mode_skill_tree: ui.preview_carousel_mode_skill_tree || "auto",
+    preview_assignments: previewAssignments,
     auto_mirror: false,
   });
 }

@@ -1289,6 +1289,63 @@ export async function saveCatalogMockups(env, productKey, body) {
     }
   }
 
+  if (
+    body.preview_card_source != null ||
+    body.preview_carousel_mode_shop != null ||
+    body.preview_carousel_mode_skill_tree != null
+  ) {
+    const {
+      normalizePreviewCardSource,
+      normalizeCarouselMode,
+    } = await import("../../catalog/previewCardSource.js");
+    const source = normalizePreviewCardSource(body.preview_card_source);
+    const shopMode = normalizeCarouselMode(body.preview_carousel_mode_shop);
+    const skillMode = normalizeCarouselMode(body.preview_carousel_mode_skill_tree);
+    try {
+      await db
+        .prepare(
+          `UPDATE product_catalog
+           SET preview_card_source = COALESCE(?, preview_card_source),
+               preview_carousel_mode_shop = COALESCE(?, preview_carousel_mode_shop),
+               preview_carousel_mode_skill_tree = COALESCE(?, preview_carousel_mode_skill_tree),
+               updated_at = ?
+           WHERE product_key = ?`
+        )
+        .bind(
+          body.preview_card_source != null ? source : null,
+          body.preview_carousel_mode_shop != null ? shopMode : null,
+          body.preview_carousel_mode_skill_tree != null ? skillMode : null,
+          now,
+          productKey
+        )
+        .run();
+    } catch (e) {
+      console.warn("[catalog-ops] preview_card_source save skipped:", e?.message || e);
+    }
+  }
+
+  if (body.preview_assignments && Array.isArray(body.preview_assignments)) {
+    for (const row of body.preview_assignments) {
+      const id = Number(row?.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      const useShop = row.use_for_shop ? 1 : 0;
+      const useSkill = row.use_for_skill_tree ? 1 : 0;
+      try {
+        await db
+          .prepare(
+            `UPDATE product_mockup_images
+             SET use_for_shop = ?, use_for_skill_tree = ?
+             WHERE id = ? AND product_key = ?`
+          )
+          .bind(useShop, useSkill, id, productKey)
+          .run();
+      } catch (e) {
+        console.warn("[catalog-ops] preview_assignments save skipped:", e?.message || e);
+        break;
+      }
+    }
+  }
+
   if (body.image_rules && Array.isArray(body.image_rules)) {
     for (const rule of body.image_rules) {
       await db
