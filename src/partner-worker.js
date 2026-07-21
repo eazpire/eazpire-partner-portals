@@ -13,19 +13,31 @@ import { rewritePartnerApiV1Request } from "./features/manufacturers/partnerApiV
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "OPTIONS") {
-      const cors = getCorsHeaders(request);
-      return new Response(null, { status: 204, headers: cors });
-    }
-
-    const apiRequest = rewritePartnerApiV1Request(request) || request;
-    const mfgResp = await handleManufacturerRouter(apiRequest, env, ctx);
-    if (mfgResp) return mfgResp;
-
-    const portalResp = await handlePartnerPortalRequest(request, env);
-    if (portalResp) return portalResp;
-
     const cors = getCorsHeaders(request);
-    return json({ ok: false, error: "not_found" }, 404, cors);
+    try {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: cors });
+      }
+
+      const apiRequest = rewritePartnerApiV1Request(request) || request;
+      const mfgResp = await handleManufacturerRouter(apiRequest, env, ctx);
+      if (mfgResp) return mfgResp;
+
+      const portalResp = await handlePartnerPortalRequest(request, env);
+      if (portalResp) return portalResp;
+
+      return json({ ok: false, error: "not_found" }, 404, cors);
+    } catch (e) {
+      console.error("[partner-worker] unhandled:", e?.message || e, e?.stack);
+      return json(
+        {
+          ok: false,
+          error: "internal_error",
+          message: e?.message || String(e) || "Internal server error",
+        },
+        500,
+        cors
+      );
+    }
   },
 };

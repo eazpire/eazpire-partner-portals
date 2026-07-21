@@ -80,18 +80,31 @@ function mapTestProductRows(rows) {
 
 export async function handlePartnerTestPrintifyCreate(request, env) {
   const cors = getCorsHeaders(request);
-  const auth = await requireAdminPartnerSession(request, env);
-  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
+  try {
+    const auth = await requireAdminPartnerSession(request, env);
+    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status, cors);
 
-  const body = await request.json().catch(() => ({}));
-  const actor = auth.session?.email || auth.email || "partner-admin";
-  const randomDesign = body.random_design === true || body.design_id == null;
-  return createTestPrintifyProduct(
-    env,
-    { ...body, random_design: randomDesign },
-    actor,
-    cors
-  );
+    const body = await request.json().catch(() => ({}));
+    const actor = auth.session?.email || auth.email || "partner-admin";
+    const randomDesign = body.random_design === true || body.design_id == null;
+    return await createTestPrintifyProduct(
+      env,
+      { ...body, random_design: randomDesign },
+      actor,
+      cors
+    );
+  } catch (e) {
+    console.error("[admin-eazpire-test-printify-create]", e?.message || e, e?.stack);
+    return json(
+      {
+        ok: false,
+        error: "create_failed",
+        message: e?.message || String(e) || "Test product create failed.",
+      },
+      500,
+      cors
+    );
+  }
 }
 
 export async function handlePartnerTestPrintifyCreations(request, env) {
