@@ -37,6 +37,7 @@
     "bootstrap:carousel-test": "node scripts/bootstrap-carousel-test-token.mjs",
     "secrets:carousel-upload": "node --env-file=.env scripts/set-carousel-worker-secret.cjs",
     "dev:design-product-catalog": "node scripts/design-product-catalog-server.mjs",
+    "dev:undersized-designs-repair": "node scripts/undersized-designs-repair-server.mjs",
     "reconvert:previews-webp": "node scripts/run-reconvert-previews-webp.mjs",
     "reconvert:previews-webp:stats": "node scripts/run-reconvert-previews-webp.mjs --stats",
     "dev:logs": "npx concurrently -n \"backend,frontend\" -c \"cyan,magenta\" \"npm run dev\" \"npm run dev:mobile\"",
@@ -152,6 +153,7 @@
     "deploy:worker": "echo '❌ VERBOTEN: Verwende npm run deploy für Worker-Änderungen!' && exit 1",
     "changes": "node scripts/utils/view-changes.js",
     "changes:today": "node scripts/utils/view-changes.js --today",
+    "dry-run:upscale-undersized": "node scripts/utils/dry-run-upscale-undersized-designs.js",
     "migrate:hero-images": "node scripts/utils/migrate-hero-images.js",
     "migrate:auto-promotions": "node scripts/utils/migrate-auto-promotions.js",
     "assets:scan": "node scripts/utils/scan-platform-assets.js",
@@ -311,7 +313,10 @@
     "wear-os:sync": "node scripts/wear-os/sync-to-wear-os-repo.js",
     "wear-os:build": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1",
     "wear-os:install": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install",
-    "wear-os:run-emulator": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install -Launch"
+    "wear-os:run-emulator": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install -Launch",
+    "secrets:meta-instagram": "node scripts/set-meta-instagram-credentials.js",
+    "measure:shop-network-audit": "node scripts/test/shop-perf-network-audit.cjs",
+    "measure:perf-median": "node scripts/test/shop-perf-median-baseline.cjs"
   },
   "keywords": [],
   "author": "",
