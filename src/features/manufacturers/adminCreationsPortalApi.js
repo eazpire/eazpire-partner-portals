@@ -371,7 +371,7 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   }
 }
 
-/** Todify = partner-direct Shopify listings, including Shop Studio customer rows for direct products. */
+/** Todify = partner-direct Shopify listings, including direct Shop Studio customer rows. */
 export async function handleAdminCreationsTodifyProducts(request, env) {
   const cors = getCorsHeaders(request);
   if (!env.SHOPIFY_ACCESS_TOKEN) {
