@@ -7283,6 +7283,15 @@ html[data-portal="admin"] .cr-card__thumb-inner img {
   object-position: center;
   display: block;
 }
+html[data-portal="admin"] .cr-card__design-overlay {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 2;
+}
 html[data-portal="admin"] .cr-card__views {
   position: absolute;
   left: 10px;

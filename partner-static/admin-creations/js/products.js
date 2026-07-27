@@ -141,21 +141,30 @@ function productCardHtml(item) {
   const views = Array.isArray(item.grid_views)
     ? item.grid_views.filter((v) => v && v.src)
     : [];
-  const img = (views[0] && views[0].src) || (item.images && item.images[0]) || item.preview_url || "";
+  const activeView = views[0] || null;
+  const img = (activeView && activeView.src) || (item.images && item.images[0]) || item.preview_url || "";
+  const activePlacement = activeView?.design_placement || null;
+  const overlayStyle = activePlacement
+    ? `left:${Math.max(0, Math.min(1, Number(activePlacement.x) || 0.5)) * 100}%;top:${Math.max(0, Math.min(1, Number(activePlacement.y) || 0.5)) * 100}%;width:${Math.max(12, Math.min(90, (Number(activePlacement.scale) || 0.95) * 46))}%;transform:translate(-50%,-50%) rotate(${Number(activePlacement.angle) || 0}deg);`
+    : "";
+  const overlayImg =
+    activeView && activeView.design_url
+      ? `<img class="cr-card__design-overlay" src="${escapeHtml(activeView.design_url)}" alt="" loading="lazy" decoding="async" data-cr-card-design-img style="${escapeHtml(overlayStyle)}" />`
+      : "";
   const viewButtons =
     views.length > 1
       ? `<div class="cr-card__views" role="group" aria-label="Product views">
           ${views
             .map(
               (v, idx) =>
-                `<button type="button" class="cr-card__view-chip ${idx === 0 ? "active" : ""}" data-cr-view-index="${idx}" data-cr-view-src="${escapeHtml(v.src)}">${escapeHtml(v.view || `View ${idx + 1}`)}</button>`
+                `<button type="button" class="cr-card__view-chip ${idx === 0 ? "active" : ""}" data-cr-view-index="${idx}" data-cr-view-src="${escapeHtml(v.src)}" data-cr-design-src="${escapeHtml(v.design_url || "")}" data-cr-design-placement="${escapeHtml(JSON.stringify(v.design_placement || {}))}">${escapeHtml(v.view || `View ${idx + 1}`)}</button>`
             )
             .join("")}
         </div>`
       : "";
   const thumbInner =
     img && String(img).trim()
-      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" data-cr-card-img />`
+      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" data-cr-card-img />${overlayImg}`
       : '<span class="cr-card__noimg">No image</span>';
   const shopifyId = item.shopify_product_id || item.id || "";
   const clickable = SHOPIFY_DETAIL_SOURCES.has(state.source) && shopifyId;
@@ -688,8 +697,27 @@ function bindProductCards(el) {
       e.stopPropagation();
       const cardForView = viewBtn.closest(".cr-card--product");
       const img = cardForView?.querySelector("[data-cr-card-img]");
+      const overlay = cardForView?.querySelector("[data-cr-card-design-img]");
       const src = viewBtn.dataset.crViewSrc || "";
       if (img && src) img.src = src;
+      if (overlay) {
+        const designSrc = viewBtn.dataset.crDesignSrc || "";
+        if (designSrc) {
+          let placement = {};
+          try {
+            placement = JSON.parse(viewBtn.dataset.crDesignPlacement || "{}") || {};
+          } catch {}
+          overlay.src = designSrc;
+          overlay.hidden = false;
+          overlay.style.left = `${Math.max(0, Math.min(1, Number(placement.x) || 0.5)) * 100}%`;
+          overlay.style.top = `${Math.max(0, Math.min(1, Number(placement.y) || 0.5)) * 100}%`;
+          overlay.style.width = `${Math.max(12, Math.min(90, (Number(placement.scale) || 0.95) * 46))}%`;
+          overlay.style.transform = `translate(-50%,-50%) rotate(${Number(placement.angle) || 0}deg)`;
+        } else {
+          overlay.hidden = true;
+          overlay.removeAttribute("src");
+        }
+      }
       cardForView?.querySelectorAll(".cr-card__view-chip").forEach((btn) => {
         btn.classList.toggle("active", btn === viewBtn);
       });

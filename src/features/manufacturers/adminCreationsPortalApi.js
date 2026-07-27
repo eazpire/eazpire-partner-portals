@@ -76,6 +76,38 @@ export function buildAdminGridViews({ previewUrl, mockUrlsJson, previewMockIndex
   return urls;
 }
 
+function parsePlacementJson(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function attachDesignOverlayToGridViews(views, designUrl, placementJson) {
+  const url = String(designUrl || "").trim();
+  if (!url || !Array.isArray(views) || !views.length) return views;
+  const parsed = parsePlacementJson(placementJson);
+  const target = String(parsed?.printify_position || "front").trim().toLowerCase().replace(/\s+/g, "_");
+  const placement = parsed?.placement && typeof parsed.placement === "object" ? parsed.placement : {};
+  return views.map((view) => {
+    const viewKey = String(view.view || "").trim().toLowerCase().replace(/\s+/g, "_");
+    if (viewKey !== target) return view;
+    return {
+      ...view,
+      design_url: url,
+      design_placement: {
+        x: Number.isFinite(Number(placement.x)) ? Number(placement.x) : 0.5,
+        y: Number.isFinite(Number(placement.y)) ? Number(placement.y) : 0.5,
+        scale: Number.isFinite(Number(placement.scale)) ? Number(placement.scale) : 0.95,
+        angle: Number.isFinite(Number(placement.angle)) ? Number(placement.angle) : 0,
+      },
+    };
+  });
+}
+
 async function loadDirectShopifyProductKeySet(env, keys) {
   const clean = [...new Set((keys || []).map((k) => String(k || "").trim()).filter(Boolean))];
   const out = new Set();
@@ -221,7 +253,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
     const studioRes = await env.CUSTOMER_DB.prepare(
       `SELECT id, customer_id, product_key, product_title, printify_product_id,
               shopify_product_id, shopify_completion_status, preview_url, mock_urls_json,
-              preview_mock_index, updated_at
+              preview_mock_index, design_url, placement_json, updated_at
        FROM shop_studio_listings
        WHERE listing_origin = 'shop' OR listing_origin IS NULL
        ORDER BY updated_at DESC
@@ -242,11 +274,11 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
       seen.add(key);
       const title = String(row.product_title || row.product_key || `Studio #${row.id}`).trim();
       const preview = row.preview_url || null;
-      const gridViews = buildAdminGridViews({
+      const gridViews = attachDesignOverlayToGridViews(buildAdminGridViews({
         previewUrl: preview,
         mockUrlsJson: row.mock_urls_json,
         previewMockIndex: row.preview_mock_index,
-      });
+      }), row.design_url, row.placement_json);
       products.push({
         id: String(row.id),
         product_key: String(row.product_key || row.id),
@@ -415,7 +447,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
       const studioRows = await env.CUSTOMER_DB.prepare(
         `SELECT id, customer_id, product_key, product_title, printify_product_id,
                 shopify_product_id, shopify_completion_status, preview_url, mock_urls_json,
-                preview_mock_index, updated_at
+                preview_mock_index, design_url, placement_json, updated_at
          FROM shop_studio_listings
          WHERE listing_origin = 'shop' OR listing_origin IS NULL
          ORDER BY updated_at DESC
@@ -433,11 +465,11 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
         const sid = normalizeShopifyProductId(row.shopify_product_id);
         if (sid && seenProductIds.has(sid)) continue;
         const preview = row.preview_url || null;
-        const gridViews = buildAdminGridViews({
+        const gridViews = attachDesignOverlayToGridViews(buildAdminGridViews({
           previewUrl: preview,
           mockUrlsJson: row.mock_urls_json,
           previewMockIndex: row.preview_mock_index,
-        });
+        }), row.design_url, row.placement_json);
         products.push({
           id: sid || `studio:${row.id}`,
           product_key: String(row.product_key || row.id),
