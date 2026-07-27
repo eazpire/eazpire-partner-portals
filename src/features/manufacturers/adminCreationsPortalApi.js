@@ -36,6 +36,69 @@ function studioStatusToIsActive(status) {
   return 0;
 }
 
+function parseJsonArray(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function inferViewFromUrl(url, fallback) {
+  const s = String(url || "").toLowerCase();
+  if (/(^|[^a-z])back([^a-z]|$)|[_/-]back[_./-]/.test(s)) return "back";
+  if (/(^|[^a-z])front([^a-z]|$)|[_/-]front[_./-]/.test(s)) return "front";
+  return fallback || "front";
+}
+
+export function buildAdminGridViews({ previewUrl, mockUrlsJson, previewMockIndex } = {}) {
+  const urls = [];
+  const seen = new Set();
+  function push(url, view, isPreview) {
+    const src = String(url || "").trim();
+    if (!src || seen.has(src.split("?")[0])) return;
+    seen.add(src.split("?")[0]);
+    urls.push({
+      src,
+      view: view || inferViewFromUrl(src, urls.length === 0 ? "front" : `view ${urls.length + 1}`),
+      is_preview: !!isPreview,
+    });
+  }
+  const rawMockUrls = parseJsonArray(mockUrlsJson);
+  const pIndex = Number(previewMockIndex);
+  rawMockUrls.forEach((url, idx) => {
+    push(url, inferViewFromUrl(url, idx === 0 ? "front" : idx === 1 ? "back" : `view ${idx + 1}`), idx === pIndex);
+  });
+  push(previewUrl, inferViewFromUrl(previewUrl, "front"), !urls.some((x) => x.is_preview));
+  if (!urls.length && previewUrl) push(previewUrl, "front", true);
+  return urls;
+}
+
+async function loadDirectShopifyProductKeySet(env, keys) {
+  const clean = [...new Set((keys || []).map((k) => String(k || "").trim()).filter(Boolean))];
+  const out = new Set();
+  if (!env?.CATALOG_DB || !clean.length) return out;
+  const placeholders = clean.map(() => "?").join(",");
+  try {
+    const rows = await env.CATALOG_DB.prepare(
+      `SELECT DISTINCT product_key
+       FROM product_publish_profiles
+       WHERE product_key IN (${placeholders})
+         AND LOWER(TRIM(source_system)) IN ('todify', 'direct_shopify')`
+    )
+      .bind(...clean)
+      .all();
+    for (const row of rows?.results || []) {
+      if (row.product_key) out.add(String(row.product_key));
+    }
+  } catch (e) {
+    console.warn("[admin-creations-products] direct key lookup:", e?.message);
+  }
+  return out;
+}
+
 async function enrichPrintifyCategories(env, products) {
   if (!env.CATALOG_DB || !products.length) return products;
 
@@ -157,7 +220,8 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
 
     const studioRes = await env.CUSTOMER_DB.prepare(
       `SELECT id, customer_id, product_key, product_title, printify_product_id,
-              shopify_product_id, shopify_completion_status, preview_url, updated_at
+              shopify_product_id, shopify_completion_status, preview_url, mock_urls_json,
+              preview_mock_index, updated_at
        FROM shop_studio_listings
        WHERE listing_origin = 'shop' OR listing_origin IS NULL
        ORDER BY updated_at DESC
@@ -166,18 +230,30 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
       .bind(limit)
       .all();
 
+    const directKeys = await loadDirectShopifyProductKeySet(
+      env,
+      (studioRes?.results || []).map((row) => row.product_key)
+    );
+
     for (const row of studioRes?.results || []) {
+      if (directKeys.has(String(row.product_key || "").trim())) continue;
       const key = `studio:${row.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const title = String(row.product_title || row.product_key || `Studio #${row.id}`).trim();
       const preview = row.preview_url || null;
+      const gridViews = buildAdminGridViews({
+        previewUrl: preview,
+        mockUrlsJson: row.mock_urls_json,
+        previewMockIndex: row.preview_mock_index,
+      });
       products.push({
         id: String(row.id),
         product_key: String(row.product_key || row.id),
         title,
         preview_url: preview,
-        images: preview ? [preview] : [],
+        images: gridViews.length ? gridViews.map((v) => v.src) : preview ? [preview] : [],
+        grid_views: gridViews,
         category: "Shop Design Studio",
         owner_id: String(row.customer_id || ""),
         owner_label: row.customer_id ? `Customer ${row.customer_id}` : "Customer",
@@ -201,7 +277,13 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
       .bind(limit)
       .all();
 
+    const cpDirectKeys = await loadDirectShopifyProductKeySet(
+      env,
+      (cpRes?.results || []).map((row) => row.product_key)
+    );
+
     for (const row of cpRes?.results || []) {
+      if (cpDirectKeys.has(String(row.product_key || "").trim())) continue;
       const sid = normalizeShopifyProductId(row.shopify_product_id);
       const dedupeKey = sid ? `sid:${sid}` : `cp:${row.id}`;
       if (seen.has(dedupeKey)) continue;
@@ -309,15 +391,78 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
       maxScan: 3000,
-      matchFn: (node) =>
-        isTodifyPartnerShopifyProduct(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds),
+      matchFn: (node) => isTodifyPartnerShopifyProduct(node),
     });
 
-    let products = nodes.map((node) => mapShopifyNodeToProduct(node, "todify", printifyLinks));
+    let products = nodes.map((node) => {
+      const row = mapShopifyNodeToProduct(node, "todify", printifyLinks);
+      if (isCustomerStudioShopifyProduct(node, customerStudioIds)) {
+        row.origin_label = "Customer";
+        row.listing_origin = row.listing_origin || "shop";
+      } else if (!row.origin_label) {
+        row.origin_label = "Creator";
+        row.listing_origin = row.listing_origin || "creator";
+      }
+      return row;
+    });
+    const seenProductIds = new Set(
+      products
+        .map((p) => normalizeShopifyProductId(p.shopify_product_id || p.id))
+        .filter(Boolean)
+    );
+
+    if (env.CUSTOMER_DB) {
+      const studioRows = await env.CUSTOMER_DB.prepare(
+        `SELECT id, customer_id, product_key, product_title, printify_product_id,
+                shopify_product_id, shopify_completion_status, preview_url, mock_urls_json,
+                preview_mock_index, updated_at
+         FROM shop_studio_listings
+         WHERE listing_origin = 'shop' OR listing_origin IS NULL
+         ORDER BY updated_at DESC
+         LIMIT ?`
+      )
+        .bind(limit)
+        .all()
+        .catch(() => ({ results: [] }));
+      const directKeys = await loadDirectShopifyProductKeySet(
+        env,
+        (studioRows?.results || []).map((row) => row.product_key)
+      );
+      for (const row of studioRows?.results || []) {
+        if (!directKeys.has(String(row.product_key || "").trim())) continue;
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        if (sid && seenProductIds.has(sid)) continue;
+        const preview = row.preview_url || null;
+        const gridViews = buildAdminGridViews({
+          previewUrl: preview,
+          mockUrlsJson: row.mock_urls_json,
+          previewMockIndex: row.preview_mock_index,
+        });
+        products.push({
+          id: sid || `studio:${row.id}`,
+          product_key: String(row.product_key || row.id),
+          title: String(row.product_title || row.product_key || `Todify Studio #${row.id}`).trim(),
+          preview_url: preview,
+          images: gridViews.length ? gridViews.map((v) => v.src) : preview ? [preview] : [],
+          grid_views: gridViews,
+          category: "Shop Design Studio",
+          owner_id: String(row.customer_id || ""),
+          owner_label: row.customer_id ? `Customer ${row.customer_id}` : "Customer",
+          shopify_product_id: sid || null,
+          printify_product_id: row.printify_product_id || null,
+          is_active: studioStatusToIsActive(row.shopify_completion_status),
+          source: "todify",
+          source_label: "Todify",
+          listing_origin: "shop",
+          origin_label: "Customer",
+        });
+        if (sid) seenProductIds.add(sid);
+      }
+    }
 
     if (q) {
       products = products.filter((p) =>
-        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label]
+        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label, p.origin_label]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()

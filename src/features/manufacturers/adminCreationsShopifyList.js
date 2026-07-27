@@ -24,6 +24,14 @@ const PRODUCTS_GQL = `
               image { url }
             }
           }
+          images(first: 12) {
+            edges {
+              node {
+                url
+                altText
+              }
+            }
+          }
           mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
           mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
           mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
@@ -72,12 +80,48 @@ function imageUrlFromNode(node) {
   return node?.featuredMedia?.image?.url || null;
 }
 
+function imageListFromNode(node) {
+  const out = [];
+  const seen = new Set();
+  const edges = node?.images?.edges || [];
+  for (const edge of edges) {
+    const url = String(edge?.node?.url || "").trim();
+    if (!url || seen.has(url.split("?")[0])) continue;
+    seen.add(url.split("?")[0]);
+    out.push({
+      src: url,
+      alt: edge?.node?.altText || "",
+      view: inferViewFromAltOrUrl(edge?.node?.altText, url, out.length),
+      is_preview: out.length === 0,
+    });
+  }
+  const featured = imageUrlFromNode(node);
+  if (featured && !seen.has(String(featured).split("?")[0])) {
+    out.unshift({ src: featured, alt: "", view: "front", is_preview: true });
+  }
+  return out;
+}
+
+function inferViewFromAltOrUrl(alt, url, index) {
+  const raw = `${String(alt || "")} ${String(url || "")}`.toLowerCase();
+  if (/(^|[^a-z])back([^a-z]|$)|[_/-]back[_./-]/.test(raw)) return "back";
+  if (/(^|[^a-z])front([^a-z]|$)|[_/-]front[_./-]/.test(raw)) return "front";
+  return index === 0 ? "front" : index === 1 ? "back" : `view ${index + 1}`;
+}
+
 function printifyIdFromNode(node) {
   return parseMetafieldValue(node?.mfPrintifyId?.value);
 }
 
 function providerFromNode(node) {
   return parseMetafieldValue(node?.mfProvider?.value).toLowerCase();
+}
+
+function originLabelFromListingOrigin(origin) {
+  const o = String(origin || "").trim().toLowerCase();
+  if (o === "shop" || o === "customer") return "Customer";
+  if (o === "creator") return "Creator";
+  return null;
 }
 
 function normYes(val) {
@@ -235,9 +279,11 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   const shopifyId = normalizeShopifyProductId(node?.id);
   const productKey = String(parseMetafieldValue(node?.mfProductKey?.value) || node?.handle || shopifyId).trim();
   const imageUrl = imageUrlFromNode(node);
+  const gridViews = imageListFromNode(node);
   const printifyFromMf = printifyIdFromNode(node);
   const printifyFromD1 = shopifyId && printifyLinks?.get(shopifyId);
   const provider = providerFromNode(node);
+  const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value) || null;
   let sourceLabel = source;
   if (source === "todify" || provider === "todify") sourceLabel = "Todify";
   else if (source === "samples" || isSampleShopifyProduct(node)) sourceLabel = "Personalizable samples";
@@ -256,14 +302,16 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     product_key: productKey,
     title: node?.title || productKey,
     preview_url: imageUrl,
-    images: imageUrl ? [imageUrl] : [],
+    images: gridViews.length ? gridViews.map((v) => v.src) : imageUrl ? [imageUrl] : [],
+    grid_views: gridViews,
     category: node?.productType || categoryDefault,
     status: node?.status,
     is_active: shopifyStatusToIsActive(node?.status),
     vendor: node?.vendor || "",
     shopify_product_id: shopifyId,
     printify_product_id: printifyFromMf || printifyFromD1 || null,
-    listing_origin: parseMetafieldValue(node?.mfListingOrigin?.value) || null,
+    listing_origin: listingOrigin,
+    origin_label: originLabelFromListingOrigin(listingOrigin),
     provider: provider || null,
     source,
     source_label: sourceLabel,

@@ -138,10 +138,24 @@ function filterToolbarHtml() {
 
 function productCardHtml(item) {
   const title = item.title || item.product_key || "—";
-  const img = (item.images && item.images[0]) || item.preview_url || "";
+  const views = Array.isArray(item.grid_views)
+    ? item.grid_views.filter((v) => v && v.src)
+    : [];
+  const img = (views[0] && views[0].src) || (item.images && item.images[0]) || item.preview_url || "";
+  const viewButtons =
+    views.length > 1
+      ? `<div class="cr-card__views" role="group" aria-label="Product views">
+          ${views
+            .map(
+              (v, idx) =>
+                `<button type="button" class="cr-card__view-chip ${idx === 0 ? "active" : ""}" data-cr-view-index="${idx}" data-cr-view-src="${escapeHtml(v.src)}">${escapeHtml(v.view || `View ${idx + 1}`)}</button>`
+            )
+            .join("")}
+        </div>`
+      : "";
   const thumbInner =
     img && String(img).trim()
-      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" />`
+      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" data-cr-card-img />`
       : '<span class="cr-card__noimg">No image</span>';
   const shopifyId = item.shopify_product_id || item.id || "";
   const clickable = SHOPIFY_DETAIL_SOURCES.has(state.source) && shopifyId;
@@ -152,6 +166,7 @@ function productCardHtml(item) {
     </div>
     <div class="cr-card__thumb">
       <div class="cr-card__thumb-inner">${thumbInner}</div>
+      ${viewButtons}
     </div>
     <div class="cr-card__meta">
       ${item.category ? `<span class="cr-meta-chip">${escapeHtml(item.category)}</span>` : ""}
@@ -667,6 +682,19 @@ function bindDetailModal(el) {
 
 function bindProductCards(el) {
   el.querySelector("#cr-products-grid")?.addEventListener("click", (e) => {
+    const viewBtn = e.target.closest("[data-cr-view-src]");
+    if (viewBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const cardForView = viewBtn.closest(".cr-card--product");
+      const img = cardForView?.querySelector("[data-cr-card-img]");
+      const src = viewBtn.dataset.crViewSrc || "";
+      if (img && src) img.src = src;
+      cardForView?.querySelectorAll(".cr-card__view-chip").forEach((btn) => {
+        btn.classList.toggle("active", btn === viewBtn);
+      });
+      return;
+    }
     const card = e.target.closest(".cr-card--product[data-shopify-id]");
     if (!card || !SHOPIFY_DETAIL_SOURCES.has(state.source)) return;
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);

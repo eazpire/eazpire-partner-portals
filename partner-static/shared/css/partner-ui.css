@@ -7283,6 +7283,33 @@ html[data-portal="admin"] .cr-card__thumb-inner img {
   object-position: center;
   display: block;
 }
+html[data-portal="admin"] .cr-card__views {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  z-index: 3;
+}
+html[data-portal="admin"] .cr-card__view-chip {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 9px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+}
+html[data-portal="admin"] .cr-card__view-chip.active {
+  border-color: #8b5cf6;
+  color: #6d28d9;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+}
 html[data-portal="admin"] .cr-card__download {
   position: absolute;
   right: 10px;

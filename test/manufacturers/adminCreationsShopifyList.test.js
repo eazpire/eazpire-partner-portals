@@ -207,4 +207,56 @@ describe("adminCreationsShopifyList", () => {
     expect(row.printify_product_id).toBe("pf-from-d1");
     expect(row.shopify_product_id).toBe("55");
   });
+
+  it("maps Todify listing origin to Creator and Customer labels", () => {
+    const creator = mapShopifyNodeToProduct(
+      {
+        id: "gid://shopify/Product/70",
+        title: "Creator Todify Hoodie",
+        mfProvider: { value: "Todify" },
+        mfListingOrigin: { value: "creator" },
+      },
+      "todify",
+      new Map()
+    );
+    const customer = mapShopifyNodeToProduct(
+      {
+        id: "gid://shopify/Product/71",
+        title: "Customer Todify Hoodie",
+        mfProvider: { value: "Todify" },
+        mfListingOrigin: { value: "shop" },
+      },
+      "todify",
+      new Map()
+    );
+
+    expect(creator.source_label).toBe("Todify");
+    expect(creator.origin_label).toBe("Creator");
+    expect(customer.source_label).toBe("Todify");
+    expect(customer.origin_label).toBe("Customer");
+  });
+
+  it("maps Shopify product images into grid views", () => {
+    const row = mapShopifyNodeToProduct(
+      {
+        id: "gid://shopify/Product/90",
+        title: "Todify Hoodie",
+        mfProvider: { value: "Todify" },
+        images: {
+          edges: [
+            { node: { url: "https://cdn.example/hoodie-front.png", altText: "Black|front|preview-default" } },
+            { node: { url: "https://cdn.example/hoodie-back.png", altText: "Black|back" } },
+          ],
+        },
+      },
+      "todify",
+      new Map()
+    );
+
+    expect(row.images).toEqual([
+      "https://cdn.example/hoodie-front.png",
+      "https://cdn.example/hoodie-back.png",
+    ]);
+    expect(row.grid_views.map((v) => v.view)).toEqual(["front", "back"]);
+  });
 });
