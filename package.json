@@ -38,6 +38,8 @@
     "secrets:carousel-upload": "node --env-file=.env scripts/set-carousel-worker-secret.cjs",
     "dev:design-product-catalog": "node scripts/design-product-catalog-server.mjs",
     "dev:undersized-designs-repair": "node scripts/undersized-designs-repair-server.mjs",
+    "test:replicate-upscale-compare": "node scripts/test/run-replicate-upscale-compare.mjs",
+    "dev:replicate-upscale-compare": "node scripts/replicate-upscale-compare-server.mjs",
     "reconvert:previews-webp": "node scripts/run-reconvert-previews-webp.mjs",
     "reconvert:previews-webp:stats": "node scripts/run-reconvert-previews-webp.mjs --stats",
     "dev:logs": "npx concurrently -n \"backend,frontend\" -c \"cyan,magenta\" \"npm run dev\" \"npm run dev:mobile\"",
@@ -94,6 +96,7 @@
     "gh:save-token": "node scripts/partner/save-github-token.cjs",
     "npm:setup": "powershell -ExecutionPolicy Bypass -File scripts/deployment/setup-node-npm.ps1",
     "predeploy:checks": "node scripts/deployment/pre-deploy-checks.cjs",
+    "check:platform-parity": "node scripts/platform-parity/check-platform-impact.cjs",
     "tryon:generate-pilot-ar": "node scripts/tryon/generate-pilot-ar-garment.mjs",
     "tryon:upload-ar-garment": "node scripts/tryon/upload-ar-garment-bundle.mjs",
     "deploy:proxy": "wrangler deploy -c wrangler-proxy.toml",
@@ -316,7 +319,8 @@
     "wear-os:run-emulator": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install -Launch",
     "secrets:meta-instagram": "node scripts/set-meta-instagram-credentials.js",
     "measure:shop-network-audit": "node scripts/test/shop-perf-network-audit.cjs",
-    "measure:perf-median": "node scripts/test/shop-perf-median-baseline.cjs"
+    "measure:perf-median": "node scripts/test/shop-perf-median-baseline.cjs",
+    "test:perf-budgets": "node scripts/test/perf-017-hard-budgets-scan.cjs"
   },
   "keywords": [],
   "author": "",
