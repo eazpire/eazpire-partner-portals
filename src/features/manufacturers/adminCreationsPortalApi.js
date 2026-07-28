@@ -92,6 +92,13 @@ function attachDesignOverlayToGridViews(views, designUrl, placementJson) {
   const parsed = parsePlacementJson(placementJson);
   const target = String(parsed?.printify_position || "front").trim().toLowerCase().replace(/\s+/g, "_");
   const placement = parsed?.placement && typeof parsed.placement === "object" ? parsed.placement : {};
+  const zoneRaw = placement.zone_frac && typeof placement.zone_frac === "object" ? placement.zone_frac : {};
+  const zone = {
+    l: Number.isFinite(Number(zoneRaw.l)) ? Number(zoneRaw.l) : 0.28,
+    t: Number.isFinite(Number(zoneRaw.t)) ? Number(zoneRaw.t) : 0.22,
+    w: Number.isFinite(Number(zoneRaw.w)) ? Number(zoneRaw.w) : 0.44,
+    h: Number.isFinite(Number(zoneRaw.h)) ? Number(zoneRaw.h) : 0.48,
+  };
   return views.map((view) => {
     const viewKey = String(view.view || "").trim().toLowerCase().replace(/\s+/g, "_");
     if (viewKey !== target) return view;
@@ -103,6 +110,7 @@ function attachDesignOverlayToGridViews(views, designUrl, placementJson) {
         y: Number.isFinite(Number(placement.y)) ? Number(placement.y) : 0.5,
         scale: Number.isFinite(Number(placement.scale)) ? Number(placement.scale) : 0.95,
         angle: Number.isFinite(Number(placement.angle)) ? Number(placement.angle) : 0,
+        zone,
       },
     };
   });

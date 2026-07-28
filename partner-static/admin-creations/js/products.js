@@ -136,6 +136,24 @@ function filterToolbarHtml() {
     </div>`;
 }
 
+function overlayStyleFromPlacement(placement) {
+  const zone = placement?.zone || {};
+  const zl = Math.max(0, Math.min(1, Number(zone.l) || 0.28));
+  const zt = Math.max(0, Math.min(1, Number(zone.t) || 0.22));
+  const zw = Math.max(0.05, Math.min(1, Number(zone.w) || 0.44));
+  const zh = Math.max(0.05, Math.min(1, Number(zone.h) || 0.48));
+  const x = Math.max(0, Math.min(1, Number(placement?.x) || 0.5));
+  const y = Math.max(0, Math.min(1, Number(placement?.y) || 0.5));
+  const scale = Math.max(0.05, Math.min(2.5, Number(placement?.scale) || 0.95));
+  const angle = Number(placement?.angle) || 0;
+  return {
+    left: (zl + x * zw) * 100,
+    top: (zt + y * zh) * 100,
+    width: zw * scale * 100,
+    angle,
+  };
+}
+
 function productCardHtml(item) {
   const title = item.title || item.product_key || "—";
   const views = Array.isArray(item.grid_views)
@@ -144,8 +162,9 @@ function productCardHtml(item) {
   const activeView = views[0] || null;
   const img = (activeView && activeView.src) || (item.images && item.images[0]) || item.preview_url || "";
   const activePlacement = activeView?.design_placement || null;
+  const overlay = activePlacement ? overlayStyleFromPlacement(activePlacement) : null;
   const overlayStyle = activePlacement
-    ? `left:${Math.max(0, Math.min(1, Number(activePlacement.x) || 0.5)) * 100}%;top:${Math.max(0, Math.min(1, Number(activePlacement.y) || 0.5)) * 100}%;width:${Math.max(12, Math.min(90, (Number(activePlacement.scale) || 0.95) * 46))}%;transform:translate(-50%,-50%) rotate(${Number(activePlacement.angle) || 0}deg);`
+    ? `left:${overlay.left}%;top:${overlay.top}%;width:${overlay.width}%;transform:translate(-50%,-50%) rotate(${overlay.angle}deg);`
     : "";
   const overlayImg =
     activeView && activeView.design_url
@@ -707,12 +726,13 @@ function bindProductCards(el) {
           try {
             placement = JSON.parse(viewBtn.dataset.crDesignPlacement || "{}") || {};
           } catch {}
+          const nextOverlay = overlayStyleFromPlacement(placement);
           overlay.src = designSrc;
           overlay.hidden = false;
-          overlay.style.left = `${Math.max(0, Math.min(1, Number(placement.x) || 0.5)) * 100}%`;
-          overlay.style.top = `${Math.max(0, Math.min(1, Number(placement.y) || 0.5)) * 100}%`;
-          overlay.style.width = `${Math.max(12, Math.min(90, (Number(placement.scale) || 0.95) * 46))}%`;
-          overlay.style.transform = `translate(-50%,-50%) rotate(${Number(placement.angle) || 0}deg)`;
+          overlay.style.left = `${nextOverlay.left}%`;
+          overlay.style.top = `${nextOverlay.top}%`;
+          overlay.style.width = `${nextOverlay.width}%`;
+          overlay.style.transform = `translate(-50%,-50%) rotate(${nextOverlay.angle}deg)`;
         } else {
           overlay.hidden = true;
           overlay.removeAttribute("src");
