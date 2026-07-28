@@ -92,12 +92,13 @@ function imageListFromNode(node) {
       src: url,
       alt: edge?.node?.altText || "",
       view: inferViewFromAltOrUrl(edge?.node?.altText, url, out.length),
+      variant_label: String(edge?.node?.altText || "").split("|")[0]?.trim() || "Default",
       is_preview: out.length === 0,
     });
   }
   const featured = imageUrlFromNode(node);
   if (featured && !seen.has(String(featured).split("?")[0])) {
-    out.unshift({ src: featured, alt: "", view: "front", is_preview: true });
+    out.unshift({ src: featured, alt: "", view: "front", variant_label: "Default", is_preview: true });
   }
   return out;
 }

@@ -7319,6 +7319,50 @@ html[data-portal="admin"] .cr-card__view-chip.active {
   color: #6d28d9;
   box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
 }
+html[data-portal="admin"] .cr-card__arrow {
+  position: absolute;
+  z-index: 4;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+}
+html[data-portal="admin"] .cr-card__arrow--left {
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+html[data-portal="admin"] .cr-card__arrow--right {
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+html[data-portal="admin"] .cr-card__arrow--up {
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+}
+html[data-portal="admin"] .cr-card__arrow--down {
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+}
+html[data-portal="admin"] .cr-card__arrow:hover,
+html[data-portal="admin"] .cr-card__arrow:focus-visible {
+  border-color: #8b5cf6;
+  color: #6d28d9;
+  outline: none;
+}
 html[data-portal="admin"] .cr-card__download {
   position: absolute;
   right: 10px;

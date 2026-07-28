@@ -63,6 +63,7 @@ export function buildAdminGridViews({ previewUrl, mockUrlsJson, previewMockIndex
     urls.push({
       src,
       view: view || inferViewFromUrl(src, urls.length === 0 ? "front" : `view ${urls.length + 1}`),
+      variant_label: "Default",
       is_preview: !!isPreview,
     });
   }
