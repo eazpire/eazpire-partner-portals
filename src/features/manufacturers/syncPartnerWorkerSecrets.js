@@ -59,6 +59,9 @@ export async function handleSyncPartnerWorkerSecrets(request, env) {
   const accountId = String(body.account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
   const cfTokenForApi = String(body.cloudflare_api_token || "").trim();
   const scriptName = String(body.script_name || DEFAULT_SCRIPT).trim();
+  const names = Array.isArray(body.secret_names) && body.secret_names.length
+    ? body.secret_names.map((n) => String(n || "").trim()).filter(Boolean)
+    : SECRET_NAMES;
 
   if (!accountId || !cfTokenForApi) {
     return json({ ok: false, error: "missing_account_id_or_token" }, 400, cors);
@@ -68,7 +71,7 @@ export async function handleSyncPartnerWorkerSecrets(request, env) {
   const skipped = [];
   const errors = [];
 
-  for (const name of SECRET_NAMES) {
+  for (const name of names) {
     const value = String(env[name] || "").trim();
     if (!value) {
       skipped.push(name);
