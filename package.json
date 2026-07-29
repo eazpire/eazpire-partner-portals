@@ -337,6 +337,8 @@
     "measure:capture-customer-session": "node scripts/test/shop-perf-capture-customer-session.cjs",
     "measure:login-median": "node scripts/test/shop-perf-login-median.cjs",
     "measure:lcp-forensics": "node scripts/test/shop-perf-lcp-forensics.cjs",
+    "test:ssr-hero-guard": "node scripts/test/shop-perf-ssr-hero-guard.cjs",
+    "test:ssr-hero-guard:offline": "node scripts/test/shop-perf-ssr-hero-guard.cjs --offline-only",
     "github:enable-perf-hard-gates": "node scripts/github/enable-perf-hard-gates-required.cjs",
     "test:perf-budgets": "node scripts/test/perf-017-hard-budgets-scan.cjs"
   },
