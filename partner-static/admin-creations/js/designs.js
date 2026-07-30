@@ -3,11 +3,14 @@ import { showToast, openModal } from "/creations/shared/js/partner-shell.js";
 import {
   checkboxHtml,
   ensureBulkDock,
+  teardownBulkDock,
   bindCardSelection,
   selectAllVisible,
   clearSelection,
   isSelected,
 } from "./designs-bulk.js";
+
+export { teardownBulkDock };
 import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
 

@@ -1,7 +1,7 @@
 import { partnerFetch } from "/creations/shared/js/partner-api.js";
 import { initShell, showToast, setTopbarExtra } from "/creations/shared/js/partner-shell.js";
 import { initAdminAppDrawer } from "/creations/shared/js/admin-app-drawer.js";
-import { mountDesignsPage } from "./designs.js";
+import { mountDesignsPage, teardownBulkDock } from "./designs.js";
 import { mountProductsPage } from "./products.js";
 
 const NAV_CORE = [
@@ -58,6 +58,7 @@ const ROUTES = {
   },
   "/creations/products": async () => {
     setTopbarExtra("");
+    teardownBulkDock();
     await mountProductsPage();
   },
 };

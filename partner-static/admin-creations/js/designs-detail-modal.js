@@ -120,15 +120,19 @@ function renderOverview(item) {
     <div class="cr-dd-overview">
       <div class="cr-dd-frame">
         <div class="cr-dd-frame__label">Design</div>
-        ${
-          preview
-            ? `<img src="${escapeHtml(preview)}" alt="" />`
-            : `<div class="cr-dd-frame__empty">No preview</div>`
-        }
+        <div class="cr-dd-frame__media">
+          ${
+            preview
+              ? `<img class="cr-dd-frame__img" src="${escapeHtml(preview)}" alt="" />`
+              : `<div class="cr-dd-frame__empty">No preview</div>`
+          }
+        </div>
       </div>
       <div class="cr-dd-frame">
         <div class="cr-dd-frame__label">Product mock</div>
-        <div class="cr-dd-frame__empty" id="cr-dd-mock-slot">Loading live mock…</div>
+        <div class="cr-dd-frame__media" id="cr-dd-mock-media">
+          <div class="cr-dd-frame__empty" id="cr-dd-mock-slot">Loading live mock…</div>
+        </div>
       </div>
     </div>`;
 }
@@ -260,23 +264,23 @@ async function renderProductsPanel(item) {
       html ||
       `<p class="cr-dd-muted">No admin catalog products for this design type.</p>`;
 
-    // Fill overview mock from first live product
-    const mockSlot = root.querySelector("#cr-dd-mock-slot");
-    if (mockSlot) {
+    // Fill overview mock from first live product (keep fixed media frame sizing)
+    const mockMedia = root.querySelector("#cr-dd-mock-media");
+    if (mockMedia) {
       const firstLive = (live.products || live.published_products || []).find(
         (p) => p.image_url || p.featured_image
       );
       if (firstLive) {
-        mockSlot.outerHTML = `<img src="${escapeHtml(
+        mockMedia.innerHTML = `<img class="cr-dd-frame__img" src="${escapeHtml(
           firstLive.image_url || firstLive.featured_image
         )}" alt="" />`;
       } else if (designPreview) {
-        mockSlot.outerHTML = `<div class="cr-dd-frame__stack">
-          <span class="cr-dd-frame__empty">Studio-style preview</span>
-          <img class="cr-dd-prod__design cr-dd-prod__design--solo" src="${escapeHtml(designPreview)}" alt="" />
+        mockMedia.innerHTML = `<div class="cr-dd-frame__stack">
+          <img class="cr-dd-frame__img" src="${escapeHtml(designPreview)}" alt="" />
+          <span class="cr-dd-frame__stack-label">Studio-style preview</span>
         </div>`;
       } else {
-        mockSlot.textContent = "No live Shopify mock yet";
+        mockMedia.innerHTML = `<div class="cr-dd-frame__empty">No live Shopify mock yet</div>`;
       }
     }
   } catch (e) {

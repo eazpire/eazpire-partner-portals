@@ -58,7 +58,13 @@ function refreshSelectionUi() {
   const dock = document.getElementById("cr-designs-bulk-dock");
   const countEl = document.getElementById("cr-bulk-count");
   const n = selected.size;
-  if (dock) dock.hidden = n === 0;
+  if (dock) {
+    // Prefer class + attribute: [hidden]{display:none!important} in portal shell
+    const show = n > 0;
+    dock.hidden = !show;
+    dock.classList.toggle("is-visible", show);
+    dock.setAttribute("aria-hidden", show ? "false" : "true");
+  }
   if (countEl) countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
 
   document.querySelectorAll(".cr-card[data-item-key]").forEach((card) => {
@@ -70,13 +76,14 @@ function refreshSelectionUi() {
   });
 }
 
-export function ensureBulkDock(rootEl, handlers = {}) {
+export function ensureBulkDock(_rootEl, handlers = {}) {
   let dock = document.getElementById("cr-designs-bulk-dock");
   if (!dock) {
     dock = document.createElement("div");
     dock.id = "cr-designs-bulk-dock";
     dock.className = "cr-bulk-dock";
     dock.hidden = true;
+    dock.setAttribute("aria-hidden", "true");
     dock.innerHTML = `
       <div class="cr-bulk-dock__panel" role="toolbar" aria-label="Design bulk actions">
         <span class="cr-bulk-dock__count" id="cr-bulk-count">0 selected</span>
@@ -88,7 +95,10 @@ export function ensureBulkDock(rootEl, handlers = {}) {
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="update">Update</button>
         </div>
       </div>`;
-    (rootEl || document.body).appendChild(dock);
+  }
+  // Must live on document.body — inside .main/.app-root overflow clips position:fixed.
+  if (dock.parentElement !== document.body) {
+    document.body.appendChild(dock);
   }
 
   dock.querySelectorAll("[data-cr-bulk]").forEach((btn) => {
@@ -104,6 +114,17 @@ export function ensureBulkDock(rootEl, handlers = {}) {
 
   refreshSelectionUi();
   return dock;
+}
+
+/** Hide dock when leaving Designs page (dock stays on body). */
+export function teardownBulkDock() {
+  clearSelection();
+  const dock = document.getElementById("cr-designs-bulk-dock");
+  if (dock) {
+    dock.hidden = true;
+    dock.classList.remove("is-visible");
+    dock.setAttribute("aria-hidden", "true");
+  }
 }
 
 export function checkboxHtml(item) {
