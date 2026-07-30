@@ -320,6 +320,12 @@ const ADMIN_OPS = new Set([
   "admin-creations-todify-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
+  "admin-design-action-preview",
+  "admin-design-delete",
+  "admin-design-publish-missing-online",
+  "admin-design-update-diff",
+  "admin-design-update-commit",
+  "admin-design-shopify-live-products",
   "admin-brand-list",
   "admin-brand-get",
   "admin-brand-suspend",
@@ -1514,6 +1520,37 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsShopifyProductDetail.js"
       );
       return handleAdminCreationsShopifyProductDetail(request, env);
+    }
+
+    if (op === "admin-design-action-preview" && request.method === "GET") {
+      const { handleAdminDesignActionPreview } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignActionPreview(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-delete" && request.method === "POST") {
+      const { handleAdminDesignDelete } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignDelete(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-publish-missing-online" && request.method === "POST") {
+      const { handleAdminDesignPublishMissingOnline } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignPublishMissingOnline(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-update-diff" && request.method === "GET") {
+      const { handleAdminDesignUpdateDiff } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignUpdateDiff(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-update-commit" && request.method === "POST") {
+      const { handleAdminDesignUpdateCommit } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignUpdateCommit(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-shopify-live-products" && request.method === "GET") {
+      const { handleAdminDesignShopifyLiveProducts } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignShopifyLiveProducts(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
 
     if (op === "admin-brand-list" && request.method === "GET") {

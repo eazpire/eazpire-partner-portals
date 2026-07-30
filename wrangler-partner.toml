@@ -97,3 +97,12 @@ bucket_name = "creator-uploads"
 [[r2_buckets]]
 binding = "MOCKUP_R2"
 bucket_name = "product-mockups"
+
+# Producer-only: Creations Portal admin publish enqueues; creator-engine still consumes.
+[[queues.producers]]
+queue = "admin-jobs-publish-by-design"
+binding = "JOB_QUEUE_ADMIN_PUBLISH_BY_DESIGN"
+
+[[queues.producers]]
+queue = "admin-jobs-publish-by-product"
+binding = "JOB_QUEUE_ADMIN_PUBLISH_BY_PRODUCT"

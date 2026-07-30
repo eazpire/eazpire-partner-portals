@@ -1,5 +1,15 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { showToast, openModal } from "/creations/shared/js/partner-shell.js";
+import {
+  checkboxHtml,
+  ensureBulkDock,
+  bindCardSelection,
+  selectAllVisible,
+  clearSelection,
+  isSelected,
+} from "./designs-bulk.js";
+import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
+import { openDesignDetailModal } from "./designs-detail-modal.js";
 
 const SOURCE_FILTERS = [
   { key: "all", label: "All" },
@@ -653,8 +663,9 @@ function designCardHtml(item) {
     ? `<button type="button" class="cr-card__download" data-cr-download="${escapeHtml(item.item_key || "")}" aria-label="Download design" title="Download design">${DOWNLOAD_ICON_SVG}</button>`
     : "";
 
-  return `<article class="cr-card" data-item-key="${escapeHtml(item.item_key || "")}">
+  return `<article class="cr-card ${isSelected(item) ? "is-selected" : ""}" data-item-key="${escapeHtml(item.item_key || "")}">
     <div class="cr-card__title-row">
+      ${checkboxHtml(item)}
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
     </div>
     <div class="cr-card__thumb">
@@ -693,15 +704,37 @@ function bindDownloadButtons(grid) {
   });
 }
 
+function getVisibleItems() {
+  return state.items.filter((item) => matchesUsage(item, state.usage));
+}
+
+function afterBulkChange() {
+  return fetchList({ append: false });
+}
+
+function bindGridInteractions(grid) {
+  bindDownloadButtons(grid);
+  bindCardSelection(grid, {
+    getItemByKey: (key) => state.items.find((row) => String(row.item_key || "") === key) || null,
+    onOpenDetail: (item) => {
+      openDesignDetailModal(item, {
+        onClose: async ({ reload } = {}) => {
+          if (reload) await afterBulkChange();
+        },
+      });
+    },
+  });
+}
+
 function renderGrid() {
   const grid = document.getElementById("cr-designs-grid");
   const empty = document.getElementById("cr-designs-empty");
   const loading = document.getElementById("cr-designs-loading");
   if (!grid) return;
 
-  const visible = state.items.filter((item) => matchesUsage(item, state.usage));
+  const visible = getVisibleItems();
   grid.innerHTML = visible.map(designCardHtml).join("");
-  bindDownloadButtons(grid);
+  bindGridInteractions(grid);
   const hasRows = visible.length > 0;
   grid.hidden = !hasRows;
   if (empty) empty.hidden = hasRows || state.loading;
@@ -767,6 +800,7 @@ function bindToolbar(el) {
       const lib = btn.dataset.crLibrary === "inactive" ? "inactive" : "active";
       if (state.library === lib) return;
       state.library = lib;
+      clearSelection();
       el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
       bindToolbar(el);
       fetchList({ append: false });
@@ -778,6 +812,7 @@ function bindToolbar(el) {
       const next = btn.dataset.crSource || "all";
       if (state.source === next) return;
       state.source = next;
+      clearSelection();
       el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
       bindToolbar(el);
       fetchList({ append: false });
@@ -805,6 +840,8 @@ export async function mountDesignsPage() {
   const el = document.getElementById("view-designs");
   if (!el) return;
 
+  clearSelection();
+
   el.innerHTML = `
     ${filterToolbarHtml()}
     <div class="cr-stage">
@@ -815,6 +852,13 @@ export async function mountDesignsPage() {
         <button type="button" class="btn btn-secondary" id="cr-designs-more" hidden>Load more</button>
       </div>
     </div>`;
+
+  ensureBulkDock(el, {
+    onSelectAll: () => selectAllVisible(getVisibleItems()),
+    onRemove: (items) => openRemoveModal(items, { onDone: afterBulkChange }),
+    onPublish: (items) => openPublishModal(items, { onDone: afterBulkChange }),
+    onUpdate: (items) => openUpdateModal(items, { onDone: afterBulkChange }),
+  });
 
   bindToolbar(el);
   await fetchList({ append: false });
