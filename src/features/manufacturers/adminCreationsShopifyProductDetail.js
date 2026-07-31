@@ -393,6 +393,41 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       }
     }
 
+    let published_design_id = null;
+    let amazon_publish = null;
+    try {
+      const { resolvePublishedDesignForAdminAmazon, loadDryRunResult } = await import(
+        "../product/amazonAdminPublish.js"
+      );
+      const resolved = await resolvePublishedDesignForAdminAmazon(env, {
+        shopify_product_id: String(p.id),
+        product_key: productKey,
+      });
+      if (resolved.ok) {
+        published_design_id = resolved.entry.id;
+        const dry = await loadDryRunResult(env, published_design_id);
+        amazon_publish = {
+          published_design_id,
+          dry_run: dry
+            ? {
+                ok: !!dry.ok,
+                mode: dry.mode,
+                summary: dry.summary || null,
+                saved_at: dry.saved_at || null,
+                marketplaces: (dry.marketplaces || []).map((m) => ({
+                  ok: m.ok,
+                  code: m.code,
+                  continent: m.continent,
+                  errors: m.errors || [],
+                })),
+              }
+            : null,
+        };
+      }
+    } catch (pdErr) {
+      console.warn("[admin-creations-shopify-product-detail] amazon publish lookup:", pdErr?.message || pdErr);
+    }
+
     return json(
       {
         ok: true,
@@ -411,6 +446,8 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
                   .filter(Boolean)
               : p.tags || [],
           product_key: productKey || null,
+          published_design_id,
+          amazon_publish,
           is_gift_card: Boolean(p.gift_card),
           currency,
           options: (p.options || []).map((o) => ({

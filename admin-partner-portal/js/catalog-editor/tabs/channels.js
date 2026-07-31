@@ -216,7 +216,7 @@ function continentsHtml(st) {
       st,
       "europa",
       "Europa",
-      "One EU publish path: all listed EU markets. Source marketplace = Ausgangs-Marketplace (linked offers later)."
+      "Publish (this phase) = source marketplace only (default DE). Other EU countries are display-only until Amazon BIL / offer linking is set up."
     ) +
     continentGroupHtml(
       st,
@@ -263,7 +263,7 @@ function renderPanel(st) {
         </div>
         <div class="ce-channels-amazon" id="ce-ch-amazon-body" ${st.amazonExpanded ? "" : "hidden"}>
           <h4 class="ce-section-title" style="font-size:0.95rem">Amazon continents</h4>
-          <p class="ce-hint">Tap Europa or USA / Amerika to set <strong>Aktiv</strong>. Publish uses continent → marketplaces (EU all / USA).</p>
+          <p class="ce-hint">Tap Europa or USA / Amerika to set <strong>Aktiv</strong>. Publish/dry-run uses source DE + USA (pre-BIL).</p>
           ${continentsHtml(st)}
 
           <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="ce-ch-amz-settings-expand" aria-expanded="${

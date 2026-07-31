@@ -1,9 +1,10 @@
 /**
  * Admin Creations → Products modal Channels panel (creator-style UI).
  * No Skill Tree limits — only product Channels unlocks from catalog settings.
- * Amazon publish targets = continents (Europa / USA), not per-country.
+ * Amazon publish targets = continents (Europa → DE source, USA → US) for this phase.
  */
-import { escapeHtml } from "/creations/shared/js/partner-api.js";
+import { escapeHtml, partnerFetch } from "/creations/shared/js/partner-api.js";
+import { showToast } from "/creations/shared/js/partner-shell.js";
 
 const FLAG_CDN = "https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/";
 const FLAG_CODE = { UK: "gb" };
@@ -33,8 +34,21 @@ function unlocksFromProduct(product) {
   };
 }
 
-/** Continent publish targets from unlocks (preferred) or legacy markets map. */
-function amazonTargetsFromUnlocks(unlocks) {
+/**
+ * Continent publish targets — prefer API amazon_publish_targets (DE + US phase).
+ */
+function amazonTargetsFromProduct(product) {
+  const apiTargets = product?.channels?.amazon_publish_targets;
+  if (Array.isArray(apiTargets) && apiTargets.length) {
+    return apiTargets.map((t) => ({
+      continent: t.continent,
+      label: t.label || (t.continent === "amerika" ? "USA / Amerika" : "Europa"),
+      source: t.source_marketplace || (t.continent === "amerika" ? "US" : "DE"),
+      publishCodes: t.publish_marketplace_codes || [t.source_marketplace || "DE"],
+    }));
+  }
+
+  const unlocks = unlocksFromProduct(product);
   const amz = unlocks?.amazon || {};
   if (!amz.enabled) return [];
   const continents = amz.continents || {};
@@ -48,11 +62,12 @@ function amazonTargetsFromUnlocks(unlocks) {
   const amerikaOn = continents.amerika === true || !!markets.US || !!markets.CA;
 
   if (europaOn) {
+    const source = src.europa || "DE";
     targets.push({
       continent: "europa",
       label: "Europa",
-      source: src.europa || "DE",
-      publishCodes: ["FR", "NL", "PL", "UK", "DE", "ES", "IE", "SE", "BE", "IT"],
+      source,
+      publishCodes: [source],
     });
   }
   if (amerikaOn) {
@@ -68,61 +83,81 @@ function amazonTargetsFromUnlocks(unlocks) {
 
 function statusHtml(st) {
   if (st?.queue) {
-    return `<span class="cr-ch-status cr-ch-status--queue"><span class="cr-ch-spinner" aria-hidden="true"></span>Queue</span>`;
+    return `<span class="cr-ch-status cr-ch-status--queue"><span class="cr-ch-spinner" aria-hidden="true"></span>${escapeHtml(
+      st.queueLabel || "Working…"
+    )}</span>`;
   }
   if (st?.status === "published") {
     return `<span class="cr-ch-status cr-ch-status--published">Published</span>`;
   }
+  if (st?.status === "dry_run_ok") {
+    return `<span class="cr-ch-status cr-ch-status--published">Dry run OK</span>`;
+  }
+  if (st?.status === "dry_run_failed") {
+    return `<span class="cr-ch-status cr-ch-status--failed">Dry run failed</span>`;
+  }
+  if (st?.status === "queued") {
+    return `<span class="cr-ch-status cr-ch-status--queue">Live queued</span>`;
+  }
   return `<span class="cr-ch-status">Not published</span>`;
 }
 
-function actionHtml(channel, region, st) {
-  if (st?.queue) return "";
-  const regionAttr = region ? ` data-cr-ch-region="${escapeHtml(region)}"` : "";
-  if (st?.status === "published") {
-    return `<button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-unpublish="${escapeHtml(
-      channel
-    )}"${regionAttr}>Unpublish</button>`;
-  }
-  return `<button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish="${escapeHtml(
-    channel
-  )}"${regionAttr}>Publish</button>`;
+function dryRunBannerHtml(product) {
+  const dr = product?.amazon_publish?.dry_run;
+  if (!dr) return "";
+  const codes = (dr.marketplaces || []).map((m) => m.code).join(", ") || "—";
+  const cls = dr.ok ? "cr-ch-dryok" : "cr-ch-dryfail";
+  return `<div class="cr-ch-drybanner ${cls}" role="status">
+    <strong>Last dry run:</strong> ${dr.ok ? "OK" : "Failed"}
+    · markets ${escapeHtml(codes)}
+    ${dr.summary ? `· ${dr.summary.ok || 0}/${dr.summary.total || 0} ok` : ""}
+  </div>`;
 }
 
 /**
  * @param {object} product
- * @param {{ channelState: Record<string, {status:string,queue:boolean}>; amazonExpanded: boolean }} ui
+ * @param {{ channelState: Record<string, object>; amazonExpanded: boolean }} ui
  */
 export function renderChannelsPanelHtml(product, ui) {
   const unlocks = unlocksFromProduct(product);
   const showAmazon = !!unlocks.amazon?.enabled;
   const showEtsy = !!unlocks.etsy?.enabled;
   const showEbay = !!unlocks.ebay?.enabled;
-  const targets = amazonTargetsFromUnlocks(unlocks);
+  const targets = amazonTargetsFromProduct(product);
   const eaz = ui.channelState["eazpire"] || { status: "published", queue: false };
 
   let amzPublished = 0;
+  let amzDryOk = 0;
   for (const t of targets) {
-    if ((ui.channelState[`amazon:${t.continent}`] || {}).status === "published") amzPublished++;
+    const st = ui.channelState[`amazon:${t.continent}`] || {};
+    if (st.status === "published" || st.status === "queued") amzPublished++;
+    if (st.status === "dry_run_ok") amzDryOk++;
   }
 
   const tiles = [];
   tiles.push(`<article class="cr-ch-tile cr-ch-tile--eazpire" role="listitem">
     ${LOGOS.eazpire}
     <div class="cr-ch-tile__top"><h4>eazpire</h4>${statusHtml(eaz)}</div>
-    <div class="cr-ch-actions">${actionHtml("eazpire", "", eaz)}</div>
+    <div class="cr-ch-actions"></div>
   </article>`);
 
   if (showAmazon) {
     const amzSt =
-      amzPublished > 0 ? { status: "published", queue: false } : { status: "unpublished", queue: false };
+      amzPublished > 0
+        ? { status: "published", queue: false }
+        : amzDryOk > 0
+          ? { status: "dry_run_ok", queue: false }
+          : { status: "unpublished", queue: false };
+    const publishLabels = targets.map((t) => (t.publishCodes || []).join("/")).filter(Boolean);
     tiles.push(`<article class="cr-ch-tile cr-ch-tile--amazon ${
       ui.amazonExpanded ? "cr-ch-tile--expanded" : ""
     }" role="listitem" data-cr-ch-amazon-tile>
       ${LOGOS.amazon}
       <div class="cr-ch-tile__top"><h4>Amazon</h4>${statusHtml(amzSt)}</div>
-      <p class="cr-ch-tile__meta">${ui.amazonExpanded ? "▾" : "▸"} Continents · ${amzPublished}/${
-      targets.length
+      <p class="cr-ch-tile__meta">${ui.amazonExpanded ? "▾" : "▸"} Continents · ${
+      amzPublished || amzDryOk
+    }/${targets.length}${
+      publishLabels.length ? ` · publish ${escapeHtml(publishLabels.join(" + "))}` : ""
     }</p>
     </article>`);
   }
@@ -151,34 +186,69 @@ export function renderChannelsPanelHtml(product, ui) {
     if (!targets.length) {
       regionsHtml = `<p class="cr-pd-hint">Amazon is enabled but no continent is Aktiv. Open Catalog Editor → Channels and enable Europa and/or USA.</p>`;
     } else {
-      regionsHtml = `<div class="cr-ch-regions" role="list">${targets
+      const pdId = product?.published_design_id || product?.amazon_publish?.published_design_id;
+      regionsHtml = `${dryRunBannerHtml(product)}
+      <p class="cr-pd-hint">Phase: publish/dry-run only <strong>DE</strong> (Europa source) and <strong>USA</strong>. Other EU markets are display-only until Amazon BIL is set up.${
+        pdId ? ` · published_design #${escapeHtml(String(pdId))}` : " · ⚠ no published_design linked"
+      }</p>
+      <div class="cr-ch-regions" role="list">${targets
         .map((t) => {
           const st = ui.channelState[`amazon:${t.continent}`] || {
             status: "unpublished",
             queue: false,
           };
           const flagCode = t.continent === "amerika" ? "US" : t.source || "DE";
+          const publishCode = (t.publishCodes && t.publishCodes[0]) || t.source || "DE";
           const codesHint =
             t.continent === "europa"
-              ? `All EU markets · source ${t.source}`
+              ? `Publish → Amazon ${publishCode} (source ${t.source}) · EU list display-only`
               : `Publish → Amazon USA · source ${t.source}`;
-          return `<div class="cr-ch-region" role="listitem">
+          const canAct = !st.queue;
+          const dryOk = st.status === "dry_run_ok" || st.status === "published";
+          return `<div class="cr-ch-region" role="listitem" data-cr-ch-continent="${escapeHtml(
+            t.continent
+          )}">
             <div class="cr-ch-region__head">${flagHtml(flagCode)}<strong>${escapeHtml(
               t.label
             )}</strong>
               <span>${escapeHtml(codesHint)}</span></div>
             ${statusHtml(st)}
-            <div class="cr-ch-actions">${actionHtml("amazon", t.continent, st)}</div>
+            <div class="cr-ch-actions">
+              ${
+                canAct
+                  ? `<button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-dryrun="amazon" data-cr-ch-region="${escapeHtml(
+                      t.continent
+                    )}">Dry run</button>`
+                  : ""
+              }
+              ${
+                canAct
+                  ? `<button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish="amazon" data-cr-ch-region="${escapeHtml(
+                      t.continent
+                    )}" ${dryOk ? "" : 'title="Run Dry run first (recommended)"'}>Publish live</button>`
+                  : ""
+              }
+            </div>
+            ${
+              st.lastMessage
+                ? `<p class="cr-pd-hint cr-ch-lastmsg">${escapeHtml(st.lastMessage)}</p>`
+                : ""
+            }
           </div>`;
         })
-        .join("")}</div>`;
+        .join("")}
+      <div class="cr-ch-actions" style="margin-top:0.75rem">
+        <button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-dryrun-all="1">Dry run DE + USA</button>
+        <button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish-all="1">Publish live DE + USA</button>
+      </div>
+      </div>`;
     }
   }
 
   return `
     <div class="cr-ch-panel">
       <h3 class="cr-pd-section-title">Channels</h3>
-      <p class="cr-pd-hint">Admin mode — Skill Tree limits ignored. Publish uses unlocked continents only (Europa / USA).</p>
+      <p class="cr-pd-hint">Admin mode — Skill Tree limits ignored. Amazon dry-run builds payloads &amp; checks credentials; <strong>Publish live</strong> creates real Amazon offers.</p>
       <div class="cr-ch-track" role="list">${tiles.join("")}</div>
       ${regionsHtml}
     </div>`;
@@ -186,34 +256,158 @@ export function renderChannelsPanelHtml(product, ui) {
 
 /**
  * @param {HTMLElement} root
- * @param {{ channelState: object; amazonExpanded: boolean; onChange: () => void }} ui
+ * @param {{ channelState: object; amazonExpanded: boolean; onChange: () => void; product: object; onProductPatch?: (p: object) => void }} ui
  */
 export function bindChannelsPanel(root, ui) {
   if (!root) return;
   root.querySelector("[data-cr-ch-amazon-tile]")?.addEventListener("click", (e) => {
-    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-unpublish]")) return;
+    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-dryrun],[data-cr-ch-dryrun-all],[data-cr-ch-publish-all]"))
+      return;
     ui.amazonExpanded = !ui.amazonExpanded;
     ui.onChange();
   });
 
-  root.querySelectorAll("[data-cr-ch-publish],[data-cr-ch-unpublish]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const publish = btn.hasAttribute("data-cr-ch-publish");
-      const channel = btn.getAttribute("data-cr-ch-publish") || btn.getAttribute("data-cr-ch-unpublish");
-      const region = btn.getAttribute("data-cr-ch-region") || "";
-      const key = region ? `${channel}:${region}` : channel;
+  const product = ui.product;
+  const shopifyId = product?.id;
+  const publishedDesignId =
+    product?.published_design_id || product?.amazon_publish?.published_design_id || null;
+
+  async function runAmazonAction({ continents, live }) {
+    const keys = (continents || []).map((c) => `amazon:${c}`);
+    for (const key of keys) {
       if (!ui.channelState[key]) ui.channelState[key] = { status: "unpublished", queue: false };
-      const st = ui.channelState[key];
-      if (st.queue) return;
-      st.queue = true;
-      ui.onChange();
-      // Phase 1 UX stub — real admin-publish queue wiring follows creator modal Phase 2.
-      window.setTimeout(() => {
+      ui.channelState[key].queue = true;
+      ui.channelState[key].queueLabel = live ? "Publishing…" : "Dry run…";
+      ui.channelState[key].lastMessage = "";
+    }
+    ui.onChange();
+
+    try {
+      const body = {
+        shopify_product_id: shopifyId,
+        published_design_id: publishedDesignId || undefined,
+        continents: continents && continents.length ? continents : undefined,
+        dry_run: !live,
+        live_submit: !!live,
+      };
+      if (live) {
+        body.dry_run = false;
+        body.live_submit = true;
+      }
+      const data = await partnerFetch("admin-amazon-publish", {
+        method: "POST",
+        body,
+      });
+
+      const resultsByContinent = {};
+      for (const m of data.marketplaces || []) {
+        resultsByContinent[m.continent] = m;
+      }
+
+      for (const key of keys.length ? keys : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
+        const continent = key.replace(/^amazon:/, "");
+        const m = resultsByContinent[continent];
+        const st = ui.channelState[key] || { status: "unpublished", queue: false };
         st.queue = false;
-        st.status = publish ? "published" : "unpublished";
-        ui.onChange();
-      }, 1200);
+        if (live && data.queued) {
+          st.status = "queued";
+          st.lastMessage = data.message || `Job ${data.job_id || ""}`;
+        } else if (m) {
+          st.status = m.ok ? "dry_run_ok" : "dry_run_failed";
+          st.lastMessage = m.ok
+            ? `${m.code}: payload OK${m.credentials?.ok ? " · credentials OK" : ""}`
+            : (m.errors || []).slice(0, 2).join("; ") || "failed";
+        } else if (data.ok && !live) {
+          st.status = "dry_run_ok";
+          st.lastMessage = data.message || "Dry run OK";
+        } else if (!data.ok) {
+          st.status = "dry_run_failed";
+          st.lastMessage = data.message || data.error || "failed";
+        }
+        ui.channelState[key] = st;
+      }
+
+      if (ui.onProductPatch && data.mode === "DRY_RUN") {
+        ui.onProductPatch({
+          amazon_publish: {
+            published_design_id: data.published_design_id || publishedDesignId,
+            dry_run: {
+              ok: !!data.ok,
+              mode: data.mode,
+              summary: data.summary || null,
+              saved_at: Date.now(),
+              marketplaces: (data.marketplaces || []).map((m) => ({
+                ok: m.ok,
+                code: m.code,
+                continent: m.continent,
+                errors: m.errors || [],
+              })),
+            },
+          },
+          published_design_id: data.published_design_id || publishedDesignId,
+        });
+      }
+
+      showToast(
+        live ? "Amazon live" : "Amazon dry run",
+        data.message || (data.ok ? "OK" : data.error || "Finished with errors")
+      );
+    } catch (e) {
+      for (const key of keys) {
+        if (!ui.channelState[key]) continue;
+        ui.channelState[key].queue = false;
+        ui.channelState[key].status = "dry_run_failed";
+        ui.channelState[key].lastMessage = e.message || String(e);
+      }
+      showToast("Amazon error", e.message || String(e));
+    }
+    ui.onChange();
+  }
+
+  root.querySelectorAll("[data-cr-ch-dryrun]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const region = btn.getAttribute("data-cr-ch-region");
+      if (!region) return;
+      runAmazonAction({ continents: [region], live: false });
     });
+  });
+
+  root.querySelectorAll("[data-cr-ch-publish]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const region = btn.getAttribute("data-cr-ch-region");
+      if (!region) return;
+      const st = ui.channelState[`amazon:${region}`] || {};
+      if (st.status !== "dry_run_ok" && st.status !== "published" && st.status !== "queued") {
+        const ok = window.confirm(
+          "Dry run has not succeeded for this continent yet.\n\nPublish LIVE anyway? This creates real Amazon offers."
+        );
+        if (!ok) return;
+      } else {
+        const ok = window.confirm(
+          "Publish LIVE to Amazon?\n\nThis creates real listings/offers (not a dry run)."
+        );
+        if (!ok) return;
+      }
+      runAmazonAction({ continents: [region], live: true });
+    });
+  });
+
+  root.querySelector("[data-cr-ch-dryrun-all]")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const targets = amazonTargetsFromProduct(product);
+    runAmazonAction({ continents: targets.map((t) => t.continent), live: false });
+  });
+
+  root.querySelector("[data-cr-ch-publish-all]")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const ok = window.confirm(
+      "Publish LIVE to Amazon DE + USA?\n\nThis creates real listings/offers for all unlocked continents."
+    );
+    if (!ok) return;
+    const targets = amazonTargetsFromProduct(product);
+    runAmazonAction({ continents: targets.map((t) => t.continent), live: true });
   });
 }
 
@@ -223,12 +417,15 @@ export function renderOverviewPanelHtml(product) {
   if (unlocks.amazon?.enabled) unlocked.push("Amazon");
   if (unlocks.etsy?.enabled) unlocked.push("Etsy");
   if (unlocks.ebay?.enabled) unlocked.push("eBay");
-  const targets = amazonTargetsFromUnlocks(unlocks);
-  const targetLabels = targets.map((t) => t.label).join(" · ") || "none";
+  const targets = amazonTargetsFromProduct(product);
+  const targetLabels = targets
+    .map((t) => `${t.label}→${(t.publishCodes || []).join(",")}`)
+    .join(" · ") || "none";
+  const dr = product?.amazon_publish?.dry_run;
   return `
     <div class="cr-pd-overview">
       <h3 class="cr-pd-section-title">Overview</h3>
-      <p class="cr-pd-hint">Stats placeholders — same structure as Creator Product Preview. Channel data will attach later.</p>
+      <p class="cr-pd-hint">Admin product modal — same structure as Creator Product Preview. Skill Tree limits ignored.</p>
       <div class="cr-pd-overview-stats">
         <div class="cr-pd-stat"><span class="cr-pd-stat__label">Sales</span><strong>—</strong></div>
         <div class="cr-pd-stat"><span class="cr-pd-stat__label">Add to cart</span><strong>—</strong></div>
@@ -236,6 +433,40 @@ export function renderOverviewPanelHtml(product) {
         <div class="cr-pd-stat"><span class="cr-pd-stat__label">Clicks</span><strong>—</strong></div>
       </div>
       <p class="cr-pd-hint">Unlocked channels: ${escapeHtml(unlocked.join(" · "))}</p>
-      <p class="cr-pd-hint">Amazon continents: ${escapeHtml(targetLabels)}</p>
+      <p class="cr-pd-hint">Amazon publish targets: ${escapeHtml(targetLabels)}</p>
+      ${
+        product?.published_design_id
+          ? `<p class="cr-pd-hint">published_design_id: ${escapeHtml(String(product.published_design_id))}</p>`
+          : `<p class="cr-pd-hint">No published_design linked — Amazon publish needs a Shopify-published design row.</p>`
+      }
+      ${
+        dr
+          ? `<p class="cr-pd-hint">Last Amazon dry run: ${dr.ok ? "OK" : "Failed"}${
+              dr.summary ? ` (${dr.summary.ok}/${dr.summary.total})` : ""
+            }</p>`
+          : ""
+      }
     </div>`;
+}
+
+/**
+ * Seed channelState from product amazon_publish / dry_run markers.
+ */
+export function seedChannelStateFromProduct(product) {
+  const state = { eazpire: { status: "published", queue: false } };
+  const targets = amazonTargetsFromProduct(product);
+  const drMarkets = product?.amazon_publish?.dry_run?.marketplaces || [];
+  for (const t of targets) {
+    const m = drMarkets.find((x) => x.continent === t.continent);
+    if (m) {
+      state[`amazon:${t.continent}`] = {
+        status: m.ok ? "dry_run_ok" : "dry_run_failed",
+        queue: false,
+        lastMessage: m.ok ? `${m.code}: dry run OK` : (m.errors || []).join("; "),
+      };
+    } else {
+      state[`amazon:${t.continent}`] = { status: "unpublished", queue: false };
+    }
+  }
+  return state;
 }

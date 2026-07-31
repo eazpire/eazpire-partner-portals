@@ -4,6 +4,7 @@ import {
   renderChannelsPanelHtml,
   bindChannelsPanel,
   renderOverviewPanelHtml,
+  seedChannelStateFromProduct,
 } from "./product-channels-panel.js";
 
 const SOURCE_FILTERS = [
@@ -650,9 +651,19 @@ function renderDetailContent() {
     const chUi = {
       channelState: state.detail.channelState,
       amazonExpanded: state.detail.amazonExpanded,
+      product,
       onChange: () => {
         state.detail.amazonExpanded = chUi.amazonExpanded;
         renderDetailContent();
+      },
+      onProductPatch: (patch) => {
+        state.detail.data = { ...state.detail.data, ...patch };
+        if (patch.amazon_publish) {
+          state.detail.data.amazon_publish = {
+            ...(state.detail.data.amazon_publish || {}),
+            ...patch.amazon_publish,
+          };
+        }
       },
     };
     content.innerHTML = renderChannelsPanelHtml(product, chUi);
@@ -720,6 +731,7 @@ async function openProductDetail(productId, title) {
     if (state.detail.productId !== id) return;
     state.detail.data = data.product || null;
     if (data.product?.title) state.detail.title = data.product.title;
+    state.detail.channelState = seedChannelStateFromProduct(data.product || {});
   } catch (e) {
     if (state.detail.productId !== id) return;
     state.detail.error = e.message || "Could not load product detail";

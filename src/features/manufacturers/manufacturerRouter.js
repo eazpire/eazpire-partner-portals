@@ -322,6 +322,8 @@ const ADMIN_OPS = new Set([
   "admin-creations-todify-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
+  "admin-amazon-publish",
+  "admin-amazon-publish-status",
   "admin-design-action-preview",
   "admin-design-delete",
   "admin-design-publish-missing-online",
@@ -1550,6 +1552,14 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsShopifyProductDetail.js"
       );
       return handleAdminCreationsShopifyProductDetail(request, env);
+    }
+    if (op === "admin-amazon-publish" && request.method === "POST") {
+      const { handleAdminAmazonPublish } = await import("../product/amazonAdminPublish.js");
+      return handleAdminAmazonPublish(request, env, ctx);
+    }
+    if (op === "admin-amazon-publish-status" && request.method === "GET") {
+      const { handleAdminAmazonPublishStatus } = await import("../product/amazonAdminPublish.js");
+      return handleAdminAmazonPublishStatus(request, env);
     }
 
     if (op === "admin-design-action-preview" && request.method === "GET") {
