@@ -8919,7 +8919,7 @@ html[data-portal="admin"] .cr-dd-prod-toolbar {
   margin-bottom: 12px;
 }
 html[data-portal="admin"] .cr-dd-visibility {
-  margin-top: 12px;
+  margin-top: 0;
 }
 html[data-portal="admin"] .cr-dd-visibility > label:first-child {
   display: block;
@@ -9150,6 +9150,13 @@ html[data-portal="admin"] .cr-dd-overview {
     grid-template-columns: 1fr;
   }
 }
+/* Column layout: orange frame only around preview; prompts sit on the page */
+html[data-portal="admin"] .cr-dd-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
 /* Match Creator CDP modal: fixed 400px preview frame, contain image */
 html[data-portal="admin"] .cr-dd-frame {
   border: 2px solid #f59e0b;
@@ -9325,8 +9332,8 @@ html[data-portal="admin"] .cr-dd-bg-preset {
   padding: 0;
 }
 html[data-portal="admin"] .cr-dd-prompt {
-  padding: 10px 12px 14px;
-  border-top: 1px solid rgba(255,255,255,.06);
+  padding: 0;
+  border-top: none;
 }
 html[data-portal="admin"] .cr-dd-prompt label {
   display: block;

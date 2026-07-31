@@ -312,17 +312,19 @@ function renderOverview(item) {
   const isPublic = visibility === "public";
   return `
     <div class="cr-dd-overview">
-      <div class="cr-dd-frame">
-        <div class="cr-dd-frame__label">Design</div>
-        <div class="cr-dd-frame__media" data-cr-dd-viewer="design">
-          <div class="cr-dd-zoom-stage" data-cr-dd-zoom-stage>
-            ${
-              preview
-                ? `<img class="cr-dd-frame__img" src="${escapeHtml(preview)}" alt="" />`
-                : `<div class="cr-dd-frame__empty">No preview</div>`
-            }
+      <div class="cr-dd-col">
+        <div class="cr-dd-frame">
+          <div class="cr-dd-frame__label">Design</div>
+          <div class="cr-dd-frame__media" data-cr-dd-viewer="design">
+            <div class="cr-dd-zoom-stage" data-cr-dd-zoom-stage>
+              ${
+                preview
+                  ? `<img class="cr-dd-frame__img" src="${escapeHtml(preview)}" alt="" />`
+                  : `<div class="cr-dd-frame__empty">No preview</div>`
+              }
+            </div>
+            ${zoomChromeHtml()}
           </div>
-          ${zoomChromeHtml()}
         </div>
         <div class="cr-dd-prompt">
           <label>Design prompt</label>
@@ -338,14 +340,16 @@ function renderOverview(item) {
           </label>
         </div>
       </div>
-      <div class="cr-dd-frame">
-        <div class="cr-dd-frame__label">User Design</div>
-        <div class="cr-dd-frame__media" data-cr-dd-viewer="user">
-          ${
-            userImage
-              ? `<img class="cr-dd-frame__img" src="${escapeHtml(userImage)}" alt="User design reference" />`
-              : `<div class="cr-dd-frame__empty">No user reference image</div>`
-          }
+      <div class="cr-dd-col">
+        <div class="cr-dd-frame">
+          <div class="cr-dd-frame__label">User Design</div>
+          <div class="cr-dd-frame__media" data-cr-dd-viewer="user">
+            ${
+              userImage
+                ? `<img class="cr-dd-frame__img" src="${escapeHtml(userImage)}" alt="User design reference" />`
+                : `<div class="cr-dd-frame__empty">No user reference image</div>`
+            }
+          </div>
         </div>
         <div class="cr-dd-prompt">
           <label>User prompt</label>
