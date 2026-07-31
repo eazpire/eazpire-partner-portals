@@ -1,14 +1,36 @@
 /**
  * Catalog editor → Channels tab.
  * Unlock sales channels for this product + Amazon IDs/settings (no skill-tree limits here).
- * TODO(amazon-worldwide): single listing across regions — discuss next; unlocks only for now.
+ *
+ * Planned later (not built here): 1 EU listing (DE source + linked EU offers) + 1 US listing.
+ * UI groups Europa / Amerika mirror that model; marketplace flags persist as today.
  */
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchChannels, saveChannels } from "../api.js";
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 
 const FLAG_CDN = "https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/";
-const FLAG_CODE = { UK: "gb", AE: "ae", SA: "sa" };
+const FLAG_CODE = { UK: "gb" };
+
+const DEFAULT_MARKET_GROUPS = {
+  europa: ["FR", "NL", "PL", "UK", "DE", "ES", "IE", "SE", "BE", "IT"],
+  amerika: ["CA", "US"],
+};
+
+const DEFAULT_MARKET_LABELS = {
+  FR: "France",
+  NL: "Netherlands",
+  PL: "Poland",
+  UK: "United Kingdom",
+  DE: "Germany",
+  ES: "Spain",
+  IE: "Ireland",
+  SE: "Sweden",
+  BE: "Belgium",
+  IT: "Italy",
+  CA: "Canada",
+  US: "United States",
+};
 
 function ensureState(ctx) {
   if (!ctx.channelsTabState) {
@@ -16,9 +38,13 @@ function ensureState(ctx) {
       loaded: false,
       channels: null,
       amazon_market_codes: [],
+      amazon_market_groups: { ...DEFAULT_MARKET_GROUPS },
+      amazon_market_labels: { ...DEFAULT_MARKET_LABELS },
       seller_id_env_fallback: "",
       amazonExpanded: true,
       amazonSettingsExpanded: true,
+      europaExpanded: true,
+      amerikaExpanded: true,
     };
   }
   return ctx.channelsTabState;
@@ -27,7 +53,11 @@ function ensureState(ctx) {
 function flagHtml(code) {
   const cc = String(FLAG_CODE[code] || code || "").toLowerCase();
   if (!cc || cc.length !== 2) return "";
-  return `<img class="ce-ship-flag" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
+  return `<img class="ce-channels-market-card__flag" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
+}
+
+function marketLabel(st, code) {
+  return st.amazon_market_labels?.[code] || DEFAULT_MARKET_LABELS[code] || code;
 }
 
 function readDomChannels() {
@@ -35,9 +65,11 @@ function readDomChannels() {
   const etsyEnabled = !!document.getElementById("ce-ch-etsy")?.checked;
   const ebayEnabled = !!document.getElementById("ce-ch-ebay")?.checked;
   const markets = {};
-  document.querySelectorAll("[data-ce-amazon-market]").forEach((inp) => {
-    const code = inp.getAttribute("data-ce-amazon-market");
-    if (code) markets[code] = !!inp.checked;
+  document.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
+    const code = el.getAttribute("data-ce-amazon-market");
+    if (!code) return;
+    const pressed = el.getAttribute("aria-pressed") === "true" || el.classList.contains("is-active");
+    markets[code] = pressed;
   });
   const pricing = {
     mode: document.getElementById("ce-ch-amz-price-mode")?.value || "percent_of_retail",
@@ -71,23 +103,62 @@ export function snapshotChannelsTab() {
   return readDomChannels();
 }
 
-function marketsGridHtml(st) {
+function marketCardHtml(st, code) {
   const markets = st.channels?.amazon?.markets || {};
-  const codes = st.amazon_market_codes?.length
-    ? st.amazon_market_codes
-    : Object.keys(markets);
-  return codes
-    .map((code) => {
-      const on = !!markets[code];
-      return `<label class="ce-channels-market-card">
-        ${flagHtml(code)}
-        <span class="ce-channels-market-card__label">${escapeHtml(code)}</span>
-        <input type="checkbox" data-ce-amazon-market="${escapeHtml(code)}" ${on ? "checked" : ""} ${
-        st.channels?.amazon?.enabled ? "" : "disabled"
-      } />
-      </label>`;
-    })
-    .join("");
+  const on = !!markets[code];
+  const enabled = !!st.channels?.amazon?.enabled;
+  const name = marketLabel(st, code);
+  return `<button type="button"
+      class="ce-channels-market-card${on ? " is-active" : ""}"
+      data-ce-amazon-market="${escapeHtml(code)}"
+      aria-pressed="${on ? "true" : "false"}"
+      ${enabled ? "" : "disabled"}
+      title="${escapeHtml(name)}">
+      ${flagHtml(code)}
+      <span class="ce-channels-market-card__body">
+        <span class="ce-channels-market-card__name">${escapeHtml(name)}</span>
+        <span class="ce-channels-market-card__status">${on ? "Aktiv" : ""}</span>
+      </span>
+    </button>`;
+}
+
+function marketsGroupHtml(st, groupKey, title, hint) {
+  const groups = st.amazon_market_groups || DEFAULT_MARKET_GROUPS;
+  const codes = groups[groupKey]?.length ? groups[groupKey] : DEFAULT_MARKET_GROUPS[groupKey] || [];
+  const expandedKey = groupKey === "europa" ? "europaExpanded" : "amerikaExpanded";
+  const expanded = st[expandedKey] !== false;
+  const expandId = `ce-ch-amz-group-${groupKey}`;
+  const bodyId = `ce-ch-amz-group-${groupKey}-body`;
+  return `
+    <div class="ce-channels-market-group">
+      <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="${expandId}" aria-expanded="${
+        expanded ? "true" : "false"
+      }">
+        <span aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+        <strong>${escapeHtml(title)}</strong>
+      </button>
+      <div id="${bodyId}" ${expanded ? "" : "hidden"}>
+        <p class="ce-hint ce-channels-market-group__hint">${escapeHtml(hint)}</p>
+        <div class="ce-channels-markets">${codes.map((code) => marketCardHtml(st, code)).join("")}</div>
+      </div>
+    </div>`;
+}
+
+function marketsGridHtml(st) {
+  return (
+    marketsGroupHtml(
+      st,
+      "europa",
+      "Europa",
+      "Later: one EU listing from Germany (DE); other EU markets linked via Amazon International Offer Creation."
+    ) +
+    marketsGroupHtml(
+      st,
+      "amerika",
+      "Amerika",
+      "Later: one US listing; Canada can link from the US listing."
+    )
+  );
 }
 
 function renderPanel(st) {
@@ -101,7 +172,7 @@ function renderPanel(st) {
   return `
     <div class="ce-tab-panel ce-channels-panel">
       <p class="ce-hint">Unlock sales channels for this product. Creators still need Skill Tree unlocks; <strong>Admin Creations</strong> ignores Skill Tree limits and only uses these unlocks. eazpire is always on.</p>
-      <p class="ce-hint">TODO: Amazon worldwide single-listing strategy (one ASIN / multi-marketplace) — discuss next; region unlocks only for now.</p>
+      <p class="ce-hint">Amazon markets = your Seller Central Aktiv list. Planned publish: 1× EU (DE source) + 1× US — dual listing, not N identical products.</p>
 
       <div class="ce-channels-list">
         <div class="ce-channels-row ce-channels-row--locked">
@@ -125,9 +196,9 @@ function renderPanel(st) {
           </label>
         </div>
         <div class="ce-channels-amazon" id="ce-ch-amazon-body" ${st.amazonExpanded ? "" : "hidden"}>
-          <h4 class="ce-section-title" style="font-size:0.95rem">Amazon regions</h4>
-          <p class="ce-hint">Only enabled regions appear in Admin Creations → Channels for this product.</p>
-          <div class="ce-channels-markets">${marketsGridHtml(st)}</div>
+          <h4 class="ce-section-title" style="font-size:0.95rem">Amazon markets</h4>
+          <p class="ce-hint">Tap a country to unlock it for Admin Creations → Channels. Selected = <strong>Aktiv</strong>.</p>
+          ${marketsGridHtml(st)}
 
           <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="ce-ch-amz-settings-expand" aria-expanded="${
             st.amazonSettingsExpanded ? "true" : "false"
@@ -213,9 +284,25 @@ function renderPanel(st) {
 
 function syncAmazonMarketDisabled(root) {
   const on = !!root.querySelector("#ce-ch-amazon")?.checked;
-  root.querySelectorAll("[data-ce-amazon-market]").forEach((inp) => {
-    inp.disabled = !on;
+  root.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
+    el.disabled = !on;
   });
+}
+
+function setMarketActive(el, on) {
+  el.classList.toggle("is-active", on);
+  el.setAttribute("aria-pressed", on ? "true" : "false");
+  const status = el.querySelector(".ce-channels-market-card__status");
+  if (status) status.textContent = on ? "Aktiv" : "";
+}
+
+function rerenderChannels(ctx, st) {
+  st.channels = readDomChannels();
+  const body = document.getElementById("ce-body");
+  if (!body) return;
+  body.innerHTML = renderPanel(st);
+  bindChannelsTab(ctx, body);
+  notifyActiveTabDirty(ctx);
 }
 
 export async function loadChannelsTab(ctx) {
@@ -224,6 +311,8 @@ export async function loadChannelsTab(ctx) {
   if (!data?.ok) throw new Error(data?.error || "Failed to load channels");
   st.channels = data.channels;
   st.amazon_market_codes = data.amazon_market_codes || [];
+  st.amazon_market_groups = data.amazon_market_groups || { ...DEFAULT_MARKET_GROUPS };
+  st.amazon_market_labels = data.amazon_market_labels || { ...DEFAULT_MARKET_LABELS };
   st.seller_id_env_fallback = data.defaults?.seller_id_env_fallback || "";
   st.loaded = true;
   return renderPanel(st);
@@ -236,24 +325,31 @@ export function bindChannelsTab(ctx, root) {
 
   panel.querySelector("#ce-ch-amazon-expand")?.addEventListener("click", () => {
     st.amazonExpanded = !st.amazonExpanded;
-    st.channels = readDomChannels();
-    const body = document.getElementById("ce-body");
-    if (body) {
-      body.innerHTML = renderPanel(st);
-      bindChannelsTab(ctx, body);
-      notifyActiveTabDirty(ctx);
-    }
+    rerenderChannels(ctx, st);
   });
 
   panel.querySelector("#ce-ch-amz-settings-expand")?.addEventListener("click", () => {
     st.amazonSettingsExpanded = !st.amazonSettingsExpanded;
-    st.channels = readDomChannels();
-    const body = document.getElementById("ce-body");
-    if (body) {
-      body.innerHTML = renderPanel(st);
-      bindChannelsTab(ctx, body);
+    rerenderChannels(ctx, st);
+  });
+
+  panel.querySelector("#ce-ch-amz-group-europa")?.addEventListener("click", () => {
+    st.europaExpanded = !st.europaExpanded;
+    rerenderChannels(ctx, st);
+  });
+
+  panel.querySelector("#ce-ch-amz-group-amerika")?.addEventListener("click", () => {
+    st.amerikaExpanded = !st.amerikaExpanded;
+    rerenderChannels(ctx, st);
+  });
+
+  panel.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
+    el.addEventListener("click", () => {
+      if (el.disabled) return;
+      const next = el.getAttribute("aria-pressed") !== "true";
+      setMarketActive(el, next);
       notifyActiveTabDirty(ctx);
-    }
+    });
   });
 
   panel.querySelector("#ce-ch-amazon")?.addEventListener("change", () => {
