@@ -76,6 +76,19 @@ export async function syncShipping(productKey, body) {
   });
 }
 
+export async function fetchChannels(productKey) {
+  return partnerFetch("admin-eazpire-channels-get", {
+    query: { product_key: productKey },
+  });
+}
+
+export async function saveChannels(productKey, body) {
+  return partnerFetch("admin-eazpire-channels-save", {
+    method: "POST",
+    body: { product_key: productKey, ...body },
+  });
+}
+
 export async function fetchProvidersBundle(productKey) {
   return partnerFetch("admin-eazpire-product-providers-bundle", { query: { product_key: productKey } });
 }

@@ -1,5 +1,10 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { showToast } from "/creations/shared/js/partner-shell.js";
+import {
+  renderChannelsPanelHtml,
+  bindChannelsPanel,
+  renderOverviewPanelHtml,
+} from "./product-channels-panel.js";
 
 const SOURCE_FILTERS = [
   { key: "printify", label: "Printify" },
@@ -11,9 +16,12 @@ const SOURCE_FILTERS = [
 
 const SHOPIFY_DETAIL_SOURCES = new Set(["shopify", "todify", "samples"]);
 
+/** Creator-parity nav first; Mockups/Metafields kept as admin extras. */
 const DETAIL_MENUS = [
-  { key: "mockups", label: "Mockups" },
+  { key: "overview", label: "Overview" },
   { key: "variants", label: "Variants" },
+  { key: "channels", label: "Channels" },
+  { key: "mockups", label: "Mockups" },
   { key: "metafields", label: "Metafields" },
 ];
 
@@ -35,12 +43,14 @@ const state = {
     open: false,
     loading: false,
     error: "",
-    menu: "mockups",
+    menu: "overview",
     productId: "",
     title: "",
     preview: null,
     data: null,
     expandedValues: new Set(),
+    channelState: {},
+    amazonExpanded: false,
   },
 };
 
@@ -634,8 +644,20 @@ function renderDetailContent() {
     return;
   }
 
-  if (state.detail.menu === "variants") content.innerHTML = renderVariantsPanel(product);
-  else if (state.detail.menu === "metafields") content.innerHTML = renderMetafieldsPanel(product);
+  if (state.detail.menu === "overview") content.innerHTML = renderOverviewPanelHtml(product);
+  else if (state.detail.menu === "variants") content.innerHTML = renderVariantsPanel(product);
+  else if (state.detail.menu === "channels") {
+    const chUi = {
+      channelState: state.detail.channelState,
+      amazonExpanded: state.detail.amazonExpanded,
+      onChange: () => {
+        state.detail.amazonExpanded = chUi.amazonExpanded;
+        renderDetailContent();
+      },
+    };
+    content.innerHTML = renderChannelsPanelHtml(product, chUi);
+    bindChannelsPanel(content, chUi);
+  } else if (state.detail.menu === "metafields") content.innerHTML = renderMetafieldsPanel(product);
   else content.innerHTML = renderMockupsPanel(product);
 
   content.querySelectorAll("[data-cr-pd-expand]").forEach((btn) => {
@@ -675,11 +697,13 @@ async function openProductDetail(productId, title) {
   state.detail.open = true;
   state.detail.loading = true;
   state.detail.error = "";
-  state.detail.menu = "mockups";
+  state.detail.menu = "overview";
   state.detail.productId = id;
   state.detail.title = title || "Product";
   state.detail.data = null;
   state.detail.expandedValues = new Set();
+  state.detail.channelState = { eazpire: { status: "published", queue: false } };
+  state.detail.amazonExpanded = false;
 
   const backdrop = ensureDetailDom();
   if (backdrop) {

@@ -23,6 +23,11 @@ import {
   bindShippingTab,
   saveShippingTab,
 } from "./tabs/shipping.js";
+import {
+  loadChannelsTab,
+  bindChannelsTab,
+  saveChannelsTab,
+} from "./tabs/channels.js";
 import { loadPartnerReviewBundle, renderReviewTab, bindReviewTab } from "./tabs/review.js";
 import {
   registerDirtyListener,
@@ -71,6 +76,7 @@ const CORE_TABS = [
   { id: "variants", label: "Variants", icon: "▦", needsProvider: true },
   { id: "print_area", label: "Print Area", icon: "⬚", needsProvider: true },
   { id: "shipping", label: "Shipping", icon: "✈", needsProvider: true },
+  { id: "channels", label: "Channels", icon: "⬡", needsProvider: false },
   { id: "meta_data", label: "Meta", icon: "◎", needsProvider: false },
   { id: "products", label: "Products", icon: "▤", needsProvider: false },
   { id: "creator_settings", label: "Creator Settings", icon: "★", needsProvider: false },
@@ -459,6 +465,9 @@ async function loadActiveTab(ctx) {
       case "shipping":
         html = await loadShippingTab(ctx);
         break;
+      case "channels":
+        html = await loadChannelsTab(ctx);
+        break;
       case "meta_data":
         html = await loadMetaTab(ctx);
         break;
@@ -491,6 +500,7 @@ async function loadActiveTab(ctx) {
     if (ctx.activeTab === "variants") bindVariantsTab(ctx, body);
     if (ctx.activeTab === "creator_settings") bindCreatorSettingsTab(ctx, body);
     if (ctx.activeTab === "shipping") bindShippingTab(ctx, body);
+    if (ctx.activeTab === "channels") bindChannelsTab(ctx, body);
     captureTabDirtySnapshot(ctx);
     captureVisibilityBaseline(ctx);
     refreshVisibilityTriSwitch(ctx);
@@ -593,6 +603,9 @@ async function saveCurrentTab() {
         break;
       case "shipping":
         await saveShippingTab(ctx);
+        break;
+      case "channels":
+        await saveChannelsTab(ctx);
         break;
       case "meta_data":
         await saveMetaTab(ctx);

@@ -374,6 +374,23 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
 
     const mockups = buildSortedMockups(p.images || []);
 
+    let channels = null;
+    if (productKey) {
+      try {
+        const { getProductChannelsConfig } = await import("../catalog/productChannelsConfig.js");
+        const chRes = await getProductChannelsConfig(env, productKey);
+        if (chRes?.ok) {
+          channels = {
+            unlocks: chRes.channels,
+            amazon_market_codes: chRes.amazon_market_codes,
+            marketplace_ids: chRes.marketplace_ids,
+          };
+        }
+      } catch (chErr) {
+        console.warn("[admin-creations-shopify-product-detail] channels:", chErr?.message || chErr);
+      }
+    }
+
     return json(
       {
         ok: true,
@@ -403,6 +420,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
           variants: (p.variants || []).map((v) => mapVariant(v, currency)),
           mockups,
           metafields: metafieldCategories,
+          channels,
         },
       },
       200,

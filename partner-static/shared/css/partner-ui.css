@@ -7728,6 +7728,226 @@ html[data-portal="admin"] .cr-pd-expand {
   }
 }
 
+/* Admin Creations — Channels / Overview (creator-style) */
+html[data-portal="admin"] .cr-pd-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+html[data-portal="admin"] .cr-pd-stat {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface-2);
+}
+html[data-portal="admin"] .cr-pd-stat__label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+html[data-portal="admin"] .cr-ch-track {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 2px 12px;
+}
+html[data-portal="admin"] .cr-ch-tile {
+  flex: 0 0 200px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+html[data-portal="admin"] .cr-ch-tile--expanded {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35);
+}
+html[data-portal="admin"] .cr-ch-tile--soon {
+  opacity: 0.85;
+}
+html[data-portal="admin"] .cr-ch-tile__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+html[data-portal="admin"] .cr-ch-tile__top h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+html[data-portal="admin"] .cr-ch-tile__meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-ch-status--published {
+  color: #34d399;
+  font-weight: 700;
+  font-size: 12px;
+}
+html[data-portal="admin"] .cr-ch-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+html[data-portal="admin"] .cr-ch-badge-soon {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--muted);
+}
+html[data-portal="admin"] .cr-ch-actions {
+  margin-top: auto;
+}
+html[data-portal="admin"] .cr-ch-btn {
+  width: 100%;
+}
+html[data-portal="admin"] .cr-ch-regions {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 8px 2px 4px;
+}
+html[data-portal="admin"] .cr-ch-region {
+  flex: 0 0 160px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #0b1220;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-portal="admin"] .cr-ch-region__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+html[data-portal="admin"] .cr-ch-flag {
+  width: 18px;
+  height: 14px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+html[data-portal="admin"] .cr-ch-logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+html[data-portal="admin"] .cr-ch-logo-text--amazon {
+  font-weight: 800;
+  font-size: 18px;
+}
+html[data-portal="admin"] .cr-ch-logo-text--etsy {
+  font-family: Georgia, serif;
+  font-weight: 800;
+  font-size: 22px;
+}
+html[data-portal="admin"] .cr-ch-logo-text--ebay i {
+  font-style: normal;
+  font-weight: 800;
+  margin-right: 1px;
+}
+html[data-portal="admin"] .cr-ch-logo-text--ebay i:nth-child(1) { color: #e53238; }
+html[data-portal="admin"] .cr-ch-logo-text--ebay i:nth-child(2) { color: #0064d2; }
+html[data-portal="admin"] .cr-ch-logo-text--ebay i:nth-child(3) { color: #f5af02; }
+html[data-portal="admin"] .cr-ch-logo-text--ebay i:nth-child(4) { color: #86b817; }
+html[data-portal="admin"] .cr-ch-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: #94a3b8;
+  border-radius: 50%;
+  animation: cr-ch-spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+@keyframes cr-ch-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Catalog editor — Channels tab */
+.ce-channels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 920px;
+}
+.ce-channels-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.ce-channels-row--locked {
+  opacity: 0.95;
+}
+.ce-channels-expand {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+.ce-channels-expand--sub {
+  margin-top: 14px;
+}
+.ce-channels-amazon {
+  padding: 4px 4px 12px 12px;
+  border-left: 2px solid rgba(251, 191, 36, 0.45);
+  margin-left: 10px;
+}
+.ce-channels-markets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+.ce-channels-market-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ce-channels-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+@media (max-width: 720px) {
+  .ce-channels-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Partner Product Editor */
 .pe-editor .pe-foot {
   display: flex;

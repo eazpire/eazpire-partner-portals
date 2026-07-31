@@ -255,6 +255,8 @@ const ADMIN_OPS = new Set([
   "admin-eazpire-shipping-get",
   "admin-eazpire-shipping-save",
   "admin-eazpire-shipping-sync",
+  "admin-eazpire-channels-get",
+  "admin-eazpire-channels-save",
   "admin-eazpire-taxonomy-search",
   "admin-eazpire-taxonomy-resolve",
   "admin-eazpire-taxonomy-used",
@@ -1005,6 +1007,20 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { syncProductProviderShipping } = await import("../catalog/productProviderShipping.js");
       const result = await syncProductProviderShipping(env, body.product_key, body);
       if (!result.ok) return json(result, 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-channels-get" && request.method === "GET") {
+      const productKey = url.searchParams.get("product_key");
+      const { getProductChannelsConfig } = await import("../catalog/productChannelsConfig.js");
+      const result = await getProductChannelsConfig(env, productKey);
+      if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
+      return json(result, 200, cors);
+    }
+    if (op === "admin-eazpire-channels-save" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const { saveProductChannelsConfig } = await import("../catalog/productChannelsConfig.js");
+      const result = await saveProductChannelsConfig(env, body.product_key, body);
+      if (!result.ok) return json(result, result.error === "not_found" ? 404 : 400, cors);
       return json(result, 200, cors);
     }
     if (op === "admin-eazpire-taxonomy-search" && request.method === "GET") {
