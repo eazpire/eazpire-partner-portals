@@ -8940,6 +8940,48 @@ html[data-portal="admin"] .cr-dd-prod.is-selected {
 html[data-portal="admin"] .cr-dd-prod.needs-update {
   box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35);
 }
+html[data-portal="admin"] .cr-dd-prod.is-publishing,
+html[data-portal="admin"] .cr-dd-prod.is-unpublishing {
+  pointer-events: none;
+}
+html[data-portal="admin"] .cr-dd-prod.is-job-error {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45);
+}
+html[data-portal="admin"] .cr-dd-prod__job {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(15, 15, 20, 0.62);
+  color: #f8fafc;
+  text-align: center;
+}
+html[data-portal="admin"] .cr-dd-prod__job--error {
+  background: rgba(127, 29, 29, 0.72);
+}
+html[data-portal="admin"] .cr-dd-prod__spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(248, 250, 252, 0.28);
+  border-top-color: #f59e0b;
+  animation: login-wait-spin 0.9s linear infinite;
+}
+html[data-portal="admin"] .cr-dd-prod__job-label {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
 html[data-portal="admin"] .cr-dd-prod__check {
   position: absolute;
   top: 8px;

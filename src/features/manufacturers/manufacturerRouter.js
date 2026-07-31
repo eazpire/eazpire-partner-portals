@@ -323,6 +323,7 @@ const ADMIN_OPS = new Set([
   "admin-design-action-preview",
   "admin-design-delete",
   "admin-design-publish-missing-online",
+  "get-publish-progress",
   "admin-design-update-diff",
   "admin-design-update-commit",
   "admin-design-unpublish",
@@ -1549,6 +1550,11 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { handleAdminDesignPublishMissingOnline } = await import("../admin/adminDesignActions.js");
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminDesignPublishMissingOnline(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    // Same KV progress poller as Creator / theme admin-page-designs (session from publish enqueue).
+    if (op === "get-publish-progress" && request.method === "GET") {
+      const { handleGetPublishProgress } = await import("../product/getPublishProgress.js");
+      return handleGetPublishProgress(request, env);
     }
     if (op === "admin-design-update-diff" && request.method === "GET") {
       const { handleAdminDesignUpdateDiff } = await import("../admin/adminDesignActions.js");

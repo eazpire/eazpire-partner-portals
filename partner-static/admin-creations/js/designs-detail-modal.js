@@ -39,6 +39,10 @@ let lastUpdateDiff = null;
 let productsNeedUpdate = false;
 let selectedProductKeys = new Set();
 let productStateByKey = new Map(); // key -> { online, publishedId, needsUpdate, title }
+/** key -> { kind: 'publish'|'unpublish', status: 'running'|'error', message?, sessionId? } */
+let productJobByKey = new Map();
+let publishWatchToken = null;
+let unpublishWatchToken = null;
 let activeTab = "overview";
 let visibilitySaving = false;
 let closePromptOpen = false;
@@ -147,7 +151,7 @@ function renderFooter() {
     let canUnpublish = false;
     for (const key of sel) {
       const st = productStateByKey.get(key);
-      if (!st) continue;
+      if (!st || isProductJobRunning(key)) continue;
       if (st.online && (st.needsUpdate || productsNeedUpdate)) canUpdate = true;
       if (!st.online) canPublish = true;
       if (st.online) canUnpublish = true;
@@ -1385,6 +1389,414 @@ function syncProductSelectionUi() {
   renderFooter();
 }
 
+function isProductJobRunning(key) {
+  return productJobByKey.get(key)?.status === "running";
+}
+
+function stopPublishWatch() {
+  publishWatchToken = null;
+}
+
+function stopUnpublishWatch() {
+  unpublishWatchToken = null;
+}
+
+function stopAllProductJobWatches() {
+  stopPublishWatch();
+  stopUnpublishWatch();
+}
+
+function applyProductJobUi(key) {
+  const root = ensureRoot();
+  const card = root.querySelector(`.cr-dd-prod[data-product-key="${CSS.escape(key)}"]`);
+  if (!card) return;
+  card.classList.remove("is-publishing", "is-unpublishing", "is-job-error");
+  card.querySelector(".cr-dd-prod__job")?.remove();
+  const job = productJobByKey.get(key);
+  if (!job) return;
+  const media = card.querySelector("[data-cr-dd-prod-media]");
+  if (job.status === "running") {
+    card.classList.add(job.kind === "unpublish" ? "is-unpublishing" : "is-publishing");
+    if (media) {
+      const overlay = document.createElement("div");
+      overlay.className = "cr-dd-prod__job";
+      overlay.setAttribute("aria-live", "polite");
+      overlay.innerHTML = `<div class="cr-dd-prod__spinner" aria-hidden="true"></div><span class="cr-dd-prod__job-label">${
+        job.kind === "unpublish" ? "Unpublishing…" : "Publishing…"
+      }</span>`;
+      media.appendChild(overlay);
+    }
+    return;
+  }
+  if (job.status === "error") {
+    card.classList.add("is-job-error");
+    if (media) {
+      const overlay = document.createElement("div");
+      overlay.className = "cr-dd-prod__job cr-dd-prod__job--error";
+      overlay.innerHTML = `<span class="cr-dd-prod__job-label">${escapeHtml(job.message || "Failed")}</span>`;
+      media.appendChild(overlay);
+    }
+  }
+}
+
+function reapplyAllProductJobUi() {
+  for (const key of productJobByKey.keys()) applyProductJobUi(key);
+}
+
+function setProductJob(key, job) {
+  if (!job) productJobByKey.delete(key);
+  else productJobByKey.set(key, job);
+  applyProductJobUi(key);
+  renderFooter();
+}
+
+function updateMediaBadge(media, online) {
+  if (!media) return;
+  let badge = media.querySelector(".cr-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    media.appendChild(badge);
+  }
+  badge.className = online ? "cr-badge cr-badge--online" : "cr-badge cr-badge--offline";
+  badge.textContent = online ? "Online" : "Offline";
+}
+
+function markProductOnlineLive(key, liveRow = null) {
+  productJobByKey.delete(key);
+  const prev = productStateByKey.get(key) || {};
+  productStateByKey.set(key, {
+    ...prev,
+    online: true,
+    publishedId: liveRow?.published_id ?? prev.publishedId ?? null,
+  });
+  const root = ensureRoot();
+  const card = root.querySelector(`.cr-dd-prod[data-product-key="${CSS.escape(key)}"]`);
+  if (!card) {
+    renderFooter();
+    return;
+  }
+  card.classList.remove("is-offline", "is-publishing", "is-unpublishing", "is-job-error");
+  card.classList.add("is-online");
+  card.setAttribute("data-online", "1");
+  card.querySelector(".cr-dd-prod__job")?.remove();
+  const media = card.querySelector("[data-cr-dd-prod-media]");
+  if (media) {
+    const liveUrl = liveRow?.image_url || liveRow?.featured_image || "";
+    if (liveUrl) {
+      const img = media.querySelector("img.cr-dd-prod__mock");
+      if (img) img.src = liveUrl;
+      else {
+        media.querySelector(".cr-dd-prod__empty")?.remove();
+        const next = document.createElement("img");
+        next.className = "cr-dd-prod__mock";
+        next.src = liveUrl;
+        next.alt = "";
+        next.loading = "lazy";
+        media.insertBefore(next, media.firstChild);
+      }
+    }
+    updateMediaBadge(media, true);
+  }
+  renderFooter();
+}
+
+function markProductOfflineLive(key) {
+  productJobByKey.delete(key);
+  const prev = productStateByKey.get(key) || {};
+  productStateByKey.set(key, {
+    ...prev,
+    online: false,
+    publishedId: null,
+    needsUpdate: false,
+  });
+  const root = ensureRoot();
+  const card = root.querySelector(`.cr-dd-prod[data-product-key="${CSS.escape(key)}"]`);
+  if (!card) {
+    renderFooter();
+    return;
+  }
+  card.classList.remove("is-online", "is-publishing", "is-unpublishing", "is-job-error", "needs-update");
+  card.classList.add("is-offline");
+  card.setAttribute("data-online", "0");
+  card.querySelector(".cr-dd-prod__job")?.remove();
+  card.querySelector("[data-cr-dd-needs-update]")?.remove();
+  const media = card.querySelector("[data-cr-dd-prod-media]");
+  if (media) updateMediaBadge(media, false);
+  renderFooter();
+}
+
+async function softRefreshLiveProductRows(designId) {
+  try {
+    const live = await partnerFetch("admin-design-shopify-live-products", {
+      query: { design_id: designId },
+    });
+    const rows = live.products || live.items || live.published_products || [];
+    const byKey = new Map();
+    for (const p of rows) byKey.set(String(p.product_key || ""), p);
+    for (const [key, st] of productStateByKey) {
+      if (!st?.online) continue;
+      const row = byKey.get(key);
+      if (row) markProductOnlineLive(key, row);
+    }
+    return byKey;
+  } catch (_) {
+    return new Map();
+  }
+}
+
+function publishPollInterval(attempt) {
+  const intervals = [1500, 2000, 3000, 4000, 5000, 8000, 10000];
+  return intervals[Math.min(attempt, intervals.length - 1)];
+}
+
+/**
+ * Poll get-publish-progress (same KV session as enqueueAdminPublishRun).
+ * Updates Offline → Online per product without rebuilding the products panel.
+ */
+function startPublishProgressWatch(sessionId, productKeys, designId) {
+  stopPublishWatch();
+  const token = {};
+  publishWatchToken = token;
+  const pending = new Set(productKeys.map(String));
+  let pollAttempt = 0;
+  let stallCount = 0;
+  const MAX_STALL = 150;
+
+  const finishRemainingFromLive = async () => {
+    const byKey = await softRefreshLiveProductRows(designId);
+    for (const key of [...pending]) {
+      if (byKey.has(key)) {
+        pending.delete(key);
+        markProductOnlineLive(key, byKey.get(key));
+      } else if (isProductJobRunning(key)) {
+        setProductJob(key, {
+          kind: "publish",
+          status: "error",
+          message: "Publish finished without a live listing",
+        });
+        pending.delete(key);
+      }
+    }
+  };
+
+  const poll = async () => {
+    if (publishWatchToken !== token) return;
+    if (!activeItem || Number(activeItem.id) !== Number(designId)) {
+      stopPublishWatch();
+      return;
+    }
+    try {
+      const data = await partnerFetch("get-publish-progress", {
+        query: { session_id: sessionId },
+      });
+      if (publishWatchToken !== token) return;
+      const products = Array.isArray(data.products) ? data.products : [];
+      for (const p of products) {
+        const key = String(p.product_key || "");
+        if (!pending.has(key)) continue;
+        const st = String(p.status || "").toLowerCase();
+        if (st === "completed") {
+          pending.delete(key);
+          markProductOnlineLive(key);
+        } else if (st === "error" || st === "skipped") {
+          pending.delete(key);
+          setProductJob(key, {
+            kind: "publish",
+            status: "error",
+            message: p.message || (st === "skipped" ? "Skipped" : "Publish failed"),
+          });
+        }
+      }
+
+      const sessionDone = data.done === true || data.status === "completed";
+      if (sessionDone || pending.size === 0) {
+        if (pending.size) await finishRemainingFromLive();
+        else await softRefreshLiveProductRows(designId);
+        stopPublishWatch();
+        if (typeof onClosed === "function") onClosed({ reload: false }).catch(() => {});
+        return;
+      }
+
+      if (data.status === "not_found" && products.length === 0) {
+        stallCount += 1;
+        if (stallCount > MAX_STALL) {
+          for (const key of pending) {
+            setProductJob(key, { kind: "publish", status: "error", message: "Publish timed out" });
+          }
+          stopPublishWatch();
+          return;
+        }
+      } else {
+        stallCount = 0;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    } catch (_) {
+      if (publishWatchToken !== token) return;
+      stallCount += 1;
+      if (stallCount > MAX_STALL) {
+        for (const key of pending) {
+          if (isProductJobRunning(key)) {
+            setProductJob(key, { kind: "publish", status: "error", message: "Publish status unavailable" });
+          }
+        }
+        stopPublishWatch();
+        return;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    }
+  };
+
+  poll();
+}
+
+/**
+ * Fallback when enqueue returns no session_id — poll live Shopify rows until Online.
+ */
+function startPublishLiveWatch(productKeys, designId) {
+  stopPublishWatch();
+  const token = {};
+  publishWatchToken = token;
+  const pending = new Set(productKeys.map(String));
+  let pollAttempt = 0;
+  let stallCount = 0;
+  const MAX_STALL = 150;
+
+  const poll = async () => {
+    if (publishWatchToken !== token) return;
+    if (!activeItem || Number(activeItem.id) !== Number(designId)) {
+      stopPublishWatch();
+      return;
+    }
+    try {
+      const live = await partnerFetch("admin-design-shopify-live-products", {
+        query: { design_id: designId },
+      });
+      if (publishWatchToken !== token) return;
+      const rows = live.products || live.items || live.published_products || [];
+      const byKey = new Map(rows.map((p) => [String(p.product_key || ""), p]));
+      let progressed = false;
+      for (const key of [...pending]) {
+        if (byKey.has(key)) {
+          pending.delete(key);
+          markProductOnlineLive(key, byKey.get(key));
+          progressed = true;
+        }
+      }
+      if (pending.size === 0) {
+        stopPublishWatch();
+        if (typeof onClosed === "function") onClosed({ reload: false }).catch(() => {});
+        return;
+      }
+      if (progressed) stallCount = 0;
+      else stallCount += 1;
+      if (stallCount > MAX_STALL) {
+        for (const key of pending) {
+          setProductJob(key, { kind: "publish", status: "error", message: "Publish timed out" });
+        }
+        stopPublishWatch();
+        return;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    } catch (_) {
+      if (publishWatchToken !== token) return;
+      stallCount += 1;
+      if (stallCount > MAX_STALL) {
+        for (const key of pending) {
+          if (isProductJobRunning(key)) {
+            setProductJob(key, {
+              kind: "publish",
+              status: "error",
+              message: "Publish status unavailable",
+            });
+          }
+        }
+        stopPublishWatch();
+        return;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    }
+  };
+
+  setTimeout(poll, 1500);
+}
+
+/**
+ * Unpublish has no shared progress session — poll live Shopify rows until Offline.
+ */
+function startUnpublishLiveWatch(productKeys, designId) {
+  stopUnpublishWatch();
+  const token = {};
+  unpublishWatchToken = token;
+  const pending = new Set(productKeys.map(String));
+  let pollAttempt = 0;
+  let stallCount = 0;
+  const MAX_STALL = 90;
+
+  const poll = async () => {
+    if (unpublishWatchToken !== token) return;
+    if (!activeItem || Number(activeItem.id) !== Number(designId)) {
+      stopUnpublishWatch();
+      return;
+    }
+    try {
+      const live = await partnerFetch("admin-design-shopify-live-products", {
+        query: { design_id: designId },
+      });
+      if (unpublishWatchToken !== token) return;
+      const rows = live.products || live.items || live.published_products || [];
+      const liveKeys = new Set(rows.map((p) => String(p.product_key || "")).filter(Boolean));
+      let progressed = false;
+      for (const key of [...pending]) {
+        if (!liveKeys.has(key)) {
+          pending.delete(key);
+          markProductOfflineLive(key);
+          progressed = true;
+        }
+      }
+      if (pending.size === 0) {
+        stopUnpublishWatch();
+        if (typeof onClosed === "function") onClosed({ reload: false }).catch(() => {});
+        return;
+      }
+      if (progressed) stallCount = 0;
+      else stallCount += 1;
+      if (stallCount > MAX_STALL) {
+        for (const key of pending) {
+          setProductJob(key, { kind: "unpublish", status: "error", message: "Unpublish timed out" });
+        }
+        stopUnpublishWatch();
+        return;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    } catch (_) {
+      if (unpublishWatchToken !== token) return;
+      stallCount += 1;
+      if (stallCount > MAX_STALL) {
+        for (const key of pending) {
+          if (isProductJobRunning(key)) {
+            setProductJob(key, {
+              kind: "unpublish",
+              status: "error",
+              message: "Unpublish status unavailable",
+            });
+          }
+        }
+        stopUnpublishWatch();
+        return;
+      }
+      pollAttempt += 1;
+      setTimeout(poll, publishPollInterval(pollAttempt));
+    }
+  };
+
+  setTimeout(poll, 1200);
+}
+
 async function updateSelectedProducts() {
   if (!activeItem) return;
   await openUpdateModal([activeItem], {
@@ -1399,20 +1811,28 @@ async function publishSelectedProducts() {
   if (!activeItem?.id) return;
   const offlineKeys = [...selectedProductKeys].filter((k) => {
     const st = productStateByKey.get(k);
-    return st && !st.online;
+    return st && !st.online && !isProductJobRunning(k);
   });
   if (!offlineKeys.length) {
     showToast("Publish", "Select offline products");
     return;
   }
   try {
-    await partnerFetch("admin-design-publish-missing-online", {
+    const data = await partnerFetch("admin-design-publish-missing-online", {
       method: "POST",
       body: { design_id: activeItem.id, product_keys: offlineKeys, region_code: "EU" },
     });
-    showToast("Publish", `${offlineKeys.length} product(s) queued`);
+    const sessionId = String(
+      data.session_id || data.publish_session_id || data.verification?.session_id || data.verification?.publish_session_id || ""
+    ).trim();
     selectedProductKeys.clear();
-    await renderProductsPanel(activeItem);
+    syncProductSelectionUi();
+    for (const key of offlineKeys) {
+      setProductJob(key, { kind: "publish", status: "running", sessionId: sessionId || null });
+    }
+    showToast("Publish", `${offlineKeys.length} product(s) queued`);
+    if (sessionId) startPublishProgressWatch(sessionId, offlineKeys, activeItem.id);
+    else startPublishLiveWatch(offlineKeys, activeItem.id);
     if (typeof onClosed === "function") await onClosed({ reload: false });
   } catch (e) {
     // Fallback to full publish modal if direct keys fail
@@ -1431,7 +1851,10 @@ async function publishSelectedProducts() {
 
 async function unpublishSelectedProducts() {
   if (!activeItem?.id) return;
-  const onlineKeys = [...selectedProductKeys].filter((k) => productStateByKey.get(k)?.online);
+  const onlineKeys = [...selectedProductKeys].filter((k) => {
+    const st = productStateByKey.get(k);
+    return st?.online && !isProductJobRunning(k);
+  });
   if (!onlineKeys.length) {
     showToast("Unpublish", "Select online products");
     return;
@@ -1448,9 +1871,14 @@ async function unpublishSelectedProducts() {
         published_ids: publishedIds,
       },
     });
-    showToast("Unpublish", `${onlineKeys.length} product(s) queued`);
     selectedProductKeys.clear();
-    await renderProductsPanel(activeItem);
+    syncProductSelectionUi();
+    for (const key of onlineKeys) {
+      setProductJob(key, { kind: "unpublish", status: "running" });
+    }
+    showToast("Unpublish", `${onlineKeys.length} product(s) queued`);
+    startUnpublishLiveWatch(onlineKeys, activeItem.id);
+    if (typeof onClosed === "function") await onClosed({ reload: false });
   } catch (e) {
     showToast("Error", e.message || "Unpublish failed");
   }
@@ -1514,6 +1942,7 @@ async function renderProductsPanel(item) {
     const missingKeys = new Set((preview.missing_products || []).map((p) => String(p.product_key || "")));
     const designUrl = preview.design_preview_url || designPreviewUrl(item);
 
+    const previousProductState = productStateByKey;
     productStateByKey = new Map();
     selectedProductKeys = new Set([...selectedProductKeys].filter((k) => catalog.some((p) => String(p.product_key) === k)));
 
@@ -1547,9 +1976,17 @@ async function renderProductsPanel(item) {
             .map((p) => {
               const key = String(p.product_key || "");
               const liveRow = liveByKey.get(key);
-              const online = !missingKeys.has(key) || !!liveRow;
-              const publishedId = liveRow?.published_id || null;
-              const needs = online && needsUpdate;
+              let online = !missingKeys.has(key) || !!liveRow;
+              const job = productJobByKey.get(key);
+              // Keep optimistic Online after queue completion until Shopify live list catches up.
+              if (!online && previousProductState.get(key)?.online && !(job && job.status === "running")) {
+                online = true;
+              }
+              if (job?.kind === "publish" && job.status === "running") online = false;
+              if (job?.kind === "unpublish" && job.status === "running") online = true;
+              const publishedId =
+                liveRow?.published_id || previousProductState.get(key)?.publishedId || null;
+              const needs = online && needsUpdate && !(job && job.status === "running");
               productStateByKey.set(key, {
                 online,
                 publishedId,
@@ -1646,6 +2083,7 @@ async function renderProductsPanel(item) {
     });
 
     syncProductSelectionUi();
+    reapplyAllProductJobUi();
   } catch (e) {
     panel.innerHTML = `<p class="cr-bulk-error">${escapeHtml(e.message || "Failed to load products")}</p>`;
   }
@@ -1675,6 +2113,8 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   productsNeedUpdate = false;
   selectedProductKeys = new Set();
   productStateByKey = new Map();
+  stopAllProductJobWatches();
+  productJobByKey = new Map();
   activeTab = "overview";
   const root = ensureRoot();
   root.querySelector("#cr-dd-title").textContent = item.title || "Design";
@@ -1754,6 +2194,7 @@ export function closeDesignDetailModal() {
   const root = document.getElementById("cr-design-detail");
   if (root) root.hidden = true;
   document.body.classList.remove("cr-dd-open");
+  stopAllProductJobWatches();
   activeItem = null;
   draftMeta = null;
   metaBaseline = "";
@@ -1765,4 +2206,5 @@ export function closeDesignDetailModal() {
   closePromptOpen = false;
   selectedProductKeys = new Set();
   productStateByKey = new Map();
+  productJobByKey = new Map();
 }
