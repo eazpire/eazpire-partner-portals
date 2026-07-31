@@ -325,6 +325,8 @@ const ADMIN_OPS = new Set([
   "admin-design-publish-missing-online",
   "admin-design-update-diff",
   "admin-design-update-commit",
+  "admin-design-unpublish",
+  "admin-design-set-visibility",
   "admin-design-shopify-live-products",
   "admin-design-edit-metadata",
   "admin-design-edit-image-preview",
@@ -1557,6 +1559,16 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { handleAdminDesignUpdateCommit } = await import("../admin/adminDesignActions.js");
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminDesignUpdateCommit(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-unpublish" && request.method === "POST") {
+      const { handleAdminDesignUnpublish } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignUnpublish(proxyRequestWithAdminOwner(request, admin.owner_id), env, ctx);
+    }
+    if (op === "admin-design-set-visibility" && request.method === "POST") {
+      const { handleAdminDesignSetVisibility } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignSetVisibility(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
     if (op === "admin-design-shopify-live-products" && request.method === "GET") {
       const { handleAdminDesignShopifyLiveProducts } = await import("../admin/adminDesignActions.js");

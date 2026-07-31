@@ -106,3 +106,8 @@ binding = "JOB_QUEUE_ADMIN_PUBLISH_BY_DESIGN"
 [[queues.producers]]
 queue = "admin-jobs-publish-by-product"
 binding = "JOB_QUEUE_ADMIN_PUBLISH_BY_PRODUCT"
+
+# Producer-only: Creations Portal admin unpublish enqueues; creator-engine consumes.
+[[queues.producers]]
+queue = "creator-jobs-unpublish"
+binding = "JOB_QUEUE_UNPUBLISH"

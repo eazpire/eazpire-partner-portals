@@ -3,7 +3,7 @@
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
-import { showToast } from "/creations/shared/js/partner-shell.js";
+import { openModal, showToast } from "/creations/shared/js/partner-shell.js";
 import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
 
 const ICON = {
@@ -15,6 +15,8 @@ const ICON = {
 
 const DEFAULT_PLACEMENT = { x: 0.5, y: 0.5, scale: 0.95, rotate: 0, flipX: false, flipY: false };
 const BG_PRESETS = ["#37375A", "#0f172a", "#ffffff", "#111827", "#f59e0b", "checker"];
+const AMAZON_BULLETS_KEY = "amazon_bullet_points_de";
+const BULLET_SLOT_COUNT = 5;
 
 let activeItem = null;
 let onClosed = null;
@@ -26,10 +28,18 @@ let editBgMode = "complete";
 let editColorTolerance = 30;
 let editPickedColor = null;
 let editBusy = false;
+let editDirty = false;
+let pendingEdit = null; // { kind, payload, previewUrl }
 let zoomLevel = 1;
 let panMode = false;
 let viewerBg = "#37375A";
 let lastCatalogPreview = null;
+let lastUpdateDiff = null;
+let productsNeedUpdate = false;
+let selectedProductKeys = new Set();
+let productStateByKey = new Map(); // key -> { online, publishedId, needsUpdate, title }
+let activeTab = "overview";
+let visibilitySaving = false;
 
 function mockCompositing() {
   return window.CreatorMockCompositing || null;
@@ -54,7 +64,7 @@ function ensureRoot() {
           <button type="button" class="cr-dd__tab is-active" data-cr-dd-tab="overview" title="Overview">${ICON.overview}</button>
           <button type="button" class="cr-dd__tab" data-cr-dd-tab="edit" title="Edit">${ICON.edit}</button>
           <button type="button" class="cr-dd__tab" data-cr-dd-tab="metadata" title="Metadata">${ICON.metadata}</button>
-          <button type="button" class="cr-dd__tab" data-cr-dd-tab="products" title="Products">${ICON.products}</button>
+          <button type="button" class="cr-dd__tab" data-cr-dd-tab="products" title="Products">${ICON.products}<span class="cr-dd__tab-badge" data-cr-dd-products-badge hidden></span></button>
         </nav>
         <div class="cr-dd__panels">
           <section class="cr-dd__panel is-active" data-cr-dd-panel="overview"></section>
@@ -63,12 +73,7 @@ function ensureRoot() {
           <section class="cr-dd__panel" data-cr-dd-panel="products"></section>
         </div>
       </div>
-      <footer class="cr-dd__footer">
-        <button type="button" class="btn btn-secondary" data-cr-dd-act="download">Download</button>
-        <button type="button" class="btn btn-secondary" data-cr-dd-act="update">Update</button>
-        <button type="button" class="btn btn-primary" data-cr-dd-act="publish">Publish</button>
-        <button type="button" class="btn btn-danger" data-cr-dd-act="remove">Remove</button>
-      </footer>
+      <footer class="cr-dd__footer" data-cr-dd-footer></footer>
     </div>`;
   document.body.appendChild(root);
 
@@ -78,42 +83,9 @@ function ensureRoot() {
   root.querySelectorAll("[data-cr-dd-tab]").forEach((btn) => {
     btn.addEventListener("click", () => setTab(btn.getAttribute("data-cr-dd-tab")));
   });
-  root.querySelectorAll("[data-cr-dd-act]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const act = btn.getAttribute("data-cr-dd-act");
-      if (!activeItem) return;
-      if (act === "download") {
-        document
-          .querySelector(`.cr-card[data-item-key="${CSS.escape(activeItem.item_key || "")}"] .cr-card__download`)
-          ?.click();
-        return;
-      }
-      if (act === "remove") {
-        await openRemoveModal([activeItem], {
-          onDone: async () => {
-            closeDesignDetailModal();
-            if (typeof onClosed === "function") await onClosed({ reload: true });
-          },
-        });
-        return;
-      }
-      if (act === "publish") {
-        await openPublishModal([activeItem], {
-          onDone: async () => {
-            await renderProductsPanel(activeItem);
-            if (typeof onClosed === "function") await onClosed({ reload: false });
-          },
-        });
-        return;
-      }
-      if (act === "update") {
-        await openUpdateModal([activeItem], {
-          onDone: async () => {
-            await renderProductsPanel(activeItem);
-          },
-        });
-      }
-    });
+  root.querySelector("[data-cr-dd-footer]")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-cr-dd-act]");
+    if (btn) handleFooterAction(btn.getAttribute("data-cr-dd-act"));
   });
 
   document.addEventListener("keydown", (e) => {
@@ -123,18 +95,120 @@ function ensureRoot() {
   return root;
 }
 
+function setProductsTabNeedsUpdate(on) {
+  productsNeedUpdate = !!on;
+  const root = ensureRoot();
+  const tab = root.querySelector('[data-cr-dd-tab="products"]');
+  const badge = root.querySelector("[data-cr-dd-products-badge]");
+  tab?.classList.toggle("needs-update", productsNeedUpdate);
+  if (badge) {
+    badge.hidden = !productsNeedUpdate;
+    badge.textContent = productsNeedUpdate ? "!" : "";
+  }
+}
+
+function renderFooter() {
+  const root = ensureRoot();
+  const footer = root.querySelector("[data-cr-dd-footer]");
+  if (!footer) return;
+  const tab = activeTab || "overview";
+
+  if (tab === "overview") {
+    footer.innerHTML = `
+      <button type="button" class="btn btn-secondary" data-cr-dd-act="download">Download</button>
+      <button type="button" class="btn btn-danger" data-cr-dd-act="remove">Remove</button>`;
+    return;
+  }
+  if (tab === "edit") {
+    footer.innerHTML = `
+      <button type="button" class="btn btn-primary" data-cr-dd-act="edit-save" ${
+        editDirty && pendingEdit ? "" : "disabled"
+      }>Save</button>`;
+    return;
+  }
+  if (tab === "metadata") {
+    footer.innerHTML = `
+      <button type="button" class="btn btn-secondary" data-cr-dd-act="meta-regen">Regenerate</button>
+      <button type="button" class="btn btn-primary" data-cr-dd-act="meta-save" ${
+        metaDirty && !metaSaving ? "" : "disabled"
+      }>Save</button>`;
+    return;
+  }
+  if (tab === "products") {
+    const sel = [...selectedProductKeys];
+    let canUpdate = false;
+    let canPublish = false;
+    let canUnpublish = false;
+    for (const key of sel) {
+      const st = productStateByKey.get(key);
+      if (!st) continue;
+      if (st.online && (st.needsUpdate || productsNeedUpdate)) canUpdate = true;
+      if (!st.online) canPublish = true;
+      if (st.online) canUnpublish = true;
+    }
+    footer.innerHTML = `
+      <button type="button" class="btn btn-secondary" data-cr-dd-act="prod-update" ${canUpdate ? "" : "disabled"}>Update</button>
+      <button type="button" class="btn btn-primary" data-cr-dd-act="prod-publish" ${canPublish ? "" : "disabled"}>Publish</button>
+      <button type="button" class="btn btn-danger" data-cr-dd-act="prod-unpublish" ${canUnpublish ? "" : "disabled"}>Unpublish</button>`;
+  }
+}
+
+async function handleFooterAction(act) {
+  if (!activeItem) return;
+  if (act === "download") {
+    document
+      .querySelector(`.cr-card[data-item-key="${CSS.escape(activeItem.item_key || "")}"] .cr-card__download`)
+      ?.click();
+    return;
+  }
+  if (act === "remove") {
+    await openRemoveModal([activeItem], {
+      onDone: async () => {
+        closeDesignDetailModal();
+        if (typeof onClosed === "function") await onClosed({ reload: true });
+      },
+    });
+    return;
+  }
+  if (act === "meta-save") {
+    await saveMetadata();
+    return;
+  }
+  if (act === "meta-regen") {
+    await regenerateMetadata();
+    return;
+  }
+  if (act === "edit-save") {
+    await commitPendingEdit();
+    return;
+  }
+  if (act === "prod-update") {
+    await updateSelectedProducts();
+    return;
+  }
+  if (act === "prod-publish") {
+    await publishSelectedProducts();
+    return;
+  }
+  if (act === "prod-unpublish") {
+    await unpublishSelectedProducts();
+  }
+}
+
 function setTab(tab) {
+  activeTab = tab || "overview";
   const root = ensureRoot();
   root.querySelectorAll("[data-cr-dd-tab]").forEach((btn) => {
-    btn.classList.toggle("is-active", btn.getAttribute("data-cr-dd-tab") === tab);
+    btn.classList.toggle("is-active", btn.getAttribute("data-cr-dd-tab") === activeTab);
   });
   root.querySelectorAll("[data-cr-dd-panel]").forEach((panel) => {
-    panel.classList.toggle("is-active", panel.getAttribute("data-cr-dd-panel") === tab);
+    panel.classList.toggle("is-active", panel.getAttribute("data-cr-dd-panel") === activeTab);
   });
-  if (tab === "products") renderProductsPanel(activeItem).catch(() => {});
-  if (tab === "edit") bindEditPanel();
-  if (tab === "metadata") bindMetadataPanel();
-  if (tab === "overview") bindOverviewChrome();
+  renderFooter();
+  if (activeTab === "products") renderProductsPanel(activeItem).catch(() => {});
+  if (activeTab === "edit") bindEditPanel();
+  if (activeTab === "metadata") bindMetadataPanel();
+  if (activeTab === "overview") bindOverviewChrome();
 }
 
 function designPreviewUrl(item) {
@@ -152,6 +226,13 @@ function normalizeList(v) {
   return [];
 }
 
+function normalizeBullets(meta) {
+  const raw = meta?.[AMAZON_BULLETS_KEY];
+  const list = Array.isArray(raw) ? raw.map((x) => String(x || "").trim()) : [];
+  while (list.length < BULLET_SLOT_COUNT) list.push("");
+  return list.slice(0, BULLET_SLOT_COUNT);
+}
+
 function cloneMeta(meta) {
   const m = meta && typeof meta === "object" ? { ...meta } : {};
   m.title = String(m.title || "").trim();
@@ -161,7 +242,24 @@ function cloneMeta(meta) {
   m.subtopics = normalizeList(m.subtopics || m.subtopic);
   m.topic = m.topics;
   m.subtopic = m.subtopics;
+  m[AMAZON_BULLETS_KEY] = normalizeBullets(m).filter(Boolean);
   return m;
+}
+
+function pickPrompts(item) {
+  const meta = item?.metadata || {};
+  const designPrompt = String(
+    meta.design_prompt || item.design_prompt || item.prompt || ""
+  ).trim();
+  const userPrompt = String(meta.user_prompt || item.user_prompt || "").trim();
+  const userImage = String(
+    meta.user_image_url || meta.image_url || meta.baseImageUrl || item.user_image_url || ""
+  ).trim();
+  const visibility =
+    String(item.visibility || meta.visibility || "private").toLowerCase() === "public"
+      ? "public"
+      : "private";
+  return { designPrompt, userPrompt, userImage, visibility };
 }
 
 function applyViewerBg(el) {
@@ -184,7 +282,7 @@ function applyZoom(stage) {
   stage.classList.toggle("is-pan", panMode);
 }
 
-function zoomChromeHtml(idPrefix) {
+function zoomChromeHtml() {
   return `
     <div class="cr-dd-zoom-chrome">
       <button type="button" class="cr-dd-zoom-btn" data-cr-dd-zoom-out aria-label="Zoom out">−</button>
@@ -210,7 +308,8 @@ function zoomChromeHtml(idPrefix) {
 
 function renderOverview(item) {
   const preview = designPreviewUrl(item);
-  const prompt = item.prompt || item.user_prompt || item.design_prompt || "";
+  const { designPrompt, userPrompt, userImage, visibility } = pickPrompts(item);
+  const isPublic = visibility === "public";
   return `
     <div class="cr-dd-overview">
       <div class="cr-dd-frame">
@@ -223,17 +322,34 @@ function renderOverview(item) {
                 : `<div class="cr-dd-frame__empty">No preview</div>`
             }
           </div>
-          ${zoomChromeHtml("design")}
+          ${zoomChromeHtml()}
         </div>
         <div class="cr-dd-prompt">
           <label>Design prompt</label>
-          <textarea readonly rows="4">${escapeHtml(prompt || "—")}</textarea>
+          <textarea readonly rows="4">${escapeHtml(designPrompt || "—")}</textarea>
+        </div>
+        <div class="cr-dd-visibility">
+          <label>Visibility</label>
+          <label class="cr-dd-switch">
+            <span>Private</span>
+            <input type="checkbox" id="cr-dd-visibility" ${isPublic ? "checked" : ""} />
+            <span class="cr-dd-switch__track" aria-hidden="true"></span>
+            <span>Public</span>
+          </label>
         </div>
       </div>
       <div class="cr-dd-frame">
-        <div class="cr-dd-frame__label">Product mock</div>
-        <div class="cr-dd-frame__media" id="cr-dd-mock-media" data-cr-dd-viewer="mock">
-          <div class="cr-dd-frame__empty" id="cr-dd-mock-slot">Loading live mock…</div>
+        <div class="cr-dd-frame__label">User Design</div>
+        <div class="cr-dd-frame__media" data-cr-dd-viewer="user">
+          ${
+            userImage
+              ? `<img class="cr-dd-frame__img" src="${escapeHtml(userImage)}" alt="User design reference" />`
+              : `<div class="cr-dd-frame__empty">No user reference image</div>`
+          }
+        </div>
+        <div class="cr-dd-prompt">
+          <label>User prompt</label>
+          <textarea readonly rows="4">${escapeHtml(userPrompt || "—")}</textarea>
         </div>
       </div>
     </div>`;
@@ -244,41 +360,68 @@ function bindOverviewChrome() {
   const panel = root.querySelector('[data-cr-dd-panel="overview"]');
   if (!panel) return;
   const media = panel.querySelector('[data-cr-dd-viewer="design"]');
-  if (!media || media.__crDdBound) return;
-  media.__crDdBound = true;
-  const stage = media.querySelector("[data-cr-dd-zoom-stage]");
-  applyViewerBg(media);
-  applyZoom(stage);
-  media.querySelector("[data-cr-dd-zoom-in]")?.addEventListener("click", () => {
-    zoomLevel = Math.min(4, zoomLevel + 0.25);
+  if (media && !media.__crDdBound) {
+    media.__crDdBound = true;
+    const stage = media.querySelector("[data-cr-dd-zoom-stage]");
+    applyViewerBg(media);
     applyZoom(stage);
-  });
-  media.querySelector("[data-cr-dd-zoom-out]")?.addEventListener("click", () => {
-    zoomLevel = Math.max(0.5, zoomLevel - 0.25);
-    applyZoom(stage);
-  });
-  media.querySelector("[data-cr-dd-pan]")?.addEventListener("click", (e) => {
-    panMode = !panMode;
-    e.currentTarget.setAttribute("aria-pressed", panMode ? "true" : "false");
-    e.currentTarget.classList.toggle("is-active", panMode);
-    applyZoom(stage);
-  });
-  const pop = media.querySelector("[data-cr-dd-bg-popover]");
-  media.querySelector("[data-cr-dd-bg-open]")?.addEventListener("click", () => {
-    if (pop) pop.hidden = !pop.hidden;
-  });
-  media.querySelectorAll("[data-cr-dd-bg]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      viewerBg = btn.getAttribute("data-cr-dd-bg") || "#37375A";
-      applyViewerBg(media);
-      const sw = media.querySelector("[data-cr-dd-bg-swatch]");
-      if (sw) {
-        sw.classList.toggle("is-checker", viewerBg === "checker");
-        sw.style.background = viewerBg === "checker" ? "" : viewerBg;
-      }
-      if (pop) pop.hidden = true;
+    media.querySelector("[data-cr-dd-zoom-in]")?.addEventListener("click", () => {
+      zoomLevel = Math.min(4, zoomLevel + 0.25);
+      applyZoom(stage);
     });
-  });
+    media.querySelector("[data-cr-dd-zoom-out]")?.addEventListener("click", () => {
+      zoomLevel = Math.max(0.5, zoomLevel - 0.25);
+      applyZoom(stage);
+    });
+    media.querySelector("[data-cr-dd-pan]")?.addEventListener("click", (e) => {
+      panMode = !panMode;
+      e.currentTarget.setAttribute("aria-pressed", panMode ? "true" : "false");
+      e.currentTarget.classList.toggle("is-active", panMode);
+      applyZoom(stage);
+    });
+    const pop = media.querySelector("[data-cr-dd-bg-popover]");
+    media.querySelector("[data-cr-dd-bg-open]")?.addEventListener("click", () => {
+      if (pop) pop.hidden = !pop.hidden;
+    });
+    media.querySelectorAll("[data-cr-dd-bg]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        viewerBg = btn.getAttribute("data-cr-dd-bg") || "#37375A";
+        applyViewerBg(media);
+        const sw = media.querySelector("[data-cr-dd-bg-swatch]");
+        if (sw) {
+          sw.classList.toggle("is-checker", viewerBg === "checker");
+          sw.style.background = viewerBg === "checker" ? "" : viewerBg;
+        }
+        if (pop) pop.hidden = true;
+      });
+    });
+  }
+
+  const vis = panel.querySelector("#cr-dd-visibility");
+  if (vis && !vis.__crDdBound) {
+    vis.__crDdBound = true;
+    vis.addEventListener("change", async () => {
+      if (!activeItem?.id || visibilitySaving) return;
+      const next = vis.checked ? "public" : "private";
+      visibilitySaving = true;
+      try {
+        const data = await partnerFetch("admin-design-set-visibility", {
+          method: "POST",
+          body: { design_id: activeItem.id, visibility: next },
+        });
+        activeItem.visibility = next;
+        if (!activeItem.metadata) activeItem.metadata = {};
+        activeItem.metadata.visibility = next;
+        if (data.metadata) activeItem.metadata = { ...activeItem.metadata, ...data.metadata };
+        showToast("Visibility", next === "public" ? "Public" : "Private");
+      } catch (e) {
+        vis.checked = !vis.checked;
+        showToast("Error", e.message || "Visibility update failed");
+      } finally {
+        visibilitySaving = false;
+      }
+    });
+  }
 }
 
 function renderEdit(item) {
@@ -297,29 +440,26 @@ function renderEdit(item) {
           <button type="button" class="cr-dd-edit__tab" data-cr-dd-edit-tool="remove_object">Remove object</button>
         </div>
         <div class="cr-dd-edit__panel is-active" data-cr-dd-edit-panel="crop">
-          <p class="cr-dd-muted">Auto-crop trims transparent / near-white borders, then commits the image (admin).</p>
-          <button type="button" class="btn btn-primary" id="cr-dd-edit-crop">Crop</button>
+          <p class="cr-dd-muted">Preview auto-crop, then Save in the footer to commit.</p>
+          <button type="button" class="btn btn-secondary" id="cr-dd-edit-crop">Preview crop</button>
         </div>
         <div class="cr-dd-edit__panel" data-cr-dd-edit-panel="remove_bg" hidden>
           <div class="cr-dd-edit__seg">
             <button type="button" class="cr-dd-edit__seg-btn is-active" data-cr-dd-bg-mode="complete">Complete</button>
             <button type="button" class="cr-dd-edit__seg-btn" data-cr-dd-bg-mode="outside">Outside</button>
           </div>
-          <div class="cr-dd-edit__row">
-            <button type="button" class="btn btn-secondary" id="cr-dd-edit-bg-preview">Preview</button>
-            <button type="button" class="btn btn-primary" id="cr-dd-edit-bg-apply">Apply</button>
-          </div>
+          <button type="button" class="btn btn-secondary" id="cr-dd-edit-bg-preview">Preview</button>
         </div>
         <div class="cr-dd-edit__panel" data-cr-dd-edit-panel="remove_color" hidden>
-          <p class="cr-dd-muted">Click the image to pick a color, then apply.</p>
+          <p class="cr-dd-muted">Click the image to pick a color, then preview. Save in the footer to commit.</p>
           <div class="cr-dd-edit__row">
             <span class="cr-dd-edit__swatch" id="cr-dd-edit-color-swatch"></span>
             <label>Tolerance <input type="range" id="cr-dd-edit-color-tol" min="0" max="100" value="30" /></label>
           </div>
-          <button type="button" class="btn btn-primary" id="cr-dd-edit-color-apply">Apply color remove</button>
+          <button type="button" class="btn btn-secondary" id="cr-dd-edit-color-preview">Preview color remove</button>
         </div>
         <div class="cr-dd-edit__panel" data-cr-dd-edit-panel="remove_object" hidden>
-          <p class="cr-dd-muted">Object remove needs a brush mask in Creator. Use Preview Modal on the storefront for full mask painting, or Remove background / color here.</p>
+          <p class="cr-dd-muted">Object remove needs a brush mask in Creator. Use History to re-apply versions.</p>
           <button type="button" class="btn btn-secondary" id="cr-dd-edit-history">Edit history</button>
         </div>
         <div id="cr-dd-edit-versions" class="cr-dd-edit__versions" hidden></div>
@@ -352,6 +492,14 @@ function setEditStatus(msg) {
   el.textContent = msg;
 }
 
+function markPendingEdit(kind, payload, previewUrl) {
+  pendingEdit = { kind, payload, previewUrl };
+  editDirty = true;
+  const img = document.getElementById("cr-dd-edit-img");
+  if (img && previewUrl) img.src = previewUrl;
+  renderFooter();
+}
+
 function applyEditedDesign(design) {
   if (!design || !activeItem) return;
   if (design.preview_url) activeItem.preview_url = design.preview_url;
@@ -362,28 +510,29 @@ function applyEditedDesign(design) {
   if (img && url) img.src = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
   const overviewImg = document.querySelector('[data-cr-dd-panel="overview"] .cr-dd-frame__img');
   if (overviewImg && url) overviewImg.src = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+  pendingEdit = null;
+  editDirty = false;
+  setProductsTabNeedsUpdate(true);
+  renderFooter();
 }
 
-async function runRemoveBg(previewOnly) {
+async function runRemoveBgPreview() {
   if (!activeItem?.id || editBusy) return;
   editBusy = true;
-  setEditStatus(previewOnly ? "Generating preview…" : "Processing…");
+  setEditStatus("Generating preview…");
   try {
     const data = await partnerFetch("admin-design-edit-remove-background", {
       method: "POST",
       body: {
         design_id: activeItem.id,
         mode: editBgMode,
-        preview_only: !!previewOnly,
+        preview_only: true,
       },
     });
-    if (previewOnly && data.version?.preview_url) {
-      const img = document.getElementById("cr-dd-edit-img");
-      if (img) img.src = data.version.preview_url;
-      showToast("Preview", "Preview ready — click Apply to save");
-    } else if (data.design) {
-      applyEditedDesign(data.design);
-      showToast("Edit", "Background removed");
+    const previewUrl = data.version?.preview_url || data.preview_url;
+    if (previewUrl) {
+      markPendingEdit("remove_bg", { mode: editBgMode }, previewUrl);
+      showToast("Preview", "Preview ready — click Save to commit");
     }
   } catch (e) {
     showToast("Error", e.message || "Remove background failed");
@@ -393,14 +542,14 @@ async function runRemoveBg(previewOnly) {
   }
 }
 
-async function runRemoveColor() {
+async function runRemoveColorPreview() {
   if (!activeItem?.id || editBusy) return;
   if (!editPickedColor) {
     showToast("Remove color", "Click the image to pick a color first");
     return;
   }
   editBusy = true;
-  setEditStatus("Processing…");
+  setEditStatus("Generating preview…");
   try {
     const data = await partnerFetch("admin-design-edit-remove-color", {
       method: "POST",
@@ -409,12 +558,23 @@ async function runRemoveColor() {
         colors: [editPickedColor],
         tolerance: editColorTolerance,
         replace_mode: "transparent",
-        preview_only: false,
+        preview_only: true,
       },
     });
-    if (data.design) {
-      applyEditedDesign(data.design);
-      showToast("Edit", "Color removed");
+    const previewUrl = data.version?.preview_url || data.preview_url || data.design?.preview_url;
+    if (previewUrl) {
+      markPendingEdit(
+        "remove_color",
+        {
+          colors: [editPickedColor],
+          tolerance: editColorTolerance,
+          replace_mode: "transparent",
+        },
+        previewUrl
+      );
+      showToast("Preview", "Preview ready — click Save to commit");
+    } else {
+      showToast("Preview", "No preview URL returned");
     }
   } catch (e) {
     showToast("Error", e.message || "Remove color failed");
@@ -424,37 +584,85 @@ async function runRemoveColor() {
   }
 }
 
-async function runAutoCrop() {
+async function runAutoCropPreview() {
   if (!activeItem?.id || editBusy) return;
-  const img = document.getElementById("cr-dd-edit-img");
-  if (!img?.src) return;
   editBusy = true;
-  setEditStatus("Cropping…");
+  setEditStatus("Cropping preview…");
   try {
     const data = await partnerFetch("admin-design-edit-image-preview", {
       method: "POST",
       body: { design_id: activeItem.id, image_operation: "auto_crop" },
     });
     const preview = data.preview_url || designPreviewUrl(activeItem);
-    const commit = await partnerFetch("admin-design-edit-image-commit", {
-      method: "POST",
-      body: {
-        design_id: activeItem.id,
+    markPendingEdit(
+      "crop",
+      {
         preview_url: preview,
         original_url: data.original_url || preview,
         image_operation: "auto_crop",
       },
-    });
-    if (commit.ok !== false) {
-      activeItem.preview_url = preview;
-      applyEditedDesign({ preview_url: preview, original_url: data.original_url || preview });
-      showToast("Edit", "Crop committed (current image URLs)");
-    }
+      preview
+    );
+    showToast("Preview", "Crop preview ready — click Save to commit");
   } catch (e) {
     showToast("Error", e.message || "Crop failed");
   } finally {
     editBusy = false;
     setEditStatus("");
+  }
+}
+
+async function commitPendingEdit() {
+  if (!activeItem?.id || !pendingEdit || editBusy) return;
+  editBusy = true;
+  setEditStatus("Saving…");
+  try {
+    if (pendingEdit.kind === "crop") {
+      const commit = await partnerFetch("admin-design-edit-image-commit", {
+        method: "POST",
+        body: {
+          design_id: activeItem.id,
+          ...pendingEdit.payload,
+        },
+      });
+      if (commit.ok !== false) {
+        applyEditedDesign({
+          preview_url: pendingEdit.payload.preview_url,
+          original_url: pendingEdit.payload.original_url,
+        });
+        showToast("Edit", "Crop saved");
+      }
+    } else if (pendingEdit.kind === "remove_bg") {
+      const data = await partnerFetch("admin-design-edit-remove-background", {
+        method: "POST",
+        body: {
+          design_id: activeItem.id,
+          mode: pendingEdit.payload.mode || editBgMode,
+          preview_only: false,
+        },
+      });
+      if (data.design) applyEditedDesign(data.design);
+      else applyEditedDesign({ preview_url: pendingEdit.previewUrl });
+      showToast("Edit", "Background removed");
+    } else if (pendingEdit.kind === "remove_color") {
+      const data = await partnerFetch("admin-design-edit-remove-color", {
+        method: "POST",
+        body: {
+          design_id: activeItem.id,
+          ...pendingEdit.payload,
+          preview_only: false,
+        },
+      });
+      if (data.design) applyEditedDesign(data.design);
+      else applyEditedDesign({ preview_url: pendingEdit.previewUrl });
+      showToast("Edit", "Color removed");
+    }
+  } catch (e) {
+    showToast("Error", e.message || "Save failed");
+  } finally {
+    editBusy = false;
+    setEditStatus("");
+    renderFooter();
   }
 }
 
@@ -520,10 +728,9 @@ function bindEditPanel() {
       });
     });
   });
-  panel.querySelector("#cr-dd-edit-crop")?.addEventListener("click", () => runAutoCrop());
-  panel.querySelector("#cr-dd-edit-bg-preview")?.addEventListener("click", () => runRemoveBg(true));
-  panel.querySelector("#cr-dd-edit-bg-apply")?.addEventListener("click", () => runRemoveBg(false));
-  panel.querySelector("#cr-dd-edit-color-apply")?.addEventListener("click", () => runRemoveColor());
+  panel.querySelector("#cr-dd-edit-crop")?.addEventListener("click", () => runAutoCropPreview());
+  panel.querySelector("#cr-dd-edit-bg-preview")?.addEventListener("click", () => runRemoveBgPreview());
+  panel.querySelector("#cr-dd-edit-color-preview")?.addEventListener("click", () => runRemoveColorPreview());
   panel.querySelector("#cr-dd-edit-history")?.addEventListener("click", () => loadEditVersions());
   panel.querySelector("#cr-dd-edit-color-tol")?.addEventListener("input", (e) => {
     editColorTolerance = Number(e.target.value) || 30;
@@ -559,6 +766,21 @@ function chipHtml(list, kind) {
     .map(
       (t, i) =>
         `<span class="cr-dd-chip">${escapeHtml(t)} <button type="button" data-cr-dd-chip-rm="${kind}:${i}" aria-label="Remove">×</button></span>`
+    )
+    .join("");
+}
+
+function bulletsHtml(meta) {
+  const bullets = normalizeBullets(meta);
+  return bullets
+    .map(
+      (b, i) => `
+      <div class="cr-dd-meta-field cr-dd-meta-bullet">
+        <label for="cr-dd-meta-bullet-${i}">Bullet point ${i + 1}</label>
+        <input type="text" id="cr-dd-meta-bullet-${i}" data-cr-dd-bullet="${i}" value="${escapeHtml(
+          b
+        )}" autocomplete="off" maxlength="256" />
+      </div>`
     )
     .join("");
 }
@@ -599,9 +821,10 @@ function renderMetadata(item) {
           <button type="button" class="btn btn-secondary" data-cr-dd-meta-add="subtopics">Add</button>
         </div>
       </div>
-      <div class="cr-dd-meta-actions">
-        <button type="button" class="btn btn-secondary" id="cr-dd-meta-regen">Regenerate</button>
-        <button type="button" class="btn btn-primary" id="cr-dd-meta-save" ${metaDirty ? "" : "disabled"}>Save metadata</button>
+      <div class="cr-dd-meta-bullets">
+        <h3 class="cr-dd-meta-bullets__title">Amazon bullet points</h3>
+        <p class="cr-dd-muted">Generated on Save / Regenerate with other metadata (DE listing bullets).</p>
+        ${bulletsHtml(meta)}
       </div>
     </div>`;
 }
@@ -617,6 +840,12 @@ function collectMetaFromDom() {
   meta.subtopics = normalizeList(meta.subtopics);
   meta.topic = meta.topics;
   meta.subtopic = meta.subtopics;
+  const bullets = [];
+  document.querySelectorAll("[data-cr-dd-bullet]").forEach((el) => {
+    const v = String(el.value || "").trim();
+    if (v) bullets.push(v);
+  });
+  meta[AMAZON_BULLETS_KEY] = bullets;
   draftMeta = meta;
   return meta;
 }
@@ -630,22 +859,80 @@ function refreshMetaChips() {
   if (topics) topics.innerHTML = chipHtml(meta.topics || [], "topics");
   if (sub) sub.innerHTML = chipHtml(meta.subtopics || [], "subtopics");
   bindChipRemoves();
-  const saveBtn = document.getElementById("cr-dd-meta-save");
-  if (saveBtn) saveBtn.disabled = !metaDirty || metaSaving || !activeItem?.id;
+  renderFooter();
 }
 
 function bindChipRemoves() {
   const root = ensureRoot();
   root.querySelectorAll("[data-cr-dd-chip-rm]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.onclick = () => {
       const [kind, idxStr] = String(btn.getAttribute("data-cr-dd-chip-rm") || "").split(":");
       const idx = Number(idxStr);
       const meta = collectMetaFromDom();
       if (Array.isArray(meta[kind])) meta[kind].splice(idx, 1);
       metaDirty = true;
       refreshMetaChips();
-    });
+    };
   });
+}
+
+function markMetaDirty() {
+  metaDirty = true;
+  collectMetaFromDom();
+  renderFooter();
+}
+
+async function saveMetadata() {
+  if (!activeItem?.id || metaSaving) return;
+  const metadata = collectMetaFromDom();
+  metaSaving = true;
+  renderFooter();
+  try {
+    const data = await partnerFetch("admin-design-edit-metadata", {
+      method: "POST",
+      body: { design_id: activeItem.id, metadata },
+    });
+    const saved = data.metadata || metadata;
+    activeItem.metadata = saved;
+    if (saved.title) {
+      activeItem.title = saved.title;
+      const titleEl = document.getElementById("cr-dd-title");
+      if (titleEl) titleEl.textContent = saved.title;
+    }
+    draftMeta = cloneMeta(saved);
+    metaDirty = false;
+    setProductsTabNeedsUpdate(true);
+    const panel = ensureRoot().querySelector('[data-cr-dd-panel="metadata"]');
+    if (panel) {
+      panel.innerHTML = renderMetadata(activeItem);
+      bindMetadataPanel();
+    }
+    showToast("Metadata", "Saved");
+  } catch (e) {
+    showToast("Error", e.message || "Save failed");
+  } finally {
+    metaSaving = false;
+    renderFooter();
+  }
+}
+
+async function regenerateMetadata() {
+  if (!activeItem?.id) return;
+  try {
+    const data = await partnerFetch("admin-design-metadata-full-regenerate", {
+      method: "POST",
+      body: { design_id: activeItem.id },
+    });
+    const next = data.metadata || {};
+    draftMeta = cloneMeta(next);
+    metaDirty = true;
+    ensureRoot().querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(activeItem);
+    bindMetadataPanel();
+    renderFooter();
+    showToast("Metadata", "Regenerated draft — save to persist");
+  } catch (e) {
+    showToast("Error", e.message || "Regenerate failed");
+  }
 }
 
 function bindMetadataPanel() {
@@ -653,17 +940,10 @@ function bindMetadataPanel() {
   const panel = root.querySelector('[data-cr-dd-panel="metadata"]');
   if (!panel) return;
   panel.__crDdMetaBound = true;
-  panel.querySelector("#cr-dd-meta-title")?.addEventListener("input", () => {
-    metaDirty = true;
-    collectMetaFromDom();
-    const saveBtn = document.getElementById("cr-dd-meta-save");
-    if (saveBtn) saveBtn.disabled = false;
-  });
-  panel.querySelector("#cr-dd-meta-description")?.addEventListener("input", () => {
-    metaDirty = true;
-    collectMetaFromDom();
-    const saveBtn = document.getElementById("cr-dd-meta-save");
-    if (saveBtn) saveBtn.disabled = false;
+  panel.querySelector("#cr-dd-meta-title")?.addEventListener("input", markMetaDirty);
+  panel.querySelector("#cr-dd-meta-description")?.addEventListener("input", markMetaDirty);
+  panel.querySelectorAll("[data-cr-dd-bullet]").forEach((el) => {
+    el.addEventListener("input", markMetaDirty);
   });
   panel.querySelectorAll("[data-cr-dd-meta-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -680,54 +960,6 @@ function bindMetadataPanel() {
     });
   });
   bindChipRemoves();
-  panel.querySelector("#cr-dd-meta-save")?.addEventListener("click", async () => {
-    if (!activeItem?.id || metaSaving) return;
-    const metadata = collectMetaFromDom();
-    metaSaving = true;
-    const saveBtn = document.getElementById("cr-dd-meta-save");
-    if (saveBtn) saveBtn.disabled = true;
-    try {
-      await partnerFetch("admin-design-edit-metadata", {
-        method: "POST",
-        body: { design_id: activeItem.id, metadata },
-      });
-      activeItem.metadata = metadata;
-      if (metadata.title) {
-        activeItem.title = metadata.title;
-        const titleEl = document.getElementById("cr-dd-title");
-        if (titleEl) titleEl.textContent = metadata.title;
-      }
-      draftMeta = cloneMeta(metadata);
-      metaDirty = false;
-      showToast("Metadata", "Saved");
-    } catch (e) {
-      showToast("Error", e.message || "Save failed");
-    } finally {
-      metaSaving = false;
-      if (saveBtn) saveBtn.disabled = !metaDirty;
-    }
-  });
-  panel.querySelector("#cr-dd-meta-regen")?.addEventListener("click", async () => {
-    if (!activeItem?.id) return;
-    const btn = document.getElementById("cr-dd-meta-regen");
-    if (btn) btn.disabled = true;
-    try {
-      const data = await partnerFetch("admin-design-metadata-full-regenerate", {
-        method: "POST",
-        body: { design_id: activeItem.id },
-      });
-      const next = data.metadata || {};
-      draftMeta = cloneMeta(next);
-      metaDirty = true;
-      root.querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(activeItem);
-      bindMetadataPanel();
-      showToast("Metadata", "Regenerated draft — save to persist");
-    } catch (e) {
-      showToast("Error", e.message || "Regenerate failed");
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  });
 }
 
 function parseZoneFrac(f) {
@@ -841,6 +1073,124 @@ function mountComposedMedia(mediaEl, previewConfig, designUrl) {
   if (stack) mediaEl.appendChild(stack);
 }
 
+function openNeedsUpdateInfoModal() {
+  const diffs = lastUpdateDiff?.field_diffs || [];
+  const keys = lastUpdateDiff?.changed_fields || lastUpdateDiff?.changed_field_keys || [];
+  const imageChanged = !!(lastUpdateDiff?.image_changed || lastUpdateDiff?.summary?.image_changed);
+  let body;
+  if (diffs.length) {
+    body = `<ul class="cr-dd-diff-list">${diffs
+      .map(
+        (d) => `<li>
+          <strong>${escapeHtml(d.field)}</strong>
+          <div class="cr-dd-diff-list__row"><span class="cr-dd-diff-list__label">Before</span><code>${escapeHtml(
+            d.before || "—"
+          )}</code></div>
+          <div class="cr-dd-diff-list__row"><span class="cr-dd-diff-list__label">After</span><code>${escapeHtml(
+            d.after || "—"
+          )}</code></div>
+        </li>`
+      )
+      .join("")}</ul>`;
+  } else {
+    const bits = [];
+    if (imageChanged) bits.push("Design image changed");
+    if (keys.length) bits.push(`Metadata: ${keys.slice(0, 12).join(", ")}`);
+    body = bits.length
+      ? `<p class="confirm-modal-message">${escapeHtml(bits.join(" · "))}</p>`
+      : `<p class="confirm-modal-message">Changes detected since last publish snapshot.</p>`;
+  }
+  openModal({
+    title: "Needs update — changes since publish",
+    bodyHtml: body,
+    onSave: async () => {},
+  });
+  const saveBtn = document.getElementById("modal-save");
+  if (saveBtn) saveBtn.style.display = "none";
+}
+
+function syncProductSelectionUi() {
+  const root = ensureRoot();
+  root.querySelectorAll(".cr-dd-prod").forEach((card) => {
+    const key = card.getAttribute("data-product-key") || "";
+    const cb = card.querySelector(".cr-dd-prod__cb");
+    if (cb) cb.checked = selectedProductKeys.has(key);
+    card.classList.toggle("is-selected", selectedProductKeys.has(key));
+  });
+  renderFooter();
+}
+
+async function updateSelectedProducts() {
+  if (!activeItem) return;
+  await openUpdateModal([activeItem], {
+    onDone: async () => {
+      setProductsTabNeedsUpdate(false);
+      await renderProductsPanel(activeItem);
+    },
+  });
+}
+
+async function publishSelectedProducts() {
+  if (!activeItem?.id) return;
+  const offlineKeys = [...selectedProductKeys].filter((k) => {
+    const st = productStateByKey.get(k);
+    return st && !st.online;
+  });
+  if (!offlineKeys.length) {
+    showToast("Publish", "Select offline products");
+    return;
+  }
+  try {
+    await partnerFetch("admin-design-publish-missing-online", {
+      method: "POST",
+      body: { design_id: activeItem.id, product_keys: offlineKeys, region_code: "EU" },
+    });
+    showToast("Publish", `${offlineKeys.length} product(s) queued`);
+    selectedProductKeys.clear();
+    await renderProductsPanel(activeItem);
+    if (typeof onClosed === "function") await onClosed({ reload: false });
+  } catch (e) {
+    // Fallback to full publish modal if direct keys fail
+    try {
+      await openPublishModal([activeItem], {
+        onDone: async () => {
+          await renderProductsPanel(activeItem);
+          if (typeof onClosed === "function") await onClosed({ reload: false });
+        },
+      });
+    } catch (_) {
+      showToast("Error", e.message || "Publish failed");
+    }
+  }
+}
+
+async function unpublishSelectedProducts() {
+  if (!activeItem?.id) return;
+  const onlineKeys = [...selectedProductKeys].filter((k) => productStateByKey.get(k)?.online);
+  if (!onlineKeys.length) {
+    showToast("Unpublish", "Select online products");
+    return;
+  }
+  const publishedIds = onlineKeys
+    .map((k) => Number(productStateByKey.get(k)?.publishedId || 0))
+    .filter((n) => n > 0);
+  try {
+    await partnerFetch("admin-design-unpublish", {
+      method: "POST",
+      body: {
+        design_id: activeItem.id,
+        product_keys: onlineKeys,
+        published_ids: publishedIds,
+      },
+    });
+    showToast("Unpublish", `${onlineKeys.length} product(s) queued`);
+    selectedProductKeys.clear();
+    await renderProductsPanel(activeItem);
+  } catch (e) {
+    showToast("Error", e.message || "Unpublish failed");
+  }
+}
+
 async function renderProductsPanel(item) {
   const root = ensureRoot();
   const panel = root.querySelector('[data-cr-dd-panel="products"]');
@@ -852,29 +1202,51 @@ async function renderProductsPanel(item) {
   }
   panel.innerHTML = `<p class="cr-dd-muted">Loading products…</p>`;
   try {
-    const [preview, live] = await Promise.all([
+    const [preview, live, diff] = await Promise.all([
       partnerFetch("admin-design-action-preview", {
         query: { action: "publish", design_id: designId },
       }),
       partnerFetch("admin-design-shopify-live-products", {
         query: { design_id: designId },
-      }).catch(() => ({ products: [] })),
+      }).catch(() => ({ products: [], items: [] })),
+      partnerFetch("admin-design-update-diff", {
+        query: { design_id: designId },
+      }).catch(() => null),
     ]);
     lastCatalogPreview = preview;
+    lastUpdateDiff = diff;
+    const needsUpdate = !!(diff?.has_updatable_changes || diff?.image_changed || Number(diff?.changed_count || 0) > 0);
+    setProductsTabNeedsUpdate(needsUpdate);
+
     if (preview.design_metadata && typeof preview.design_metadata === "object") {
       item.metadata = { ...(item.metadata || {}), ...preview.design_metadata };
       if (!metaDirty) draftMeta = cloneMeta(item.metadata);
     }
+    if (preview.design_visibility) item.visibility = preview.design_visibility;
     if (preview.design_preview_url) item.preview_url = preview.design_preview_url;
+    if (preview.user_image_url && item.metadata) item.metadata.user_image_url = preview.user_image_url;
+    if (preview.user_prompt && item.metadata) item.metadata.user_prompt = preview.user_prompt;
+    if (preview.design_prompt && item.metadata) item.metadata.design_prompt = preview.design_prompt;
 
+    // Refresh overview if still mounted
+    const overviewPanel = root.querySelector('[data-cr-dd-panel="overview"]');
+    if (overviewPanel && activeTab === "overview") {
+      overviewPanel.innerHTML = renderOverview(item);
+      bindOverviewChrome();
+    }
+
+    const liveRows = live.products || live.items || live.published_products || [];
     const liveByKey = new Map();
-    for (const p of live.products || live.published_products || []) {
+    for (const p of liveRows) {
       liveByKey.set(String(p.product_key || ""), p);
     }
 
     const catalog = preview.catalog_products || [];
     const missingKeys = new Set((preview.missing_products || []).map((p) => String(p.product_key || "")));
     const designUrl = preview.design_preview_url || designPreviewUrl(item);
+
+    productStateByKey = new Map();
+    selectedProductKeys = new Set([...selectedProductKeys].filter((k) => catalog.some((p) => String(p.product_key) === k)));
 
     const byChannel = new Map();
     for (const p of catalog) {
@@ -895,7 +1267,11 @@ async function renderProductsPanel(item) {
     });
 
     panel.innerHTML =
-      keys
+      `<div class="cr-dd-prod-toolbar">
+        <button type="button" class="btn btn-secondary btn-sm" data-cr-dd-prod-all>Select all</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-cr-dd-prod-none>Select none</button>
+      </div>` +
+      (keys
         .map((ch) => {
           const products = byChannel.get(ch) || [];
           const cards = products
@@ -903,11 +1279,27 @@ async function renderProductsPanel(item) {
               const key = String(p.product_key || "");
               const liveRow = liveByKey.get(key);
               const online = !missingKeys.has(key) || !!liveRow;
-              return `<article class="cr-dd-prod ${online ? "is-online" : "is-offline"}" data-product-key="${escapeHtml(
-                key
-              )}" data-online="${online ? "1" : "0"}">
+              const publishedId = liveRow?.published_id || null;
+              const needs = online && needsUpdate;
+              productStateByKey.set(key, {
+                online,
+                publishedId,
+                needsUpdate: needs,
+                title: p.title || key,
+              });
+              return `<article class="cr-dd-prod ${online ? "is-online" : "is-offline"} ${
+                needs ? "needs-update" : ""
+              }" data-product-key="${escapeHtml(key)}" data-online="${online ? "1" : "0"}">
+              <label class="cr-dd-prod__check">
+                <input type="checkbox" class="cr-dd-prod__cb" data-product-key="${escapeHtml(key)}" />
+              </label>
               <div class="cr-dd-prod__media" data-cr-dd-prod-media></div>
               <div class="cr-dd-prod__title">${escapeHtml(p.title || key)}</div>
+              ${
+                needs
+                  ? `<button type="button" class="cr-dd-needs-update" data-cr-dd-needs-update>needs Update</button>`
+                  : ""
+              }
             </article>`;
             })
             .join("");
@@ -920,9 +1312,8 @@ async function renderProductsPanel(item) {
           <div class="cr-channel__body"><div class="cr-dd-prod-grid">${cards}</div></div>
         </details>`;
         })
-        .join("") || `<p class="cr-dd-muted">No admin catalog products for this design type.</p>`;
+        .join("") || `<p class="cr-dd-muted">No admin catalog products for this design type.</p>`);
 
-    // Mount media: Online = Shopify live image; Offline = studio composite
     for (const p of catalog) {
       const ch = String(p.channel || "").toLowerCase();
       if (ch === "amazon") continue;
@@ -948,35 +1339,31 @@ async function renderProductsPanel(item) {
       }
     }
 
-    // Overview mock panel
-    const mockMedia = root.querySelector("#cr-dd-mock-media");
-    if (mockMedia) {
-      const firstLive = (live.products || live.published_products || []).find(
-        (p) => p.image_url || p.featured_image
-      );
-      if (firstLive) {
-        mockMedia.innerHTML = `<img class="cr-dd-frame__img" src="${escapeHtml(
-          firstLive.image_url || firstLive.featured_image
-        )}" alt="" />`;
-      } else {
-        const offline = (preview.missing_products || preview.catalog_products || [])[0];
-        const cfg =
-          offline?.studio_card_preview ||
-          synthesizePreviewFromMocks(offline?.mock_urls || (offline?.mock_url ? [offline.mock_url] : []));
-        if (cfg && designUrl) {
-          mockMedia.innerHTML = "";
-          mockMedia.classList.add("cr-dd-compose", "cr-dd-compose--overview");
-          mountComposedMedia(mockMedia, cfg, designUrl);
-        } else if (designUrl) {
-          mockMedia.innerHTML = `<div class="cr-dd-frame__stack">
-            <img class="cr-dd-frame__img" src="${escapeHtml(designUrl)}" alt="" />
-            <span class="cr-dd-frame__stack-label">Studio-style preview</span>
-          </div>`;
-        } else {
-          mockMedia.innerHTML = `<div class="cr-dd-frame__empty">No live Shopify mock yet</div>`;
-        }
-      }
-    }
+    panel.querySelector("[data-cr-dd-prod-all]")?.addEventListener("click", () => {
+      for (const key of productStateByKey.keys()) selectedProductKeys.add(key);
+      syncProductSelectionUi();
+    });
+    panel.querySelector("[data-cr-dd-prod-none]")?.addEventListener("click", () => {
+      selectedProductKeys.clear();
+      syncProductSelectionUi();
+    });
+    panel.querySelectorAll(".cr-dd-prod__cb").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const key = cb.getAttribute("data-product-key") || "";
+        if (cb.checked) selectedProductKeys.add(key);
+        else selectedProductKeys.delete(key);
+        syncProductSelectionUi();
+      });
+    });
+    panel.querySelectorAll("[data-cr-dd-needs-update]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openNeedsUpdateInfoModal();
+      });
+    });
+
+    syncProductSelectionUi();
   } catch (e) {
     panel.innerHTML = `<p class="cr-bulk-error">${escapeHtml(e.message || "Failed to load products")}</p>`;
   }
@@ -990,10 +1377,17 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   metaDirty = false;
   metaSaving = false;
   editTool = "crop";
+  editDirty = false;
+  pendingEdit = null;
   zoomLevel = 1;
   panMode = false;
   viewerBg = "#37375A";
   lastCatalogPreview = null;
+  lastUpdateDiff = null;
+  productsNeedUpdate = false;
+  selectedProductKeys = new Set();
+  productStateByKey = new Map();
+  activeTab = "overview";
   const root = ensureRoot();
   root.querySelector("#cr-dd-title").textContent = item.title || "Design";
   root.querySelector('[data-cr-dd-panel="overview"]').innerHTML = renderOverview(item);
@@ -1001,6 +1395,7 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   root.querySelector('[data-cr-dd-panel="edit"]').__crDdEditBound = false;
   root.querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(item);
   root.querySelector('[data-cr-dd-panel="products"]').innerHTML = `<p class="cr-dd-muted">Loading catalog…</p>`;
+  setProductsTabNeedsUpdate(false);
   setTab("overview");
   root.hidden = false;
   document.body.classList.add("cr-dd-open");
@@ -1016,4 +1411,9 @@ export function closeDesignDetailModal() {
   activeItem = null;
   draftMeta = null;
   lastCatalogPreview = null;
+  lastUpdateDiff = null;
+  pendingEdit = null;
+  editDirty = false;
+  selectedProductKeys = new Set();
+  productStateByKey = new Map();
 }
