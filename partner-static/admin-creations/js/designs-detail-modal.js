@@ -246,6 +246,12 @@ function cloneMeta(meta) {
   return m;
 }
 
+function normalizeVisibility(raw) {
+  if (raw === true || raw === 1 || raw === "1") return "public";
+  if (raw === false || raw === 0 || raw === "0") return "private";
+  return String(raw ?? "private").trim().toLowerCase() === "public" ? "public" : "private";
+}
+
 function pickPrompts(item) {
   const meta = item?.metadata || {};
   const designPrompt = String(
@@ -255,10 +261,15 @@ function pickPrompts(item) {
   const userImage = String(
     meta.user_image_url || meta.image_url || meta.baseImageUrl || item.user_image_url || ""
   ).trim();
-  const visibility =
-    String(item.visibility || meta.visibility || "private").toLowerCase() === "public"
-      ? "public"
-      : "private";
+  // Prefer top-level creations.visibility (list/API), then metadata fallback.
+  const hasTopLevel =
+    item &&
+    Object.prototype.hasOwnProperty.call(item, "visibility") &&
+    item.visibility != null &&
+    String(item.visibility).trim() !== "";
+  const visibility = normalizeVisibility(
+    hasTopLevel ? item.visibility : meta.visibility ?? item?.is_public ?? meta.is_public
+  );
   return { designPrompt, userPrompt, userImage, visibility };
 }
 
@@ -1306,7 +1317,11 @@ async function renderProductsPanel(item) {
       item.metadata = { ...(item.metadata || {}), ...preview.design_metadata };
       if (!metaDirty) draftMeta = cloneMeta(item.metadata);
     }
-    if (preview.design_visibility) item.visibility = preview.design_visibility;
+    if (preview.design_visibility != null && String(preview.design_visibility).trim() !== "") {
+      item.visibility = normalizeVisibility(preview.design_visibility);
+      if (!item.metadata) item.metadata = {};
+      item.metadata.visibility = item.visibility;
+    }
     if (preview.design_preview_url) item.preview_url = preview.design_preview_url;
     if (preview.user_image_url && item.metadata) item.metadata.user_image_url = preview.user_image_url;
     if (preview.user_prompt && item.metadata) item.metadata.user_prompt = preview.user_prompt;
