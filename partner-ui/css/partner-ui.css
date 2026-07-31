@@ -8761,7 +8761,7 @@ html[data-portal="admin"] .cr-dd-prod__media {
   aspect-ratio: 1;
   border-radius: 12px;
   overflow: hidden;
-  background: #0f172a;
+  background: #1a1a22;
 }
 html[data-portal="admin"] .cr-pub-card__mock,
 html[data-portal="admin"] .cr-dd-prod__mock {
@@ -8788,6 +8788,64 @@ html[data-portal="admin"] .cr-dd-prod__design {
   object-fit: contain;
   filter: drop-shadow(0 6px 12px rgba(0,0,0,.35));
   pointer-events: none;
+}
+/* Studio card compositing (Creator parity) */
+html[data-portal="admin"] .cr-dd-compose,
+html[data-portal="admin"] .cr-dd-prod__media.cr-dd-compose {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+html[data-portal="admin"] .cr-dd-compose__slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+html[data-portal="admin"] .cr-dd-compose__frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+html[data-portal="admin"] .cr-dd-compose__stage {
+  position: relative;
+  line-height: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+html[data-portal="admin"] .cr-dd-compose__mock {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+html[data-portal="admin"] .cr-dd-compose__zone {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+html[data-portal="admin"] .cr-dd-compose__design {
+  position: absolute;
+  display: block;
+  max-width: none;
+  max-height: none;
+  pointer-events: none;
+  opacity: 0;
+}
+html[data-portal="admin"] .cr-dd-compose__design.is-laid-out {
+  opacity: 1;
+}
+html[data-portal="admin"] .cr-dd-compose--overview {
+  height: 100%;
+  min-height: 0;
 }
 html[data-portal="admin"] .cr-pub-card__media .cr-badge,
 html[data-portal="admin"] .cr-dd-prod__media .cr-badge {
@@ -8892,6 +8950,21 @@ html[data-portal="admin"] .cr-dd__panels {
   min-width: 0;
   overflow: auto;
   padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 transparent;
+}
+html[data-portal="admin"] .cr-dd__panels::-webkit-scrollbar {
+  width: 6px;
+}
+html[data-portal="admin"] .cr-dd__panels::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-portal="admin"] .cr-dd__panels::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+html[data-portal="admin"] .cr-dd__panels::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
 }
 html[data-portal="admin"] .cr-dd__panel {
   display: none;
@@ -9007,27 +9080,291 @@ html[data-portal="admin"] .cr-dd-note {
 html[data-portal="admin"] .cr-dd-muted {
   color: #94a3b8;
 }
-html[data-portal="admin"] .cr-dd-meta {
+html[data-portal="admin"] .cr-dd-zoom-stage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+  transition: transform 0.15s ease;
+}
+html[data-portal="admin"] .cr-dd-zoom-stage.is-pan {
+  cursor: grab;
+}
+html[data-portal="admin"] .cr-dd-zoom-chrome {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  z-index: 12;
+}
+html[data-portal="admin"] .cr-dd-zoom-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.65);
+  background: rgba(15, 23, 42, 0.88);
+  color: #f8fafc;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+html[data-portal="admin"] .cr-dd-zoom-btn.is-active {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+html[data-portal="admin"] .cr-dd-bg-btn {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 2px solid #f59e0b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  cursor: pointer;
+  z-index: 12;
+}
+html[data-portal="admin"] .cr-dd-bg-swatch {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  background: #37375a;
+}
+html[data-portal="admin"] .cr-dd-bg-swatch.is-checker,
+html[data-portal="admin"] .cr-dd-bg-preset.is-checker {
+  background-image: linear-gradient(45deg,#cbd5e1 25%,transparent 25%),linear-gradient(-45deg,#cbd5e1 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cbd5e1 75%),linear-gradient(-45deg,transparent 75%,#cbd5e1 75%);
+  background-size: 8px 8px;
+  background-position: 0 0,0 4px,4px -4px,-4px 0;
+  background-color: #e2e8f0;
+}
+html[data-portal="admin"] .cr-dd-bg-popover {
+  position: absolute;
+  bottom: 56px;
+  right: 12px;
+  z-index: 14;
+  background: #1e1e24;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  padding: 10px;
+}
+html[data-portal="admin"] .cr-dd-bg-presets {
+  display: flex;
+  gap: 6px;
+}
+html[data-portal="admin"] .cr-dd-bg-preset {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.2);
+  cursor: pointer;
+  padding: 0;
+}
+html[data-portal="admin"] .cr-dd-prompt {
+  padding: 10px 12px 14px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+html[data-portal="admin"] .cr-dd-prompt label {
+  display: block;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+html[data-portal="admin"] .cr-dd-prompt textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(0,0,0,.25);
+  color: #e2e8f0;
+  padding: 8px 10px;
+  resize: vertical;
+  font: inherit;
+}
+html[data-portal="admin"] .cr-dd-meta-editor {
+  max-width: 720px;
+  display: grid;
+  gap: 16px;
+}
+html[data-portal="admin"] .cr-dd-meta-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 6px;
+  color: #e2e8f0;
+}
+html[data-portal="admin"] .cr-dd-meta-field input[type="text"],
+html[data-portal="admin"] .cr-dd-meta-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  color: #f8fafc;
+  padding: 10px 12px;
+  font: inherit;
+}
+html[data-portal="admin"] .cr-dd-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 28px;
+}
+html[data-portal="admin"] .cr-dd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 12px;
+}
+html[data-portal="admin"] .cr-dd-chip button {
+  border: 0;
+  background: transparent;
+  color: #fbbf24;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+html[data-portal="admin"] .cr-dd-meta-add {
+  display: flex;
+  gap: 8px;
+}
+html[data-portal="admin"] .cr-dd-meta-add input {
+  flex: 1;
+}
+html[data-portal="admin"] .cr-dd-meta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+html[data-portal="admin"] .cr-dd-edit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  html[data-portal="admin"] .cr-dd-edit {
+    grid-template-columns: 1fr;
+  }
+}
+html[data-portal="admin"] .cr-dd-edit__viewer {
+  position: relative;
+  border: 2px solid #f59e0b;
+  border-radius: 10px;
+  background: #37375a;
+  min-height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  overflow: hidden;
+}
+html[data-portal="admin"] .cr-dd-edit__img {
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: crosshair;
+}
+html[data-portal="admin"] .cr-dd-edit__status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  font-size: 12px;
+}
+html[data-portal="admin"] .cr-dd-edit__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+html[data-portal="admin"] .cr-dd-edit__tab {
+  border: 1px solid rgba(255,255,255,.12);
+  background: transparent;
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+html[data-portal="admin"] .cr-dd-edit__tab.is-active {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.08);
+}
+html[data-portal="admin"] .cr-dd-edit__panel {
+  display: grid;
+  gap: 12px;
+}
+html[data-portal="admin"] .cr-dd-edit__seg {
+  display: flex;
+  gap: 6px;
+}
+html[data-portal="admin"] .cr-dd-edit__seg-btn {
+  flex: 1;
+  border: 1px solid rgba(255,255,255,.12);
+  background: transparent;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-dd-edit__seg-btn.is-active {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.1);
+}
+html[data-portal="admin"] .cr-dd-edit__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+html[data-portal="admin"] .cr-dd-edit__swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.25);
+  background: transparent;
+}
+html[data-portal="admin"] .cr-dd-edit__versions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+html[data-portal="admin"] .cr-dd-edit__version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
   gap: 8px;
-  margin: 0 0 16px;
 }
-html[data-portal="admin"] .cr-dd-meta-row {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 10px;
+html[data-portal="admin"] .cr-dd-edit__version-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255,255,255,.04);
   font-size: 13px;
-}
-html[data-portal="admin"] .cr-dd-meta-row dt {
-  color: #94a3b8;
-  margin: 0;
-}
-html[data-portal="admin"] .cr-dd-meta-row dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 html[data-portal="admin"] .cr-dd .cr-channel {
   background: rgba(255,255,255,.03);

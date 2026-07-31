@@ -326,6 +326,17 @@ const ADMIN_OPS = new Set([
   "admin-design-update-diff",
   "admin-design-update-commit",
   "admin-design-shopify-live-products",
+  "admin-design-edit-metadata",
+  "admin-design-edit-image-preview",
+  "admin-design-edit-image-commit",
+  "admin-design-metadata-regenerate",
+  "admin-design-edit-remove-background",
+  "admin-design-edit-remove-color",
+  "admin-design-edit-remove-object",
+  "admin-design-edit-list-versions",
+  "admin-design-edit-apply-version",
+  "admin-design-edit-delete-version",
+  "admin-design-metadata-full-regenerate",
   "admin-brand-list",
   "admin-brand-get",
   "admin-brand-suspend",
@@ -1551,6 +1562,91 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { handleAdminDesignShopifyLiveProducts } = await import("../admin/adminDesignActions.js");
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminDesignShopifyLiveProducts(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-edit-metadata" && request.method === "POST") {
+      const { handleAdminDesignEditMetadata } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignEditMetadata(proxyRequestWithAdminOwner(request, admin.owner_id), env, ctx);
+    }
+    if (op === "admin-design-edit-image-preview" && request.method === "POST") {
+      const { handleAdminDesignEditImagePreview } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignEditImagePreview(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-edit-image-commit" && request.method === "POST") {
+      const { handleAdminDesignEditImageCommit } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignEditImageCommit(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-metadata-regenerate" && request.method === "POST") {
+      const { handleAdminDesignMetadataRegenerate } = await import("../admin/adminDesignMetadataRegenerate.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignMetadataRegenerate(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-metadata-full-regenerate" && request.method === "POST") {
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      const body = await request.clone().json().catch(() => ({}));
+      const designId = Number(body.design_id || body.designId || 0);
+      let designOwner = "";
+      if (designId && env.CREATOR_DB) {
+        const row = await env.CREATOR_DB.prepare(`SELECT owner_id FROM creations WHERE id = ? LIMIT 1`)
+          .bind(designId)
+          .first()
+          .catch(() => null);
+        designOwner = String(row?.owner_id || "").trim();
+      }
+      const { handleRegenerateDesignMetadata } = await import("../design/regenerateMetadata.js");
+      return handleRegenerateDesignMetadata(
+        proxyRequestWithAdminOwner(request, designOwner || admin.owner_id),
+        env
+      );
+    }
+    if (
+      (op === "admin-design-edit-remove-background" ||
+        op === "admin-design-edit-remove-color" ||
+        op === "admin-design-edit-remove-object" ||
+        op === "admin-design-edit-list-versions" ||
+        op === "admin-design-edit-apply-version" ||
+        op === "admin-design-edit-delete-version") &&
+      (request.method === "POST" || request.method === "GET")
+    ) {
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      let designOwner = "";
+      let designId = 0;
+      if (request.method === "GET") {
+        designId = Number(url.searchParams.get("design_id") || 0);
+      } else {
+        const body = await request.clone().json().catch(() => ({}));
+        designId = Number(body.design_id || body.designId || 0);
+      }
+      if (designId && env.CREATOR_DB) {
+        const row = await env.CREATOR_DB.prepare(`SELECT owner_id FROM creations WHERE id = ? LIMIT 1`)
+          .bind(designId)
+          .first()
+          .catch(() => null);
+        designOwner = String(row?.owner_id || "").trim();
+      }
+      const proxied = proxyRequestWithAdminOwner(request, designOwner || admin.owner_id);
+      const edit = await import("../design/designEditVersions.js");
+      if (op === "admin-design-edit-remove-background" && request.method === "POST") {
+        return edit.handleDesignEditRemoveBackground(proxied, env);
+      }
+      if (op === "admin-design-edit-remove-color" && request.method === "POST") {
+        return edit.handleDesignEditRemoveColor(proxied, env);
+      }
+      if (op === "admin-design-edit-remove-object" && request.method === "POST") {
+        return edit.handleDesignEditRemoveObject(proxied, env);
+      }
+      if (op === "admin-design-edit-list-versions" && request.method === "GET") {
+        return edit.handleListDesignEditVersions(proxied, env);
+      }
+      if (op === "admin-design-edit-apply-version" && request.method === "POST") {
+        return edit.handleApplyDesignEditVersion(proxied, env);
+      }
+      if (op === "admin-design-edit-delete-version" && request.method === "POST") {
+        return edit.handleDeleteDesignEditVersion(proxied, env);
+      }
+      return json({ ok: false, error: "method_not_allowed" }, 405, cors);
     }
 
     if (op === "admin-brand-list" && request.method === "GET") {

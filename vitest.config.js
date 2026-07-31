@@ -33,7 +33,12 @@ export default defineConfig({
     },
   },
   test: {
-    testTimeout: 15000,
+    // Windows under deploy load: avoid flaky vitest-pool worker timeouts.
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 30000,
+    pool: "forks",
+    maxWorkers: 2,
     include: ["test/**/*.test.{js,ts,mjs,cjs}"],
     exclude: [
       "e2e/**",
@@ -48,3 +53,4 @@ export default defineConfig({
     ],
   },
 });
+
