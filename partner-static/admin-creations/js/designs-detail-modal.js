@@ -1071,10 +1071,90 @@ function mountComposedMedia(mediaEl, previewConfig, designUrl) {
   const slides = (previewConfig?.slides || []).filter((s) => s?.mock_url);
   if (!slides.length || !designUrl) {
     mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
-    return;
+    return false;
   }
   const stack = buildComposeStack(slides[0], designUrl);
-  if (stack) mediaEl.appendChild(stack);
+  if (stack) {
+    mediaEl.appendChild(stack);
+    return true;
+  }
+  mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
+  return false;
+}
+
+function mountOfflineProductMedia(mediaEl, product, designUrl) {
+  if (!mediaEl) return;
+  const previewConfig =
+    product.studio_card_preview ||
+    synthesizePreviewFromMocks(
+      product.mock_urls || (product.mock_url ? [product.mock_url] : [])
+    );
+  if (mountComposedMedia(mediaEl, previewConfig, designUrl)) return;
+
+  // Fallback when studio compose has no usable mock: show catalog/preview/design image.
+  const fallbackUrl = String(
+    product.mock_url ||
+      (Array.isArray(product.mock_urls) && product.mock_urls[0]) ||
+      product.preview_url ||
+      designUrl ||
+      ""
+  ).trim();
+  mediaEl.classList.remove("cr-dd-compose");
+  if (fallbackUrl) {
+    mediaEl.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(fallbackUrl)}" alt="" loading="lazy" />`;
+  } else {
+    mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
+  }
+}
+
+function syncProdCarouselArrows(carousel) {
+  if (!carousel) return;
+  const track = carousel.querySelector(".cr-dd-prod-carousel__track");
+  const prev = carousel.querySelector(".cr-dd-prod-carousel__arrow--prev");
+  const next = carousel.querySelector(".cr-dd-prod-carousel__arrow--next");
+  if (!track) return;
+  const maxScroll = Math.max(0, track.scrollWidth - track.clientWidth - 1);
+  const hasOverflow = maxScroll > 2;
+  carousel.classList.toggle("has-overflow", hasOverflow);
+  if (prev) {
+    prev.hidden = !hasOverflow;
+    prev.disabled = track.scrollLeft <= 2;
+  }
+  if (next) {
+    next.hidden = !hasOverflow;
+    next.disabled = track.scrollLeft >= maxScroll;
+  }
+}
+
+function bindProdCarousels(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-cr-dd-prod-carousel]").forEach((carousel) => {
+    if (carousel.__crDdCarouselBound) {
+      syncProdCarouselArrows(carousel);
+      return;
+    }
+    carousel.__crDdCarouselBound = true;
+    const track = carousel.querySelector(".cr-dd-prod-carousel__track");
+    const prev = carousel.querySelector(".cr-dd-prod-carousel__arrow--prev");
+    const next = carousel.querySelector(".cr-dd-prod-carousel__arrow--next");
+    if (!track) return;
+    const step = () => Math.max(160, Math.floor(track.clientWidth * 0.85));
+    prev?.addEventListener("click", () => {
+      track.scrollBy({ left: -step(), behavior: "smooth" });
+    });
+    next?.addEventListener("click", () => {
+      track.scrollBy({ left: step(), behavior: "smooth" });
+    });
+    track.addEventListener("scroll", () => syncProdCarouselArrows(carousel), { passive: true });
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => syncProdCarouselArrows(carousel));
+      ro.observe(track);
+      carousel.__crDdCarouselRo = ro;
+    }
+    requestAnimationFrame(() => syncProdCarouselArrows(carousel));
+    setTimeout(() => syncProdCarouselArrows(carousel), 120);
+    setTimeout(() => syncProdCarouselArrows(carousel), 400);
+  });
 }
 
 function openNeedsUpdateInfoModal() {
@@ -1313,7 +1393,13 @@ async function renderProductsPanel(item) {
           <summary class="cr-channel__summary"><span>${escapeHtml(label)}</span><span class="cr-channel__count">${
             products.length
           }</span></summary>
-          <div class="cr-channel__body"><div class="cr-dd-prod-grid">${cards}</div></div>
+          <div class="cr-channel__body">
+            <div class="cr-dd-prod-carousel" data-cr-dd-prod-carousel>
+              <button type="button" class="cr-dd-prod-carousel__arrow cr-dd-prod-carousel__arrow--prev" aria-label="Previous products" hidden>‹</button>
+              <div class="cr-dd-prod-carousel__track" data-cr-dd-prod-track>${cards}</div>
+              <button type="button" class="cr-dd-prod-carousel__arrow cr-dd-prod-carousel__arrow--next" aria-label="Next products" hidden>›</button>
+            </div>
+          </div>
         </details>`;
         })
         .join("") || `<p class="cr-dd-muted">No admin catalog products for this design type.</p>`);
@@ -1333,15 +1419,22 @@ async function renderProductsPanel(item) {
           ? `<img class="cr-dd-prod__mock" src="${escapeHtml(liveUrl)}" alt="" loading="lazy" /><span class="cr-badge cr-badge--online">Online</span>`
           : `<span class="cr-dd-prod__empty">No Shopify image</span><span class="cr-badge cr-badge--online">Online</span>`;
       } else {
-        const previewConfig =
-          p.studio_card_preview || synthesizePreviewFromMocks(p.mock_urls || (p.mock_url ? [p.mock_url] : []));
-        mountComposedMedia(media, previewConfig, designUrl);
+        mountOfflineProductMedia(media, p, designUrl);
         const badge = document.createElement("span");
         badge.className = "cr-badge cr-badge--offline";
         badge.textContent = "Offline";
         media.appendChild(badge);
       }
     }
+
+    bindProdCarousels(panel);
+    panel.querySelectorAll("details.cr-channel").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (details.open) {
+          requestAnimationFrame(() => bindProdCarousels(details));
+        }
+      });
+    });
 
     panel.querySelector("[data-cr-dd-prod-all]")?.addEventListener("click", () => {
       for (const key of productStateByKey.keys()) selectedProductKeys.add(key);

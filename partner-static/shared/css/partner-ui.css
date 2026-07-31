@@ -8746,6 +8746,66 @@ html[data-portal="admin"] .cr-dd-prod-grid {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
 }
+/* Design detail modal — horizontal product carousel per channel (Printify / Todify / …) */
+html[data-portal="admin"] .cr-dd-prod-carousel {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__track::-webkit-scrollbar {
+  height: 6px;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__track::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel .cr-dd-prod {
+  flex: 0 0 148px;
+  width: 148px;
+  max-width: 148px;
+  scroll-snap-align: start;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__arrow {
+  align-self: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.75);
+  color: #f8fafc;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  z-index: 2;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__arrow:hover:not(:disabled) {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+html[data-portal="admin"] .cr-dd-prod-carousel__arrow[hidden] {
+  display: none !important;
+}
 html[data-portal="admin"] .cr-pub-card {
   display: flex;
   flex-direction: column;
