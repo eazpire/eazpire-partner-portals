@@ -1613,6 +1613,12 @@ function startPublishProgressWatch(sessionId, productKeys, designId) {
         if (pending.size) await finishRemainingFromLive();
         else await softRefreshLiveProductRows(designId);
         stopPublishWatch();
+        // Re-fetch update-diff so "needs update" clears once publish wrote the baseline snapshot.
+        try {
+          if (activeItem && Number(activeItem.id) === Number(designId)) {
+            await renderProductsPanel(activeItem);
+          }
+        } catch (_) {}
         if (typeof onClosed === "function") onClosed({ reload: false }).catch(() => {});
         return;
       }
