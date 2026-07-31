@@ -14,6 +14,7 @@ function resetModalFooter() {
   const saveBtn = document.getElementById("modal-save");
   const cancelBtn = document.getElementById("modal-cancel");
   const modal = document.querySelector("#modal-backdrop .modal");
+  document.getElementById("modal-discard")?.remove();
   if (saveBtn) {
     saveBtn.textContent = DEFAULT_MODAL_FOOTER.saveLabel;
     saveBtn.className = DEFAULT_MODAL_FOOTER.saveClass;
@@ -147,6 +148,57 @@ export function confirmAction({
     saveBtn.style.display = "";
   }
   if (cancelBtn) cancelBtn.textContent = cancelLabel;
+}
+
+/**
+ * Unsaved-changes dialog: Cancel (keep editing) · Discard · Save.
+ * bodyHtml may include a change summary list.
+ */
+export function confirmUnsavedChanges({
+  title = "Unsaved changes",
+  bodyHtml = "",
+  saveLabel = "Save",
+  discardLabel = "Discard",
+  cancelLabel = "Cancel",
+  onSave,
+  onDiscard,
+  onCancel,
+}) {
+  openModal({
+    title,
+    bodyHtml:
+      bodyHtml ||
+      `<p class="confirm-modal-message">You have unsaved changes. Save them, discard them, or cancel to keep editing.</p>`,
+    onSave: async () => {
+      if (onSave) await onSave();
+    },
+  });
+  modalCancelHandler = onCancel || null;
+  const saveBtn = document.getElementById("modal-save");
+  const cancelBtn = document.getElementById("modal-cancel");
+  const foot = document.querySelector("#modal-backdrop .modal-foot");
+  const modal = document.querySelector("#modal-backdrop .modal");
+  modal?.classList.add("confirm-modal");
+  if (cancelBtn) cancelBtn.textContent = cancelLabel;
+  if (saveBtn) {
+    saveBtn.textContent = saveLabel;
+    saveBtn.className = "btn btn-primary";
+    saveBtn.style.display = "";
+  }
+  // Remove prior discard button if any, then insert before Save.
+  foot?.querySelector("#modal-discard")?.remove();
+  if (foot && saveBtn) {
+    const discardBtn = document.createElement("button");
+    discardBtn.type = "button";
+    discardBtn.id = "modal-discard";
+    discardBtn.className = "btn btn-danger";
+    discardBtn.textContent = discardLabel;
+    discardBtn.addEventListener("click", async () => {
+      closeModal();
+      if (onDiscard) await onDiscard();
+    });
+    foot.insertBefore(discardBtn, saveBtn);
+  }
 }
 
 function navItemHtml(item) {

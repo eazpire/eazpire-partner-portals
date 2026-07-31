@@ -3,7 +3,7 @@
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
-import { openModal, showToast } from "/creations/shared/js/partner-shell.js";
+import { openModal, showToast, confirmAction, confirmUnsavedChanges } from "/creations/shared/js/partner-shell.js";
 import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
 
 const ICON = {
@@ -21,6 +21,7 @@ const BULLET_SLOT_COUNT = 5;
 let activeItem = null;
 let onClosed = null;
 let draftMeta = null;
+let metaBaseline = "";
 let metaDirty = false;
 let metaSaving = false;
 let editTool = "crop";
@@ -40,6 +41,7 @@ let selectedProductKeys = new Set();
 let productStateByKey = new Map(); // key -> { online, publishedId, needsUpdate, title }
 let activeTab = "overview";
 let visibilitySaving = false;
+let closePromptOpen = false;
 
 function mockCompositing() {
   return window.CreatorMockCompositing || null;
@@ -78,7 +80,7 @@ function ensureRoot() {
   document.body.appendChild(root);
 
   root.querySelectorAll("[data-cr-dd-close]").forEach((el) => {
-    el.addEventListener("click", () => closeDesignDetailModal());
+    el.addEventListener("click", () => requestCloseDesignDetailModal());
   });
   root.querySelectorAll("[data-cr-dd-tab]").forEach((btn) => {
     btn.addEventListener("click", () => setTab(btn.getAttribute("data-cr-dd-tab")));
@@ -89,7 +91,11 @@ function ensureRoot() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && root && !root.hidden) closeDesignDetailModal();
+    if (e.key !== "Escape" || !root || root.hidden) return;
+    // Shared confirm modal owns Escape while open.
+    const shared = document.getElementById("modal-backdrop");
+    if (shared?.classList.contains("show")) return;
+    requestCloseDesignDetailModal();
   });
 
   return root;
@@ -171,7 +177,7 @@ async function handleFooterAction(act) {
     return;
   }
   if (act === "meta-save") {
-    await saveMetadata();
+    await saveMetadataWithConfirm();
     return;
   }
   if (act === "meta-regen") {
@@ -179,7 +185,7 @@ async function handleFooterAction(act) {
     return;
   }
   if (act === "edit-save") {
-    await commitPendingEdit();
+    await commitPendingEditWithConfirm();
     return;
   }
   if (act === "prod-update") {
@@ -244,6 +250,120 @@ function cloneMeta(meta) {
   m.subtopic = m.subtopics;
   m[AMAZON_BULLETS_KEY] = normalizeBullets(m).filter(Boolean);
   return m;
+}
+
+function metaComparable(meta) {
+  const m = cloneMeta(meta);
+  return JSON.stringify({
+    title: m.title || "",
+    description: m.description || "",
+    tags: m.tags || [],
+    topics: m.topics || [],
+    subtopics: m.subtopics || [],
+    bullets: m[AMAZON_BULLETS_KEY] || [],
+  });
+}
+
+function captureMetaBaseline(meta) {
+  metaBaseline = metaComparable(meta || draftMeta || activeItem?.metadata || {});
+  metaDirty = false;
+}
+
+function recomputeMetaDirty() {
+  if (!activeItem) {
+    metaDirty = false;
+    return false;
+  }
+  const current = metaComparable(collectMetaFromDom());
+  metaDirty = current !== metaBaseline;
+  renderFooter();
+  return metaDirty;
+}
+
+function describeMetaChanges() {
+  const before = JSON.parse(metaBaseline || metaComparable({}));
+  const after = JSON.parse(metaComparable(collectMetaFromDom()));
+  const lines = [];
+  const pushDiff = (label, a, b) => {
+    const sa = Array.isArray(a) ? a.join(", ") : String(a || "");
+    const sb = Array.isArray(b) ? b.join(", ") : String(b || "");
+    if (sa === sb) return;
+    lines.push({
+      label,
+      before: sa || "—",
+      after: sb || "—",
+    });
+  };
+  pushDiff("Title", before.title, after.title);
+  pushDiff("Description", before.description, after.description);
+  pushDiff("Tags", before.tags, after.tags);
+  pushDiff("Topics", before.topics, after.topics);
+  pushDiff("Subtopics", before.subtopics, after.subtopics);
+  pushDiff("Amazon bullets", before.bullets, after.bullets);
+  return lines;
+}
+
+function describeEditChange() {
+  if (!pendingEdit) return null;
+  const kind = pendingEdit.kind || "edit";
+  const labels = {
+    crop: "Auto-crop",
+    remove_bg: "Remove background",
+    remove_color: "Remove color",
+    remove_object: "Remove object",
+  };
+  return labels[kind] || kind;
+}
+
+function hasUnsavedDirty() {
+  if (activeTab === "metadata" || metaDirty) {
+    if (draftMeta || activeItem) recomputeMetaDirty();
+  }
+  return !!(metaDirty || (editDirty && pendingEdit));
+}
+
+function dirtySummaryHtml({ forSave = false } = {}) {
+  const bits = [];
+  if (metaDirty) {
+    const diffs = describeMetaChanges();
+    if (diffs.length) {
+      bits.push(
+        `<p class="confirm-modal-message"><strong>Metadata</strong></p><ul class="cr-dd-diff-list">${diffs
+          .map(
+            (d) => `<li>
+          <strong>${escapeHtml(d.label)}</strong>
+          <div class="cr-dd-diff-list__row"><span class="cr-dd-diff-list__label">Before</span><code>${escapeHtml(
+            d.before
+          )}</code></div>
+          <div class="cr-dd-diff-list__row"><span class="cr-dd-diff-list__label">After</span><code>${escapeHtml(
+            d.after
+          )}</code></div>
+        </li>`
+          )
+          .join("")}</ul>`
+      );
+    }
+  }
+  if (editDirty && pendingEdit) {
+    const label = describeEditChange();
+    bits.push(
+      `<p class="confirm-modal-message"><strong>Edit Design</strong> — ${escapeHtml(
+        label || "Pending image edit"
+      )}</p>`
+    );
+  }
+  if (!bits.length) {
+    bits.push(`<p class="confirm-modal-message">No changes detected.</p>`);
+  } else if (forSave) {
+    bits.unshift(
+      `<p class="confirm-modal-message">Apply these changes to the design?</p>`
+    );
+  } else {
+    bits.unshift(
+      `<p class="confirm-modal-message">You have unsaved changes. Save them, discard them, or cancel to keep editing.</p>`
+    );
+  }
+  return bits.join("");
 }
 
 function normalizeVisibility(raw) {
@@ -515,6 +635,17 @@ function markPendingEdit(kind, payload, previewUrl) {
   renderFooter();
 }
 
+function clearPendingEdit({ resetImage = false } = {}) {
+  pendingEdit = null;
+  editDirty = false;
+  if (resetImage && activeItem) {
+    const img = document.getElementById("cr-dd-edit-img");
+    const url = designPreviewUrl(activeItem);
+    if (img && url) img.src = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+  }
+  renderFooter();
+}
+
 function applyEditedDesign(design) {
   if (!design || !activeItem) return;
   if (design.preview_url) activeItem.preview_url = design.preview_url;
@@ -625,6 +756,20 @@ async function runAutoCropPreview() {
     editBusy = false;
     setEditStatus("");
   }
+}
+
+async function commitPendingEditWithConfirm() {
+  if (!activeItem?.id || !pendingEdit || editBusy) return;
+  const label = describeEditChange() || "Pending image edit";
+  confirmAction({
+    title: "Apply design edit?",
+    message: `Save this edit to the design?\n\n${label}`,
+    confirmLabel: "Save",
+    cancelLabel: "Cancel",
+    onConfirm: async () => {
+      await commitPendingEdit();
+    },
+  });
 }
 
 async function commitPendingEdit() {
@@ -885,21 +1030,47 @@ function bindChipRemoves() {
       const idx = Number(idxStr);
       const meta = collectMetaFromDom();
       if (Array.isArray(meta[kind])) meta[kind].splice(idx, 1);
-      metaDirty = true;
+      recomputeMetaDirty();
       refreshMetaChips();
     };
   });
 }
 
 function markMetaDirty() {
-  metaDirty = true;
   collectMetaFromDom();
-  renderFooter();
+  recomputeMetaDirty();
+}
+
+async function saveMetadataWithConfirm() {
+  if (!activeItem?.id || metaSaving) return;
+  collectMetaFromDom();
+  if (!recomputeMetaDirty()) {
+    showToast("Metadata", "No changes to save");
+    return;
+  }
+  confirmAction({
+    title: "Apply metadata changes?",
+    message: "Save the metadata changes listed in the next step to this design?",
+    confirmLabel: "Save",
+    cancelLabel: "Cancel",
+    onConfirm: async () => {
+      // Show detailed summary then persist (second beat via same confirm body).
+      await saveMetadata();
+    },
+  });
+  // Replace body with the real diff summary while the confirm is open.
+  const body = document.getElementById("modal-body");
+  if (body) body.innerHTML = dirtySummaryHtml({ forSave: true });
 }
 
 async function saveMetadata() {
   if (!activeItem?.id || metaSaving) return;
   const metadata = collectMetaFromDom();
+  if (metaComparable(metadata) === metaBaseline) {
+    metaDirty = false;
+    renderFooter();
+    return;
+  }
   metaSaving = true;
   renderFooter();
   try {
@@ -915,7 +1086,7 @@ async function saveMetadata() {
       if (titleEl) titleEl.textContent = saved.title;
     }
     draftMeta = cloneMeta(saved);
-    metaDirty = false;
+    captureMetaBaseline(draftMeta);
     setProductsTabNeedsUpdate(true);
     const panel = ensureRoot().querySelector('[data-cr-dd-panel="metadata"]');
     if (panel) {
@@ -940,10 +1111,9 @@ async function regenerateMetadata() {
     });
     const next = data.metadata || {};
     draftMeta = cloneMeta(next);
-    metaDirty = true;
     ensureRoot().querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(activeItem);
     bindMetadataPanel();
-    renderFooter();
+    recomputeMetaDirty();
     showToast("Metadata", "Regenerated draft — save to persist");
   } catch (e) {
     showToast("Error", e.message || "Regenerate failed");
@@ -970,7 +1140,7 @@ function bindMetadataPanel() {
       if (!Array.isArray(meta[kind])) meta[kind] = [];
       if (!meta[kind].includes(val)) meta[kind].push(val);
       if (input) input.value = "";
-      metaDirty = true;
+      recomputeMetaDirty();
       refreshMetaChips();
     });
   });
@@ -1484,13 +1654,19 @@ async function renderProductsPanel(item) {
 export async function openDesignDetailModal(item, { onClose } = {}) {
   if (!item) return;
   activeItem = item;
+  // Normalize visibility from list/API (creations.visibility) before first paint.
+  const picked = pickPrompts(item);
+  activeItem.visibility = picked.visibility;
+  if (!activeItem.metadata) activeItem.metadata = {};
+  activeItem.metadata.visibility = picked.visibility;
   onClosed = onClose || null;
   draftMeta = cloneMeta(item.metadata);
-  metaDirty = false;
+  captureMetaBaseline(draftMeta);
   metaSaving = false;
   editTool = "crop";
   editDirty = false;
   pendingEdit = null;
+  closePromptOpen = false;
   zoomLevel = 1;
   panMode = false;
   viewerBg = "#37375A";
@@ -1502,10 +1678,10 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   activeTab = "overview";
   const root = ensureRoot();
   root.querySelector("#cr-dd-title").textContent = item.title || "Design";
-  root.querySelector('[data-cr-dd-panel="overview"]').innerHTML = renderOverview(item);
-  root.querySelector('[data-cr-dd-panel="edit"]').innerHTML = renderEdit(item);
+  root.querySelector('[data-cr-dd-panel="overview"]').innerHTML = renderOverview(activeItem);
+  root.querySelector('[data-cr-dd-panel="edit"]').innerHTML = renderEdit(activeItem);
   root.querySelector('[data-cr-dd-panel="edit"]').__crDdEditBound = false;
-  root.querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(item);
+  root.querySelector('[data-cr-dd-panel="metadata"]').innerHTML = renderMetadata(activeItem);
   root.querySelector('[data-cr-dd-panel="products"]').innerHTML = `<p class="cr-dd-muted">Loading catalog…</p>`;
   setProductsTabNeedsUpdate(false);
   setTab("overview");
@@ -1513,7 +1689,65 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   document.body.classList.add("cr-dd-open");
   bindOverviewChrome();
   bindMetadataPanel();
-  renderProductsPanel(item).catch(() => {});
+  renderProductsPanel(activeItem).catch(() => {});
+}
+
+function discardUnsavedChanges() {
+  if (metaDirty) {
+    draftMeta = cloneMeta(activeItem?.metadata);
+    captureMetaBaseline(draftMeta);
+    const panel = ensureRoot().querySelector('[data-cr-dd-panel="metadata"]');
+    if (panel) {
+      panel.innerHTML = renderMetadata(activeItem);
+      bindMetadataPanel();
+    }
+  }
+  if (editDirty || pendingEdit) {
+    clearPendingEdit({ resetImage: true });
+  }
+}
+
+export function requestCloseDesignDetailModal() {
+  if (closePromptOpen) return;
+  // Refresh dirty flags from live form state.
+  if (activeItem) {
+    try {
+      collectMetaFromDom();
+      recomputeMetaDirty();
+    } catch (_) {
+      /* panel may not be mounted */
+    }
+  }
+  if (!hasUnsavedDirty()) {
+    closeDesignDetailModal();
+    return;
+  }
+  closePromptOpen = true;
+  confirmUnsavedChanges({
+    title: "Unsaved changes",
+    bodyHtml: dirtySummaryHtml({ forSave: false }),
+    saveLabel: "Save",
+    discardLabel: "Discard",
+    cancelLabel: "Cancel",
+    onCancel: () => {
+      closePromptOpen = false;
+    },
+    onDiscard: () => {
+      closePromptOpen = false;
+      discardUnsavedChanges();
+      closeDesignDetailModal();
+    },
+    onSave: async () => {
+      closePromptOpen = false;
+      try {
+        if (metaDirty) await saveMetadata();
+        if (editDirty && pendingEdit) await commitPendingEdit();
+        if (!hasUnsavedDirty()) closeDesignDetailModal();
+      } catch (_) {
+        /* keep modal open on failure */
+      }
+    },
+  });
 }
 
 export function closeDesignDetailModal() {
@@ -1522,10 +1756,13 @@ export function closeDesignDetailModal() {
   document.body.classList.remove("cr-dd-open");
   activeItem = null;
   draftMeta = null;
+  metaBaseline = "";
+  metaDirty = false;
   lastCatalogPreview = null;
   lastUpdateDiff = null;
   pendingEdit = null;
   editDirty = false;
+  closePromptOpen = false;
   selectedProductKeys = new Set();
   productStateByKey = new Map();
 }
