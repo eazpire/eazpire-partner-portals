@@ -95,6 +95,7 @@ function renderPanel(st) {
   const amz = ch.amazon || {};
   const settings = amz.settings || {};
   const pricing = settings.pricing || {};
+  const sellerValue = settings.seller_id || st.seller_id_env_fallback || "";
   const sellerPh = st.seller_id_env_fallback || "from env AMAZON_SELLER_ID";
 
   return `
@@ -138,8 +139,8 @@ function renderPanel(st) {
             <div class="ce-channels-settings-grid">
               <div class="field"><label for="ce-ch-amz-seller">Seller ID</label>
                 <input id="ce-ch-amz-seller" class="input" type="text" value="${escapeHtml(
-                  settings.seller_id || ""
-                )}" placeholder="${escapeHtml(sellerPh)}" /></div>
+                  sellerValue
+                )}" placeholder="${escapeHtml(sellerPh)}" autocomplete="off" /></div>
               <div class="field"><label for="ce-ch-amz-brand">Brand</label>
                 <input id="ce-ch-amz-brand" class="input" type="text" value="${escapeHtml(
                   settings.brand || "eazpire"
@@ -150,7 +151,7 @@ function renderPanel(st) {
                 )}" /></div>
               <div class="field"><label for="ce-ch-amz-browse">Browse node</label>
                 <input id="ce-ch-amz-browse" class="input" type="text" value="${escapeHtml(
-                  settings.browse_node || ""
+                  settings.browse_node || "1760215031"
                 )}" /></div>
               <div class="field" style="grid-column:1/-1"><label for="ce-ch-amz-ship">Merchant shipping group name</label>
                 <input id="ce-ch-amz-ship" class="input" type="text" value="${escapeHtml(
