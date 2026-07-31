@@ -7319,6 +7319,13 @@ html[data-portal="admin"] .cr-card__view-chip.active {
   color: #6d28d9;
   box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
 }
+/* Nav overlay must not steal card clicks — only the arrow buttons capture events. */
+html[data-portal="admin"] .cr-card__nav {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
 html[data-portal="admin"] .cr-card__arrow {
   position: absolute;
   z-index: 4;
@@ -7336,6 +7343,7 @@ html[data-portal="admin"] .cr-card__arrow {
   place-items: center;
   cursor: pointer;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+  pointer-events: auto;
 }
 html[data-portal="admin"] .cr-card__arrow--left {
   left: 10px;

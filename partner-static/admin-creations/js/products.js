@@ -15,7 +15,20 @@ const SOURCE_FILTERS = [
   { key: "shopify", label: "Shopify" },
 ];
 
-const SHOPIFY_DETAIL_SOURCES = new Set(["shopify", "todify", "samples"]);
+/**
+ * Sources whose list `id` is a Shopify product id (safe fallback when shopify_product_id is missing).
+ * Customer rows use D1 ids — only open the detail modal when shopify_product_id is set.
+ */
+const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "samples"]);
+
+function resolveShopifyProductId(item) {
+  const fromField = String(item?.shopify_product_id || "").trim();
+  if (fromField) return fromField;
+  if (SHOPIFY_ROW_ID_SOURCES.has(state.source)) {
+    return String(item?.id || "").trim();
+  }
+  return "";
+}
 
 /** Creator-parity nav first; Mockups/Metafields kept as admin extras. */
 const DETAIL_MENUS = [
@@ -210,8 +223,8 @@ function productCardHtml(item) {
           ${groups.some((g) => g.views.length > 1) ? '<button type="button" class="cr-card__arrow cr-card__arrow--up" data-cr-grid-axis="view" data-cr-grid-delta="-1" aria-label="Previous view">↑</button><button type="button" class="cr-card__arrow cr-card__arrow--down" data-cr-grid-axis="view" data-cr-grid-delta="1" aria-label="Next view">↓</button>' : ""}
         </div>`
       : "";
-  const shopifyId = item.shopify_product_id || item.id || "";
-  const clickable = SHOPIFY_DETAIL_SOURCES.has(state.source) && shopifyId;
+  const shopifyId = resolveShopifyProductId(item);
+  const clickable = Boolean(shopifyId);
 
   return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}" data-cr-grid-groups="${escapeHtml(JSON.stringify(groups))}" data-cr-variant-index="0" data-cr-view-index="0"${clickable ? ` data-shopify-id="${escapeHtml(String(shopifyId))}" data-product-title="${escapeHtml(title)}" tabindex="0" role="button"` : ""}>
     <div class="cr-card__title-row">
@@ -792,13 +805,13 @@ function bindProductCards(el) {
       return;
     }
     const card = e.target.closest(".cr-card--product[data-shopify-id]");
-    if (!card || !SHOPIFY_DETAIL_SOURCES.has(state.source)) return;
+    if (!card?.dataset?.shopifyId) return;
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
   el.querySelector("#cr-products-grid")?.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     const card = e.target.closest?.(".cr-card--product[data-shopify-id]");
-    if (!card || !SHOPIFY_DETAIL_SOURCES.has(state.source)) return;
+    if (!card?.dataset?.shopifyId) return;
     e.preventDefault();
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
