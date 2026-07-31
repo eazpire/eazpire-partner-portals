@@ -383,6 +383,8 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
           channels = {
             unlocks: chRes.channels,
             amazon_market_codes: chRes.amazon_market_codes,
+            amazon_market_groups: chRes.amazon_market_groups,
+            amazon_publish_targets: chRes.amazon_publish_targets,
             marketplace_ids: chRes.marketplace_ids,
           };
         }

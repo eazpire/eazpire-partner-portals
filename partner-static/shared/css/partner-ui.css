@@ -7919,46 +7919,84 @@ html[data-portal="admin"] .cr-ch-spinner {
   margin-left: 10px;
 }
 .ce-channels-market-group {
-  margin: 4px 0 10px;
+  margin: 4px 0 14px;
 }
 .ce-channels-market-group__hint {
   margin: 4px 0 8px;
 }
-.ce-channels-markets {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
-  margin: 0 0 14px;
-}
-.ce-channels-market-card {
+.ce-channels-continent-head {
   display: flex;
-  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.ce-channels-continent-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 160px;
+  padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
   font: inherit;
   font-size: 14px;
-  text-align: left;
+  font-weight: 600;
   cursor: pointer;
   color: inherit;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-.ce-channels-market-card:hover:not(:disabled) {
+.ce-channels-continent-card:hover:not(:disabled) {
   border-color: rgba(251, 191, 36, 0.65);
 }
-.ce-channels-market-card:disabled {
+.ce-channels-continent-card:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.ce-channels-market-card.is-active {
+.ce-channels-continent-card.is-active {
   border-color: rgba(34, 197, 94, 0.75);
   background: rgba(34, 197, 94, 0.08);
   box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.25);
 }
-.ce-channels-market-card__flag {
+.ce-channels-continent-card__status {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+.ce-channels-continent-card.is-active .ce-channels-continent-card__status {
+  color: #15803d;
+}
+.ce-channels-source-field {
+  margin: 8px 0 12px;
+  max-width: 360px;
+}
+.ce-channels-country-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.ce-channels-country-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 14px;
+  opacity: 0.72;
+}
+.ce-channels-country-row.is-included {
+  opacity: 1;
+  background: rgba(34, 197, 94, 0.06);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.ce-channels-country-row__flag {
   width: 40px;
   height: 30px;
   object-fit: cover;
@@ -7966,21 +8004,16 @@ html[data-portal="admin"] .cr-ch-spinner {
   flex-shrink: 0;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
-.ce-channels-market-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.ce-channels-country-row__name {
+  font-weight: 600;
+  flex: 1;
   min-width: 0;
 }
-.ce-channels-market-card__name {
-  font-weight: 600;
-  line-height: 1.25;
-}
-.ce-channels-market-card__status {
-  font-size: 12px;
+.ce-channels-country-row__meta {
+  font-size: 11px;
   font-weight: 600;
   color: #15803d;
-  min-height: 1em;
+  white-space: nowrap;
 }
 .ce-channels-settings-grid {
   display: grid;

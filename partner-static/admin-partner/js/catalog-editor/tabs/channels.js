@@ -1,9 +1,7 @@
 /**
  * Catalog editor → Channels tab.
- * Unlock sales channels for this product + Amazon IDs/settings (no skill-tree limits here).
- *
- * Planned later (not built here): 1 EU listing (DE source + linked EU offers) + 1 US listing.
- * UI groups Europa / Amerika mirror that model; marketplace flags persist as today.
+ * Amazon: continent toggles (Europa / Amerika) + per-continent source marketplace.
+ * Country lists are display-only; publish maps continent → marketplaces.
  */
 import { escapeHtml } from "/partner/shared/js/partner-api.js";
 import { fetchChannels, saveChannels } from "../api.js";
@@ -32,6 +30,8 @@ const DEFAULT_MARKET_LABELS = {
   US: "United States",
 };
 
+const DEFAULT_SOURCE = { europa: "DE", amerika: "US" };
+
 function ensureState(ctx) {
   if (!ctx.channelsTabState) {
     ctx.channelsTabState = {
@@ -50,27 +50,47 @@ function ensureState(ctx) {
   return ctx.channelsTabState;
 }
 
-function flagHtml(code) {
+function flagHtml(code, className = "ce-channels-country-row__flag") {
   const cc = String(FLAG_CODE[code] || code || "").toLowerCase();
   if (!cc || cc.length !== 2) return "";
-  return `<img class="ce-channels-market-card__flag" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
+  return `<img class="${escapeHtml(className)}" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
 }
 
 function marketLabel(st, code) {
   return st.amazon_market_labels?.[code] || DEFAULT_MARKET_LABELS[code] || code;
 }
 
+function continentOn(st, key) {
+  return !!st.channels?.amazon?.continents?.[key];
+}
+
+function sourceMarketplace(st, key) {
+  return (
+    st.channels?.amazon?.source_marketplaces?.[key] ||
+    DEFAULT_SOURCE[key] ||
+    (key === "europa" ? "DE" : "US")
+  );
+}
+
 function readDomChannels() {
   const amazonEnabled = !!document.getElementById("ce-ch-amazon")?.checked;
   const etsyEnabled = !!document.getElementById("ce-ch-etsy")?.checked;
   const ebayEnabled = !!document.getElementById("ce-ch-ebay")?.checked;
-  const markets = {};
-  document.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
-    const code = el.getAttribute("data-ce-amazon-market");
-    if (!code) return;
-    const pressed = el.getAttribute("aria-pressed") === "true" || el.classList.contains("is-active");
-    markets[code] = pressed;
-  });
+
+  const europaEl = document.querySelector('[data-ce-amazon-continent="europa"]');
+  const amerikaEl = document.querySelector('[data-ce-amazon-continent="amerika"]');
+  const continents = {
+    europa:
+      europaEl?.getAttribute("aria-pressed") === "true" || europaEl?.classList.contains("is-active"),
+    amerika:
+      amerikaEl?.getAttribute("aria-pressed") === "true" || amerikaEl?.classList.contains("is-active"),
+  };
+
+  const source_marketplaces = {
+    europa: document.getElementById("ce-ch-amz-source-europa")?.value?.trim().toUpperCase() || "DE",
+    amerika: document.getElementById("ce-ch-amz-source-amerika")?.value?.trim().toUpperCase() || "US",
+  };
+
   const pricing = {
     mode: document.getElementById("ce-ch-amz-price-mode")?.value || "percent_of_retail",
     percent: Number(document.getElementById("ce-ch-amz-price-percent")?.value) || 97,
@@ -84,7 +104,8 @@ function readDomChannels() {
     eazpire: { enabled: true },
     amazon: {
       enabled: amazonEnabled,
-      markets,
+      continents,
+      source_marketplaces,
       settings: {
         seller_id: document.getElementById("ce-ch-amz-seller")?.value?.trim() || "",
         product_type: document.getElementById("ce-ch-amz-ptype")?.value?.trim() || "SHIRT",
@@ -103,60 +124,105 @@ export function snapshotChannelsTab() {
   return readDomChannels();
 }
 
-function marketCardHtml(st, code) {
-  const markets = st.channels?.amazon?.markets || {};
-  const on = !!markets[code];
-  const enabled = !!st.channels?.amazon?.enabled;
-  const name = marketLabel(st, code);
-  return `<button type="button"
-      class="ce-channels-market-card${on ? " is-active" : ""}"
-      data-ce-amazon-market="${escapeHtml(code)}"
-      aria-pressed="${on ? "true" : "false"}"
-      ${enabled ? "" : "disabled"}
-      title="${escapeHtml(name)}">
-      ${flagHtml(code)}
-      <span class="ce-channels-market-card__body">
-        <span class="ce-channels-market-card__name">${escapeHtml(name)}</span>
-        <span class="ce-channels-market-card__status">${on ? "Aktiv" : ""}</span>
-      </span>
-    </button>`;
-}
-
-function marketsGroupHtml(st, groupKey, title, hint) {
+function countryRowsHtml(st, groupKey, active) {
   const groups = st.amazon_market_groups || DEFAULT_MARKET_GROUPS;
   const codes = groups[groupKey]?.length ? groups[groupKey] : DEFAULT_MARKET_GROUPS[groupKey] || [];
+  return `<div class="ce-channels-country-list" role="list">
+    ${codes
+      .map((code) => {
+        const name = marketLabel(st, code);
+        const included = active;
+        return `<div class="ce-channels-country-row${included ? " is-included" : ""}" role="listitem">
+          ${flagHtml(code)}
+          <span class="ce-channels-country-row__name">${escapeHtml(name)}</span>
+          <span class="ce-channels-country-row__meta">${
+            included ? (groupKey === "amerika" && code === "US" ? "Publish target" : "Included") : ""
+          }</span>
+        </div>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function sourceSelectHtml(st, groupKey, enabled) {
+  const groups = st.amazon_market_groups || DEFAULT_MARKET_GROUPS;
+  const codes = groups[groupKey] || [];
+  const selected = sourceMarketplace(st, groupKey);
+  const id = `ce-ch-amz-source-${groupKey}`;
+  const label =
+    groupKey === "europa" ? "Source marketplace (Europa)" : "Source marketplace (USA / Amerika)";
+  const hint =
+    groupKey === "europa"
+      ? "Ausgangs-Marketplace for the EU listing (usually Germany)."
+      : "Ausgangs-Marketplace for the America listing (usually USA).";
+  return `<div class="field ce-channels-source-field">
+    <label for="${id}">${escapeHtml(label)}</label>
+    <select id="${id}" class="input" data-ce-amazon-source="${escapeHtml(groupKey)}" ${
+      enabled ? "" : "disabled"
+    }>
+      ${codes
+        .map(
+          (code) =>
+            `<option value="${escapeHtml(code)}" ${code === selected ? "selected" : ""}>${escapeHtml(
+              marketLabel(st, code)
+            )} (${escapeHtml(code)})</option>`
+        )
+        .join("")}
+    </select>
+    <p class="ce-hint" style="margin:4px 0 0">${escapeHtml(hint)}</p>
+  </div>`;
+}
+
+function continentGroupHtml(st, groupKey, title, hint) {
+  const active = continentOn(st, groupKey);
+  const amazonOn = !!st.channels?.amazon?.enabled;
   const expandedKey = groupKey === "europa" ? "europaExpanded" : "amerikaExpanded";
   const expanded = st[expandedKey] !== false;
   const expandId = `ce-ch-amz-group-${groupKey}`;
   const bodyId = `ce-ch-amz-group-${groupKey}-body`;
+  const toggleId = `ce-ch-amz-continent-${groupKey}`;
+
   return `
     <div class="ce-channels-market-group">
-      <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="${expandId}" aria-expanded="${
-        expanded ? "true" : "false"
-      }">
-        <span aria-hidden="true">${expanded ? "▾" : "▸"}</span>
-        <strong>${escapeHtml(title)}</strong>
-      </button>
+      <div class="ce-channels-continent-head">
+        <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="${expandId}" aria-expanded="${
+          expanded ? "true" : "false"
+        }">
+          <span aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+          <strong>${escapeHtml(title)}</strong>
+        </button>
+        <button type="button"
+          id="${toggleId}"
+          class="ce-channels-continent-card${active ? " is-active" : ""}"
+          data-ce-amazon-continent="${escapeHtml(groupKey)}"
+          aria-pressed="${active ? "true" : "false"}"
+          ${amazonOn ? "" : "disabled"}>
+          <span class="ce-channels-continent-card__label">${escapeHtml(title)}</span>
+          <span class="ce-channels-continent-card__status">${active ? "Aktiv" : "Off"}</span>
+        </button>
+      </div>
       <div id="${bodyId}" ${expanded ? "" : "hidden"}>
         <p class="ce-hint ce-channels-market-group__hint">${escapeHtml(hint)}</p>
-        <div class="ce-channels-markets">${codes.map((code) => marketCardHtml(st, code)).join("")}</div>
+        ${sourceSelectHtml(st, groupKey, amazonOn && active)}
+        <p class="ce-hint" style="margin:10px 0 6px">Countries (informational — included when continent is Aktiv):</p>
+        ${countryRowsHtml(st, groupKey, active)}
       </div>
     </div>`;
 }
 
-function marketsGridHtml(st) {
+function continentsHtml(st) {
   return (
-    marketsGroupHtml(
+    continentGroupHtml(
       st,
       "europa",
       "Europa",
-      "Later: one EU listing from Germany (DE); other EU markets linked via Amazon International Offer Creation."
+      "One EU publish path: all listed EU markets. Source marketplace = Ausgangs-Marketplace (linked offers later)."
     ) +
-    marketsGroupHtml(
+    continentGroupHtml(
       st,
       "amerika",
-      "Amerika",
-      "Later: one US listing; Canada can link from the US listing."
+      "USA / Amerika",
+      "Publish target = Amazon USA. Canada is listed under Amerika for visibility."
     )
   );
 }
@@ -172,7 +238,7 @@ function renderPanel(st) {
   return `
     <div class="ce-tab-panel ce-channels-panel">
       <p class="ce-hint">Unlock sales channels for this product. Creators still need Skill Tree unlocks; <strong>Admin Creations</strong> ignores Skill Tree limits and only uses these unlocks. eazpire is always on.</p>
-      <p class="ce-hint">Amazon markets = your Seller Central Aktiv list. Planned publish: 1× EU (DE source) + 1× US — dual listing, not N identical products.</p>
+      <p class="ce-hint">Amazon: select <strong>continents</strong> only (Europa / USA). Set the <strong>source marketplace</strong> (Ausgangs-Marketplace) per continent below. Countries are listed for visibility, not selected one-by-one.</p>
 
       <div class="ce-channels-list">
         <div class="ce-channels-row ce-channels-row--locked">
@@ -196,9 +262,9 @@ function renderPanel(st) {
           </label>
         </div>
         <div class="ce-channels-amazon" id="ce-ch-amazon-body" ${st.amazonExpanded ? "" : "hidden"}>
-          <h4 class="ce-section-title" style="font-size:0.95rem">Amazon markets</h4>
-          <p class="ce-hint">Tap a country to unlock it for Admin Creations → Channels. Selected = <strong>Aktiv</strong>.</p>
-          ${marketsGridHtml(st)}
+          <h4 class="ce-section-title" style="font-size:0.95rem">Amazon continents</h4>
+          <p class="ce-hint">Tap Europa or USA / Amerika to set <strong>Aktiv</strong>. Publish uses continent → marketplaces (EU all / USA).</p>
+          ${continentsHtml(st)}
 
           <button type="button" class="ce-channels-expand ce-channels-expand--sub" id="ce-ch-amz-settings-expand" aria-expanded="${
             st.amazonSettingsExpanded ? "true" : "false"
@@ -282,18 +348,24 @@ function renderPanel(st) {
     </div>`;
 }
 
-function syncAmazonMarketDisabled(root) {
+function syncAmazonContinentDisabled(root) {
   const on = !!root.querySelector("#ce-ch-amazon")?.checked;
-  root.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
+  root.querySelectorAll("[data-ce-amazon-continent]").forEach((el) => {
     el.disabled = !on;
+  });
+  root.querySelectorAll("[data-ce-amazon-source]").forEach((el) => {
+    const key = el.getAttribute("data-ce-amazon-source");
+    const cont = root.querySelector(`[data-ce-amazon-continent="${key}"]`);
+    const contOn = cont?.getAttribute("aria-pressed") === "true";
+    el.disabled = !on || !contOn;
   });
 }
 
-function setMarketActive(el, on) {
+function setContinentActive(el, on) {
   el.classList.toggle("is-active", on);
   el.setAttribute("aria-pressed", on ? "true" : "false");
-  const status = el.querySelector(".ce-channels-market-card__status");
-  if (status) status.textContent = on ? "Aktiv" : "";
+  const status = el.querySelector(".ce-channels-continent-card__status");
+  if (status) status.textContent = on ? "Aktiv" : "Off";
 }
 
 function rerenderChannels(ctx, st) {
@@ -310,6 +382,13 @@ export async function loadChannelsTab(ctx) {
   const data = await fetchChannels(ctx.productKey);
   if (!data?.ok) throw new Error(data?.error || "Failed to load channels");
   st.channels = data.channels;
+  // Ensure continents exist even for older payloads
+  if (!st.channels.amazon.continents) {
+    st.channels.amazon.continents = { europa: false, amerika: false };
+  }
+  if (!st.channels.amazon.source_marketplaces) {
+    st.channels.amazon.source_marketplaces = { ...DEFAULT_SOURCE };
+  }
   st.amazon_market_codes = data.amazon_market_codes || [];
   st.amazon_market_groups = data.amazon_market_groups || { ...DEFAULT_MARKET_GROUPS };
   st.amazon_market_labels = data.amazon_market_labels || { ...DEFAULT_MARKET_LABELS };
@@ -343,19 +422,21 @@ export function bindChannelsTab(ctx, root) {
     rerenderChannels(ctx, st);
   });
 
-  panel.querySelectorAll("[data-ce-amazon-market]").forEach((el) => {
+  panel.querySelectorAll("[data-ce-amazon-continent]").forEach((el) => {
     el.addEventListener("click", () => {
       if (el.disabled) return;
       const next = el.getAttribute("aria-pressed") !== "true";
-      setMarketActive(el, next);
-      notifyActiveTabDirty(ctx);
+      setContinentActive(el, next);
+      syncAmazonContinentDisabled(panel);
+      // Refresh included country styling via re-render
+      rerenderChannels(ctx, st);
     });
   });
 
   panel.querySelector("#ce-ch-amazon")?.addEventListener("change", () => {
-    syncAmazonMarketDisabled(panel);
+    syncAmazonContinentDisabled(panel);
   });
-  syncAmazonMarketDisabled(panel);
+  syncAmazonContinentDisabled(panel);
 }
 
 export async function saveChannelsTab(ctx) {
