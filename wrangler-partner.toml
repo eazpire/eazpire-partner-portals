@@ -12,6 +12,9 @@
 #   REPLICATE_API_TOKEN (Catalog Editor → Generate Preview Image; copy from creator-engine:
 #     node scripts/deployment/sync-replicate-api-token-to-workers.cjs --partner-only
 #     or: npm run deploy:sync-replicate-secret)
+#   Amazon SP-API (Admin Creations → Channels dry-run): AMAZON_LWA_*, AMAZON_REFRESH_TOKEN_EU/NA,
+#     AMAZON_SPAPI_ROLE_ARN, AWS_* — copy from creator-engine:
+#     node scripts/partner/sync-amazon-secrets-to-partner.cjs
 
 name = "eazpire-partner-portals"
 main = "src/partner-worker.js"
@@ -43,6 +46,12 @@ PRINTIFY_SHOP_ID = "22170465"
 PUBLIC_FILE_BASE_URL = "https://creator-engine.eazpire.workers.dev"
 # Same Shopify store as creator-engine (Creations admin Products tab)
 SHOPIFY_SHOP = "allyoucanpink.myshopify.com"
+# Amazon SP-API non-secret defaults (LWA/refresh/STS = Wrangler secrets; sync via sync-amazon-secrets-to-partner.cjs)
+AMAZON_REGION = "eu"
+AMAZON_SPAPI_HOST = "sellingpartnerapi-eu.amazon.com"
+AMAZON_MARKETPLACE_ID_DE = "A1PA6795UKMFR9"
+AMAZON_SELLER_ID = "A235MZXJBWCPSO"
+AMAZON_DEFAULT_MARKETPLACES = "A1PA6795UKMFR9"
 
 [[kv_namespaces]]
 binding = "JOBS"

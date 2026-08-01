@@ -12,6 +12,15 @@ const SECRET_NAMES = [
   "JWT_APP_SECRET",
   "SHOPIFY_ACCESS_TOKEN",
   "REPLICATE_API_TOKEN",
+  // Admin Creations → Amazon dry-run / credential checks run on partner-portals
+  "AMAZON_LWA_CLIENT_ID",
+  "AMAZON_LWA_CLIENT_SECRET",
+  "AMAZON_REFRESH_TOKEN_EU",
+  "AMAZON_REFRESH_TOKEN_NA",
+  "AMAZON_REFRESH_TOKEN",
+  "AMAZON_SPAPI_ROLE_ARN",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
 ];
 const DEFAULT_SCRIPT = "eazpire-partner-portals";
 
