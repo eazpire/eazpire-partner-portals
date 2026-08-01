@@ -7998,6 +7998,30 @@ html[data-portal="admin"] .cr-ch-drybanner.cr-ch-dryfail {
 html[data-portal="admin"] .cr-ch-lastmsg {
   margin: 0.35rem 0 0;
   grid-column: 1 / -1;
+  color: #b91c1c;
+  word-break: break-word;
+}
+html[data-portal="admin"] .cr-ch-errors {
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.65rem 0.45rem 1.25rem;
+  grid-column: 1 / -1;
+  list-style: disc;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 8px;
+  color: #991b1b;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+html[data-portal="admin"] .cr-ch-errors li {
+  margin: 0.15rem 0;
+  word-break: break-word;
+}
+html[data-portal="admin"] .cr-ch-drybanner__errors {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  word-break: break-word;
 }
 html[data-portal="admin"] .cr-ch-badge-soon {
   font-size: 10px;

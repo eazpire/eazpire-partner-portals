@@ -102,16 +102,65 @@ function statusHtml(st) {
   return `<span class="cr-ch-status">Not published</span>`;
 }
 
+function formatMarketplaceErrors(m) {
+  const errs = Array.isArray(m?.errors) ? m.errors.filter(Boolean) : [];
+  if (errs.length) return errs;
+  if (m?.credentials?.ok === false && m.credentials.error) {
+    return [`credentials: ${m.credentials.error}`];
+  }
+  return [];
+}
+
+function errorsListHtml(errors) {
+  const list = (errors || []).filter(Boolean);
+  if (!list.length) return "";
+  return `<ul class="cr-ch-errors" role="list">${list
+    .map((e) => `<li>${escapeHtml(e)}</li>`)
+    .join("")}</ul>`;
+}
+
 function dryRunBannerHtml(product) {
   const dr = product?.amazon_publish?.dry_run;
   if (!dr) return "";
-  const codes = (dr.marketplaces || []).map((m) => m.code).join(", ") || "—";
+  const markets = dr.marketplaces || [];
+  const codes = markets.map((m) => m.code).join(", ") || "—";
   const cls = dr.ok ? "cr-ch-dryok" : "cr-ch-dryfail";
+  const failLines = markets
+    .filter((m) => !m.ok)
+    .map((m) => {
+      const errs = formatMarketplaceErrors(m);
+      return `${m.code || "?"}: ${errs.length ? errs.join("; ") : "failed"}`;
+    });
   return `<div class="cr-ch-drybanner ${cls}" role="status">
     <strong>Last dry run:</strong> ${dr.ok ? "OK" : "Failed"}
     · markets ${escapeHtml(codes)}
     ${dr.summary ? `· ${dr.summary.ok || 0}/${dr.summary.total || 0} ok` : ""}
+    ${
+      failLines.length
+        ? `<div class="cr-ch-drybanner__errors">${failLines
+            .map((line) => `<div>${escapeHtml(line)}</div>`)
+            .join("")}</div>`
+        : ""
+    }
   </div>`;
+}
+
+/**
+ * partnerFetch throws when ok===false (HTTP 422 dry-run with marketplace errors).
+ * Recover DRY_RUN payloads so continent cards can show marketplaces[].errors.
+ */
+function extractAmazonPublishResponse(errOrData) {
+  const candidates = [errOrData, errOrData?.data].filter(Boolean);
+  for (const data of candidates) {
+    if (
+      data &&
+      typeof data === "object" &&
+      (Array.isArray(data.marketplaces) || data.mode === "DRY_RUN" || data.mode === "LIVE")
+    ) {
+      return data;
+    }
+  }
+  return null;
 }
 
 /**
@@ -205,6 +254,7 @@ export function renderChannelsPanelHtml(product, ui) {
               : `Publish → Amazon USA · source ${t.source}`;
           const canAct = !st.queue;
           const dryOk = st.status === "dry_run_ok" || st.status === "published";
+          const errors = Array.isArray(st.errors) ? st.errors : [];
           return `<div class="cr-ch-region" role="listitem" data-cr-ch-continent="${escapeHtml(
             t.continent
           )}">
@@ -234,6 +284,7 @@ export function renderChannelsPanelHtml(product, ui) {
                 ? `<p class="cr-pd-hint cr-ch-lastmsg">${escapeHtml(st.lastMessage)}</p>`
                 : ""
             }
+            ${errorsListHtml(errors)}
           </div>`;
         })
         .join("")}
@@ -267,6 +318,76 @@ export function bindChannelsPanel(root, ui) {
   const publishedDesignId =
     product?.published_design_id || product?.amazon_publish?.published_design_id || null;
 
+  function applyAmazonPublishResult(data, { continents, live }) {
+    const keys = (continents || []).map((c) => `amazon:${c}`);
+    const resultsByContinent = {};
+    for (const m of data.marketplaces || []) {
+      resultsByContinent[m.continent] = m;
+    }
+
+    for (const key of keys.length
+      ? keys
+      : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
+      const continent = key.replace(/^amazon:/, "");
+      const m = resultsByContinent[continent];
+      const st = ui.channelState[key] || { status: "unpublished", queue: false };
+      st.queue = false;
+      if (live && data.queued) {
+        st.status = "queued";
+        st.lastMessage = data.message || `Job ${data.job_id || ""}`;
+        st.errors = [];
+      } else if (m) {
+        const errs = formatMarketplaceErrors(m);
+        st.status = m.ok ? "dry_run_ok" : "dry_run_failed";
+        st.errors = m.ok ? [] : errs;
+        st.lastMessage = m.ok
+          ? `${m.code}: payload OK${m.credentials?.ok ? " · credentials OK" : ""}`
+          : errs.slice(0, 3).join("; ") || "failed";
+      } else if (data.ok && !live) {
+        st.status = "dry_run_ok";
+        st.lastMessage = data.message || "Dry run OK";
+        st.errors = [];
+      } else if (!data.ok) {
+        st.status = "dry_run_failed";
+        const summaries = data.error_summaries || data.summary?.errors || [];
+        st.errors = summaries.length ? summaries : [data.message || data.error || "failed"].filter(Boolean);
+        st.lastMessage = st.errors[0] || data.message || data.error || "failed";
+      }
+      ui.channelState[key] = st;
+    }
+
+    if (ui.onProductPatch && data.mode === "DRY_RUN") {
+      ui.onProductPatch({
+        amazon_publish: {
+          published_design_id: data.published_design_id || publishedDesignId,
+          dry_run: {
+            ok: !!data.ok,
+            mode: data.mode,
+            summary: data.summary || null,
+            saved_at: Date.now(),
+            marketplaces: (data.marketplaces || []).map((m) => ({
+              ok: m.ok,
+              code: m.code,
+              continent: m.continent,
+              errors: formatMarketplaceErrors(m),
+              credentials: m.credentials
+                ? { ok: !!m.credentials.ok, error: m.credentials.error || null }
+                : undefined,
+            })),
+          },
+        },
+        published_design_id: data.published_design_id || publishedDesignId,
+      });
+    }
+
+    const toastDetail =
+      data.message ||
+      (data.ok
+        ? "OK"
+        : (data.error_summaries || data.summary?.errors || []).join(" | ") || data.error || "Finished with errors");
+    showToast(live ? "Amazon live" : "Amazon dry run", toastDetail);
+  }
+
   async function runAmazonAction({ continents, live }) {
     const keys = (continents || []).map((c) => `amazon:${c}`);
     for (const key of keys) {
@@ -274,6 +395,7 @@ export function bindChannelsPanel(root, ui) {
       ui.channelState[key].queue = true;
       ui.channelState[key].queueLabel = live ? "Publishing…" : "Dry run…";
       ui.channelState[key].lastMessage = "";
+      ui.channelState[key].errors = [];
     }
     ui.onChange();
 
@@ -289,70 +411,31 @@ export function bindChannelsPanel(root, ui) {
         body.dry_run = false;
         body.live_submit = true;
       }
-      const data = await partnerFetch("admin-amazon-publish", {
-        method: "POST",
-        body,
-      });
 
-      const resultsByContinent = {};
-      for (const m of data.marketplaces || []) {
-        resultsByContinent[m.continent] = m;
-      }
-
-      for (const key of keys.length ? keys : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
-        const continent = key.replace(/^amazon:/, "");
-        const m = resultsByContinent[continent];
-        const st = ui.channelState[key] || { status: "unpublished", queue: false };
-        st.queue = false;
-        if (live && data.queued) {
-          st.status = "queued";
-          st.lastMessage = data.message || `Job ${data.job_id || ""}`;
-        } else if (m) {
-          st.status = m.ok ? "dry_run_ok" : "dry_run_failed";
-          st.lastMessage = m.ok
-            ? `${m.code}: payload OK${m.credentials?.ok ? " · credentials OK" : ""}`
-            : (m.errors || []).slice(0, 2).join("; ") || "failed";
-        } else if (data.ok && !live) {
-          st.status = "dry_run_ok";
-          st.lastMessage = data.message || "Dry run OK";
-        } else if (!data.ok) {
-          st.status = "dry_run_failed";
-          st.lastMessage = data.message || data.error || "failed";
-        }
-        ui.channelState[key] = st;
-      }
-
-      if (ui.onProductPatch && data.mode === "DRY_RUN") {
-        ui.onProductPatch({
-          amazon_publish: {
-            published_design_id: data.published_design_id || publishedDesignId,
-            dry_run: {
-              ok: !!data.ok,
-              mode: data.mode,
-              summary: data.summary || null,
-              saved_at: Date.now(),
-              marketplaces: (data.marketplaces || []).map((m) => ({
-                ok: m.ok,
-                code: m.code,
-                continent: m.continent,
-                errors: m.errors || [],
-              })),
-            },
-          },
-          published_design_id: data.published_design_id || publishedDesignId,
+      let data;
+      try {
+        data = await partnerFetch("admin-amazon-publish", {
+          method: "POST",
+          body,
         });
+      } catch (e) {
+        // Dry-run with marketplace failures returns HTTP 422 + ok:false — still a usable payload.
+        const recovered = extractAmazonPublishResponse(e);
+        if (recovered) {
+          data = recovered;
+        } else {
+          throw e;
+        }
       }
 
-      showToast(
-        live ? "Amazon live" : "Amazon dry run",
-        data.message || (data.ok ? "OK" : data.error || "Finished with errors")
-      );
+      applyAmazonPublishResult(data, { continents, live });
     } catch (e) {
       for (const key of keys) {
         if (!ui.channelState[key]) continue;
         ui.channelState[key].queue = false;
         ui.channelState[key].status = "dry_run_failed";
         ui.channelState[key].lastMessage = e.message || String(e);
+        ui.channelState[key].errors = [e.message || String(e)];
       }
       showToast("Amazon error", e.message || String(e));
     }
@@ -402,6 +485,13 @@ export function renderOverviewPanelHtml(product) {
     .map((t) => `${t.label}→${(t.publishCodes || []).join(",")}`)
     .join(" · ") || "none";
   const dr = product?.amazon_publish?.dry_run;
+  const failHint =
+    dr && !dr.ok
+      ? (dr.marketplaces || [])
+          .filter((m) => !m.ok)
+          .map((m) => `${m.code}: ${(m.errors || []).join("; ") || "failed"}`)
+          .join(" · ")
+      : "";
   return `
     <div class="cr-pd-overview">
       <h3 class="cr-pd-section-title">Overview</h3>
@@ -423,7 +513,11 @@ export function renderOverviewPanelHtml(product) {
         dr
           ? `<p class="cr-pd-hint">Last Amazon dry run: ${dr.ok ? "OK" : "Failed"}${
               dr.summary ? ` (${dr.summary.ok}/${dr.summary.total})` : ""
-            }</p>`
+            }</p>${
+              failHint
+                ? `<p class="cr-pd-hint cr-ch-lastmsg">${escapeHtml(failHint)}</p>`
+                : ""
+            }`
           : ""
       }
     </div>`;
@@ -439,13 +533,15 @@ export function seedChannelStateFromProduct(product) {
   for (const t of targets) {
     const m = drMarkets.find((x) => x.continent === t.continent);
     if (m) {
+      const errs = formatMarketplaceErrors(m);
       state[`amazon:${t.continent}`] = {
         status: m.ok ? "dry_run_ok" : "dry_run_failed",
         queue: false,
-        lastMessage: m.ok ? `${m.code}: dry run OK` : (m.errors || []).join("; "),
+        lastMessage: m.ok ? `${m.code}: dry run OK` : errs.join("; ") || "failed",
+        errors: m.ok ? [] : errs,
       };
     } else {
-      state[`amazon:${t.continent}`] = { status: "unpublished", queue: false };
+      state[`amazon:${t.continent}`] = { status: "unpublished", queue: false, errors: [] };
     }
   }
   return state;
