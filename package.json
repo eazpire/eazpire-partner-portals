@@ -153,6 +153,8 @@
     "partner:secrets:amazon": "node scripts/partner/sync-amazon-secrets-to-partner.cjs",
     "partner:secrets:aws": "node scripts/partner/set-aws-access-keys.cjs",
     "amazon:secrets:aws": "node scripts/partner/set-aws-access-keys.cjs",
+    "partner:secrets:amazon-na": "node scripts/partner/set-amazon-refresh-token-na.cjs",
+    "amazon:secrets:na": "node scripts/partner/set-amazon-refresh-token-na.cjs",
     "partner:create-repo": "node scripts/partner/create-partner-repo.js",
     "partner:sync": "node scripts/partner/sync-to-partner-repo.js",
     "partner:set-github-secret": "node scripts/partner/set-github-secret.cjs",
