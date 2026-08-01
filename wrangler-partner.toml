@@ -120,3 +120,8 @@ binding = "JOB_QUEUE_ADMIN_PUBLISH_BY_PRODUCT"
 [[queues.producers]]
 queue = "creator-jobs-unpublish"
 binding = "JOB_QUEUE_UNPUBLISH"
+
+# Producer-only: Admin Amazon LIVE publish enqueues; creator-engine consumes creator-jobs-amazon-publish.
+[[queues.producers]]
+queue = "creator-jobs-amazon-publish"
+binding = "JOB_QUEUE_AMAZON_PUBLISH"
