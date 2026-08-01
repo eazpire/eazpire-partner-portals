@@ -1,11 +1,19 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
-import { showToast } from "/creations/shared/js/partner-shell.js";
+import { showToast, confirmUnsavedChanges } from "/creations/shared/js/partner-shell.js";
 import {
   renderChannelsPanelHtml,
   bindChannelsPanel,
   renderOverviewPanelHtml,
   seedChannelStateFromProduct,
 } from "./product-channels-panel.js";
+import {
+  renderEditDesignPanelHtml,
+  bindEditDesignPanel,
+  loadEditDesignForProduct,
+  isEditDesignDirty,
+  saveEditDesignWorking,
+  discardEditDesignWorking,
+} from "./product-edit-design-panel.js";
 
 const SOURCE_FILTERS = [
   { key: "printify", label: "Printify" },
@@ -30,11 +38,12 @@ function resolveShopifyProductId(item) {
   return "";
 }
 
-/** Creator-parity nav first; Mockups/Metafields kept as admin extras. */
+/** Creator-parity nav first; Mockups/Metafields/Edit Design kept as admin extras. */
 const DETAIL_MENUS = [
   { key: "overview", label: "Overview" },
   { key: "variants", label: "Variants" },
   { key: "channels", label: "Channels" },
+  { key: "edit_design", label: "Edit Design" },
   { key: "mockups", label: "Mockups" },
   { key: "metafields", label: "Metafields" },
 ];
@@ -65,6 +74,9 @@ const state = {
     expandedValues: new Set(),
     channelState: {},
     amazonExpanded: false,
+    editDesignUi: null,
+    editDesignLoadedFor: "",
+    closePromptOpen: false,
   },
 };
 
@@ -710,6 +722,22 @@ function renderDetailContent() {
     };
     content.innerHTML = renderChannelsPanelHtml(product, chUi);
     bindChannelsPanel(content, chUi);
+  } else if (state.detail.menu === "edit_design") {
+    kickEditDesignLoad();
+    const edUi = state.detail.editDesignUi || {
+      loading: true,
+      error: "",
+      editDesign: null,
+      activePos: "front",
+      working: {},
+      savedBaseline: {},
+      pendingUpdate: false,
+      busy: false,
+    };
+    edUi.onRerender = () => renderDetailContent();
+    edUi.onDirtyChange = () => {};
+    content.innerHTML = renderEditDesignPanelHtml(edUi);
+    if (edUi.editDesign && !edUi.loading && !edUi.error) bindEditDesignPanel(content, edUi);
   } else if (state.detail.menu === "metafields") content.innerHTML = renderMetafieldsPanel(product);
   else content.innerHTML = renderMockupsPanel(product);
 
@@ -728,6 +756,45 @@ function isDetailBackdropOpen(backdrop) {
   return !!(backdrop && (backdrop.classList.contains("show") || !backdrop.hidden));
 }
 
+function kickEditDesignLoad() {
+  const id = state.detail.productId;
+  if (!id) return;
+  if (state.detail.editDesignLoadedFor === id && state.detail.editDesignUi) return;
+
+  state.detail.editDesignLoadedFor = id;
+  state.detail.editDesignUi = {
+    loading: true,
+    error: "",
+    editDesign: null,
+    activePos: "front",
+    working: {},
+    savedBaseline: {},
+    pendingUpdate: false,
+    busy: false,
+  };
+
+  loadEditDesignForProduct(id)
+    .then((ui) => {
+      if (state.detail.productId !== id) return;
+      state.detail.editDesignUi = ui;
+      if (state.detail.menu === "edit_design") renderDetailContent();
+    })
+    .catch((e) => {
+      if (state.detail.productId !== id) return;
+      state.detail.editDesignUi = {
+        loading: false,
+        error: e.message || "Could not load Edit Design",
+        editDesign: null,
+        activePos: "front",
+        working: {},
+        savedBaseline: {},
+        pendingUpdate: false,
+        busy: false,
+      };
+      if (state.detail.menu === "edit_design") renderDetailContent();
+    });
+}
+
 function closeProductDetail() {
   state.detail.open = false;
   state.detail.loading = false;
@@ -735,6 +802,9 @@ function closeProductDetail() {
   state.detail.data = null;
   state.detail.productId = "";
   state.detail.expandedValues = new Set();
+  state.detail.editDesignUi = null;
+  state.detail.editDesignLoadedFor = "";
+  state.detail.closePromptOpen = false;
   const backdrop = document.getElementById("cr-pd-backdrop");
   if (backdrop) {
     backdrop.hidden = true;
@@ -745,13 +815,48 @@ function closeProductDetail() {
   document.removeEventListener("keydown", onDetailKeydown);
 }
 
+function requestCloseProductDetail() {
+  if (state.detail.closePromptOpen) return;
+  if (!isEditDesignDirty(state.detail.editDesignUi)) {
+    closeProductDetail();
+    return;
+  }
+  state.detail.closePromptOpen = true;
+  confirmUnsavedChanges({
+    title: "Unsaved changes",
+    bodyHtml: `<p class="confirm-modal-message">You have unsaved Edit Design changes. Save them, discard them, or cancel to keep editing.</p>`,
+    saveLabel: "Save",
+    discardLabel: "Discard",
+    cancelLabel: "Cancel",
+    onCancel: () => {
+      state.detail.closePromptOpen = false;
+    },
+    onDiscard: () => {
+      state.detail.closePromptOpen = false;
+      discardEditDesignWorking(state.detail.editDesignUi);
+      closeProductDetail();
+    },
+    onSave: async () => {
+      state.detail.closePromptOpen = false;
+      try {
+        await saveEditDesignWorking(state.detail.editDesignUi);
+        if (!isEditDesignDirty(state.detail.editDesignUi)) closeProductDetail();
+        else if (state.detail.menu === "edit_design") renderDetailContent();
+      } catch (e) {
+        showToast("Error", e.message || "Save failed");
+        /* keep modal open */
+      }
+    },
+  });
+}
+
 function onDetailKeydown(e) {
   if (e.key !== "Escape") return;
   const backdrop = document.getElementById("cr-pd-backdrop");
   // Defensive: close even if state drifted but backdrop/blur is still visible.
   if (state.detail.open || isDetailBackdropOpen(backdrop)) {
     e.preventDefault();
-    closeProductDetail();
+    requestCloseProductDetail();
   }
 }
 
@@ -769,6 +874,9 @@ async function openProductDetail(productId, title) {
   state.detail.expandedValues = new Set();
   state.detail.channelState = { eazpire: { status: "published", queue: false } };
   state.detail.amazonExpanded = false;
+  state.detail.editDesignUi = null;
+  state.detail.editDesignLoadedFor = "";
+  state.detail.closePromptOpen = false;
 
   const backdrop = ensureDetailDom();
   if (backdrop) {
@@ -801,9 +909,9 @@ async function openProductDetail(productId, title) {
 }
 
 function bindDetailModal(backdrop) {
-  backdrop.querySelector("#cr-pd-close")?.addEventListener("click", closeProductDetail);
+  backdrop.querySelector("#cr-pd-close")?.addEventListener("click", requestCloseProductDetail);
   backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop || e.target?.id === "cr-pd-backdrop") closeProductDetail();
+    if (e.target === backdrop || e.target?.id === "cr-pd-backdrop") requestCloseProductDetail();
   });
   backdrop.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
     btn.addEventListener("click", () => {

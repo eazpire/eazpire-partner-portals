@@ -322,6 +322,9 @@ const ADMIN_OPS = new Set([
   "admin-creations-todify-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
+  "admin-creations-edit-design",
+  "admin-creations-edit-design-save",
+  "admin-creations-edit-design-update",
   "admin-amazon-publish",
   "admin-amazon-publish-status",
   "admin-design-action-preview",
@@ -1552,6 +1555,18 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsShopifyProductDetail.js"
       );
       return handleAdminCreationsShopifyProductDetail(request, env);
+    }
+    if (op === "admin-creations-edit-design" && request.method === "GET") {
+      const { handleAdminCreationsEditDesignGet } = await import("./adminCreationsEditDesign.js");
+      return handleAdminCreationsEditDesignGet(request, env);
+    }
+    if (op === "admin-creations-edit-design-save" && request.method === "POST") {
+      const { handleAdminCreationsEditDesignSave } = await import("./adminCreationsEditDesign.js");
+      return handleAdminCreationsEditDesignSave(request, env);
+    }
+    if (op === "admin-creations-edit-design-update" && request.method === "POST") {
+      const { handleAdminCreationsEditDesignUpdate } = await import("./adminCreationsEditDesign.js");
+      return handleAdminCreationsEditDesignUpdate(request, env);
     }
     if (op === "admin-amazon-publish" && request.method === "POST") {
       const { handleAdminAmazonPublish } = await import("../product/amazonAdminPublish.js");
