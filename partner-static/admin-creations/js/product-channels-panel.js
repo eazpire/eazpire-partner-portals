@@ -237,10 +237,6 @@ export function renderChannelsPanelHtml(product, ui) {
           </div>`;
         })
         .join("")}
-      <div class="cr-ch-actions" style="margin-top:0.75rem">
-        <button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-dryrun-all="1">Dry run DE + USA</button>
-        <button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish-all="1">Publish live DE + USA</button>
-      </div>
       </div>`;
     }
   }
@@ -261,8 +257,7 @@ export function renderChannelsPanelHtml(product, ui) {
 export function bindChannelsPanel(root, ui) {
   if (!root) return;
   root.querySelector("[data-cr-ch-amazon-tile]")?.addEventListener("click", (e) => {
-    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-dryrun],[data-cr-ch-dryrun-all],[data-cr-ch-publish-all]"))
-      return;
+    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-dryrun]")) return;
     ui.amazonExpanded = !ui.amazonExpanded;
     ui.onChange();
   });
@@ -394,21 +389,6 @@ export function bindChannelsPanel(root, ui) {
     });
   });
 
-  root.querySelector("[data-cr-ch-dryrun-all]")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const targets = amazonTargetsFromProduct(product);
-    runAmazonAction({ continents: targets.map((t) => t.continent), live: false });
-  });
-
-  root.querySelector("[data-cr-ch-publish-all]")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const ok = window.confirm(
-      "Publish LIVE to Amazon DE + USA?\n\nThis creates real listings/offers for all unlocked continents."
-    );
-    if (!ok) return;
-    const targets = amazonTargetsFromProduct(product);
-    runAmazonAction({ continents: targets.map((t) => t.continent), live: true });
-  });
 }
 
 export function renderOverviewPanelHtml(product) {

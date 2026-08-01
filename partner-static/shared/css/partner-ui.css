@@ -7800,12 +7800,12 @@ html[data-portal="admin"] .cr-ch-tile__meta {
   cursor: pointer;
 }
 html[data-portal="admin"] .cr-ch-status--published {
-  color: #34d399;
+  color: #059669;
   font-weight: 700;
   font-size: 12px;
 }
 html[data-portal="admin"] .cr-ch-status--failed {
-  color: #f87171;
+  color: #dc2626;
   font-weight: 700;
   font-size: 12px;
 }
@@ -7820,14 +7820,14 @@ html[data-portal="admin"] .cr-ch-drybanner {
   font-size: 0.85rem;
 }
 html[data-portal="admin"] .cr-ch-drybanner.cr-ch-dryok {
-  background: rgba(52, 211, 153, 0.12);
-  color: #6ee7b7;
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.35);
 }
 html[data-portal="admin"] .cr-ch-drybanner.cr-ch-dryfail {
-  background: rgba(248, 113, 113, 0.12);
-  color: #fca5a5;
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 html[data-portal="admin"] .cr-ch-lastmsg {
   margin: 0.35rem 0 0;
@@ -7845,6 +7845,9 @@ html[data-portal="admin"] .cr-ch-badge-soon {
 }
 html[data-portal="admin"] .cr-ch-actions {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 html[data-portal="admin"] .cr-ch-btn {
   width: 100%;
@@ -7856,20 +7859,32 @@ html[data-portal="admin"] .cr-ch-regions {
   padding: 8px 2px 4px;
 }
 html[data-portal="admin"] .cr-ch-region {
-  flex: 0 0 160px;
+  flex: 0 0 200px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 12px;
-  background: #0b1220;
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--surface-2);
+  color: var(--text);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 html[data-portal="admin"] .cr-ch-region__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   font-size: 12px;
+  color: var(--text);
+}
+html[data-portal="admin"] .cr-ch-region__head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+html[data-portal="admin"] .cr-ch-region__head span {
+  flex: 1 1 100%;
+  color: var(--muted);
+  line-height: 1.35;
 }
 html[data-portal="admin"] .cr-ch-flag {
   width: 18px;
