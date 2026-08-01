@@ -16,6 +16,9 @@ export const MOCKUP_VIEW_ORDER = {
   sleeve: 3,
   left: 4,
   right: 5,
+  folded: 6,
+  folded_2: 7,
+  lifestyle: 8,
   other: 90,
 };
 
@@ -97,16 +100,86 @@ function viewSortRank(view) {
 }
 
 /**
- * Build mockup list from Shopify images, sorted by variant (color) then view.
- * @param {Array<{ id?: *, src?: string, alt?: string|null, position?: number, variant_ids?: *[] }>} images
+ * Color from Shopify image.variant_ids → product variant option1 (Printify sync often
+ * attaches size variants of one color). Used when alt text was wiped by a republish.
+ * @param {{ variant_ids?: *[] }|string} img
+ * @param {Map<string, string>|null|undefined} colorByVariantId
  */
-export function buildSortedMockups(images) {
+export function inferMockupColorFromVariantIds(img, colorByVariantId) {
+  if (!colorByVariantId || !colorByVariantId.size) return null;
+  const vids = Array.isArray(img?.variant_ids) ? img.variant_ids.map(String) : [];
+  for (const id of vids) {
+    const color = colorByVariantId.get(id);
+    if (color) return color;
+  }
+  return null;
+}
+
+/**
+ * @param {Array<{ id?: *, option1?: string|null }>|null|undefined} variants
+ * @returns {Map<string, string>}
+ */
+export function buildColorByVariantIdMap(variants) {
+  const map = new Map();
+  for (const v of Array.isArray(variants) ? variants : []) {
+    if (v?.id == null) continue;
+    const color = String(v.option1 || "").trim();
+    if (color) map.set(String(v.id), color);
+  }
+  return map;
+}
+
+/**
+ * View key from Printify camera_label on CDN URL (Shopify file URLs usually lack this).
+ * @param {string} src
+ */
+export function inferMockupViewFromSrc(src) {
+  if (!src || typeof src !== "string") return null;
+  try {
+    const u = new URL(src);
+    const cam = u.searchParams.get("camera_label");
+    if (cam) {
+      return String(cam)
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, "_");
+    }
+  } catch {
+    /* ignore */
+  }
+  const lower = src.toLowerCase();
+  if (lower.includes("folded-2") || lower.includes("folded_2")) return "folded_2";
+  if (lower.includes("folded")) return "folded";
+  if (lower.includes("lifestyle")) return "lifestyle";
+  if (/[?&]camera_label=back\b/i.test(src) || /\/back[_-]/i.test(src)) return "back";
+  if (/[?&]camera_label=front\b/i.test(src) || /\/front[_-]/i.test(src)) return "front";
+  return null;
+}
+
+/**
+ * Build mockup list from Shopify images, sorted by variant (color) then view.
+ * Falls back to variant_ids→option1 and URL camera_label when Printify republish
+ * wiped Color|view alt texts (Admin Mockups would otherwise show Unassigned/other).
+ *
+ * @param {Array<{ id?: *, src?: string, alt?: string|null, position?: number, variant_ids?: *[] }>} images
+ * @param {{ variants?: Array<{ id?: *, option1?: string|null }> }|Array} [variantsOrOpts]
+ */
+export function buildSortedMockups(images, variantsOrOpts = null) {
+  const opts = Array.isArray(variantsOrOpts)
+    ? { variants: variantsOrOpts }
+    : variantsOrOpts && typeof variantsOrOpts === "object"
+      ? variantsOrOpts
+      : {};
+  const colorByVariantId = buildColorByVariantIdMap(opts.variants);
+
   const list = (Array.isArray(images) ? images : []).map((img, index) => {
     const src = typeof img === "string" ? img : img?.src || "";
     const alt = typeof img === "string" ? null : img?.alt || null;
     const parsed = parseMockupAlt(alt);
-    const variantLabel = parsed?.color || "Unassigned";
-    const view = parsed?.view || "other";
+    const fromVariants = inferMockupColorFromVariantIds(img, colorByVariantId);
+    const fromSrc = inferMockupViewFromSrc(src);
+    const variantLabel = parsed?.color || fromVariants || "Unassigned";
+    const view = parsed?.view || fromSrc || "other";
     return {
       id: img?.id != null ? String(img.id) : `img-${index}`,
       src,
@@ -372,7 +445,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       env.SHOPIFY_CURRENCY ||
       "EUR";
 
-    const mockups = buildSortedMockups(p.images || []);
+    const mockups = buildSortedMockups(p.images || [], { variants: p.variants || [] });
 
     let channels = null;
     if (productKey) {

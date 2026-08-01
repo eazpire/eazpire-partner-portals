@@ -22,6 +22,39 @@ describe("adminCreationsShopifyProductDetail helpers", () => {
     expect(sorted[2].variant_label).toBe("Unassigned");
   });
 
+  it("buildSortedMockups falls back to variant_ids color when alt wiped", () => {
+    const variants = [
+      { id: 10, option1: "White" },
+      { id: 11, option1: "White" },
+      { id: 20, option1: "Black" },
+    ];
+    const sorted = buildSortedMockups(
+      [
+        {
+          id: 1,
+          src: "https://cdn.shopify.com/x.jpg?camera_label=back",
+          alt: null,
+          position: 2,
+          variant_ids: [20],
+        },
+        {
+          id: 2,
+          src: "https://cdn.shopify.com/y.jpg?camera_label=front",
+          alt: null,
+          position: 1,
+          variant_ids: [10, 11],
+        },
+        { id: 3, src: "https://cdn.shopify.com/z.jpg", alt: null, position: 3, variant_ids: [] },
+      ],
+      { variants }
+    );
+    // Color sort is alphabetical: Black → Unassigned → White
+    expect(sorted.map((m) => m.id)).toEqual(["1", "3", "2"]);
+    expect(sorted[0]).toMatchObject({ variant_label: "Black", view: "back" });
+    expect(sorted[1].variant_label).toBe("Unassigned");
+    expect(sorted[2]).toMatchObject({ variant_label: "White", view: "front" });
+  });
+
   it("normalizeShopifyMetafields filters and sorts", () => {
     const rows = normalizeShopifyMetafields([
       { namespace: "custom", key: "sample", value: "yes" },
