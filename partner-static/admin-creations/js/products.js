@@ -470,31 +470,60 @@ function pageShellHtml() {
       <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
       <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
       <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
-    </div>
-    <div id="cr-pd-backdrop" class="cr-pd-backdrop" hidden>
-      <div class="cr-pd-modal" role="dialog" aria-modal="true" aria-labelledby="cr-pd-title">
-        <div class="cr-pd-modal__head">
-          <div class="cr-pd-modal__head-text">
-            <h2 id="cr-pd-title">Product</h2>
-            <p class="cr-pd-modal__sub" id="cr-pd-sub" hidden></p>
-          </div>
-          <button type="button" class="icon-btn" id="cr-pd-close" aria-label="Close">×</button>
+    </div>`;
+}
+
+function detailModalHtml() {
+  return `
+    <div class="cr-pd-modal" role="dialog" aria-modal="true" aria-labelledby="cr-pd-title">
+      <div class="cr-pd-modal__head">
+        <div class="cr-pd-modal__head-text">
+          <h2 id="cr-pd-title">Product</h2>
+          <p class="cr-pd-modal__sub" id="cr-pd-sub" hidden></p>
         </div>
-        <div class="cr-pd-modal__body">
-          <nav class="cr-pd-nav" aria-label="Product detail sections">
-            ${DETAIL_MENUS.map(
-              (m) =>
-                `<button type="button" class="cr-pd-nav__btn" data-cr-pd-menu="${m.key}">${escapeHtml(m.label)}</button>`
-            ).join("")}
-          </nav>
-          <div class="cr-pd-content" id="cr-pd-content"></div>
-        </div>
+        <button type="button" class="icon-btn" id="cr-pd-close" aria-label="Close">×</button>
+      </div>
+      <div class="cr-pd-modal__body">
+        <nav class="cr-pd-nav" aria-label="Product detail sections">
+          ${DETAIL_MENUS.map(
+            (m) =>
+              `<button type="button" class="cr-pd-nav__btn" data-cr-pd-menu="${m.key}">${escapeHtml(m.label)}</button>`
+          ).join("")}
+        </nav>
+        <div class="cr-pd-content" id="cr-pd-content"></div>
       </div>
     </div>`;
 }
 
+let detailModalBound = false;
+
+/**
+ * Product detail must live on document.body.
+ * #view-products.layout-stage keeps animation-fill transform:translateY(0), which makes
+ * position:fixed descendants relative to the tall scrollable view — backdrop blur shows
+ * in the viewport while the white modal panel is centered off-screen.
+ */
 function ensureDetailDom() {
-  return document.getElementById("cr-pd-backdrop");
+  let backdrop = document.getElementById("cr-pd-backdrop");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "cr-pd-backdrop";
+    backdrop.className = "cr-pd-backdrop";
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+    backdrop.innerHTML = detailModalHtml();
+    document.body.appendChild(backdrop);
+    detailModalBound = false;
+  }
+  if (backdrop.parentElement !== document.body) {
+    document.body.appendChild(backdrop);
+    detailModalBound = false;
+  }
+  if (!detailModalBound) {
+    bindDetailModal(backdrop);
+    detailModalBound = true;
+  }
+  return backdrop;
 }
 
 function truncateValue(value, id) {
@@ -695,6 +724,10 @@ function renderDetailContent() {
   });
 }
 
+function isDetailBackdropOpen(backdrop) {
+  return !!(backdrop && (backdrop.classList.contains("show") || !backdrop.hidden));
+}
+
 function closeProductDetail() {
   state.detail.open = false;
   state.detail.loading = false;
@@ -702,16 +735,24 @@ function closeProductDetail() {
   state.detail.data = null;
   state.detail.productId = "";
   state.detail.expandedValues = new Set();
-  const backdrop = ensureDetailDom();
+  const backdrop = document.getElementById("cr-pd-backdrop");
   if (backdrop) {
     backdrop.hidden = true;
     backdrop.classList.remove("show");
+    backdrop.setAttribute("aria-hidden", "true");
   }
+  document.body.classList.remove("cr-pd-open");
   document.removeEventListener("keydown", onDetailKeydown);
 }
 
 function onDetailKeydown(e) {
-  if (e.key === "Escape") closeProductDetail();
+  if (e.key !== "Escape") return;
+  const backdrop = document.getElementById("cr-pd-backdrop");
+  // Defensive: close even if state drifted but backdrop/blur is still visible.
+  if (state.detail.open || isDetailBackdropOpen(backdrop)) {
+    e.preventDefault();
+    closeProductDetail();
+  }
 }
 
 async function openProductDetail(productId, title) {
@@ -733,7 +774,10 @@ async function openProductDetail(productId, title) {
   if (backdrop) {
     backdrop.hidden = false;
     backdrop.classList.add("show");
+    backdrop.setAttribute("aria-hidden", "false");
   }
+  document.body.classList.add("cr-pd-open");
+  document.removeEventListener("keydown", onDetailKeydown);
   document.addEventListener("keydown", onDetailKeydown);
   renderDetailContent();
 
@@ -756,12 +800,12 @@ async function openProductDetail(productId, title) {
   }
 }
 
-function bindDetailModal(el) {
-  el.querySelector("#cr-pd-close")?.addEventListener("click", closeProductDetail);
-  el.querySelector("#cr-pd-backdrop")?.addEventListener("click", (e) => {
-    if (e.target?.id === "cr-pd-backdrop") closeProductDetail();
+function bindDetailModal(backdrop) {
+  backdrop.querySelector("#cr-pd-close")?.addEventListener("click", closeProductDetail);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop || e.target?.id === "cr-pd-backdrop") closeProductDetail();
   });
-  el.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
+  backdrop.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const menu = btn.dataset.crPdMenu;
       if (!menu || state.detail.menu === menu) return;
@@ -817,14 +861,21 @@ function bindProductCards(el) {
   });
 }
 
+/** Hide body-mounted product modal when leaving Products (modal stays on document.body). */
+export function teardownProductDetailModal() {
+  closeProductDetail();
+}
+
 export async function mountProductsPage() {
   const el = document.getElementById("view-products");
   if (!el) return;
 
   try {
+    // Close any leftover body-mounted modal from a previous visit.
+    closeProductDetail();
     el.innerHTML = pageShellHtml();
     bindToolbar(el);
-    bindDetailModal(el);
+    ensureDetailDom();
     bindProductCards(el);
     await fetchProducts();
   } catch (e) {
