@@ -469,9 +469,11 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
     let published_design_id = null;
     let amazon_publish = null;
     try {
-      const { resolvePublishedDesignForAdminAmazon, loadDryRunResult } = await import(
-        "../product/amazonAdminPublish.js"
-      );
+      const {
+        resolvePublishedDesignForAdminAmazon,
+        loadDryRunResult,
+        loadAmazonAdminListingSummary,
+      } = await import("../product/amazonAdminPublish.js");
       const resolved = await resolvePublishedDesignForAdminAmazon(env, {
         shopify_product_id: String(p.id),
         product_key: productKey,
@@ -479,8 +481,20 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       if (resolved.ok) {
         published_design_id = resolved.entry.id;
         const dry = await loadDryRunResult(env, published_design_id);
+        const listingSummary = await loadAmazonAdminListingSummary(env, published_design_id);
         amazon_publish = {
           published_design_id,
+          continents: listingSummary.continents || {},
+          listings: (listingSummary.listings || []).map((row) => ({
+            marketplace_id: row.marketplace_id,
+            amazon_sku: row.amazon_sku,
+            status: row.status,
+            asin: row.asin || null,
+            verified_status: row.verified_status || null,
+            feed_id: row.feed_id || null,
+            last_error: row.last_error || null,
+            updated_at: row.updated_at || null,
+          })),
           dry_run: dry
             ? {
                 ok: !!dry.ok,
@@ -492,6 +506,9 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
                   code: m.code,
                   continent: m.continent,
                   errors: m.errors || [],
+                  credentials: m.credentials
+                    ? { ok: !!m.credentials.ok, error: m.credentials.error || null }
+                    : undefined,
                 })),
               }
             : null,

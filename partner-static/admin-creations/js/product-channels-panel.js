@@ -88,7 +88,15 @@ function statusHtml(st) {
     )}</span>`;
   }
   if (st?.status === "published") {
-    return `<span class="cr-ch-status cr-ch-status--published">Published</span>`;
+    const asinHint = st.asin ? ` · ${st.asin}` : "";
+    return `<span class="cr-ch-status cr-ch-status--published">Published${escapeHtml(
+      asinHint
+    )}</span>`;
+  }
+  if (st?.status === "publishing" || st?.status === "queued") {
+    return `<span class="cr-ch-status cr-ch-status--queue"><span class="cr-ch-spinner" aria-hidden="true"></span>${escapeHtml(
+      st.status === "queued" ? "Live queued" : "Publishing…"
+    )}</span>`;
   }
   if (st?.status === "dry_run_ok") {
     return `<span class="cr-ch-status cr-ch-status--published">Dry run OK</span>`;
@@ -96,8 +104,8 @@ function statusHtml(st) {
   if (st?.status === "dry_run_failed") {
     return `<span class="cr-ch-status cr-ch-status--failed">Dry run failed</span>`;
   }
-  if (st?.status === "queued") {
-    return `<span class="cr-ch-status cr-ch-status--queue">Live queued</span>`;
+  if (st?.status === "failed") {
+    return `<span class="cr-ch-status cr-ch-status--failed">Failed</span>`;
   }
   return `<span class="cr-ch-status">Not published</span>`;
 }
@@ -179,7 +187,9 @@ export function renderChannelsPanelHtml(product, ui) {
   let amzDryOk = 0;
   for (const t of targets) {
     const st = ui.channelState[`amazon:${t.continent}`] || {};
-    if (st.status === "published" || st.status === "queued") amzPublished++;
+    if (st.status === "published" || st.status === "queued" || st.status === "publishing") {
+      amzPublished++;
+    }
     if (st.status === "dry_run_ok") amzDryOk++;
   }
 
@@ -429,6 +439,9 @@ export function bindChannelsPanel(root, ui) {
       }
 
       applyAmazonPublishResult(data, { continents, live });
+      if (live && data?.queued && data?.published_design_id) {
+        pollAmazonPublishStatus(data.published_design_id, continents || []);
+      }
     } catch (e) {
       for (const key of keys) {
         if (!ui.channelState[key]) continue;
@@ -440,6 +453,62 @@ export function bindChannelsPanel(root, ui) {
       showToast("Amazon error", e.message || String(e));
     }
     ui.onChange();
+  }
+
+  /**
+   * After LIVE enqueue, refresh continent cards from amazon_listing
+   * (queued → publishing → published) without reopening the modal.
+   */
+  async function pollAmazonPublishStatus(publishedDesignId, continents) {
+    const id = Number(publishedDesignId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const keys = (continents || []).map((c) => `amazon:${c}`);
+    const delays = [4000, 8000, 15000, 25000, 40000];
+    for (const waitMs of delays) {
+      await new Promise((r) => setTimeout(r, waitMs));
+      try {
+        const data = await partnerFetch("admin-amazon-publish-status", {
+          query: { published_design_id: String(id) },
+        });
+        const contMap = data?.continents || {};
+        let anyTerminal = true;
+        for (const key of keys.length
+          ? keys
+          : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
+          const continent = key.replace(/^amazon:/, "");
+          const cont = contMap[continent];
+          if (!cont) {
+            anyTerminal = false;
+            continue;
+          }
+          const st = ui.channelState[key] || { status: "unpublished", queue: false };
+          st.queue = cont.status === "publishing" || cont.status === "queued";
+          st.queueLabel = cont.status === "queued" ? "Live queued" : "Publishing…";
+          st.status = cont.status;
+          st.asin = cont.asin || null;
+          st.lastMessage = [cont.code, cont.asin ? `ASIN ${cont.asin}` : cont.amazon_sku, cont.last_error]
+            .filter(Boolean)
+            .join(" · ");
+          st.errors = cont.status === "failed" && cont.last_error ? [cont.last_error] : [];
+          ui.channelState[key] = st;
+          if (cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
+        }
+        if (ui.onProductPatch) {
+          ui.onProductPatch({
+            amazon_publish: {
+              published_design_id: id,
+              continents: contMap,
+              listings: data.listings || [],
+            },
+            published_design_id: id,
+          });
+        }
+        ui.onChange();
+        if (anyTerminal) break;
+      } catch {
+        /* keep polling */
+      }
+    }
   }
 
   root.querySelectorAll("[data-cr-ch-dryrun]").forEach((btn) => {
@@ -524,13 +593,39 @@ export function renderOverviewPanelHtml(product) {
 }
 
 /**
- * Seed channelState from product amazon_publish / dry_run markers.
+ * Seed channelState from product amazon_publish continents (live listings)
+ * and dry_run markers. Live / publishing status wins over dry-run.
  */
 export function seedChannelStateFromProduct(product) {
   const state = { eazpire: { status: "published", queue: false } };
   const targets = amazonTargetsFromProduct(product);
   const drMarkets = product?.amazon_publish?.dry_run?.marketplaces || [];
+  const continents = product?.amazon_publish?.continents || {};
   for (const t of targets) {
+    const cont = continents[t.continent];
+    const contStatus = String(cont?.status || "").toLowerCase();
+    if (
+      cont &&
+      (contStatus === "published" ||
+        contStatus === "publishing" ||
+        contStatus === "queued" ||
+        contStatus === "failed")
+    ) {
+      const msgParts = [];
+      if (cont.code) msgParts.push(cont.code);
+      if (cont.asin) msgParts.push(`ASIN ${cont.asin}`);
+      else if (cont.amazon_sku) msgParts.push(cont.amazon_sku);
+      if (contStatus === "failed" && cont.last_error) msgParts.push(cont.last_error);
+      state[`amazon:${t.continent}`] = {
+        status: contStatus,
+        queue: false,
+        asin: cont.asin || null,
+        lastMessage: msgParts.join(" · ") || contStatus,
+        errors: contStatus === "failed" && cont.last_error ? [cont.last_error] : [],
+      };
+      continue;
+    }
+
     const m = drMarkets.find((x) => x.continent === t.continent);
     if (m) {
       const errs = formatMarketplaceErrors(m);
