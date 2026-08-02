@@ -232,6 +232,7 @@ const ADMIN_OPS = new Set([
   "admin-partner-catalog-blueprints",
   "admin-partner-sync-printify",
   "admin-todify-dogfood-setup",
+  "admin-todify-reconcile-markets",
   "admin-catalog-studio-tree",
   "admin-catalog-studio-products",
   "admin-catalog-studio-set-status",
@@ -785,6 +786,7 @@ export async function handleManufacturerRouter(request, env, ctx) {
           target_key: body?.target_key,
           owner_email: body?.owner_email,
           send_magic_link: body?.send_magic_link,
+          reconcile_publications: body?.reconcile_publications,
         });
         if (!result.ok) return json(result, 400, cors);
         return json(result, 200, cors);
@@ -792,6 +794,26 @@ export async function handleManufacturerRouter(request, env, ctx) {
         console.error("[admin-todify-dogfood-setup]", err);
         return json(
           { ok: false, error: "todify_dogfood_setup_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
+    }
+    if (op === "admin-todify-reconcile-markets" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const { reconcileTodifyExclusivePublications } = await import(
+          "./adapters/todify/todifyDogfoodSetup.js"
+        );
+        const result = await reconcileTodifyExclusivePublications(env, {
+          product_keys: Array.isArray(body?.product_keys) ? body.product_keys : undefined,
+        });
+        if (!result.ok) return json(result, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-todify-reconcile-markets]", err);
+        return json(
+          { ok: false, error: "todify_reconcile_markets_failed", detail: String(err?.message || err) },
           500,
           cors
         );
