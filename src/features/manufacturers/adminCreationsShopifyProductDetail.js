@@ -445,7 +445,47 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       env.SHOPIFY_CURRENCY ||
       "EUR";
 
-    const mockups = buildSortedMockups(p.images || [], { variants: p.variants || [] });
+    let mockups = buildSortedMockups(p.images || [], { variants: p.variants || [] });
+    const providerMf = shopifyMetafields.find((m) => m.namespace === "custom" && m.key === "provider");
+    const isTodifyListing =
+      String(providerMf?.value || "")
+        .trim()
+        .toLowerCase() === "todify" || String(productKey || "").toLowerCase().includes("todify");
+    const hasViewAlts = mockups.some((m) => m.view && m.view !== "other" && m.alt && String(m.alt).includes("|"));
+    if (isTodifyListing && (!mockups.length || !hasViewAlts) && productKey) {
+      try {
+        const {
+          loadTodifyCleanCatalogMocks,
+          ensureTodifyFrontIsDefaultMock,
+        } = await import("../publish/todifyCatalogMocks.js");
+        await ensureTodifyFrontIsDefaultMock(env, productKey);
+        const catalogMocks = await loadTodifyCleanCatalogMocks(env, productKey);
+        if (catalogMocks.length) {
+          const fromCatalog = catalogMocks.map((m, index) => ({
+            id: `catalog-${index}`,
+            src: m.image_url,
+            alt: `${m.color_name}|${m.view_key}${m.view_key === "front" ? "|preview-default" : ""}`,
+            variant_label: m.color_name || "Default",
+            view: m.view_key || "other",
+            is_preview: String(m.view_key || "") === "front",
+            position: index + 1,
+            variant_ids: [],
+          }));
+          mockups = buildSortedMockups(
+            fromCatalog.map((m) => ({
+              id: m.id,
+              src: m.src,
+              alt: m.alt,
+              position: m.position,
+              variant_ids: [],
+            })),
+            { variants: p.variants || [] }
+          );
+        }
+      } catch (catErr) {
+        console.warn("[admin-creations-shopify-product-detail] catalog mocks:", catErr?.message || catErr);
+      }
+    }
 
     let channels = null;
     if (productKey) {

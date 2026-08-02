@@ -238,6 +238,7 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
   for (const table of [
     "print_area_printify_templates",
     "product_mockup_defaults",
+    "product_mockup_images",
     "template_products",
     "product_branding_mappings",
   ]) {

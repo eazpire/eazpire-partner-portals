@@ -5,7 +5,9 @@
  * POST ?op=admin-creations-edit-design-save
  * POST ?op=admin-creations-edit-design-update
  *
- * Save → D1 draft only. Update → Printify print_areas + Shopify publish refresh.
+ * Save → D1 draft only.
+ * Update → Printify print_areas + Shopify refresh (Printify listings)
+ *        → catalog mock refresh + draft sync (Todify / direct Shopify)
  */
 
 import { json, getCorsHeaders } from "../../utils/response.js";
@@ -25,6 +27,13 @@ import {
   placeholderMatchesStudioTarget,
   sanitizeStudioPrintAreasForPrintifyApi,
 } from "../shop/studioPrintAreaPlacement.js";
+import { isDirectShopifySourceSystem } from "./partnerCatalog/constants.js";
+import {
+  attachTodifyCatalogMocksToShopify,
+  ensureTodifyFrontIsDefaultMock,
+  loadTodifyCleanCatalogMocks,
+} from "../publish/todifyCatalogMocks.js";
+import { designImagePublicUrl } from "../publish/directShopifyPublish.js";
 
 const DEFAULT_ZONE = { l: 0.28, t: 0.22, w: 0.44, h: 0.48 };
 const POSITIONS = ["front", "back"];
@@ -134,7 +143,8 @@ async function resolvePublishedRow(env, shopifyProductId) {
   let entry = await db
     .prepare(
       `SELECT pd.id, pd.printify_product_id, pd.product_key, pd.design_id, pd.shopify_product_id,
-              c.preview_url AS design_preview_url, c.original_url AS design_original_url
+              c.preview_url AS design_preview_url, c.original_url AS design_original_url,
+              c.r2_key_original AS design_r2_key, c.r2_key_preview AS design_r2_key_preview
        FROM published_designs pd
        LEFT JOIN creations c ON c.id = pd.design_id
        WHERE pd.shopify_product_id = ? OR pd.shopify_product_id = ?
@@ -146,7 +156,8 @@ async function resolvePublishedRow(env, shopifyProductId) {
     entry = await db
       .prepare(
         `SELECT pd.id, pd.printify_product_id, pd.product_key, pd.design_id, pd.shopify_product_id,
-                c.preview_url AS design_preview_url, c.original_url AS design_original_url
+                c.preview_url AS design_preview_url, c.original_url AS design_original_url,
+                c.r2_key_original AS design_r2_key, c.r2_key_preview AS design_r2_key_preview
          FROM published_designs pd
          LEFT JOIN creations c ON c.id = pd.design_id
          WHERE CAST(pd.shopify_product_id AS TEXT) LIKE ?
@@ -156,6 +167,103 @@ async function resolvePublishedRow(env, shopifyProductId) {
       .first();
   }
   return entry || null;
+}
+
+async function resolveListingSourceSystem(env, productKey) {
+  const pk = String(productKey || "").trim();
+  if (!pk || !env?.CATALOG_DB) return "";
+  try {
+    const row = await env.CATALOG_DB.prepare(
+      `SELECT source_system FROM product_publish_profiles
+       WHERE product_key = ? AND COALESCE(is_active, 1) = 1
+       ORDER BY CASE WHEN LOWER(TRIM(source_system)) IN ('todify','direct_shopify') THEN 0 ELSE 1 END, id ASC
+       LIMIT 1`
+    )
+      .bind(pk)
+      .first();
+    return String(row?.source_system || "").trim().toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+async function buildTodifyEditDesignPayload(env, {
+  shopifyProductId,
+  productKey,
+  published,
+  shopifyMockups,
+  providerLabel = "todify",
+}) {
+  const sid = String(shopifyProductId);
+  const pk = String(productKey || "").trim();
+  await ensureTodifyFrontIsDefaultMock(env, pk).catch(() => ({}));
+  const catalogMocks = await loadTodifyCleanCatalogMocks(env, pk);
+  const zone = await loadZoneForProductKey(env, pk);
+  const draft = await loadDraft(env, sid);
+
+  const availablePositions = [];
+  const livePlacements = {};
+  const views = {};
+
+  for (const pos of POSITIONS) {
+    const fromShopify = pickMockUrl(shopifyMockups, [], pos);
+    const fromCatalog = (catalogMocks || []).find((m) => normView(m.view_key) === pos)?.image_url || "";
+    const mockUrl = fromShopify || fromCatalog || "";
+    if (mockUrl || pos === "front") {
+      if (!availablePositions.includes(pos)) availablePositions.push(pos);
+    }
+    views[pos] = {
+      mock_url: mockUrl || null,
+      zone,
+      live_placement: null,
+      draft_placement: draft?.placements?.[pos] || null,
+    };
+  }
+  if (!availablePositions.length) availablePositions.push("front");
+  // Prefer front tab first for Todify (matches Design Studio / overview).
+  availablePositions.sort((a, b) => (a === "front" ? -1 : b === "front" ? 1 : 0));
+
+  if (!livePlacements.front) {
+    livePlacements.front = normalizePlacement({ x: 0.5, y: 0.5, scale: 0.95 });
+  }
+  if (availablePositions.includes("back") && !livePlacements.back) {
+    livePlacements.back = normalizePlacement({ x: 0.5, y: 0.5, scale: 0.95 });
+  }
+  for (const pos of availablePositions) {
+    views[pos].live_placement = livePlacements[pos] || null;
+  }
+
+  let designUrl = String(published?.design_original_url || published?.design_preview_url || "").trim();
+  if (!designUrl) {
+    const r2 = published?.design_r2_key || published?.design_r2_key_preview;
+    if (r2) designUrl = designImagePublicUrl(env, r2) || "";
+  }
+
+  return {
+    ok: true,
+    edit_design: {
+      shopify_product_id: sid,
+      printify_product_id: null,
+      source_system: providerLabel || "todify",
+      product_key: pk || null,
+      published_design_id: published?.id != null ? Number(published.id) : null,
+      design_id: published?.design_id || null,
+      design_url: designUrl || null,
+      design_image_id: null,
+      positions: availablePositions,
+      views,
+      live_placements: livePlacements,
+      draft: draft
+        ? {
+            placements: draft.placements,
+            saved_at: draft.saved_at,
+            synced_at: draft.synced_at,
+            pending_update: draftPendingUpdate(draft),
+          }
+        : null,
+      pending_update: draftPendingUpdate(draft),
+    },
+  };
 }
 
 async function loadZoneForProductKey(env, productKey) {
@@ -237,36 +345,56 @@ async function buildEditDesignPayload(env, shopifyProductId) {
 
   const domain = shopDomainFromEnv(env);
   let shopifyMockups = [];
+  let shopifyProviderLabel = "";
   try {
     if (domain) {
       const product = await shopifyAPI(env, domain, `products/${sid}.json`, { method: "GET" });
       const p = product?.product || product;
       shopifyMockups = buildSortedMockups(p?.images || []);
-      if (!productKey) {
-        // Fallback: custom.product_key metafield often set on listing
-        try {
-          const mf = await shopifyAPI(env, domain, `products/${sid}/metafields.json?limit=250`, {
-            method: "GET",
-          });
-          const rows = Array.isArray(mf?.metafields) ? mf.metafields : [];
+      // Metafields: product_key / printify id / provider (Todify detection)
+      try {
+        const mf = await shopifyAPI(env, domain, `products/${sid}/metafields.json?limit=250`, {
+          method: "GET",
+        });
+        const rows = Array.isArray(mf?.metafields) ? mf.metafields : [];
+        if (!productKey) {
           const pkMf = rows.find((m) => m.namespace === "custom" && m.key === "product_key");
           if (pkMf?.value) productKey = String(pkMf.value).trim();
-          const pidMf = rows.find(
-            (m) =>
-              (m.namespace === "custom" && m.key === "printify_product_id") ||
-              (m.namespace === "printify" && m.key === "product_id")
-          );
-          if (!printifyProductId && pidMf?.value) printifyProductId = String(pidMf.value).trim();
-        } catch {
-          /* ignore */
         }
+        const pidMf = rows.find(
+          (m) =>
+            (m.namespace === "custom" && m.key === "printify_product_id") ||
+            (m.namespace === "printify" && m.key === "product_id")
+        );
+        if (!printifyProductId && pidMf?.value) printifyProductId = String(pidMf.value).trim();
+        const provMf = rows.find((m) => m.namespace === "custom" && m.key === "provider");
+        if (provMf?.value) {
+          shopifyProviderLabel = String(provMf.value).trim().toLowerCase();
+        }
+      } catch {
+        /* ignore */
       }
     }
   } catch (e) {
     console.warn("[admin-creations-edit-design] shopify product:", e?.message || e);
   }
 
+  const sourceSystem = await resolveListingSourceSystem(env, productKey);
+  const isTodifyListing =
+    isDirectShopifySourceSystem(sourceSystem) ||
+    shopifyProviderLabel === "todify" ||
+    String(productKey || "").toLowerCase().includes("todify");
+
   if (!printifyProductId) {
+    if (isTodifyListing && productKey) {
+      return buildTodifyEditDesignPayload(env, {
+        shopifyProductId: sid,
+        productKey,
+        published,
+        shopifyMockups,
+        providerLabel: sourceSystem || providerMf || "todify",
+      });
+    }
     return {
       ok: false,
       error: "printify_product_not_linked",
@@ -499,7 +627,7 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
         {
           ok: false,
           error: "already_synced",
-          message: "Saved placement is already pushed to Printify/Shopify.",
+          message: "Saved placement is already pushed to Shopify (and Printify when linked).",
         },
         400,
         cors
@@ -516,6 +644,63 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
     }
     const ed = context.edit_design;
     const printifyProductId = ed.printify_product_id;
+    const isTodifyUpdate =
+      !printifyProductId ||
+      isDirectShopifySourceSystem(ed.source_system) ||
+      String(ed.product_key || "").toLowerCase().includes("todify");
+
+    if (isTodifyUpdate) {
+      const domain = shopDomainFromEnv(env);
+      if (!domain || !ed.product_key) {
+        return json(
+          {
+            ok: false,
+            error: "todify_update_unavailable",
+            message: "Todify Edit Design update needs a Shopify shop and product_key.",
+          },
+          400,
+          cors
+        );
+      }
+      await ensureTodifyFrontIsDefaultMock(env, ed.product_key).catch(() => ({}));
+      const mockAttach = await attachTodifyCatalogMocksToShopify(env, {
+        shopDomain: domain,
+        shopifyProductId: sid,
+        productKey: ed.product_key,
+        designImageUrl: ed.design_url || "",
+        primaryViewKey: "front",
+      });
+      const syncedAt = nowIso();
+      await ensureDraftTable(env);
+      await env.CREATOR_DB.prepare(
+        `UPDATE admin_product_design_drafts
+         SET synced_at = ?, updated_at = ?, printify_product_id = NULL, product_key = ?
+         WHERE shopify_product_id = ?`
+      )
+        .bind(syncedAt, syncedAt, ed.product_key || null, sid)
+        .run();
+      const refreshed = await loadDraft(env, sid);
+      return json(
+        {
+          ok: true,
+          source_system: ed.source_system || "todify",
+          printify_product_id: null,
+          mock_attach: mockAttach,
+          draft: refreshed
+            ? {
+                placements: refreshed.placements,
+                saved_at: refreshed.saved_at,
+                synced_at: refreshed.synced_at,
+                pending_update: draftPendingUpdate(refreshed),
+              }
+            : null,
+          pending_update: false,
+        },
+        200,
+        cors
+      );
+    }
+
     const product = await getPrintifyProduct(env, printifyProductId);
     if (!product?.print_areas?.length) {
       return json({ ok: false, error: "missing_print_areas" }, 400, cors);
