@@ -50,18 +50,28 @@ function clamp01(n, fallback = 0.5) {
   return Math.max(0, Math.min(1, v));
 }
 
+/** Todify / Edit Design: placement may leave the print zone (clipped on bake). */
+function clampPlacementCoord(n, fallback = 0.5) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(-2, Math.min(3, v));
+}
+
 function normalizePlacement(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const scaleRaw = Number(src.scale);
+  let angle = Number.isFinite(Number(src.angle))
+    ? Number(src.angle)
+    : Number.isFinite(Number(src.rotate))
+      ? Number(src.rotate)
+      : 0;
+  angle = ((angle % 360) + 360) % 360;
+  if (angle > 180) angle -= 360;
   return {
-    x: clamp01(src.x, 0.5),
-    y: clamp01(src.y, 0.5),
+    x: clampPlacementCoord(src.x, 0.5),
+    y: clampPlacementCoord(src.y, 0.5),
     scale: Number.isFinite(scaleRaw) && scaleRaw > 0 ? Math.min(4, Math.max(0.05, scaleRaw)) : 0.95,
-    angle: Number.isFinite(Number(src.angle))
-      ? Number(src.angle)
-      : Number.isFinite(Number(src.rotate))
-        ? Number(src.rotate)
-        : 0,
+    angle,
   };
 }
 

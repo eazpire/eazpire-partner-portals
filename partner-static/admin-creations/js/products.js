@@ -40,12 +40,12 @@ function resolveShopifyProductId(item) {
 
 /** Creator-parity nav first; Mockups/Metafields/Edit Design kept as admin extras. */
 const DETAIL_MENUS = [
-  { key: "overview", label: "Overview" },
-  { key: "variants", label: "Variants" },
-  { key: "channels", label: "Channels" },
-  { key: "edit_design", label: "Edit Design" },
-  { key: "mockups", label: "Mockups" },
-  { key: "metafields", label: "Metafields" },
+  { key: "overview", label: "Overview", abbr: "Ov" },
+  { key: "variants", label: "Variants", abbr: "Va" },
+  { key: "channels", label: "Channels", abbr: "Ch" },
+  { key: "edit_design", label: "Edit Design", abbr: "Ed" },
+  { key: "mockups", label: "Mockups", abbr: "Mk" },
+  { key: "metafields", label: "Metafields", abbr: "Mf" },
 ];
 
 const VALUE_TRUNCATE = 160;
@@ -77,6 +77,7 @@ const state = {
     editDesignUi: null,
     editDesignLoadedFor: "",
     closePromptOpen: false,
+    navCollapsed: false,
   },
 };
 
@@ -496,10 +497,11 @@ function detailModalHtml() {
         <button type="button" class="icon-btn" id="cr-pd-close" aria-label="Close">×</button>
       </div>
       <div class="cr-pd-modal__body">
-        <nav class="cr-pd-nav" aria-label="Product detail sections">
+        <nav class="cr-pd-nav" id="cr-pd-nav" aria-label="Product detail sections">
+          <button type="button" class="cr-pd-nav__toggle" id="cr-pd-nav-toggle" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true">‹</button>
           ${DETAIL_MENUS.map(
             (m) =>
-              `<button type="button" class="cr-pd-nav__btn" data-cr-pd-menu="${m.key}">${escapeHtml(m.label)}</button>`
+              `<button type="button" class="cr-pd-nav__btn" data-cr-pd-menu="${m.key}" title="${escapeHtml(m.label)}"><span class="cr-pd-nav__label">${escapeHtml(m.label)}</span><span class="cr-pd-nav__abbr" aria-hidden="true">${escapeHtml(m.abbr)}</span></button>`
           ).join("")}
         </nav>
         <div class="cr-pd-content" id="cr-pd-content"></div>
@@ -664,6 +666,27 @@ function renderMetafieldsPanel(product) {
     </section>`;
 }
 
+function syncDetailStudioChrome() {
+  const modal = document.querySelector("#cr-pd-backdrop .cr-pd-modal");
+  const nav = document.getElementById("cr-pd-nav");
+  const toggle = document.getElementById("cr-pd-nav-toggle");
+  if (!modal) return;
+  const studio = state.detail.menu === "edit_design";
+  modal.classList.toggle("cr-pd-modal--studio", studio);
+  if (studio && state.detail.navCollapsed == null) {
+    state.detail.navCollapsed = true;
+  }
+  const collapsed = !!state.detail.navCollapsed;
+  modal.classList.toggle("cr-pd-modal--nav-collapsed", collapsed);
+  nav?.classList.toggle("cr-pd-nav--collapsed", collapsed);
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    toggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    toggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    toggle.textContent = collapsed ? "›" : "‹";
+  }
+}
+
 function renderDetailContent() {
   const content = document.getElementById("cr-pd-content");
   const titleEl = document.getElementById("cr-pd-title");
@@ -680,6 +703,8 @@ function renderDetailContent() {
     subEl.textContent = bits.join(" · ");
     subEl.hidden = !bits.length;
   }
+
+  syncDetailStudioChrome();
 
   document.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.crPdMenu === state.detail.menu);
@@ -805,11 +830,13 @@ function closeProductDetail() {
   state.detail.editDesignUi = null;
   state.detail.editDesignLoadedFor = "";
   state.detail.closePromptOpen = false;
+  state.detail.navCollapsed = false;
   const backdrop = document.getElementById("cr-pd-backdrop");
   if (backdrop) {
     backdrop.hidden = true;
     backdrop.classList.remove("show");
     backdrop.setAttribute("aria-hidden", "true");
+    backdrop.querySelector(".cr-pd-modal")?.classList.remove("cr-pd-modal--studio", "cr-pd-modal--nav-collapsed");
   }
   document.body.classList.remove("cr-pd-open");
   document.removeEventListener("keydown", onDetailKeydown);
@@ -877,6 +904,7 @@ async function openProductDetail(productId, title) {
   state.detail.editDesignUi = null;
   state.detail.editDesignLoadedFor = "";
   state.detail.closePromptOpen = false;
+  state.detail.navCollapsed = false;
 
   const backdrop = ensureDetailDom();
   if (backdrop) {
@@ -913,11 +941,18 @@ function bindDetailModal(backdrop) {
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop || e.target?.id === "cr-pd-backdrop") requestCloseProductDetail();
   });
+  backdrop.querySelector("#cr-pd-nav-toggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    state.detail.navCollapsed = !state.detail.navCollapsed;
+    syncDetailStudioChrome();
+  });
   backdrop.querySelectorAll("[data-cr-pd-menu]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const menu = btn.dataset.crPdMenu;
       if (!menu || state.detail.menu === menu) return;
       state.detail.menu = menu;
+      if (menu === "edit_design") state.detail.navCollapsed = true;
       renderDetailContent();
     });
   });

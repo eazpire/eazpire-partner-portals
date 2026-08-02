@@ -1,6 +1,6 @@
 /**
  * Admin Creations → Product Modal → Edit Design panel.
- * Mock viewer with front/back tabs, drag/scale design, Save (DB) / Update (Printify+Shopify).
+ * Fullscreen studio viewer: move / scale / rotate, print-area clip, Save / Update footer.
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -18,15 +18,18 @@ function cloneTr(tr) {
   };
 }
 
+/** Free placement (own coordinate system) — x/y may leave the print zone. */
 function normalizeTr(tr) {
   const out = cloneTr(tr);
   if (!Number.isFinite(out.x)) out.x = DEFAULT_TRANSFORM.x;
   if (!Number.isFinite(out.y)) out.y = DEFAULT_TRANSFORM.y;
   if (!Number.isFinite(out.scale) || out.scale <= 0) out.scale = DEFAULT_TRANSFORM.scale;
   if (!Number.isFinite(out.angle)) out.angle = 0;
-  out.x = Math.max(0.05, Math.min(0.95, out.x));
-  out.y = Math.max(0.05, Math.min(0.95, out.y));
+  out.x = Math.max(-2, Math.min(3, out.x));
+  out.y = Math.max(-2, Math.min(3, out.y));
   out.scale = Math.max(0.08, Math.min(4, out.scale));
+  out.angle = ((out.angle % 360) + 360) % 360;
+  if (out.angle > 180) out.angle -= 360;
   return out;
 }
 
@@ -53,16 +56,13 @@ function parseZone(zone) {
   return { l: 0.28, t: 0.22, w: 0.44, h: 0.48 };
 }
 
+function snapRotate5(deg) {
+  const n = Number(deg) || 0;
+  return Math.round(n / 5) * 5;
+}
+
 /**
  * @param {object} ui
- * @param {object|null} ui.editDesign
- * @param {boolean} ui.loading
- * @param {string} ui.error
- * @param {string} ui.activePos
- * @param {Record<string, object>} ui.working
- * @param {Record<string, object>} ui.savedBaseline
- * @param {boolean} ui.pendingUpdate
- * @param {boolean} ui.busy
  */
 export function renderEditDesignPanelHtml(ui) {
   if (ui.loading) {
@@ -85,6 +85,7 @@ export function renderEditDesignPanelHtml(ui) {
   const dirty = !placementsEqual(ui.working, ui.savedBaseline);
   const pending = !!ui.pendingUpdate;
   const busy = !!ui.busy;
+  const isTodify = !ed.printify_product_id;
 
   const tabs = positions
     .map(
@@ -93,31 +94,14 @@ export function renderEditDesignPanelHtml(ui) {
     )
     .join("");
 
-  const isTodify = !ed.printify_product_id;
-  const statusBits = [];
-  if (dirty) statusBits.push("Unsaved local changes");
-  else if (pending)
-    statusBits.push(isTodify ? "Saved — ready to Update Shopify mockups" : "Saved — ready to Update Printify/Shopify");
-  else statusBits.push(isTodify ? "In sync · Update rebuilds design-on-mock images" : "In sync with last save");
-
   const updateEnabled = isTodify ? !dirty && !busy : pending && !dirty && !busy;
-  const updateHint = isTodify
-    ? "Drag to move · corner handle to scale. <strong>Save</strong> writes placement to the database. <strong>Update</strong> renders design-on-mock images and uploads them to Shopify (front featured)."
-    : "Drag to move · corner handle to scale. <strong>Save</strong> writes to the database only. <strong>Update</strong> pushes the saved placement to Printify and refreshes Shopify.";
+  let status = "";
+  if (dirty) status = "Unsaved changes";
+  else if (pending) status = isTodify ? "Saved — ready to Update" : "Saved — ready to Update Printify";
+  else status = "In sync";
 
   return `
     <section class="cr-pd-ed">
-      <div class="cr-pd-ed__head">
-        <div>
-          <h3 class="cr-pd-section-title">Edit Design</h3>
-          <p class="cr-pd-hint">${updateHint}</p>
-        </div>
-        <div class="cr-pd-ed__actions">
-          <button type="button" class="btn btn-secondary" id="cr-pd-ed-save" ${dirty && !busy ? "" : "disabled"}>${busy ? "Working…" : "Save"}</button>
-          <button type="button" class="btn btn-primary" id="cr-pd-ed-update" ${updateEnabled ? "" : "disabled"}>${busy ? "Working…" : "Update"}</button>
-        </div>
-      </div>
-      <p class="cr-pd-ed__status" id="cr-pd-ed-status">${escapeHtml(statusBits.join(" · "))}${ed.printify_product_id ? ` · Printify ${escapeHtml(String(ed.printify_product_id))}` : " · Todify"}</p>
       <div class="cr-pd-ed__viewer" id="cr-pd-ed-viewer">
         <div class="cr-pd-ed__frame" id="cr-pd-ed-frame">
           <div class="cr-pd-ed__stage" id="cr-pd-ed-stage">
@@ -127,26 +111,35 @@ export function renderEditDesignPanelHtml(ui) {
                 : `<div class="cr-pd-ed__mock-missing">No ${escapeHtml(active)} mock available</div>`
             }
             <div class="cr-pd-ed__zone" id="cr-pd-ed-zone" style="left:${zone.l * 100}%;top:${zone.t * 100}%;width:${zone.w * 100}%;height:${zone.h * 100}%;">
-              ${
-                designUrl
-                  ? `<div class="cr-pd-ed__design-wrap" id="cr-pd-ed-design-wrap">
-                      <img class="cr-pd-ed__design" id="cr-pd-ed-design" src="${escapeHtml(designUrl)}" alt="Design" draggable="false" />
-                      <div class="cr-pd-ed__chrome" id="cr-pd-ed-chrome">
-                        <button type="button" class="cr-pd-ed__rz" data-cr-ed-rz="scale" aria-label="Scale design"></button>
-                      </div>
-                    </div>`
-                  : `<div class="cr-pd-ed__design-missing">No design image found</div>`
-              }
+              <div class="cr-pd-ed__zone-clip" id="cr-pd-ed-zone-clip">
+                ${
+                  designUrl
+                    ? `<div class="cr-pd-ed__design-wrap" id="cr-pd-ed-design-wrap">
+                        <img class="cr-pd-ed__design" id="cr-pd-ed-design" src="${escapeHtml(designUrl)}" alt="Design" draggable="false" />
+                      </div>`
+                    : `<div class="cr-pd-ed__design-missing">No design image found</div>`
+                }
+              </div>
             </div>
+            ${
+              designUrl
+                ? `<div class="cr-pd-ed__chrome" id="cr-pd-ed-chrome" hidden>
+                    <button type="button" class="cr-pd-ed__rz cr-pd-ed__rz--scale" data-cr-ed-rz="scale" aria-label="Scale design"></button>
+                    <button type="button" class="cr-pd-ed__rz cr-pd-ed__rz--rotate" data-cr-ed-rz="rotate" aria-label="Rotate design"></button>
+                  </div>`
+                : ""
+            }
           </div>
         </div>
         <div class="cr-pd-ed__tabs" role="tablist" aria-label="Print positions">${tabs}</div>
       </div>
-      <div class="cr-pd-ed__meta">
-        <label>X <input type="number" step="0.01" min="0" max="1" id="cr-pd-ed-x" /></label>
-        <label>Y <input type="number" step="0.01" min="0" max="1" id="cr-pd-ed-y" /></label>
-        <label>Scale <input type="number" step="0.01" min="0.08" max="4" id="cr-pd-ed-scale" /></label>
-      </div>
+      <footer class="cr-pd-ed__foot">
+        <p class="cr-pd-ed__status" id="cr-pd-ed-status">${escapeHtml(status)}</p>
+        <div class="cr-pd-ed__actions">
+          <button type="button" class="btn btn-secondary" id="cr-pd-ed-save" ${dirty && !busy ? "" : "disabled"}>${busy ? "Working…" : "Save"}</button>
+          <button type="button" class="btn btn-primary" id="cr-pd-ed-update" ${updateEnabled ? "" : "disabled"}>${busy ? "Working…" : "Update"}</button>
+        </div>
+      </footer>
     </section>`;
 }
 
@@ -160,7 +153,7 @@ function applyTransform(root, tr) {
       designEl,
       zoneEl,
       { x: norm.x, y: norm.y, scale: norm.scale, rotate: norm.angle, flipX: false, flipY: false },
-      { uiScaleMax: 4 }
+      { uiScaleMax: 4, freeEdit: true }
     );
   } else {
     const zoneW = zoneEl.offsetWidth || 1;
@@ -173,12 +166,29 @@ function applyTransform(root, tr) {
     const dy = (norm.y - 0.5) * zoneH;
     designEl.style.transform = `translate(-50%, -50%) translate(${dx}px,${dy}px) rotate(${norm.angle}deg)`;
   }
-  const xIn = root.querySelector("#cr-pd-ed-x");
-  const yIn = root.querySelector("#cr-pd-ed-y");
-  const sIn = root.querySelector("#cr-pd-ed-scale");
-  if (xIn && document.activeElement !== xIn) xIn.value = String(Math.round(norm.x * 100) / 100);
-  if (yIn && document.activeElement !== yIn) yIn.value = String(Math.round(norm.y * 100) / 100);
-  if (sIn && document.activeElement !== sIn) sIn.value = String(Math.round(norm.scale * 100) / 100);
+  syncChrome(root);
+}
+
+function syncChrome(root) {
+  const stage = root.querySelector("#cr-pd-ed-stage");
+  const chrome = root.querySelector("#cr-pd-ed-chrome");
+  const design = root.querySelector("#cr-pd-ed-design");
+  if (!stage || !chrome || !design) return;
+  if (!design.classList.contains("is-laid-out")) {
+    chrome.hidden = true;
+    return;
+  }
+  const sr = stage.getBoundingClientRect();
+  const dr = design.getBoundingClientRect();
+  if (dr.width < 2 || dr.height < 2) {
+    chrome.hidden = true;
+    return;
+  }
+  chrome.hidden = false;
+  chrome.style.left = `${dr.left - sr.left}px`;
+  chrome.style.top = `${dr.top - sr.top}px`;
+  chrome.style.width = `${dr.width}px`;
+  chrome.style.height = `${dr.height}px`;
 }
 
 function fitStage(root) {
@@ -191,7 +201,7 @@ function fitStage(root) {
 
 /**
  * @param {HTMLElement} root
- * @param {object} ui — mutable UI state shared with products.js
+ * @param {object} ui
  */
 export function bindEditDesignPanel(root, ui) {
   if (!root || !ui?.editDesign) return;
@@ -209,14 +219,9 @@ export function bindEditDesignPanel(root, ui) {
         : !(ui.pendingUpdate && !dirty) || !!ui.busy;
     }
     if (status) {
-      const bits = [];
-      if (dirty) bits.push("Unsaved local changes");
-      else if (ui.pendingUpdate)
-        bits.push(isTodify ? "Saved — ready to Update Shopify mockups" : "Saved — ready to Update Printify/Shopify");
-      else bits.push(isTodify ? "In sync · Update rebuilds design-on-mock images" : "In sync with last save");
-      if (ui.editDesign.printify_product_id) bits.push(`Printify ${ui.editDesign.printify_product_id}`);
-      else bits.push("Todify");
-      status.textContent = bits.join(" · ");
+      if (dirty) status.textContent = "Unsaved changes";
+      else if (ui.pendingUpdate) status.textContent = isTodify ? "Saved — ready to Update" : "Saved — ready to Update Printify";
+      else status.textContent = "In sync";
     }
   };
 
@@ -260,16 +265,6 @@ export function bindEditDesignPanel(root, ui) {
     });
   });
 
-  ["cr-pd-ed-x", "cr-pd-ed-y", "cr-pd-ed-scale"].forEach((id) => {
-    root.querySelector(`#${id}`)?.addEventListener("change", () => {
-      const tr = currentTr();
-      tr.x = Number(root.querySelector("#cr-pd-ed-x")?.value);
-      tr.y = Number(root.querySelector("#cr-pd-ed-y")?.value);
-      tr.scale = Number(root.querySelector("#cr-pd-ed-scale")?.value);
-      setWorkingTr(tr);
-    });
-  });
-
   const wrap = root.querySelector("#cr-pd-ed-design-wrap");
   const zoneEl = root.querySelector("#cr-pd-ed-zone");
   let drag = null;
@@ -287,6 +282,10 @@ export function bindEditDesignPanel(root, ui) {
       const curDist = Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy);
       const ratio = startDist > 1 ? curDist / startDist : 1;
       tr.scale = drag.startTr.scale * ratio;
+    } else if (drag.mode === "rotate") {
+      const ang0 = Math.atan2(drag.startY - drag.cy, drag.startX - drag.cx);
+      const ang = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
+      tr.angle = snapRotate5(drag.startTr.angle + ((ang - ang0) * 180) / Math.PI);
     }
     setWorkingTr(tr);
   };
@@ -297,29 +296,11 @@ export function bindEditDesignPanel(root, ui) {
     window.removeEventListener("pointercancel", onUp);
   };
 
-  wrap?.addEventListener("pointerdown", (e) => {
-    if (e.button != null && e.button !== 0) return;
-    if (e.target?.closest?.("[data-cr-ed-rz]")) return;
-    const rect = wrap.getBoundingClientRect();
-    drag = {
-      mode: "move",
-      startX: e.clientX,
-      startY: e.clientY,
-      startTr: currentTr(),
-      cx: rect.left + rect.width / 2,
-      cy: rect.top + rect.height / 2,
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    e.preventDefault();
-  });
-
-  root.querySelector("[data-cr-ed-rz]")?.addEventListener("pointerdown", (e) => {
+  const startDrag = (mode, e) => {
     if (e.button != null && e.button !== 0) return;
     const rect = wrap?.getBoundingClientRect();
     drag = {
-      mode: "scale",
+      mode,
       startX: e.clientX,
       startY: e.clientY,
       startTr: currentTr(),
@@ -330,7 +311,19 @@ export function bindEditDesignPanel(root, ui) {
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     e.preventDefault();
-    e.stopPropagation();
+  };
+
+  wrap?.addEventListener("pointerdown", (e) => {
+    if (e.target?.closest?.("[data-cr-ed-rz]")) return;
+    startDrag("move", e);
+  });
+
+  root.querySelectorAll("[data-cr-ed-rz]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => {
+      const mode = handle.dataset.crEdRz === "rotate" ? "rotate" : "scale";
+      startDrag(mode, e);
+      e.stopPropagation();
+    });
   });
 
   root.querySelector("#cr-pd-ed-save")?.addEventListener("click", async () => {
@@ -358,7 +351,7 @@ export function bindEditDesignPanel(root, ui) {
         ui.editDesign.draft = { ...draft, pending_update: ui.pendingUpdate };
       }
       ui.editDesign.pending_update = ui.pendingUpdate;
-      showToast("Saved", "Design placement saved to database");
+      showToast("Saved", "Design placement saved");
       ui.onDirtyChange?.(false);
       refreshButtons();
     } catch (e) {

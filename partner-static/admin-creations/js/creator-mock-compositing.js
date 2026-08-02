@@ -160,18 +160,38 @@
     opts = opts || {};
     var uiMax = opts.uiScaleMax || UI_SCALE_MAX;
     var minWidth = typeof opts.minDesignWidth === 'number' ? opts.minDesignWidth : 8;
-    var displayTr = normalizeOpenSeedPlacement(tr);
-    var x = displayTr.x;
-    var y = displayTr.y;
-    var rot = displayTr.rotate;
+    var freeEdit = opts.freeEdit === true;
     var zoneW = zoneEl.offsetWidth || 1;
     var zoneH = zoneEl.offsetHeight || 1;
     var designW = designEl.naturalWidth || 0;
     var designH = designEl.naturalHeight || 0;
-    var visualScale = resolveVisualScale(tr, zoneW, zoneH, designW, designH, { uiScaleMax: uiMax });
-    var flipSx = displayTr.flipX ? -1 : 1;
-    var flipSy = displayTr.flipY ? -1 : 1;
+    var x;
+    var y;
+    var rot;
+    var visualScale;
+    var flipSx = 1;
+    var flipSy = 1;
+    if (freeEdit) {
+      // Edit Design / Todify: own coordinate system — no open-seed remap / contain clamp.
+      x = Number(tr && tr.x);
+      y = Number(tr && tr.y);
+      rot = Number(tr && (tr.rotate != null ? tr.rotate : tr.angle)) || 0;
+      if (!Number.isFinite(x)) x = DEFAULT_TRANSFORM.x;
+      if (!Number.isFinite(y)) y = DEFAULT_TRANSFORM.y;
+      visualScale = clampScale(tr && tr.scale, uiMax);
+      flipSx = tr && tr.flipX ? -1 : 1;
+      flipSy = tr && tr.flipY ? -1 : 1;
+    } else {
+      var displayTr = normalizeOpenSeedPlacement(tr);
+      x = displayTr.x;
+      y = displayTr.y;
+      rot = displayTr.rotate;
+      visualScale = resolveVisualScale(tr, zoneW, zoneH, designW, designH, { uiScaleMax: uiMax });
+      flipSx = displayTr.flipX ? -1 : 1;
+      flipSy = displayTr.flipY ? -1 : 1;
+    }
 
+    designEl.style.position = 'absolute';
     designEl.style.width = Math.max(minWidth, zoneW * visualScale) + 'px';
     designEl.style.height = 'auto';
     designEl.style.maxWidth = 'none';
