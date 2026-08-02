@@ -3,16 +3,20 @@ import { showToast, openModal } from "/creations/shared/js/partner-shell.js";
 import {
   checkboxHtml,
   ensureBulkDock,
-  teardownBulkDock,
+  teardownBulkDock as teardownBulkDockInner,
   bindCardSelection,
   selectAllVisible,
   clearSelection,
   isSelected,
 } from "./designs-bulk.js";
-
-export { teardownBulkDock };
-import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
+import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
+import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
+
+export function teardownBulkDock() {
+  teardownBulkDockInner();
+  teardownContextMenu();
+}
 
 const SOURCE_FILTERS = [
   { key: "all", label: "All" },
@@ -726,6 +730,28 @@ function bindGridInteractions(grid) {
         },
       });
     },
+  });
+  bindCardContextMenu(grid, ".cr-card[data-item-key]", (card, event) => {
+    const key = card.getAttribute("data-item-key") || "";
+    const item = state.items.find((row) => String(row.item_key || "") === key);
+    if (!item) return;
+    const canUnpublish = Number(item.id || 0) > 0;
+    openContextMenu(
+      event,
+      [
+        { label: "Unpublish", action: "unpublish", disabled: !canUnpublish },
+        { label: "Remove", action: "remove", danger: true },
+      ],
+      async (action) => {
+        if (action === "remove") {
+          await openRemoveModal([item], { onDone: afterBulkChange });
+          return;
+        }
+        if (action === "unpublish") {
+          await openDesignUnpublishModal(item, { onDone: afterBulkChange });
+        }
+      }
+    );
   });
 }
 

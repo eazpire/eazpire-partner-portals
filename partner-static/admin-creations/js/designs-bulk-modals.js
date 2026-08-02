@@ -177,6 +177,116 @@ async function fetchUpdatePreview(item) {
   });
 }
 
+async function fetchUnpublishPreview(item) {
+  const designId = designIdOf(item);
+  if (!designId) throw new Error("Unsaved designs cannot be unpublished");
+  return partnerFetch("admin-design-action-preview", {
+    query: { action: "unpublish", design_id: designId },
+  });
+}
+
+function salesChannelsForProduct(product) {
+  if (Array.isArray(product?.sales_channels) && product.sales_channels.length) {
+    return product.sales_channels;
+  }
+  // Fallback: manufacturing + shopify labels from delete/publish enrich
+  const keys =
+    Array.isArray(product?.channels) && product.channels.length
+      ? product.channels
+      : [channelKey(product)];
+  return keys.map((key) => {
+    const k = String(key || "printify").toLowerCase();
+    if (k === "shopify") return { key: "eazpire", label: "eazpire", kind: "eazpire" };
+    return { key: k, label: channelLabel(k), kind: "manufacturing" };
+  });
+}
+
+function syncUnpublishConfirmEnabled(root) {
+  const saveBtn = document.getElementById("modal-save");
+  if (!saveBtn) return;
+  const checked = root?.querySelectorAll?.(".cr-unpub-ch__cb:checked")?.length || 0;
+  saveBtn.disabled = checked < 1;
+}
+
+function bindUnpublishCheckboxUi(root) {
+  if (!root) return;
+  const update = () => syncUnpublishConfirmEnabled(root);
+
+  root.querySelectorAll("[data-cr-unpub-all]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const on = btn.getAttribute("data-cr-unpub-all") === "1";
+      root.querySelectorAll(".cr-unpub-ch__cb").forEach((cb) => {
+        cb.checked = on;
+      });
+      root.querySelectorAll(".cr-unpub-prod__cb").forEach((cb) => {
+        cb.checked = on;
+        cb.indeterminate = false;
+      });
+      update();
+    });
+  });
+
+  root.querySelectorAll(".cr-unpub-prod__cb").forEach((prodCb) => {
+    prodCb.addEventListener("change", () => {
+      const block = prodCb.closest(".cr-unpub-prod");
+      block?.querySelectorAll(".cr-unpub-ch__cb").forEach((cb) => {
+        cb.checked = prodCb.checked;
+      });
+      prodCb.indeterminate = false;
+      update();
+    });
+  });
+
+  root.querySelectorAll(".cr-unpub-ch__cb").forEach((chCb) => {
+    chCb.addEventListener("change", () => {
+      const block = chCb.closest(".cr-unpub-prod");
+      const prodCb = block?.querySelector(".cr-unpub-prod__cb");
+      const boxes = [...(block?.querySelectorAll(".cr-unpub-ch__cb") || [])];
+      const n = boxes.filter((b) => b.checked).length;
+      if (prodCb) {
+        prodCb.checked = n === boxes.length && n > 0;
+        prodCb.indeterminate = n > 0 && n < boxes.length;
+      }
+      update();
+    });
+  });
+
+  update();
+}
+
+function unpublishProductBlockHtml(product) {
+  const productKey = String(product.product_key || "");
+  const publishedId = Number(product.published_id || 0);
+  const title = product.product_name || product.title || productKey || "Product";
+  const channels = salesChannelsForProduct(product);
+  const channelRows = channels
+    .map((ch) => {
+      const key = String(ch.key || "");
+      const kind = String(ch.kind || "eazpire");
+      const continent = ch.continent ? String(ch.continent) : "";
+      const marketplaceId = ch.marketplace_id ? String(ch.marketplace_id) : "";
+      return `<label class="cr-unpub-ch">
+        <input type="checkbox" class="cr-unpub-ch__cb" checked
+          data-product-key="${escapeHtml(productKey)}"
+          data-published-id="${escapeHtml(String(publishedId || ""))}"
+          data-channel-key="${escapeHtml(key)}"
+          data-channel-kind="${escapeHtml(kind)}"
+          data-continent="${escapeHtml(continent)}"
+          data-marketplace-id="${escapeHtml(marketplaceId)}" />
+        <span>${escapeHtml(ch.label || key)}</span>
+      </label>`;
+    })
+    .join("");
+  return `<div class="cr-unpub-prod" data-product-key="${escapeHtml(productKey)}">
+    <label class="cr-unpub-prod__head">
+      <input type="checkbox" class="cr-unpub-prod__cb" checked />
+      <span class="cr-unpub-prod__title">${escapeHtml(title)}</span>
+      ${product.shopify_live ? '<span class="cr-badge">Shopify live</span>' : ""}
+    </label>
+    <div class="cr-unpub-prod__channels">${channelRows || `<p class="cr-bulk-empty">No active channels</p>`}</div>
+  </div>`;
+}
+
 export async function openRemoveModal(items, { onDone } = {}) {
   const list = (items || []).filter(Boolean);
   if (!list.length) {
@@ -360,6 +470,136 @@ export async function openPublishModal(items, { onDone } = {}) {
     },
   });
   configurePrimaryConfirm("Publish selected");
+}
+
+/**
+ * Context-menu / single-design unpublish with per-product + per-channel checkboxes.
+ */
+export async function openDesignUnpublishModal(item, { onDone } = {}) {
+  if (!item || !designIdOf(item)) {
+    showToast("Unpublish", "Only saved designs can be unpublished");
+    return;
+  }
+
+  let data;
+  try {
+    data = await fetchUnpublishPreview(item);
+  } catch (e) {
+    showToast("Error", e.message || "Could not load published products");
+    return;
+  }
+
+  const products = (data.published_products || []).filter((p) => {
+    const sales = salesChannelsForProduct(p);
+    return sales.length > 0;
+  });
+
+  if (!products.length) {
+    openModal({
+      title: "Unpublish",
+      bodyHtml: `<p class="confirm-modal-message">This design has no live products or active sales channels to unpublish.</p>`,
+      onSave: async () => {},
+    });
+    const saveBtn = document.getElementById("modal-save");
+    if (saveBtn) saveBtn.style.display = "none";
+    return;
+  }
+
+  const body = `
+    <p class="confirm-modal-message">Select products and channels to unpublish. All are selected by default. At least one channel is required.</p>
+    <div class="cr-unpub-toolbar">
+      <button type="button" class="btn btn-secondary btn-sm" data-cr-unpub-all="1">Select all</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-cr-unpub-all="0">Deselect all</button>
+    </div>
+    <div class="cr-bulk-scroll" id="cr-unpub-body">
+      ${products.map(unpublishProductBlockHtml).join("")}
+    </div>`;
+
+  openModal({
+    title: `Unpublish — ${designTitle(item, data.design_title)}`,
+    bodyHtml: body,
+    onSave: async () => {
+      const root = document.getElementById("cr-unpub-body");
+      const selected = [...(root?.querySelectorAll(".cr-unpub-ch__cb:checked") || [])];
+      if (!selected.length) throw new Error("Select at least one channel");
+
+      const eazpireByKey = new Map();
+      const amazonByPublished = new Map();
+
+      for (const cb of selected) {
+        const kind = cb.getAttribute("data-channel-kind") || "";
+        const productKey = cb.getAttribute("data-product-key") || "";
+        const publishedId = Number(cb.getAttribute("data-published-id") || 0);
+        if (kind === "amazon") {
+          const continent = cb.getAttribute("data-continent") || "";
+          if (!publishedId || !continent) continue;
+          if (!amazonByPublished.has(publishedId)) {
+            amazonByPublished.set(publishedId, { published_id: publishedId, continents: new Set() });
+          }
+          amazonByPublished.get(publishedId).continents.add(continent);
+        } else {
+          // eazpire / manufacturing / shopify → Shopify unpublish for this product
+          if (!productKey && !publishedId) continue;
+          eazpireByKey.set(productKey || `id:${publishedId}`, {
+            product_key: productKey,
+            published_id: publishedId,
+          });
+        }
+      }
+
+      if (!eazpireByKey.size && !amazonByPublished.size) {
+        throw new Error("Select at least one channel");
+      }
+
+      setModalBusy(true, "Unpublishing…");
+      const errors = [];
+      let queued = 0;
+
+      try {
+        if (eazpireByKey.size) {
+          const product_keys = [...eazpireByKey.values()].map((v) => v.product_key).filter(Boolean);
+          const published_ids = [...eazpireByKey.values()]
+            .map((v) => v.published_id)
+            .filter((n) => Number.isFinite(n) && n > 0);
+          await partnerFetch("admin-design-unpublish", {
+            method: "POST",
+            body: {
+              design_id: designIdOf(item),
+              product_keys,
+              published_ids,
+            },
+          });
+          queued += product_keys.length || published_ids.length;
+        }
+
+        for (const { published_id, continents } of amazonByPublished.values()) {
+          try {
+            await partnerFetch("admin-amazon-unpublish", {
+              method: "POST",
+              body: {
+                published_design_id: published_id,
+                continents: [...continents],
+              },
+            });
+            queued += continents.size;
+          } catch (e) {
+            errors.push(`Amazon #${published_id}: ${e.message || "failed"}`);
+          }
+        }
+      } catch (e) {
+        setModalBusy(false);
+        throw e;
+      }
+
+      setModalBusy(false);
+      if (queued) showToast("Unpublish", `${queued} channel action(s) queued`);
+      if (errors.length) showToast("Error", errors.slice(0, 2).join(" · "));
+      if (typeof onDone === "function") await onDone({ queued, errors });
+    },
+  });
+  configurePrimaryConfirm("Unpublish selected");
+  const modalBody = document.getElementById("modal-body");
+  bindUnpublishCheckboxUi(modalBody);
 }
 
 export async function openUpdateModal(items, { onDone } = {}) {

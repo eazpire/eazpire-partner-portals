@@ -14,6 +14,8 @@ import {
   saveEditDesignWorking,
   discardEditDesignWorking,
 } from "./product-edit-design-panel.js";
+import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
+import { openProductUnpublishModal } from "./products-unpublish-modal.js";
 
 const SOURCE_FILTERS = [
   { key: "printify", label: "Printify" },
@@ -935,7 +937,8 @@ function bindDetailModal(backdrop) {
 }
 
 function bindProductCards(el) {
-  el.querySelector("#cr-products-grid")?.addEventListener("click", (e) => {
+  const grid = el.querySelector("#cr-products-grid");
+  grid?.addEventListener("click", (e) => {
     const navBtn = e.target.closest("[data-cr-grid-axis]");
     if (navBtn) {
       e.preventDefault();
@@ -971,18 +974,28 @@ function bindProductCards(el) {
     if (!card?.dataset?.shopifyId) return;
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
-  el.querySelector("#cr-products-grid")?.addEventListener("keydown", (e) => {
+  grid?.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     const card = e.target.closest?.(".cr-card--product[data-shopify-id]");
     if (!card?.dataset?.shopifyId) return;
     e.preventDefault();
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
+  bindCardContextMenu(grid, ".cr-card--product[data-shopify-id]", (card, event) => {
+    const shopifyId = card.dataset.shopifyId || "";
+    const title = card.dataset.productTitle || "";
+    if (!shopifyId) return;
+    openContextMenu(event, [{ label: "Unpublish", action: "unpublish" }], async (action) => {
+      if (action !== "unpublish") return;
+      await openProductUnpublishModal({ shopifyId, title });
+    });
+  });
 }
 
 /** Hide body-mounted product modal when leaving Products (modal stays on document.body). */
 export function teardownProductDetailModal() {
   closeProductDetail();
+  teardownContextMenu();
 }
 
 export async function mountProductsPage() {

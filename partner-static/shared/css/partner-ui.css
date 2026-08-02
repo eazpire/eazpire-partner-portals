@@ -10250,3 +10250,93 @@ html[data-portal="admin"] .cr-dd .cr-channel__count {
   background: rgba(255,255,255,.08);
   color: #e2e8f0;
 }
+
+/* Admin Creations — right-click context menu + unpublish channel pickers */
+html[data-portal="admin"] .cr-ctx-menu {
+  position: fixed;
+  z-index: 14000;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+html[data-portal="admin"] .cr-ctx-menu[hidden] {
+  display: none !important;
+}
+html[data-portal="admin"] .cr-ctx-menu__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-ctx-menu__item:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+html[data-portal="admin"] .cr-ctx-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+html[data-portal="admin"] .cr-ctx-menu__item--danger {
+  color: #b91c1c;
+}
+html[data-portal="admin"] .cr-ctx-menu__item--danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+html[data-portal="admin"] .cr-unpub-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+html[data-portal="admin"] .cr-unpub-prod {
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-portal="admin"] .cr-unpub-prod__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-unpub-prod__title {
+  flex: 1;
+  min-width: 0;
+}
+html[data-portal="admin"] .cr-unpub-prod__channels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 4px;
+}
+html[data-portal="admin"] .cr-unpub-ch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 13px;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-unpub-ch:hover {
+  background: #f1f5f9;
+}

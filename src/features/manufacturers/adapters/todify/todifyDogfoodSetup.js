@@ -13,6 +13,170 @@ import {
 const DEFAULT_SOURCE_KEY = "unisex-softstyle-cotton-tee";
 const DEFAULT_TARGET_KEY = "todify-dogfood-tee";
 
+/** Todify fulfills from Morocco — publish plans must never inherit Printify EU country lists. */
+const TODIFY_COUNTRY_CODES_JSON = '["MA"]';
+const TODIFY_REGION_CODES_JSON = "[]";
+
+/**
+ * Force product_publish_map country targets to Morocco-only for a Todify catalog key.
+ * @param {any} catalogDb
+ * @param {string} productKey
+ */
+export async function forceTodifyPublishMapToMorocco(catalogDb, productKey) {
+  const key = String(productKey || "").trim();
+  if (!catalogDb || !key) return { ok: false, updated: 0 };
+  const now = Date.now();
+  const result = await catalogDb
+    .prepare(
+      `UPDATE product_publish_map
+       SET country_codes_json = ?, region_codes_json = ?, provider_name = ?, updated_at = ?
+       WHERE product_key = ?`
+    )
+    .bind(TODIFY_COUNTRY_CODES_JSON, TODIFY_REGION_CODES_JSON, TODIFY_PROVIDER_DISPLAY_NAME, now, key)
+    .run();
+  const updated = Number(result?.meta?.changes ?? result?.changes ?? 0);
+  return { ok: true, updated, product_key: key };
+}
+
+/**
+ * Force Morocco plans for all Todify catalog keys, then re-apply exclusive Shopify publications
+ * for already-published Shopify product IDs (removes wrong EU/other market catalogs).
+ * @param {any} env
+ * @param {{ product_keys?: string[] }} [opts]
+ */
+export async function reconcileTodifyExclusivePublications(env, opts = {}) {
+  const catalogDb = env?.CATALOG_DB;
+  if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
+
+  const keys = new Set(
+    (Array.isArray(opts.product_keys) ? opts.product_keys : [])
+      .map((k) => String(k || "").trim())
+      .filter(Boolean)
+  );
+
+  try {
+    const profileKeys = await catalogDb
+      .prepare(
+        `SELECT DISTINCT product_key FROM product_publish_profiles
+         WHERE lower(COALESCE(source_system, '')) = 'todify' AND product_key IS NOT NULL`
+      )
+      .all();
+    for (const row of profileKeys?.results || []) {
+      const k = String(row.product_key || "").trim();
+      if (k) keys.add(k);
+    }
+  } catch (e) {
+    console.warn("[todify-reconcile] profile keys:", e?.message);
+  }
+
+  try {
+    const mapKeys = await catalogDb
+      .prepare(
+        `SELECT DISTINCT product_key FROM product_publish_map
+         WHERE product_key LIKE 'todify-%' OR lower(COALESCE(provider_name, '')) LIKE '%todify%'`
+      )
+      .all();
+    for (const row of mapKeys?.results || []) {
+      const k = String(row.product_key || "").trim();
+      if (k) keys.add(k);
+    }
+  } catch (e) {
+    console.warn("[todify-reconcile] map keys:", e?.message);
+  }
+
+  const planUpdates = [];
+  for (const key of keys) {
+    planUpdates.push(await forceTodifyPublishMapToMorocco(catalogDb, key));
+  }
+
+  const shop = env.SHOPIFY_SHOP || "eazpire.myshopify.com";
+  const shopDomain = shop.includes(".") ? shop : `${shop}.myshopify.com`;
+  const publishedPairs = [];
+
+  if (env.CREATOR_DB && keys.size) {
+    try {
+      const placeholders = [...keys].map(() => "?").join(", ");
+      const rows = await env.CREATOR_DB.prepare(
+        `SELECT DISTINCT product_key, shopify_product_id FROM published_designs
+         WHERE product_key IN (${placeholders})
+           AND shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) != ''`
+      )
+        .bind(...keys)
+        .all();
+      for (const row of rows?.results || []) {
+        publishedPairs.push({
+          product_key: String(row.product_key || "").trim(),
+          shopify_product_id: String(row.shopify_product_id || "").trim(),
+        });
+      }
+    } catch (e) {
+      console.warn("[todify-reconcile] published_designs:", e?.message);
+    }
+  }
+
+  try {
+    const rows = await catalogDb
+      .prepare(
+        `SELECT DISTINCT product_key, shopify_product_id FROM eaz_test_todify_products
+         WHERE shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) != ''`
+      )
+      .all();
+    for (const row of rows?.results || []) {
+      const pk = String(row.product_key || "").trim();
+      const sid = String(row.shopify_product_id || "").trim();
+      if (!pk || !sid) continue;
+      keys.add(pk);
+      publishedPairs.push({ product_key: pk, shopify_product_id: sid });
+    }
+  } catch (e) {
+    // Table may not exist in all envs
+    console.warn("[todify-reconcile] eaz_test_todify_products:", e?.message);
+  }
+
+  const seenShopify = new Set();
+  const publicationResults = [];
+  if (String(env.SHOPIFY_ACCESS_TOKEN || "").trim() && publishedPairs.length) {
+    const { applyCatalogPublicationsForProduct } = await import("../../../shopify/catalogPublishing.js");
+    for (const pair of publishedPairs) {
+      if (!pair.product_key || !pair.shopify_product_id) continue;
+      const dedupe = `${pair.product_key}:${pair.shopify_product_id}`;
+      if (seenShopify.has(dedupe)) continue;
+      seenShopify.add(dedupe);
+      await forceTodifyPublishMapToMorocco(catalogDb, pair.product_key);
+      try {
+        const result = await applyCatalogPublicationsForProduct(
+          env,
+          shopDomain,
+          pair.shopify_product_id,
+          pair.product_key,
+          { exclusive: true }
+        );
+        publicationResults.push({
+          ok: true,
+          product_key: pair.product_key,
+          shopify_product_id: pair.shopify_product_id,
+          unpublished_other_country_catalogs: result.unpublished_other_country_catalogs || 0,
+          plan_countries: result.plan_countries || [],
+        });
+      } catch (e) {
+        publicationResults.push({
+          ok: false,
+          product_key: pair.product_key,
+          shopify_product_id: pair.shopify_product_id,
+          error: e?.message || String(e),
+        });
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    plan_keys: [...keys],
+    plan_updates: planUpdates,
+    publications: publicationResults,
+  };
+}
+
 async function ensureTodifyOwnerUser(db, ownerEmail) {
   const email = String(ownerEmail || "").trim().toLowerCase();
   if (!email || !email.includes("@")) return null;
@@ -90,13 +254,7 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
       )
       .bind(Date.now(), targetKey)
       .run();
-    await catalogDb
-      .prepare(
-        `UPDATE product_publish_map SET provider_name = ?, updated_at = ?
-         WHERE product_key = ?`
-      )
-      .bind(TODIFY_PROVIDER_DISPLAY_NAME, Date.now(), targetKey)
-      .run();
+    await forceTodifyPublishMapToMorocco(catalogDb, targetKey);
     await catalogDb
       .prepare(
         `UPDATE product_catalog SET is_active = 2, regions_json = ?, updated_at = ? WHERE product_key = ?`
@@ -208,6 +366,9 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
     const values = cols.map((c) => {
       if (c === "product_key") return targetKey;
       if (c === "provider_name") return TODIFY_PROVIDER_DISPLAY_NAME;
+      // Never copy Printify EU (or other) market lists onto Todify dogfood products.
+      if (c === "country_codes_json") return TODIFY_COUNTRY_CODES_JSON;
+      if (c === "region_codes_json") return TODIFY_REGION_CODES_JSON;
       if (c === "publish_profile_id" && profileIdMap.has(Number(m.publish_profile_id))) {
         return profileIdMap.get(Number(m.publish_profile_id));
       }
@@ -227,13 +388,7 @@ async function cloneCatalogProductForTodify(catalogDb, sourceKey, targetKey) {
     }
   }
 
-  await catalogDb
-    .prepare(
-      `UPDATE product_publish_map SET provider_name = ?, updated_at = ?
-       WHERE product_key = ?`
-    )
-    .bind(TODIFY_PROVIDER_DISPLAY_NAME, now, targetKey)
-    .run();
+  await forceTodifyPublishMapToMorocco(catalogDb, targetKey);
 
   for (const table of [
     "print_area_printify_templates",
@@ -308,6 +463,18 @@ export async function runTodifyDogfoodSetup(env, opts = {}) {
     console.warn("[todify-dogfood] eazpire_product upsert:", e?.message);
   }
 
+  let reconcile = null;
+  if (opts.reconcile_publications !== false) {
+    try {
+      reconcile = await reconcileTodifyExclusivePublications(env, {
+        product_keys: [targetKey],
+      });
+    } catch (e) {
+      console.warn("[todify-dogfood] reconcile publications:", e?.message);
+      reconcile = { ok: false, error: e?.message || String(e) };
+    }
+  }
+
   return {
     ok: true,
     partner,
@@ -316,6 +483,7 @@ export async function runTodifyDogfoodSetup(env, opts = {}) {
     catalog: clone,
     product_key: targetKey,
     source_system: "todify",
-    note: "Creator publish for this product_key uses direct Shopify (no Printify). Fulfill orders manually in Todify for now. Log in at partner.eazpire.com with the owner email magic link.",
+    reconcile,
+    note: "Creator publish for this product_key uses direct Shopify (no Printify). Publish plan is Morocco (MA) only. Fulfill orders manually in Todify for now. Log in at partner.eazpire.com with the owner email magic link.",
   };
 }

@@ -507,6 +507,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
     }
 
     let published_design_id = null;
+    let design_id = null;
     let amazon_publish = null;
     try {
       const {
@@ -520,10 +521,12 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       });
       if (resolved.ok) {
         published_design_id = resolved.entry.id;
+        design_id = resolved.entry.design_id != null ? Number(resolved.entry.design_id) : null;
         const dry = await loadDryRunResult(env, published_design_id);
         const listingSummary = await loadAmazonAdminListingSummary(env, published_design_id);
         amazon_publish = {
           published_design_id,
+          design_id,
           continents: listingSummary.continents || {},
           listings: (listingSummary.listings || []).map((row) => ({
             marketplace_id: row.marketplace_id,
@@ -577,6 +580,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
               : p.tags || [],
           product_key: productKey || null,
           published_design_id,
+          design_id,
           amazon_publish,
           is_gift_card: Boolean(p.gift_card),
           currency,
