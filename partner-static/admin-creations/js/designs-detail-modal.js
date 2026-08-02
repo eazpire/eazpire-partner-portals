@@ -2042,17 +2042,17 @@ async function renderProductsPanel(item) {
       const liveRow = liveByKey.get(key);
       const online = card?.getAttribute("data-online") === "1";
       if (online) {
-        // Prefer client compose (Todify Shopify images may still be blank catalog mocks).
-        if (mountComposedMedia(media, p.studio_card_preview, designUrl)) {
+        // Online = Shopify saved featured/mock image (same as storefront), not client re-compose.
+        const liveUrl = liveRow?.image_url || liveRow?.featured_image || "";
+        if (liveUrl) {
+          media.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(liveUrl)}" alt="" loading="lazy" /><span class="cr-badge cr-badge--online">Online</span>`;
+        } else if (mountComposedMedia(media, p.studio_card_preview, designUrl)) {
           const badge = document.createElement("span");
           badge.className = "cr-badge cr-badge--online";
           badge.textContent = "Online";
           media.appendChild(badge);
         } else {
-          const liveUrl = liveRow?.image_url || liveRow?.featured_image || "";
-          media.innerHTML = liveUrl
-            ? `<img class="cr-dd-prod__mock" src="${escapeHtml(liveUrl)}" alt="" loading="lazy" /><span class="cr-badge cr-badge--online">Online</span>`
-            : `<span class="cr-dd-prod__empty">No Shopify image</span><span class="cr-badge cr-badge--online">Online</span>`;
+          media.innerHTML = `<span class="cr-dd-prod__empty">No Shopify image</span><span class="cr-badge cr-badge--online">Online</span>`;
         }
       } else {
         mountOfflineProductMedia(media, p, designUrl);
