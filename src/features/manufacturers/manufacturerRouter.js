@@ -323,6 +323,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-todify-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
+  "admin-creations-shopify-product-unpublish",
   "admin-creations-edit-design",
   "admin-creations-edit-design-save",
   "admin-creations-edit-design-update",
@@ -1578,6 +1579,12 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsShopifyProductDetail.js"
       );
       return handleAdminCreationsShopifyProductDetail(request, env);
+    }
+    if (op === "admin-creations-shopify-product-unpublish" && request.method === "POST") {
+      const { handleAdminCreationsShopifyProductUnpublish } = await import(
+        "./adminCreationsShopifyUnpublish.js"
+      );
+      return handleAdminCreationsShopifyProductUnpublish(request, env);
     }
     if (op === "admin-creations-edit-design" && request.method === "GET") {
       const { handleAdminCreationsEditDesignGet } = await import("./adminCreationsEditDesign.js");

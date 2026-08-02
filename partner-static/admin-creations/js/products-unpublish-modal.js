@@ -80,8 +80,8 @@ function activeChannelsFromProduct(product) {
   const state = seedChannelStateFromProduct(product || {});
   const channels = [];
 
-  // eazpire unpublish requires a published_designs row (Shopify listing linked to a design).
-  if (product?.published_design_id) {
+  // eazpire channel: D1-linked listing OR live Shopify product (Todify / orphan after D1-only unpublish).
+  if (product?.published_design_id || product?.id) {
     channels.push({
       key: "eazpire",
       label: "eazpire",
@@ -194,17 +194,22 @@ export async function openProductUnpublishModal({ shopifyId, title } = {}, { onD
       try {
         let queued = 0;
         if (wantEazpire) {
-          if (!designId || !publishedDesignId) {
-            throw new Error("Cannot unpublish eazpire: missing design / published_design link");
+          if (designId && publishedDesignId) {
+            await partnerFetch("admin-design-unpublish", {
+              method: "POST",
+              body: {
+                design_id: designId,
+                product_keys: productKey ? [productKey] : [],
+                published_ids: [publishedDesignId],
+              },
+            });
+          } else {
+            // Shopify-only / orphan path — delete Admin product even without published_designs.
+            await partnerFetch("admin-creations-shopify-product-unpublish", {
+              method: "POST",
+              body: { product_id: id },
+            });
           }
-          await partnerFetch("admin-design-unpublish", {
-            method: "POST",
-            body: {
-              design_id: designId,
-              product_keys: productKey ? [productKey] : [],
-              published_ids: [publishedDesignId],
-            },
-          });
           queued += 1;
         }
 
