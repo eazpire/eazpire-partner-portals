@@ -93,24 +93,31 @@ export function renderEditDesignPanelHtml(ui) {
     )
     .join("");
 
+  const isTodify = !ed.printify_product_id;
   const statusBits = [];
   if (dirty) statusBits.push("Unsaved local changes");
-  else if (pending) statusBits.push("Saved — ready to Update Printify/Shopify");
-  else statusBits.push("In sync with last save");
+  else if (pending)
+    statusBits.push(isTodify ? "Saved — ready to Update Shopify mockups" : "Saved — ready to Update Printify/Shopify");
+  else statusBits.push(isTodify ? "In sync · Update rebuilds design-on-mock images" : "In sync with last save");
+
+  const updateEnabled = isTodify ? !dirty && !busy : pending && !dirty && !busy;
+  const updateHint = isTodify
+    ? "Drag to move · corner handle to scale. <strong>Save</strong> writes placement to the database. <strong>Update</strong> renders design-on-mock images and uploads them to Shopify (front featured)."
+    : "Drag to move · corner handle to scale. <strong>Save</strong> writes to the database only. <strong>Update</strong> pushes the saved placement to Printify and refreshes Shopify.";
 
   return `
     <section class="cr-pd-ed">
       <div class="cr-pd-ed__head">
         <div>
           <h3 class="cr-pd-section-title">Edit Design</h3>
-          <p class="cr-pd-hint">Drag to move · corner handle to scale. <strong>Save</strong> writes to the database only. <strong>Update</strong> pushes the saved placement to Printify and refreshes Shopify.</p>
+          <p class="cr-pd-hint">${updateHint}</p>
         </div>
         <div class="cr-pd-ed__actions">
           <button type="button" class="btn btn-secondary" id="cr-pd-ed-save" ${dirty && !busy ? "" : "disabled"}>${busy ? "Working…" : "Save"}</button>
-          <button type="button" class="btn btn-primary" id="cr-pd-ed-update" ${pending && !dirty && !busy ? "" : "disabled"}>${busy ? "Working…" : "Update"}</button>
+          <button type="button" class="btn btn-primary" id="cr-pd-ed-update" ${updateEnabled ? "" : "disabled"}>${busy ? "Working…" : "Update"}</button>
         </div>
       </div>
-      <p class="cr-pd-ed__status" id="cr-pd-ed-status">${escapeHtml(statusBits.join(" · "))}${ed.printify_product_id ? ` · Printify ${escapeHtml(String(ed.printify_product_id))}` : ""}</p>
+      <p class="cr-pd-ed__status" id="cr-pd-ed-status">${escapeHtml(statusBits.join(" · "))}${ed.printify_product_id ? ` · Printify ${escapeHtml(String(ed.printify_product_id))}` : " · Todify"}</p>
       <div class="cr-pd-ed__viewer" id="cr-pd-ed-viewer">
         <div class="cr-pd-ed__frame" id="cr-pd-ed-frame">
           <div class="cr-pd-ed__stage" id="cr-pd-ed-stage">
@@ -194,14 +201,21 @@ export function bindEditDesignPanel(root, ui) {
     const saveBtn = root.querySelector("#cr-pd-ed-save");
     const updateBtn = root.querySelector("#cr-pd-ed-update");
     const status = root.querySelector("#cr-pd-ed-status");
+    const isTodify = !ui.editDesign.printify_product_id;
     if (saveBtn) saveBtn.disabled = !dirty || !!ui.busy;
-    if (updateBtn) updateBtn.disabled = !(ui.pendingUpdate && !dirty) || !!ui.busy;
+    if (updateBtn) {
+      updateBtn.disabled = isTodify
+        ? !(!dirty && !ui.busy)
+        : !(ui.pendingUpdate && !dirty) || !!ui.busy;
+    }
     if (status) {
       const bits = [];
       if (dirty) bits.push("Unsaved local changes");
-      else if (ui.pendingUpdate) bits.push("Saved — ready to Update Printify/Shopify");
-      else bits.push("In sync with last save");
+      else if (ui.pendingUpdate)
+        bits.push(isTodify ? "Saved — ready to Update Shopify mockups" : "Saved — ready to Update Printify/Shopify");
+      else bits.push(isTodify ? "In sync · Update rebuilds design-on-mock images" : "In sync with last save");
       if (ui.editDesign.printify_product_id) bits.push(`Printify ${ui.editDesign.printify_product_id}`);
+      else bits.push("Todify");
       status.textContent = bits.join(" · ");
     }
   };
@@ -357,13 +371,18 @@ export function bindEditDesignPanel(root, ui) {
 
   root.querySelector("#cr-pd-ed-update")?.addEventListener("click", async () => {
     if (ui.busy) return;
-    if (!ui.pendingUpdate || !placementsEqual(ui.working, ui.savedBaseline)) return;
+    if (!placementsEqual(ui.working, ui.savedBaseline)) return;
+    const isTodify = !ui.editDesign.printify_product_id;
+    if (!isTodify && !ui.pendingUpdate) return;
     ui.busy = true;
     refreshButtons();
     try {
       const data = await partnerFetch("admin-creations-edit-design-update", {
         method: "POST",
-        body: { shopify_product_id: ui.editDesign.shopify_product_id },
+        body: {
+          shopify_product_id: ui.editDesign.shopify_product_id,
+          ...(isTodify && !ui.pendingUpdate ? { force_recompose: true } : {}),
+        },
       });
       ui.pendingUpdate = !!data.pending_update;
       if (data.draft) {
@@ -375,7 +394,15 @@ export function bindEditDesignPanel(root, ui) {
         ui.working = { ...ui.savedBaseline };
       }
       ui.editDesign.pending_update = ui.pendingUpdate;
-      showToast("Updated", "Printify placement updated and Shopify refresh requested");
+      const composed = Number(data?.mock_attach?.composed) || 0;
+      showToast(
+        "Updated",
+        isTodify
+          ? composed > 0
+            ? `Design-on-mock uploaded (${composed} view(s))`
+            : "Shopify mockups refreshed"
+          : "Printify placement updated and Shopify refresh requested"
+      );
       ui.onDirtyChange?.(false);
       refreshButtons();
     } catch (e) {
