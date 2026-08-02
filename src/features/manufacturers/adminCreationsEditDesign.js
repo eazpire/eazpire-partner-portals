@@ -610,29 +610,8 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
   if (!sid) return json({ ok: false, error: "shopify_product_id_required" }, 400, cors);
 
   try {
+    const forceRecompose = body.force_recompose === true || body.recompose === true;
     const draft = await loadDraft(env, sid);
-    if (!draft?.saved_at || !Object.keys(draft.placements || {}).length) {
-      return json(
-        {
-          ok: false,
-          error: "no_saved_draft",
-          message: "Save design placement to the database before Update.",
-        },
-        400,
-        cors
-      );
-    }
-    if (!draftPendingUpdate(draft)) {
-      return json(
-        {
-          ok: false,
-          error: "already_synced",
-          message: "Saved placement is already pushed to Shopify (and Printify when linked).",
-        },
-        400,
-        cors
-      );
-    }
 
     const context = await buildEditDesignPayload(env, sid);
     if (!context.ok) {
@@ -662,23 +641,74 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
           cors
         );
       }
+      // Todify: compose design-on-mock even without a prior Save (catalog placement defaults).
+      // With a saved draft, use those placements. force_recompose always rebuilds Shopify images.
+      const placementsByView =
+        draft?.placements && Object.keys(draft.placements).length
+          ? draft.placements
+          : ed.live_placements || {};
+      if (
+        !forceRecompose &&
+        draft?.saved_at &&
+        !draftPendingUpdate(draft) &&
+        Object.keys(draft.placements || {}).length
+      ) {
+        return json(
+          {
+            ok: false,
+            error: "already_synced",
+            message:
+              "Saved placement is already pushed. Use Update after Save, or pass force_recompose to rebuild mockups.",
+          },
+          400,
+          cors
+        );
+      }
       await ensureTodifyFrontIsDefaultMock(env, ed.product_key).catch(() => ({}));
+      const zonesByView = {};
+      for (const pos of ed.positions || ["front", "back"]) {
+        const z = ed.views?.[pos]?.zone;
+        if (z && Number.isFinite(Number(z.l))) {
+          zonesByView[pos] = {
+            l: Number(z.l),
+            t: Number(z.t),
+            w: Number(z.w),
+            h: Number(z.h),
+          };
+        }
+      }
+      if (!ed.design_url) {
+        return json(
+          {
+            ok: false,
+            error: "design_url_missing",
+            message: "No design image URL found for this listing — cannot compose mockups.",
+          },
+          400,
+          cors
+        );
+      }
       const mockAttach = await attachTodifyCatalogMocksToShopify(env, {
         shopDomain: domain,
         shopifyProductId: sid,
         productKey: ed.product_key,
         designImageUrl: ed.design_url || "",
         primaryViewKey: "front",
+        replaceExisting: true,
+        placementsByView,
+        zonesByView,
       });
       const syncedAt = nowIso();
       await ensureDraftTable(env);
-      await env.CREATOR_DB.prepare(
-        `UPDATE admin_product_design_drafts
-         SET synced_at = ?, updated_at = ?, printify_product_id = NULL, product_key = ?
-         WHERE shopify_product_id = ?`
-      )
-        .bind(syncedAt, syncedAt, ed.product_key || null, sid)
-        .run();
+      if (draft?.saved_at) {
+        await env.CREATOR_DB.prepare(
+          `UPDATE admin_product_design_drafts
+           SET synced_at = ?, updated_at = ?, printify_product_id = NULL, product_key = ?
+           WHERE shopify_product_id = ?`
+        )
+          .bind(syncedAt, syncedAt, ed.product_key || null, sid)
+          .run();
+      }
       const refreshed = await loadDraft(env, sid);
       return json(
         {
@@ -697,6 +727,29 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
           pending_update: false,
         },
         200,
+        cors
+      );
+    }
+
+    if (!draft?.saved_at || !Object.keys(draft.placements || {}).length) {
+      return json(
+        {
+          ok: false,
+          error: "no_saved_draft",
+          message: "Save design placement to the database before Update.",
+        },
+        400,
+        cors
+      );
+    }
+    if (!draftPendingUpdate(draft)) {
+      return json(
+        {
+          ok: false,
+          error: "already_synced",
+          message: "Saved placement is already pushed to Shopify (and Printify when linked).",
+        },
+        400,
         cors
       );
     }
