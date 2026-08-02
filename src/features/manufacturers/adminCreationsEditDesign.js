@@ -35,6 +35,7 @@ import {
   loadTodifyComposeDefaults,
   normalizeStudioPlacement,
 } from "../publish/todifyCatalogMocks.js";
+import { loadCatalogCalibrationPrintAreaFracMap } from "../../utils/customerPrintArea.js";
 import { designImagePublicUrl } from "../publish/directShopifyPublish.js";
 
 const DEFAULT_ZONE = { l: 0.28, t: 0.22, w: 0.44, h: 0.48 };
@@ -212,12 +213,17 @@ async function buildTodifyEditDesignPayload(env, {
   const catalogMocks = await loadTodifyCleanCatalogMocks(env, pk);
   const composeDefaults = await loadTodifyComposeDefaults(env, pk);
   const draft = await loadDraft(env, sid);
+  const enabled = new Set(
+    (composeDefaults.composeViews || ["front"]).map((p) => normView(p)).filter(Boolean)
+  );
+  if (!enabled.size) enabled.add("front");
 
   const availablePositions = [];
   const livePlacements = {};
   const views = {};
 
   for (const pos of POSITIONS) {
+    if (!enabled.has(pos)) continue;
     const fromShopify = pickMockUrl(shopifyMockups, [], pos);
     const fromCatalog = (catalogMocks || []).find((m) => normView(m.view_key) === pos)?.image_url || "";
     // Edit Design canvas: prefer blank catalog mock (placement editor), not Shopify featured.
@@ -277,30 +283,21 @@ async function buildTodifyEditDesignPayload(env, {
   };
 }
 
-async function loadZoneForProductKey(env, productKey) {
+/** Per-position zones from Catalog Editor calibration (red print bounds). */
+async function loadZonesByPosition(env, productKey) {
   const pk = String(productKey || "").trim();
-  if (!pk || !env.CATALOG_DB) return { ...DEFAULT_ZONE };
+  /** @type {Record<string, { l: number, t: number, w: number, h: number }>} */
+  const out = {};
+  if (!pk || !env.CATALOG_DB) return out;
   try {
-    const row = await env.CATALOG_DB.prepare(
-      `SELECT placement_print_area_json FROM design_studio_settings WHERE product_key = ? LIMIT 1`
-    )
-      .bind(pk)
-      .first();
-    if (row?.placement_print_area_json) {
-      const parsed = JSON.parse(row.placement_print_area_json);
-      const z = parsed?.zone || parsed?.zone_frac || parsed;
-      const l = Number(z?.l ?? z?.left);
-      const t = Number(z?.t ?? z?.top);
-      const w = Number(z?.w ?? z?.width);
-      const h = Number(z?.h ?? z?.height);
-      if ([l, t, w, h].every((n) => Number.isFinite(n))) {
-        return { l, t, w, h };
-      }
+    const map = await loadCatalogCalibrationPrintAreaFracMap(env, pk);
+    for (const [pos, frac] of map.entries()) {
+      if (frac) out[normView(pos) || pos] = frac;
     }
   } catch {
-    /* default */
+    /* empty */
   }
-  return { ...DEFAULT_ZONE };
+  return out;
 }
 
 function pickMockUrl(mockups, printifyImages, position) {
@@ -430,7 +427,7 @@ async function buildEditDesignPayload(env, shopifyProductId) {
     };
   }
 
-  const zone = await loadZoneForProductKey(env, productKey);
+  const zonesByPos = await loadZonesByPosition(env, productKey);
   const livePlacements = {};
   const availablePositions = [];
   for (const pos of POSITIONS) {
@@ -457,7 +454,7 @@ async function buildEditDesignPayload(env, shopifyProductId) {
   for (const pos of availablePositions) {
     views[pos] = {
       mock_url: pickMockUrl(shopifyMockups, printifyProduct.images, pos) || null,
-      zone,
+      zone: zonesByPos[pos] || zonesByPos.front || { ...DEFAULT_ZONE },
       live_placement: livePlacements[pos] || null,
       draft_placement: draft?.placements?.[pos] || null,
     };
@@ -654,10 +651,21 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
       }
       // Todify: compose design-on-mock even without a prior Save (catalog placement defaults).
       // With a saved draft, use those placements. force_recompose always rebuilds Shopify images.
-      const placementsByView =
+      const rawPlacements =
         draft?.placements && Object.keys(draft.placements).length
           ? draft.placements
           : ed.live_placements || {};
+      // Only enabled Edit Design positions (front-only for typical Todify) — drop stale back keys.
+      const allowedPos = new Set((ed.positions || ["front"]).map((p) => normView(p)));
+      const placementsByView = {};
+      for (const [k, v] of Object.entries(rawPlacements || {})) {
+        const vk = normView(k);
+        if (allowedPos.has(vk)) placementsByView[vk] = v;
+      }
+      if (!Object.keys(placementsByView).length && allowedPos.has("front")) {
+        placementsByView.front =
+          ed.live_placements?.front || normalizeStudioPlacement({ x: 0.5, y: 0.5, scale: 0.95 });
+      }
       if (
         !forceRecompose &&
         draft?.saved_at &&
@@ -676,8 +684,6 @@ export async function handleAdminCreationsEditDesignUpdate(request, env) {
         );
       }
       await ensureTodifyFrontIsDefaultMock(env, ed.product_key).catch(() => ({}));
-      // Zones come from Design Studio frac map inside attach — do not override with a
-      // single broken DEFAULT_ZONE from the old loadZoneForProductKey path.
       if (!ed.design_url) {
         return json(
           {
