@@ -62,7 +62,13 @@ export function shopDomainFromEnv(env) {
 export function normalizeShopifyProductId(id) {
   const raw = String(id ?? "").trim();
   if (!raw) return "";
-  return raw.replace(/^gid:\/\/shopify\/Product\//i, "").replace(/\.0$/, "");
+  // Reject Admin UI pseudo-ids (e.g. studio:26) — only real Shopify product ids.
+  if (/^studio:/i.test(raw)) return "";
+  const gid = /^gid:\/\/shopify\/Product\/(\d+)$/i.exec(raw);
+  if (gid) return gid[1];
+  const whole = raw.replace(/\.0+$/, "").replace(/\.\d+$/, "");
+  if (/^\d+$/.test(whole)) return whole;
+  return "";
 }
 
 function sqlNormalizeShopifyProductId(column = "shopify_product_id") {

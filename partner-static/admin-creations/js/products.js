@@ -27,15 +27,34 @@ const SOURCE_FILTERS = [
 
 /**
  * Sources whose list `id` is a Shopify product id (safe fallback when shopify_product_id is missing).
- * Customer rows use D1 ids — only open the detail modal when shopify_product_id is set.
+ * Customer / studio pseudo-ids (`studio:26`) must never be treated as Shopify ids.
  */
 const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "samples"]);
 
+function isNumericShopifyId(raw) {
+  const s = String(raw || "").trim();
+  if (!s || /^studio:/i.test(s)) return false;
+  if (/^gid:\/\/shopify\/Product\/\d+$/i.test(s)) return true;
+  return /^\d+(\.0+)?$/.test(s);
+}
+
 function resolveShopifyProductId(item) {
   const fromField = String(item?.shopify_product_id || "").trim();
-  if (fromField) return fromField;
+  if (isNumericShopifyId(fromField)) return fromField.replace(/\.0+$/, "");
   if (SHOPIFY_ROW_ID_SOURCES.has(state.source)) {
-    return String(item?.id || "").trim();
+    const id = String(item?.id || "").trim();
+    if (isNumericShopifyId(id)) return id.replace(/\.0+$/, "");
+  }
+  return "";
+}
+
+/** Studio listing id for Todify/Customer cards that are not (yet) on Shopify. */
+function resolveStudioListingId(item) {
+  const id = String(item?.id || "").trim();
+  const m = /^studio:(\d+)$/i.exec(id);
+  if (m) return m[1];
+  if ((state.source === "customer" || item?.source === "customer") && !resolveShopifyProductId(item)) {
+    if (/^\d+$/.test(id)) return id;
   }
   return "";
 }
@@ -238,9 +257,19 @@ function productCardHtml(item) {
         </div>`
       : "";
   const shopifyId = resolveShopifyProductId(item);
+  const studioListingId = resolveStudioListingId(item);
   const clickable = Boolean(shopifyId);
+  const canUnpublish = Boolean(shopifyId || studioListingId);
+  const dataAttrs = [
+    clickable ? `data-shopify-id="${escapeHtml(String(shopifyId))}"` : "",
+    studioListingId ? `data-studio-listing-id="${escapeHtml(String(studioListingId))}"` : "",
+    canUnpublish || clickable ? `data-product-title="${escapeHtml(title)}"` : "",
+    clickable ? `tabindex="0" role="button"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}" data-cr-grid-groups="${escapeHtml(JSON.stringify(groups))}" data-cr-variant-index="0" data-cr-view-index="0"${clickable ? ` data-shopify-id="${escapeHtml(String(shopifyId))}" data-product-title="${escapeHtml(title)}" tabindex="0" role="button"` : ""}>
+  return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}${canUnpublish ? " cr-card--unpublishable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}" data-cr-grid-groups="${escapeHtml(JSON.stringify(groups))}" data-cr-variant-index="0" data-cr-view-index="0"${dataAttrs ? ` ${dataAttrs}` : ""}>
     <div class="cr-card__title-row">
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
     </div>
@@ -981,13 +1010,14 @@ function bindProductCards(el) {
     e.preventDefault();
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
-  bindCardContextMenu(grid, ".cr-card--product[data-shopify-id]", (card, event) => {
+  bindCardContextMenu(grid, ".cr-card--product[data-shopify-id], .cr-card--product[data-studio-listing-id]", (card, event) => {
     const shopifyId = card.dataset.shopifyId || "";
+    const studioListingId = card.dataset.studioListingId || "";
     const title = card.dataset.productTitle || "";
-    if (!shopifyId) return;
+    if (!shopifyId && !studioListingId) return;
     openContextMenu(event, [{ label: "Unpublish", action: "unpublish" }], async (action) => {
       if (action !== "unpublish") return;
-      await openProductUnpublishModal({ shopifyId, title });
+      await openProductUnpublishModal({ shopifyId, studioListingId, title });
     });
   });
 }

@@ -22,9 +22,11 @@ describe("adminCreationsShopifyList", () => {
     expect(shopDomainFromEnv({ SHOPIFY_SHOP_DOMAIN: "store" })).toBe("store.myshopify.com");
   });
 
-  it("normalizeShopifyProductId strips gid prefix", () => {
+  it("normalizeShopifyProductId strips gid prefix and rejects studio pseudo-ids", () => {
     expect(normalizeShopifyProductId("gid://shopify/Product/12345")).toBe("12345");
     expect(normalizeShopifyProductId("12345.0")).toBe("12345");
+    expect(normalizeShopifyProductId("studio:26")).toBe("");
+    expect(normalizeShopifyProductId("abc")).toBe("");
   });
 
   it("isPrintifySourcedProduct detects metafield, provider, listing_origin, and D1 link", () => {

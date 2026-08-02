@@ -277,6 +277,8 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
     );
 
     for (const row of studioRes?.results || []) {
+      const st = String(row.shopify_completion_status || "").trim().toLowerCase();
+      if (st === "cancelled" || st === "failed") continue;
       if (directKeys.has(String(row.product_key || "").trim())) continue;
       const key = `studio:${row.id}`;
       if (seen.has(key)) continue;
@@ -470,6 +472,8 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
         (studioRows?.results || []).map((row) => row.product_key)
       );
       for (const row of studioRows?.results || []) {
+        const st = String(row.shopify_completion_status || "").trim().toLowerCase();
+        if (st === "cancelled" || st === "failed") continue;
         if (!directKeys.has(String(row.product_key || "").trim())) continue;
         const sid = normalizeShopifyProductId(row.shopify_product_id);
         if (sid && seenProductIds.has(sid)) continue;

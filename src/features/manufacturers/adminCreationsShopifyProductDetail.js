@@ -7,6 +7,7 @@ import { json, getCorsHeaders } from "../../utils/response.js";
 import { shopifyAPI } from "../../utils/shopify.js";
 import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 import { shopDomainFromEnv, normalizeShopifyProductId } from "./adminCreationsShopifyList.js";
+import { resolveShopifyProductIdFromAdminRef } from "./adminCreationsResolveProductId.js";
 
 /** Preferred view order for mockup sorting (unknown views sort after). */
 export const MOCKUP_VIEW_ORDER = {
@@ -407,7 +408,23 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
 
   const url = new URL(request.url);
   const productIdRaw = url.searchParams.get("product_id") || url.searchParams.get("id") || "";
-  const productId = normalizeShopifyProductId(productIdRaw);
+  const resolved = await resolveShopifyProductIdFromAdminRef(env, productIdRaw);
+  if (!resolved.ok) {
+    const status =
+      resolved.error === "studio_listing_not_found" || resolved.error === "studio_listing_not_on_shopify"
+        ? 404
+        : 400;
+    return json(
+      {
+        ok: false,
+        error: resolved.error || "product_id_required",
+        studio_listing_id: resolved.studio_listing_id,
+      },
+      status,
+      cors
+    );
+  }
+  const productId = resolved.shopify_product_id;
   if (!productId) {
     return json({ ok: false, error: "product_id_required" }, 400, cors);
   }

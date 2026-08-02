@@ -113,36 +113,58 @@ function activeChannelsFromProduct(product) {
 }
 
 /**
- * @param {{ shopifyId: string, title?: string }} opts
+ * @param {{ shopifyId?: string, studioListingId?: string, title?: string }} opts
  * @param {{ onDone?: Function }} hooks
  */
-export async function openProductUnpublishModal({ shopifyId, title } = {}, { onDone } = {}) {
+export async function openProductUnpublishModal(
+  { shopifyId, studioListingId, title } = {},
+  { onDone } = {}
+) {
   const id = String(shopifyId || "").trim();
-  if (!id) {
-    showToast("Unpublish", "Missing Shopify product id");
+  const studioId = String(studioListingId || "").trim();
+  const detailRef = id || (studioId ? `studio:${studioId}` : "");
+  if (!detailRef) {
+    showToast("Unpublish", "Missing product id");
     return;
   }
 
-  let product;
+  let product = null;
+  let loadError = "";
   try {
     const data = await partnerFetch("admin-creations-shopify-product-detail", {
-      query: { product_id: id },
+      query: { product_id: detailRef },
     });
     product = data.product || null;
   } catch (e) {
-    showToast("Error", e.message || "Could not load product");
-    return;
+    loadError = String(e?.message || e || "");
+    // Studio listing not on Shopify yet — still allow cancel/unpublish via studio id.
+    if (!studioId && !/^studio:/i.test(detailRef)) {
+      showToast("Error", loadError || "Could not load product");
+      return;
+    }
+    product = {
+      id: id || null,
+      title: title || detailRef,
+      published_design_id: null,
+      design_id: null,
+      product_key: "",
+      studio_listing_id: studioId || null,
+    };
   }
 
-  const channels = activeChannelsFromProduct(product);
-  const displayTitle = title || product?.title || id;
+  let channels = activeChannelsFromProduct(product);
+  // Orphan studio / Shopify-only: still offer eazpire channel so Unpublish can delete/cancel.
+  if (!channels.length && (id || studioId || product?.id)) {
+    channels = [{ key: "eazpire", label: "eazpire", kind: "eazpire" }];
+  }
+  const displayTitle = title || product?.title || detailRef;
 
   if (!channels.length) {
     openModal({
       title: "Unpublish channels",
       bodyHtml: `<p class="confirm-modal-message">No active channels to unpublish for <strong>${escapeHtml(
         displayTitle
-      )}</strong>.</p>`,
+      )}</strong>${loadError ? ` <span class="text-muted">(${escapeHtml(loadError)})</span>` : ""}.</p>`,
       onSave: async () => {},
     });
     const saveBtn = document.getElementById("modal-save");
@@ -204,10 +226,13 @@ export async function openProductUnpublishModal({ shopifyId, title } = {}, { onD
               },
             });
           } else {
-            // Shopify-only / orphan path — delete Admin product even without published_designs.
+            // Shopify-only / studio orphan — delete Admin product and/or cancel studio listing.
             await partnerFetch("admin-creations-shopify-product-unpublish", {
               method: "POST",
-              body: { product_id: id },
+              body: {
+                product_id: id || detailRef,
+                studio_listing_id: studioId || undefined,
+              },
             });
           }
           queued += 1;
