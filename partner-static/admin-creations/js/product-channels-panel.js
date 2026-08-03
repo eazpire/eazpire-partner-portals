@@ -81,6 +81,24 @@ function amazonTargetsFromProduct(product) {
   return targets;
 }
 
+function amazonLinkHtml(st) {
+  const productUrl = st?.product_url || null;
+  const scUrl = st?.seller_central_url || null;
+  if (!productUrl && !scUrl) return "";
+  const parts = [];
+  if (productUrl) {
+    parts.push(
+      `<a class="cr-ch-amzlink" href="${escapeHtml(productUrl)}" target="_blank" rel="noopener noreferrer">Open on Amazon</a>`
+    );
+  }
+  if (scUrl) {
+    parts.push(
+      `<a class="cr-ch-amzlink cr-ch-amzlink--sc" href="${escapeHtml(scUrl)}" target="_blank" rel="noopener noreferrer">Seller Central</a>`
+    );
+  }
+  return `<div class="cr-ch-amzlinks">${parts.join(" · ")}</div>`;
+}
+
 function statusHtml(st) {
   if (st?.queue) {
     return `<span class="cr-ch-status cr-ch-status--queue"><span class="cr-ch-spinner" aria-hidden="true"></span>${escapeHtml(
@@ -263,7 +281,8 @@ export function renderChannelsPanelHtml(product, ui) {
               ? `Publish → Amazon ${publishCode} (source ${t.source}) · EU list display-only`
               : `Publish → Amazon USA · source ${t.source}`;
           const canAct = !st.queue;
-          const dryOk = st.status === "dry_run_ok" || st.status === "published";
+          const isPublished = st.status === "published";
+          const dryOk = st.status === "dry_run_ok" || isPublished;
           const errors = Array.isArray(st.errors) ? st.errors : [];
           return `<div class="cr-ch-region" role="listitem" data-cr-ch-continent="${escapeHtml(
             t.continent
@@ -273,6 +292,7 @@ export function renderChannelsPanelHtml(product, ui) {
             )}</strong>
               <span>${escapeHtml(codesHint)}</span></div>
             ${statusHtml(st)}
+            ${amazonLinkHtml(st)}
             <div class="cr-ch-actions">
               ${
                 canAct
@@ -282,10 +302,17 @@ export function renderChannelsPanelHtml(product, ui) {
                   : ""
               }
               ${
-                canAct
+                canAct && !isPublished
                   ? `<button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish="amazon" data-cr-ch-region="${escapeHtml(
                       t.continent
                     )}" ${dryOk ? "" : 'title="Run Dry run first (recommended)"'}>Publish live</button>`
+                  : ""
+              }
+              ${
+                canAct && (isPublished || st.status === "failed" || st.status === "publishing")
+                  ? `<button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-sync="amazon" data-cr-ch-region="${escapeHtml(
+                      t.continent
+                    )}">Refresh from Amazon</button>`
                   : ""
               }
             </div>
@@ -318,7 +345,7 @@ export function renderChannelsPanelHtml(product, ui) {
 export function bindChannelsPanel(root, ui) {
   if (!root) return;
   root.querySelector("[data-cr-ch-amazon-tile]")?.addEventListener("click", (e) => {
-    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-dryrun]")) return;
+    if (e.target.closest("[data-cr-ch-publish],[data-cr-ch-dryrun],[data-cr-ch-sync]")) return;
     ui.amazonExpanded = !ui.amazonExpanded;
     ui.onChange();
   });
@@ -438,9 +465,17 @@ export function bindChannelsPanel(root, ui) {
         }
       }
 
-      applyAmazonPublishResult(data, { continents, live });
-      if (live && data?.queued && data?.published_design_id) {
-        pollAmazonPublishStatus(data.published_design_id, continents || []);
+      if (live && data?.skipped && !data?.queued) {
+        applyContinentMap(data.continents || {}, continents || []);
+        showToast(
+          "Amazon live",
+          data.message || "Already published — nothing enqueued (no duplicate publish)."
+        );
+      } else {
+        applyAmazonPublishResult(data, { continents, live });
+        if (live && data?.queued && data?.published_design_id) {
+          pollAmazonPublishStatus(data.published_design_id, continents || []);
+        }
       }
     } catch (e) {
       for (const key of keys) {
@@ -455,6 +490,29 @@ export function bindChannelsPanel(root, ui) {
     ui.onChange();
   }
 
+  function applyContinentMap(contMap, continents) {
+    const keys = (continents || []).map((c) => `amazon:${c}`);
+    for (const key of keys.length
+      ? keys
+      : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
+      const continent = key.replace(/^amazon:/, "");
+      const cont = contMap[continent];
+      if (!cont) continue;
+      const st = ui.channelState[key] || { status: "unpublished", queue: false };
+      st.queue = cont.status === "publishing" || cont.status === "queued";
+      st.queueLabel = cont.status === "queued" ? "Live queued" : "Publishing…";
+      st.status = cont.status;
+      st.asin = cont.asin || null;
+      st.product_url = cont.product_url || null;
+      st.seller_central_url = cont.seller_central_url || null;
+      st.lastMessage = [cont.code, cont.asin ? `ASIN ${cont.asin}` : cont.amazon_sku, cont.last_error]
+        .filter(Boolean)
+        .join(" · ");
+      st.errors = cont.status === "failed" && cont.last_error ? [cont.last_error] : [];
+      ui.channelState[key] = st;
+    }
+  }
+
   /**
    * After LIVE enqueue, refresh continent cards from amazon_listing
    * (queued → publishing → published) without reopening the modal.
@@ -462,36 +520,19 @@ export function bindChannelsPanel(root, ui) {
   async function pollAmazonPublishStatus(publishedDesignId, continents) {
     const id = Number(publishedDesignId);
     if (!Number.isFinite(id) || id <= 0) return;
-    const keys = (continents || []).map((c) => `amazon:${c}`);
     const delays = [4000, 8000, 15000, 25000, 40000];
-    for (const waitMs of delays) {
-      await new Promise((r) => setTimeout(r, waitMs));
+    for (let i = 0; i < delays.length; i++) {
+      await new Promise((r) => setTimeout(r, delays[i]));
       try {
-        const data = await partnerFetch("admin-amazon-publish-status", {
-          query: { published_design_id: String(id) },
-        });
+        const query = { published_design_id: String(id) };
+        if (i === delays.length - 1) query.sync = "1";
+        const data = await partnerFetch("admin-amazon-publish-status", { query });
         const contMap = data?.continents || {};
+        applyContinentMap(contMap, continents || []);
         let anyTerminal = true;
-        for (const key of keys.length
-          ? keys
-          : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
-          const continent = key.replace(/^amazon:/, "");
-          const cont = contMap[continent];
-          if (!cont) {
-            anyTerminal = false;
-            continue;
-          }
-          const st = ui.channelState[key] || { status: "unpublished", queue: false };
-          st.queue = cont.status === "publishing" || cont.status === "queued";
-          st.queueLabel = cont.status === "queued" ? "Live queued" : "Publishing…";
-          st.status = cont.status;
-          st.asin = cont.asin || null;
-          st.lastMessage = [cont.code, cont.asin ? `ASIN ${cont.asin}` : cont.amazon_sku, cont.last_error]
-            .filter(Boolean)
-            .join(" · ");
-          st.errors = cont.status === "failed" && cont.last_error ? [cont.last_error] : [];
-          ui.channelState[key] = st;
-          if (cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
+        for (const c of continents || []) {
+          const cont = contMap[c];
+          if (!cont || cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
         }
         if (ui.onProductPatch) {
           ui.onProductPatch({
@@ -511,6 +552,52 @@ export function bindChannelsPanel(root, ui) {
     }
   }
 
+  async function syncAmazonContinent(region) {
+    const key = `amazon:${region}`;
+    if (!ui.channelState[key]) ui.channelState[key] = { status: "unpublished", queue: false };
+    ui.channelState[key].queue = true;
+    ui.channelState[key].queueLabel = "Refreshing…";
+    ui.onChange();
+    try {
+      const data = await partnerFetch("admin-amazon-sync-listing", {
+        method: "POST",
+        body: {
+          shopify_product_id: shopifyId,
+          published_design_id: publishedDesignId || undefined,
+          continents: [region],
+        },
+      });
+      applyContinentMap(data?.continents || {}, [region]);
+      if (ui.onProductPatch) {
+        ui.onProductPatch({
+          amazon_publish: {
+            published_design_id: data?.published_design_id || publishedDesignId,
+            continents: data?.continents || {},
+            listings: data?.listings || [],
+          },
+          published_design_id: data?.published_design_id || publishedDesignId,
+        });
+      }
+      const cont = data?.continents?.[region];
+      showToast(
+        "Amazon sync",
+        cont?.asin
+          ? `${cont.code || region}: ASIN ${cont.asin}`
+          : cont?.seller_central_url
+            ? "Synced — open Seller Central if ASIN not ready yet"
+            : data?.sync?.ok
+              ? "Synced"
+              : data?.sync?.error || "Sync finished"
+      );
+    } catch (e) {
+      ui.channelState[key].queue = false;
+      ui.channelState[key].lastMessage = e.message || String(e);
+      showToast("Amazon sync error", e.message || String(e));
+    }
+    ui.channelState[key].queue = false;
+    ui.onChange();
+  }
+
   root.querySelectorAll("[data-cr-ch-dryrun]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -526,7 +613,13 @@ export function bindChannelsPanel(root, ui) {
       const region = btn.getAttribute("data-cr-ch-region");
       if (!region) return;
       const st = ui.channelState[`amazon:${region}`] || {};
-      if (st.status !== "dry_run_ok" && st.status !== "published" && st.status !== "queued") {
+      if (st.status === "published") {
+        window.alert(
+          "This continent is already marked published.\n\nUse “Refresh from Amazon” for the live link, or contact support to force-republish."
+        );
+        return;
+      }
+      if (st.status !== "dry_run_ok" && st.status !== "queued") {
         const ok = window.confirm(
           "Dry run has not succeeded for this continent yet.\n\nPublish LIVE anyway? This creates real Amazon offers."
         );
@@ -538,6 +631,15 @@ export function bindChannelsPanel(root, ui) {
         if (!ok) return;
       }
       runAmazonAction({ continents: [region], live: true });
+    });
+  });
+
+  root.querySelectorAll("[data-cr-ch-sync]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const region = btn.getAttribute("data-cr-ch-region");
+      if (!region) return;
+      syncAmazonContinent(region);
     });
   });
 
@@ -620,6 +722,8 @@ export function seedChannelStateFromProduct(product) {
         status: contStatus,
         queue: false,
         asin: cont.asin || null,
+        product_url: cont.product_url || null,
+        seller_central_url: cont.seller_central_url || null,
         lastMessage: msgParts.join(" · ") || contStatus,
         errors: contStatus === "failed" && cont.last_error ? [cont.last_error] : [],
       };

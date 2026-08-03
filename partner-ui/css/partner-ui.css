@@ -8139,6 +8139,19 @@ html[data-portal="admin"] .cr-ch-region__head span {
   color: var(--muted);
   line-height: 1.35;
 }
+html[data-portal="admin"] .cr-ch-amzlinks {
+  margin: 4px 0 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+html[data-portal="admin"] .cr-ch-amzlink {
+  color: var(--accent, #0b6bcb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+html[data-portal="admin"] .cr-ch-amzlink:hover {
+  opacity: 0.9;
+}
 html[data-portal="admin"] .cr-ch-flag {
   width: 18px;
   height: 14px;
