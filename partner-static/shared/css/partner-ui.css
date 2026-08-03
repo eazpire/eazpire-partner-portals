@@ -9272,6 +9272,38 @@ html[data-portal="admin"] .cr-bulk-scroll {
   gap: 12px;
   margin-top: 12px;
 }
+/* Bulk Publish: wider modal, single scroll region, full product carousels */
+html[data-portal="admin"] .modal.cr-bulk-publish-modal {
+  width: min(920px, calc(100vw - 24px));
+  max-height: min(92vh, 960px);
+  display: flex;
+  flex-direction: column;
+}
+html[data-portal="admin"] .modal.cr-bulk-publish-modal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+html[data-portal="admin"] .modal.cr-bulk-publish-modal .cr-bulk-scroll {
+  max-height: none;
+  overflow: visible;
+  margin-top: 0;
+}
+html[data-portal="admin"] .cr-bulk-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--muted, #64748b);
+  font-size: 14px;
+}
+html[data-portal="admin"] .modal.cr-bulk-publish-modal .cr-channel__body {
+  min-width: 0;
+  overflow: visible;
+}
+html[data-portal="admin"] .modal.cr-bulk-publish-modal .cr-dd-prod-carousel {
+  width: 100%;
+}
 html[data-portal="admin"] .cr-design-group,
 html[data-portal="admin"] .cr-channel {
   border: 1px solid var(--line, #e2e8f0);

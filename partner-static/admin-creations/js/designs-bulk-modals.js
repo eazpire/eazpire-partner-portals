@@ -5,6 +5,11 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, showToast } from "/creations/shared/js/partner-shell.js";
 import { clearSelection } from "./designs-bulk.js";
+import {
+  mountOfflineProductMedia,
+  bindProdCarousels,
+  productCarouselHtml,
+} from "./designs-product-media.js";
 
 const PHASE1_CHANNELS = new Set(["printify", "todify", "shopify"]);
 
@@ -164,8 +169,9 @@ async function fetchDeletePreview(item) {
 async function fetchPublishPreview(item) {
   const designId = designIdOf(item);
   if (!designId) throw new Error("Unsaved designs cannot be published");
+  // studio_scope=missing: only attach Design Studio previews for unpublished products (faster bulk open).
   return partnerFetch("admin-design-action-preview", {
-    query: { action: "publish", design_id: designId },
+    query: { action: "publish", design_id: designId, studio_scope: "missing" },
   });
 }
 
@@ -360,37 +366,97 @@ export async function openRemoveModal(items, { onDone } = {}) {
   configureDangerConfirm("Delete permanently");
 }
 
-function publishProductCardHtml(product, designPreviewUrl, { checked = true } = {}) {
+function publishProductCardHtml(product, { checked = true } = {}) {
   const key = String(product.product_key || "");
   const title = product.title || product.product_name || key;
-  const mock = product.mock_url || product.preview_url || "";
-  const designImg = designPreviewUrl || "";
-  return `<label class="cr-pub-card">
-    <input type="checkbox" class="cr-pub-card__cb" data-product-key="${escapeHtml(key)}" ${checked ? "checked" : ""} />
-    <span class="cr-pub-card__media">
-      ${
-        mock
-          ? `<img class="cr-pub-card__mock" src="${escapeHtml(mock)}" alt="" loading="lazy" />`
-          : `<span class="cr-pub-card__mock cr-pub-card__mock--empty">No mock</span>`
-      }
-      ${designImg ? `<img class="cr-pub-card__design" src="${escapeHtml(designImg)}" alt="" loading="lazy" />` : ""}
-      <span class="cr-badge cr-badge--offline">Offline</span>
-    </span>
-    <span class="cr-pub-card__title">${escapeHtml(title)}</span>
-  </label>`;
+  return `<article class="cr-dd-prod is-offline is-selected" data-product-key="${escapeHtml(key)}" data-online="0">
+    <label class="cr-dd-prod__check">
+      <input type="checkbox" class="cr-dd-prod__cb cr-pub-card__cb" data-product-key="${escapeHtml(key)}" ${
+    checked ? "checked" : ""
+  } />
+    </label>
+    <div class="cr-dd-prod__media" data-cr-dd-prod-media></div>
+    <div class="cr-dd-prod__title">${escapeHtml(title)}</div>
+  </article>`;
 }
 
-function publishChannelHtml(channel, products, designPreviewUrl) {
-  const cards = products.map((p) => publishProductCardHtml(p, designPreviewUrl, { checked: true })).join("");
+function publishChannelHtml(channel, products) {
+  const cards = products.map((p) => publishProductCardHtml(p, { checked: true })).join("");
   return `<details class="cr-channel" open>
     <summary class="cr-channel__summary">
       <span>${escapeHtml(channelLabel(channel))}</span>
       <span class="cr-channel__count">${products.length}</span>
     </summary>
     <div class="cr-channel__body">
-      <div class="cr-pub-grid">${cards}</div>
+      ${productCarouselHtml(cards)}
     </div>
   </details>`;
+}
+
+function publishDesignBlockHtml(item, data, error) {
+  const id = designIdOf(item);
+  if (error) return designShellHtml(designTitle(item), `<p class="cr-bulk-error">${escapeHtml(error)}</p>`, id);
+  const missing = (data.missing_products || []).filter((p) => channelKey(p) !== "amazon");
+  if (!missing.length) {
+    return designShellHtml(
+      designTitle(item, data.design_title),
+      `<p class="cr-bulk-empty">All admin catalog products are already published.</p>`,
+      id
+    );
+  }
+  const groups = groupCatalogByChannel(missing);
+  const channelsHtml = channelOrder(groups.keys())
+    .map((ch) => publishChannelHtml(ch, groups.get(ch) || []))
+    .join("");
+  return designShellHtml(
+    designTitle(item, data.design_title),
+    `<p class="confirm-modal-message">Only unpublished products. All admin variants are selected by default (Skill Tree ignored).</p>${channelsHtml}`,
+    id
+  );
+}
+
+function mountPublishProductMedia(root, blocks) {
+  if (!root) return;
+  for (const { item, data, error } of blocks) {
+    if (error || !data) continue;
+    const designId = designIdOf(item);
+    const designUrl = String(
+      data.design_preview_url || item.preview_url || item.original_url || ""
+    ).trim();
+    const group = root.querySelector(`.cr-design-group[data-design-id="${CSS.escape(String(designId))}"]`);
+    if (!group) continue;
+    for (const p of data.missing_products || []) {
+      if (channelKey(p) === "amazon") continue;
+      const key = String(p.product_key || "");
+      if (!key) continue;
+      const card = group.querySelector(`.cr-dd-prod[data-product-key="${CSS.escape(key)}"]`);
+      const media = card?.querySelector("[data-cr-dd-prod-media]");
+      if (!media) continue;
+      mountOfflineProductMedia(media, p, designUrl);
+      const badge = document.createElement("span");
+      badge.className = "cr-badge cr-badge--offline";
+      badge.textContent = "Offline";
+      media.appendChild(badge);
+    }
+  }
+  bindProdCarousels(root);
+  root.querySelectorAll("details.cr-channel").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (details.open) requestAnimationFrame(() => bindProdCarousels(details));
+    });
+  });
+  root.querySelectorAll(".cr-dd-prod__cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const card = cb.closest(".cr-dd-prod");
+      card?.classList.toggle("is-selected", !!cb.checked);
+    });
+  });
+}
+
+function setPublishModalChrome() {
+  const modal = document.querySelector("#modal-backdrop .modal");
+  modal?.classList.add("cr-bulk-publish-modal");
+  configurePrimaryConfirm("Publish selected");
 }
 
 export async function openPublishModal(items, { onDone } = {}) {
@@ -401,44 +467,15 @@ export async function openPublishModal(items, { onDone } = {}) {
   }
 
   const blocks = [];
-  for (const item of list) {
-    try {
-      const data = await fetchPublishPreview(item);
-      blocks.push({ item, data });
-    } catch (e) {
-      blocks.push({ item, error: e.message || "Preview failed" });
-    }
-  }
-
-  const body = blocks
-    .map(({ item, data, error }) => {
-      const id = designIdOf(item);
-      if (error) return designShellHtml(designTitle(item), `<p class="cr-bulk-error">${escapeHtml(error)}</p>`, id);
-      const missing = (data.missing_products || []).filter((p) => channelKey(p) !== "amazon");
-      if (!missing.length) {
-        return designShellHtml(
-          designTitle(item, data.design_title),
-          `<p class="cr-bulk-empty">All admin catalog products are already published.</p>`,
-          id
-        );
-      }
-      const groups = groupCatalogByChannel(missing);
-      const designPreview = data.design_preview_url || item.preview_url || item.original_url || "";
-      const channelsHtml = channelOrder(groups.keys())
-        .map((ch) => publishChannelHtml(ch, groups.get(ch) || [], designPreview))
-        .join("");
-      return designShellHtml(
-        designTitle(item, data.design_title),
-        `<p class="confirm-modal-message">Only unpublished products. All admin variants are selected by default (Skill Tree ignored).</p>${channelsHtml}`,
-        id
-      );
-    })
-    .join("");
+  let publishBusy = true;
 
   openModal({
     title: list.length === 1 ? "Publish products" : `Publish ${list.length} designs`,
-    bodyHtml: `<div class="cr-bulk-scroll" id="cr-publish-body">${body}</div>`,
+    bodyHtml: `<div class="cr-bulk-scroll" id="cr-publish-body">
+      <p class="cr-bulk-loading">Loading unpublished products…</p>
+    </div>`,
     onSave: async () => {
+      if (publishBusy) throw new Error("Still loading product previews");
       setModalBusy(true, "Publishing…");
       let queued = 0;
       const errors = [];
@@ -446,7 +483,7 @@ export async function openPublishModal(items, { onDone } = {}) {
         if (error || !data) continue;
         const designId = designIdOf(item);
         const group = document.querySelector(`#cr-publish-body .cr-design-group[data-design-id="${designId}"]`);
-        const keys = [...(group ? group.querySelectorAll(".cr-pub-card__cb:checked") : [])]
+        const keys = [...(group ? group.querySelectorAll(".cr-pub-card__cb:checked, .cr-dd-prod__cb:checked") : [])]
           .map((el) => el.getAttribute("data-product-key") || "")
           .filter(Boolean);
         const allowed = new Set((data.missing_products || []).map((p) => String(p.product_key || "")));
@@ -469,6 +506,30 @@ export async function openPublishModal(items, { onDone } = {}) {
       if (typeof onDone === "function") await onDone({ queued, errors });
     },
   });
+  setPublishModalChrome();
+  setModalBusy(true, "Loading…");
+
+  const settled = await Promise.all(
+    list.map(async (item) => {
+      try {
+        const data = await fetchPublishPreview(item);
+        return { item, data };
+      } catch (e) {
+        return { item, error: e.message || "Preview failed" };
+      }
+    })
+  );
+  blocks.push(...settled);
+
+  const bodyEl = document.getElementById("cr-publish-body");
+  if (!bodyEl || !document.getElementById("modal-backdrop")?.classList.contains("show")) {
+    return;
+  }
+
+  bodyEl.innerHTML = blocks.map(({ item, data, error }) => publishDesignBlockHtml(item, data, error)).join("");
+  mountPublishProductMedia(bodyEl, blocks);
+  publishBusy = false;
+  setModalBusy(false);
   configurePrimaryConfirm("Publish selected");
 }
 

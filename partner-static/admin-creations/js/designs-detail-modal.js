@@ -5,6 +5,11 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, showToast, confirmAction, confirmUnsavedChanges } from "/creations/shared/js/partner-shell.js";
 import { openRemoveModal, openPublishModal, openUpdateModal } from "./designs-bulk-modals.js";
+import {
+  mountComposedMedia,
+  mountOfflineProductMedia,
+  bindProdCarousels,
+} from "./designs-product-media.js";
 
 const ICON = {
   overview: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`,
@@ -12,8 +17,6 @@ const ICON = {
   metadata: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>`,
   products: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`,
 };
-
-const DEFAULT_PLACEMENT = { x: 0.5, y: 0.5, scale: 0.95, rotate: 0, flipX: false, flipY: false };
 const BG_PRESETS = ["#37375A", "#0f172a", "#ffffff", "#111827", "#f59e0b", "checker"];
 const AMAZON_BULLETS_KEY = "amazon_bullet_points_de";
 const BULLET_SLOT_COUNT = 5;
@@ -46,10 +49,6 @@ let unpublishWatchToken = null;
 let activeTab = "overview";
 let visibilitySaving = false;
 let closePromptOpen = false;
-
-function mockCompositing() {
-  return window.CreatorMockCompositing || null;
-}
 
 function ensureRoot() {
   let root = document.getElementById("cr-design-detail");
@@ -1149,197 +1148,6 @@ function bindMetadataPanel() {
     });
   });
   bindChipRemoves();
-}
-
-function parseZoneFrac(f) {
-  const MC = mockCompositing();
-  if (MC) return MC.parseZoneFrac(f);
-  return { l: 0.28, t: 0.22, w: 0.44, h: 0.48 };
-}
-
-function normalizePlacement(raw) {
-  const MC = mockCompositing();
-  if (MC?.normalizeOpenSeedPlacement) return MC.normalizeOpenSeedPlacement(raw || {});
-  return { ...DEFAULT_PLACEMENT, ...(raw || {}) };
-}
-
-function layoutStack(stackEl, attempt = 0) {
-  if (!stackEl) return;
-  const frame = stackEl.querySelector(".cr-dd-compose__frame");
-  const stage = stackEl.querySelector(".cr-dd-compose__stage");
-  const mock = stackEl.querySelector(".cr-dd-compose__mock");
-  const zone = stackEl.querySelector(".cr-dd-compose__zone");
-  const design = stackEl.querySelector(".cr-dd-compose__design");
-  if (!frame || !stage || !mock) return;
-  if (!mock.complete || !mock.naturalWidth) {
-    if (attempt < 48) setTimeout(() => layoutStack(stackEl, attempt + 1), attempt < 12 ? 16 : 50);
-    return;
-  }
-  const MC = mockCompositing();
-  if (MC) MC.fitMockStage(stage, mock, frame);
-  else {
-    const nw = mock.naturalWidth;
-    const nh = mock.naturalHeight;
-    const boxW = Math.max(1, frame.clientWidth);
-    const boxH = Math.max(1, frame.clientHeight);
-    const fit = Math.min(boxW / nw, boxH / nh);
-    stage.style.width = `${Math.max(1, nw * fit)}px`;
-    stage.style.height = `${Math.max(1, nh * fit)}px`;
-    mock.style.width = "100%";
-    mock.style.height = "100%";
-    mock.style.objectFit = "fill";
-  }
-  if (!zone || !design) return;
-  if (!design.complete || !design.naturalWidth) {
-    if (attempt < 48) setTimeout(() => layoutStack(stackEl, attempt + 1), attempt < 12 ? 16 : 50);
-    return;
-  }
-  let placement = DEFAULT_PLACEMENT;
-  try {
-    placement = normalizePlacement(JSON.parse(stackEl.getAttribute("data-card-placement") || "{}"));
-  } catch (_) {}
-  if (MC) {
-    MC.applyDesignTransformInZone(design, zone, placement, { uiScaleMax: 4, minDesignWidth: 8 });
-  } else {
-    design.classList.add("is-laid-out");
-  }
-}
-
-function buildComposeStack(slide, designUrl) {
-  const mockUrl = String(slide?.mock_url || "").trim();
-  if (!mockUrl || !designUrl) return null;
-  const z = parseZoneFrac(slide?.print_area_frac);
-  const placement = normalizePlacement(slide?.placement);
-  const stack = document.createElement("div");
-  stack.className = "cr-dd-compose__slide is-active";
-  stack.setAttribute("data-card-placement", JSON.stringify(placement));
-  stack.innerHTML = `
-    <div class="cr-dd-compose__frame">
-      <div class="cr-dd-compose__stage">
-        <img class="cr-dd-compose__mock" src="${escapeHtml(mockUrl)}" alt="" decoding="async" draggable="false" />
-        <span class="cr-dd-compose__zone" style="left:${z.l * 100}%;top:${z.t * 100}%;width:${z.w * 100}%;height:${z.h * 100}%;">
-          <img class="cr-dd-compose__design" src="${escapeHtml(designUrl)}" alt="" decoding="async" draggable="false" />
-        </span>
-      </div>
-    </div>`;
-  const mock = stack.querySelector(".cr-dd-compose__mock");
-  const design = stack.querySelector(".cr-dd-compose__design");
-  const after = () => layoutStack(stack);
-  [mock, design].forEach((img) => {
-    if (img.complete && img.naturalWidth) return;
-    img.addEventListener("load", after, { once: true });
-    img.addEventListener("error", after, { once: true });
-  });
-  requestAnimationFrame(after);
-  setTimeout(after, 80);
-  setTimeout(after, 320);
-  return stack;
-}
-
-function synthesizePreviewFromMocks(urls) {
-  const slides = (urls || [])
-    .map((u) => String(u || "").trim())
-    .filter(Boolean)
-    .slice(0, 6)
-    .map((mock_url) => ({
-      mock_url,
-      print_area_frac: null,
-      placement: { ...DEFAULT_PLACEMENT },
-    }));
-  return slides.length ? { slides } : null;
-}
-
-function mountComposedMedia(mediaEl, previewConfig, designUrl) {
-  if (!mediaEl) return;
-  mediaEl.innerHTML = "";
-  mediaEl.classList.add("cr-dd-compose");
-  const slides = (previewConfig?.slides || []).filter((s) => s?.mock_url);
-  if (!slides.length || !designUrl) {
-    mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
-    return false;
-  }
-  const stack = buildComposeStack(slides[0], designUrl);
-  if (stack) {
-    mediaEl.appendChild(stack);
-    return true;
-  }
-  mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
-  return false;
-}
-
-function mountOfflineProductMedia(mediaEl, product, designUrl) {
-  if (!mediaEl) return;
-  const previewConfig =
-    product.studio_card_preview ||
-    synthesizePreviewFromMocks(
-      product.mock_urls || (product.mock_url ? [product.mock_url] : [])
-    );
-  if (mountComposedMedia(mediaEl, previewConfig, designUrl)) return;
-
-  // Fallback when studio compose has no usable mock: show catalog/preview/design image.
-  const fallbackUrl = String(
-    product.mock_url ||
-      (Array.isArray(product.mock_urls) && product.mock_urls[0]) ||
-      product.preview_url ||
-      designUrl ||
-      ""
-  ).trim();
-  mediaEl.classList.remove("cr-dd-compose");
-  if (fallbackUrl) {
-    mediaEl.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(fallbackUrl)}" alt="" loading="lazy" />`;
-  } else {
-    mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
-  }
-}
-
-function syncProdCarouselArrows(carousel) {
-  if (!carousel) return;
-  const track = carousel.querySelector(".cr-dd-prod-carousel__track");
-  const prev = carousel.querySelector(".cr-dd-prod-carousel__arrow--prev");
-  const next = carousel.querySelector(".cr-dd-prod-carousel__arrow--next");
-  if (!track) return;
-  const maxScroll = Math.max(0, track.scrollWidth - track.clientWidth - 1);
-  const hasOverflow = maxScroll > 2;
-  carousel.classList.toggle("has-overflow", hasOverflow);
-  if (prev) {
-    prev.hidden = !hasOverflow;
-    prev.disabled = track.scrollLeft <= 2;
-  }
-  if (next) {
-    next.hidden = !hasOverflow;
-    next.disabled = track.scrollLeft >= maxScroll;
-  }
-}
-
-function bindProdCarousels(root) {
-  if (!root) return;
-  root.querySelectorAll("[data-cr-dd-prod-carousel]").forEach((carousel) => {
-    if (carousel.__crDdCarouselBound) {
-      syncProdCarouselArrows(carousel);
-      return;
-    }
-    carousel.__crDdCarouselBound = true;
-    const track = carousel.querySelector(".cr-dd-prod-carousel__track");
-    const prev = carousel.querySelector(".cr-dd-prod-carousel__arrow--prev");
-    const next = carousel.querySelector(".cr-dd-prod-carousel__arrow--next");
-    if (!track) return;
-    const step = () => Math.max(160, Math.floor(track.clientWidth * 0.85));
-    prev?.addEventListener("click", () => {
-      track.scrollBy({ left: -step(), behavior: "smooth" });
-    });
-    next?.addEventListener("click", () => {
-      track.scrollBy({ left: step(), behavior: "smooth" });
-    });
-    track.addEventListener("scroll", () => syncProdCarouselArrows(carousel), { passive: true });
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => syncProdCarouselArrows(carousel));
-      ro.observe(track);
-      carousel.__crDdCarouselRo = ro;
-    }
-    requestAnimationFrame(() => syncProdCarouselArrows(carousel));
-    setTimeout(() => syncProdCarouselArrows(carousel), 120);
-    setTimeout(() => syncProdCarouselArrows(carousel), 400);
-  });
 }
 
 function openNeedsUpdateInfoModal() {

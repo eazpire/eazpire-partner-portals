@@ -25,7 +25,7 @@ function resetModalFooter() {
     cancelBtn.textContent = DEFAULT_MODAL_FOOTER.cancelLabel;
     cancelBtn.style.display = "";
   }
-  modal?.classList.remove("confirm-modal");
+  modal?.classList.remove("confirm-modal", "cr-bulk-publish-modal");
 }
 
 export function showToast(title, text) {
