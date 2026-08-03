@@ -329,6 +329,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-edit-design-update",
   "admin-amazon-publish",
   "admin-amazon-publish-status",
+  "admin-amazon-sync-listing",
   "admin-amazon-unpublish",
   "admin-design-action-preview",
   "admin-design-delete",
@@ -1605,6 +1606,10 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-amazon-publish-status" && request.method === "GET") {
       const { handleAdminAmazonPublishStatus } = await import("../product/amazonAdminPublish.js");
       return handleAdminAmazonPublishStatus(request, env);
+    }
+    if (op === "admin-amazon-sync-listing" && request.method === "POST") {
+      const { handleAdminAmazonSyncListing } = await import("../product/amazonAdminPublish.js");
+      return handleAdminAmazonSyncListing(request, env);
     }
     if (op === "admin-amazon-unpublish" && request.method === "POST") {
       const { handleAdminAmazonUnpublish } = await import("../product/amazonAdminPublish.js");
