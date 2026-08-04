@@ -38,12 +38,12 @@ export function showToast(title, text) {
   showToast._t = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
-export function openModal({ title, bodyHtml, onSave }) {
+export function openModal({ title, bodyHtml, onSave, onCancel }) {
   const backdrop = document.getElementById("modal-backdrop");
   document.getElementById("modal-title").textContent = title;
   document.getElementById("modal-body").innerHTML = bodyHtml;
   modalSaveHandler = onSave || null;
-  modalCancelHandler = null;
+  modalCancelHandler = typeof onCancel === "function" ? onCancel : null;
   backdrop.hidden = false;
   backdrop.classList.add("show");
 }

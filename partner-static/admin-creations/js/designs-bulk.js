@@ -3,6 +3,8 @@
  */
 
 const selected = new Map(); // item_key -> design item
+/** When true, dock stays hidden even if selection is non-empty (e.g. while a bulk modal is open). */
+let dockSuppressed = false;
 
 export function selectionKey(item) {
   return String(item?.item_key || "").trim();
@@ -23,6 +25,7 @@ export function getSelectedCount() {
 
 export function clearSelection() {
   selected.clear();
+  dockSuppressed = false;
   refreshSelectionUi();
 }
 
@@ -54,17 +57,31 @@ export function isBulkActionable(item) {
   return !!(item.id || item.job_id);
 }
 
-function refreshSelectionUi() {
+function applyDockVisibility() {
   const dock = document.getElementById("cr-designs-bulk-dock");
+  if (!dock) return;
+  const show = selected.size > 0 && !dockSuppressed;
+  dock.hidden = !show;
+  dock.classList.toggle("is-visible", show);
+  dock.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
+/** Hide floating bar without clearing selection (use while Remove/Publish/Update modal is open). */
+export function suppressBulkDock() {
+  dockSuppressed = true;
+  applyDockVisibility();
+}
+
+/** Show floating bar again if designs are still selected (e.g. modal cancelled). */
+export function releaseBulkDock() {
+  dockSuppressed = false;
+  applyDockVisibility();
+}
+
+function refreshSelectionUi() {
   const countEl = document.getElementById("cr-bulk-count");
   const n = selected.size;
-  if (dock) {
-    // Prefer class + attribute: [hidden]{display:none!important} in portal shell
-    const show = n > 0;
-    dock.hidden = !show;
-    dock.classList.toggle("is-visible", show);
-    dock.setAttribute("aria-hidden", show ? "false" : "true");
-  }
+  applyDockVisibility();
   if (countEl) countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
 
   document.querySelectorAll(".cr-card[data-item-key]").forEach((card) => {
@@ -105,7 +122,13 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
     btn.onclick = () => {
       const act = btn.getAttribute("data-cr-bulk");
       if (act === "all" && typeof handlers.onSelectAll === "function") handlers.onSelectAll();
-      if (act === "none") clearSelection();
+      if (act === "none") {
+        releaseBulkDock();
+        clearSelection();
+      }
+      if (act === "remove" || act === "publish" || act === "update") {
+        suppressBulkDock();
+      }
       if (act === "remove" && typeof handlers.onRemove === "function") handlers.onRemove(getSelectedItems());
       if (act === "publish" && typeof handlers.onPublish === "function") handlers.onPublish(getSelectedItems());
       if (act === "update" && typeof handlers.onUpdate === "function") handlers.onUpdate(getSelectedItems());
@@ -118,13 +141,9 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
 
 /** Hide dock when leaving Designs page (dock stays on body). */
 export function teardownBulkDock() {
+  dockSuppressed = false;
   clearSelection();
-  const dock = document.getElementById("cr-designs-bulk-dock");
-  if (dock) {
-    dock.hidden = true;
-    dock.classList.remove("is-visible");
-    dock.setAttribute("aria-hidden", "true");
-  }
+  applyDockVisibility();
 }
 
 export function checkboxHtml(item) {

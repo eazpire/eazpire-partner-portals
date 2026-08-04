@@ -127,6 +127,32 @@ export function mountComposedMedia(mediaEl, previewConfig, designUrl) {
   return false;
 }
 
+/** Prefer first studio slide mock, then catalog mock URLs (no design overlay). */
+export function cleanMockUrlFromProduct(product) {
+  const slide0 = product?.studio_card_preview?.slides?.[0]?.mock_url;
+  const fromSlide = String(slide0 || "").trim();
+  if (fromSlide) return fromSlide;
+  if (Array.isArray(product?.mock_urls)) {
+    for (const u of product.mock_urls) {
+      const s = String(u || "").trim();
+      if (s) return s;
+    }
+  }
+  return String(product?.mock_url || product?.preview_url || "").trim();
+}
+
+/** Clean product mock only (no design compositing) — for global publish picker. */
+export function mountCleanProductMedia(mediaEl, product) {
+  if (!mediaEl) return;
+  mediaEl.classList.remove("cr-dd-compose");
+  const url = cleanMockUrlFromProduct(product);
+  if (url) {
+    mediaEl.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(url)}" alt="" decoding="async" />`;
+  } else {
+    mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
+  }
+}
+
 export function mountOfflineProductMedia(mediaEl, product, designUrl) {
   if (!mediaEl) return;
   const previewConfig =

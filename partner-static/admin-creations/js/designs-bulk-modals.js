@@ -4,9 +4,10 @@
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, showToast } from "/creations/shared/js/partner-shell.js";
-import { clearSelection } from "./designs-bulk.js";
+import { clearSelection, releaseBulkDock, suppressBulkDock } from "./designs-bulk.js";
 import {
   mountOfflineProductMedia,
+  mountCleanProductMedia,
   bindProdCarousels,
   productCarouselHtml,
 } from "./designs-product-media.js";
@@ -296,9 +297,11 @@ function unpublishProductBlockHtml(product) {
 export async function openRemoveModal(items, { onDone } = {}) {
   const list = (items || []).filter(Boolean);
   if (!list.length) {
+    releaseBulkDock();
     showToast("Remove", "Select at least one design");
     return;
   }
+  suppressBulkDock();
 
   const previews = [];
   for (const item of list) {
@@ -337,6 +340,7 @@ export async function openRemoveModal(items, { onDone } = {}) {
         <input class="input" id="cr-bulk-delete-confirm" autocomplete="off" placeholder="DELETE" />
       </div>
       <div class="cr-bulk-scroll">${body}</div>`,
+    onCancel: () => releaseBulkDock(),
     onSave: async () => {
       const typed = String(document.getElementById("cr-bulk-delete-confirm")?.value || "").trim();
       if (typed !== "DELETE") throw new Error("Type DELETE to confirm");
@@ -366,22 +370,27 @@ export async function openRemoveModal(items, { onDone } = {}) {
   configureDangerConfirm("Delete permanently");
 }
 
-function publishProductCardHtml(product, { checked = true } = {}) {
+function publishProductCardHtml(product, { checked = true, designCountLabel = "", global = false } = {}) {
   const key = String(product.product_key || "");
   const title = product.title || product.product_name || key;
-  return `<article class="cr-dd-prod is-offline is-selected" data-product-key="${escapeHtml(key)}" data-online="0">
+  const countHtml = designCountLabel
+    ? `<span class="cr-dd-prod__design-count" data-cr-pub-count="${escapeHtml(key)}">${escapeHtml(designCountLabel)}</span>`
+    : `<span class="cr-dd-prod__design-count" data-cr-pub-count="${escapeHtml(key)}" hidden></span>`;
+  const extraClass = global ? " cr-pub-global-card" : "";
+  return `<article class="cr-dd-prod is-offline is-selected${extraClass}" data-product-key="${escapeHtml(key)}" data-online="0">
     <label class="cr-dd-prod__check">
       <input type="checkbox" class="cr-dd-prod__cb cr-pub-card__cb" data-product-key="${escapeHtml(key)}" ${
     checked ? "checked" : ""
   } />
     </label>
     <div class="cr-dd-prod__media" data-cr-dd-prod-media></div>
+    ${countHtml}
     <div class="cr-dd-prod__title">${escapeHtml(title)}</div>
   </article>`;
 }
 
-function publishChannelHtml(channel, products) {
-  const cards = products.map((p) => publishProductCardHtml(p, { checked: true })).join("");
+function publishChannelHtml(channel, products, { cardOpts = {} } = {}) {
+  const cards = products.map((p) => publishProductCardHtml(p, { checked: true, ...cardOpts })).join("");
   return `<details class="cr-channel" open>
     <summary class="cr-channel__summary">
       <span>${escapeHtml(channelLabel(channel))}</span>
@@ -415,8 +424,123 @@ function publishDesignBlockHtml(item, data, error) {
   );
 }
 
+/** Union of missing products across designs — for global Clean Mockups picker. */
+function collectGlobalPublishProducts(blocks) {
+  const byKey = new Map();
+  for (const { data, error } of blocks) {
+    if (error || !data) continue;
+    for (const p of data.missing_products || []) {
+      if (channelKey(p) === "amazon") continue;
+      const key = String(p.product_key || "").trim();
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, p);
+    }
+  }
+  return [...byKey.values()];
+}
+
+function designCountLabel(selected, total) {
+  if (!total) return "";
+  if (total === 1) return selected ? "1 design" : "0/1 designs";
+  return `${selected}/${total} designs`;
+}
+
+function publishGlobalSectionHtml(products) {
+  if (!products.length) return "";
+  const groups = groupCatalogByChannel(products);
+  const channelsHtml = channelOrder(groups.keys())
+    .map((ch) => {
+      const list = groups.get(ch) || [];
+      const cards = list
+        .map((p) => publishProductCardHtml(p, { checked: true, global: true }))
+        .join("");
+      return `<details class="cr-channel" open>
+        <summary class="cr-channel__summary">
+          <span>${escapeHtml(channelLabel(ch))}</span>
+          <span class="cr-channel__count">${list.length}</span>
+        </summary>
+        <div class="cr-channel__body">
+          ${productCarouselHtml(cards)}
+        </div>
+      </details>`;
+    })
+    .join("");
+  return `<section class="cr-pub-global" id="cr-pub-global">
+    <h3 class="cr-pub-global__title">Clean mockups — apply to all designs</h3>
+    <p class="confirm-modal-message">Select or deselect products here to toggle them for every design below. Previews show the blank product (no design).</p>
+    ${channelsHtml}
+  </section>`;
+}
+
+function countProductAcrossDesigns(root, productKey) {
+  const groups = [...(root?.querySelectorAll(".cr-design-group[data-design-id]") || [])];
+  let total = 0;
+  let selected = 0;
+  for (const group of groups) {
+    const cb = group.querySelector(`.cr-pub-card__cb[data-product-key="${CSS.escape(productKey)}"]`);
+    if (!cb) continue;
+    total += 1;
+    if (cb.checked) selected += 1;
+  }
+  return { selected, total };
+}
+
+function syncPublishDesignCountLabels(root) {
+  if (!root) return;
+  const keys = new Set(
+    [...root.querySelectorAll(".cr-pub-card__cb[data-product-key]")].map((cb) => cb.getAttribute("data-product-key") || "").filter(Boolean)
+  );
+  for (const key of keys) {
+    const { selected, total } = countProductAcrossDesigns(root, key);
+    const label = designCountLabel(selected, total);
+    root.querySelectorAll(`[data-cr-pub-count="${CSS.escape(key)}"]`).forEach((el) => {
+      if (!total) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      el.hidden = false;
+      el.textContent = label;
+    });
+  }
+  // Sync global card checkbox / indeterminate from per-design state
+  root.querySelectorAll("#cr-pub-global .cr-pub-global-card").forEach((card) => {
+    const key = card.getAttribute("data-product-key") || "";
+    const cb = card.querySelector(".cr-pub-card__cb");
+    if (!cb || !key) return;
+    const { selected, total } = countProductAcrossDesigns(root, key);
+    cb.checked = total > 0 && selected === total;
+    cb.indeterminate = selected > 0 && selected < total;
+    card.classList.toggle("is-selected", selected > 0);
+  });
+}
+
+function setProductCheckedForAllDesigns(root, productKey, checked) {
+  root.querySelectorAll(`.cr-design-group .cr-pub-card__cb[data-product-key="${CSS.escape(productKey)}"]`).forEach((cb) => {
+    cb.checked = !!checked;
+    cb.closest(".cr-dd-prod")?.classList.toggle("is-selected", !!checked);
+  });
+}
+
 function mountPublishProductMedia(root, blocks) {
   if (!root) return;
+  // Clean mockups (global section)
+  const globalSection = root.querySelector("#cr-pub-global");
+  if (globalSection) {
+    for (const p of collectGlobalPublishProducts(blocks)) {
+      const key = String(p.product_key || "");
+      if (!key) continue;
+      const card = globalSection.querySelector(`.cr-pub-global-card[data-product-key="${CSS.escape(key)}"]`);
+      const media = card?.querySelector("[data-cr-dd-prod-media]");
+      if (!media) continue;
+      mountCleanProductMedia(media, p);
+      const badge = document.createElement("span");
+      badge.className = "cr-badge cr-badge--clean";
+      badge.textContent = "Clean";
+      media.appendChild(badge);
+    }
+  }
+
   for (const { item, data, error } of blocks) {
     if (error || !data) continue;
     const designId = designIdOf(item);
@@ -445,12 +569,27 @@ function mountPublishProductMedia(root, blocks) {
       if (details.open) requestAnimationFrame(() => bindProdCarousels(details));
     });
   });
-  root.querySelectorAll(".cr-dd-prod__cb").forEach((cb) => {
+
+  root.querySelectorAll("#cr-pub-global .cr-pub-global-card .cr-pub-card__cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const key = cb.getAttribute("data-product-key") || "";
+      if (!key) return;
+      setProductCheckedForAllDesigns(root, key, cb.checked);
+      cb.indeterminate = false;
+      cb.closest(".cr-dd-prod")?.classList.toggle("is-selected", !!cb.checked);
+      syncPublishDesignCountLabels(root);
+    });
+  });
+
+  root.querySelectorAll(".cr-design-group .cr-pub-card__cb").forEach((cb) => {
     cb.addEventListener("change", () => {
       const card = cb.closest(".cr-dd-prod");
       card?.classList.toggle("is-selected", !!cb.checked);
+      syncPublishDesignCountLabels(root);
     });
   });
+
+  syncPublishDesignCountLabels(root);
 }
 
 function setPublishModalChrome() {
@@ -462,10 +601,12 @@ function setPublishModalChrome() {
 export async function openPublishModal(items, { onDone } = {}) {
   const list = (items || []).filter((item) => designIdOf(item));
   if (!list.length) {
+    releaseBulkDock();
     showToast("Publish", "Select at least one saved design");
     return;
   }
 
+  suppressBulkDock();
   const blocks = [];
   let publishBusy = true;
 
@@ -474,6 +615,7 @@ export async function openPublishModal(items, { onDone } = {}) {
     bodyHtml: `<div class="cr-bulk-scroll" id="cr-publish-body">
       <p class="cr-bulk-loading">Loading unpublished products…</p>
     </div>`,
+    onCancel: () => releaseBulkDock(),
     onSave: async () => {
       if (publishBusy) throw new Error("Still loading product previews");
       setModalBusy(true, "Publishing…");
@@ -483,11 +625,12 @@ export async function openPublishModal(items, { onDone } = {}) {
         if (error || !data) continue;
         const designId = designIdOf(item);
         const group = document.querySelector(`#cr-publish-body .cr-design-group[data-design-id="${designId}"]`);
-        const keys = [...(group ? group.querySelectorAll(".cr-pub-card__cb:checked, .cr-dd-prod__cb:checked") : [])]
+        // Scoped to this design group so global Clean Mockups checkboxes are not double-counted
+        const keys = [...(group?.querySelectorAll(".cr-pub-card__cb:checked") || [])]
           .map((el) => el.getAttribute("data-product-key") || "")
           .filter(Boolean);
         const allowed = new Set((data.missing_products || []).map((p) => String(p.product_key || "")));
-        const product_keys = keys.filter((k) => allowed.has(k));
+        const product_keys = [...new Set(keys.filter((k) => allowed.has(k)))];
         if (!product_keys.length) continue;
         try {
           await partnerFetch("admin-design-publish-missing-online", {
@@ -523,10 +666,13 @@ export async function openPublishModal(items, { onDone } = {}) {
 
   const bodyEl = document.getElementById("cr-publish-body");
   if (!bodyEl || !document.getElementById("modal-backdrop")?.classList.contains("show")) {
+    releaseBulkDock();
     return;
   }
 
-  bodyEl.innerHTML = blocks.map(({ item, data, error }) => publishDesignBlockHtml(item, data, error)).join("");
+  const globalProducts = collectGlobalPublishProducts(blocks);
+  const designsHtml = blocks.map(({ item, data, error }) => publishDesignBlockHtml(item, data, error)).join("");
+  bodyEl.innerHTML = `${publishGlobalSectionHtml(globalProducts)}${designsHtml}`;
   mountPublishProductMedia(bodyEl, blocks);
   publishBusy = false;
   setModalBusy(false);
@@ -666,9 +812,11 @@ export async function openDesignUnpublishModal(item, { onDone } = {}) {
 export async function openUpdateModal(items, { onDone } = {}) {
   const list = (items || []).filter((item) => designIdOf(item));
   if (!list.length) {
+    releaseBulkDock();
     showToast("Update", "Select at least one saved design");
     return;
   }
+  suppressBulkDock();
 
   const blocks = [];
   for (const item of list) {
@@ -693,7 +841,10 @@ export async function openUpdateModal(items, { onDone } = {}) {
     openModal({
       title: "Update listings",
       bodyHtml: `<p class="confirm-modal-message">No online products with design or default changes since publish.</p>`,
-      onSave: async () => {},
+      onCancel: () => releaseBulkDock(),
+      onSave: async () => {
+        releaseBulkDock();
+      },
     });
     const saveBtn = document.getElementById("modal-save");
     if (saveBtn) saveBtn.style.display = "none";
@@ -719,6 +870,7 @@ export async function openUpdateModal(items, { onDone } = {}) {
   openModal({
     title: updatable.length === 1 ? "Update listings" : `Update ${updatable.length} designs`,
     bodyHtml: `<div class="cr-bulk-scroll">${body}</div>`,
+    onCancel: () => releaseBulkDock(),
     onSave: async () => {
       setModalBusy(true, "Updating…");
       let ok = 0;
