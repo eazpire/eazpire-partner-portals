@@ -12,10 +12,17 @@ import {
 import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
+import {
+  startPublishDockWatch,
+  teardownPublishDock,
+  setPublishSessionsListener,
+  getPublishingDesignIds,
+} from "./designs-publish-dock.js";
 
 export function teardownBulkDock() {
   teardownBulkDockInner();
   teardownContextMenu();
+  teardownPublishDock();
 }
 
 const SOURCE_FILTERS = [
@@ -711,8 +718,15 @@ function bindDownloadButtons(grid) {
   });
 }
 
+function isDesignPublishing(item) {
+  const id = Number(item?.id || 0);
+  if (!id) return false;
+  return getPublishingDesignIds().has(id);
+}
+
 function getVisibleItems() {
-  return state.items.filter((item) => matchesUsage(item, state.usage));
+  // Hide designs that are currently publishing (shown in the publish floating bar instead).
+  return state.items.filter((item) => matchesUsage(item, state.usage) && !isDesignPublishing(item));
 }
 
 function afterBulkChange() {
@@ -724,6 +738,10 @@ function bindGridInteractions(grid) {
   bindCardSelection(grid, {
     getItemByKey: (key) => state.items.find((row) => String(row.item_key || "") === key) || null,
     onOpenDetail: (item) => {
+      if (isDesignPublishing(item)) {
+        showToast("Publishing", "This design is publishing and cannot be opened right now");
+        return;
+      }
       openDesignDetailModal(item, {
         onClose: async ({ reload } = {}) => {
           if (reload) await afterBulkChange();
@@ -734,7 +752,7 @@ function bindGridInteractions(grid) {
   bindCardContextMenu(grid, ".cr-card[data-item-key]", (card, event) => {
     const key = card.getAttribute("data-item-key") || "";
     const item = state.items.find((row) => String(row.item_key || "") === key);
-    if (!item) return;
+    if (!item || isDesignPublishing(item)) return;
     const canUnpublish = Number(item.id || 0) > 0;
     openContextMenu(
       event,
@@ -885,9 +903,21 @@ export async function mountDesignsPage() {
   ensureBulkDock(el, {
     onSelectAll: () => selectAllVisible(getVisibleItems()),
     onRemove: (items) => openRemoveModal(items, { onDone: afterBulkChange }),
-    onPublish: (items) => openPublishModal(items, { onDone: afterBulkChange }),
+    onPublish: (items) =>
+      openPublishModal(items, {
+        onDone: async (result) => {
+          await afterBulkChange();
+          return result;
+        },
+      }),
     onUpdate: (items) => openUpdateModal(items, { onDone: afterBulkChange }),
   });
+
+  setPublishSessionsListener(() => {
+    // Re-render grid when publishing set changes (hide/show designs).
+    renderGrid();
+  });
+  startPublishDockWatch();
 
   bindToolbar(el);
   await fetchList({ append: false });

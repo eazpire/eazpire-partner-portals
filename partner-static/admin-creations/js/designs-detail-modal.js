@@ -10,6 +10,7 @@ import {
   mountOfflineProductMedia,
   bindProdCarousels,
 } from "./designs-product-media.js";
+import { trackPublishSessions, startPublishDockWatch } from "./designs-publish-dock.js";
 
 const ICON = {
   overview: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`,
@@ -1645,16 +1646,37 @@ async function publishSelectedProducts() {
       setProductJob(key, { kind: "publish", status: "running", sessionId: sessionId || null });
     }
     showToast("Publish", `${offlineKeys.length} product(s) queued`);
-    if (sessionId) startPublishProgressWatch(sessionId, offlineKeys, activeItem.id);
-    else startPublishLiveWatch(offlineKeys, activeItem.id);
-    if (typeof onClosed === "function") await onClosed({ reload: false });
+    if (sessionId) {
+      trackPublishSessions([
+        {
+          session_id: sessionId,
+          design_id: Number(activeItem.id),
+          design_title: String(activeItem.title || `Design #${activeItem.id}`),
+          design_preview_url: String(activeItem.preview_url || activeItem.original_url || "").trim(),
+          products: offlineKeys.map((pk) => {
+            const st = productStateByKey.get(pk) || {};
+            return {
+              product_key: pk,
+              title: st.title || st.product_name || pk,
+              status: "pending",
+              mock_url: st.mock_url || "",
+              mock_urls: st.mock_urls || [],
+              studio_card_preview: st.studio_card_preview || null,
+            };
+          }),
+        },
+      ]);
+      startPublishDockWatch();
+      startPublishProgressWatch(sessionId, offlineKeys, activeItem.id);
+    } else startPublishLiveWatch(offlineKeys, activeItem.id);
+    if (typeof onClosed === "function") await onClosed({ reload: true });
   } catch (e) {
     // Fallback to full publish modal if direct keys fail
     try {
       await openPublishModal([activeItem], {
         onDone: async () => {
           await renderProductsPanel(activeItem);
-          if (typeof onClosed === "function") await onClosed({ reload: false });
+          if (typeof onClosed === "function") await onClosed({ reload: true });
         },
       });
     } catch (_) {

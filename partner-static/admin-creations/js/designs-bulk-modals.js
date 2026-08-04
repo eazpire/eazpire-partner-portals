@@ -11,6 +11,7 @@ import {
   bindProdCarousels,
   productCarouselHtml,
 } from "./designs-product-media.js";
+import { trackPublishSessions, startPublishDockWatch } from "./designs-publish-dock.js";
 
 const PHASE1_CHANNELS = new Set(["printify", "todify", "shopify"]);
 
@@ -621,6 +622,7 @@ export async function openPublishModal(items, { onDone } = {}) {
       setModalBusy(true, "Publishing…");
       let queued = 0;
       const errors = [];
+      const tracked = [];
       for (const { item, data, error } of blocks) {
         if (error || !data) continue;
         const designId = designIdOf(item);
@@ -633,20 +635,52 @@ export async function openPublishModal(items, { onDone } = {}) {
         const product_keys = [...new Set(keys.filter((k) => allowed.has(k)))];
         if (!product_keys.length) continue;
         try {
-          await partnerFetch("admin-design-publish-missing-online", {
+          const res = await partnerFetch("admin-design-publish-missing-online", {
             method: "POST",
             body: { design_id: designId, product_keys, region_code: "EU" },
           });
           queued += 1;
+          const sid = String(res?.session_id || res?.publish_session_id || "").trim();
+          if (sid) {
+            const byKey = new Map(
+              (data.missing_products || []).map((p) => [String(p.product_key || ""), p])
+            );
+            tracked.push({
+              session_id: sid,
+              design_id: designId,
+              design_title: designTitle(item, data.design_title),
+              design_preview_url: String(
+                data.design_preview_url || item.preview_url || item.original_url || ""
+              ).trim(),
+              products: product_keys.map((pk) => {
+                const p = byKey.get(pk) || { product_key: pk };
+                return {
+                  product_key: pk,
+                  title: p.title || p.product_name || pk,
+                  status: "pending",
+                  progress: 0,
+                  message: "Waiting…",
+                  mock_url: p.mock_url || "",
+                  mock_urls: p.mock_urls || [],
+                  studio_card_preview: p.studio_card_preview || null,
+                  channel: p.channel || "printify",
+                };
+              }),
+            });
+          }
         } catch (e) {
           errors.push(`${designTitle(item)}: ${e.message || "failed"}`);
         }
       }
       setModalBusy(false);
       clearSelection();
+      if (tracked.length) {
+        trackPublishSessions(tracked);
+        startPublishDockWatch();
+      }
       if (queued) showToast("Publish queued", `${queued} design${queued === 1 ? "" : "s"} enqueued`);
       if (errors.length) showToast("Error", errors.slice(0, 2).join(" · "));
-      if (typeof onDone === "function") await onDone({ queued, errors });
+      if (typeof onDone === "function") await onDone({ queued, errors, sessions: tracked });
     },
   });
   setPublishModalChrome();

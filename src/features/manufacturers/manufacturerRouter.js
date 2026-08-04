@@ -335,6 +335,7 @@ const ADMIN_OPS = new Set([
   "admin-design-delete",
   "admin-design-publish-missing-online",
   "get-publish-progress",
+  "list-active-publishes",
   "admin-design-update-diff",
   "admin-design-update-commit",
   "admin-design-unpublish",
@@ -1635,6 +1636,10 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "get-publish-progress" && request.method === "GET") {
       const { handleGetPublishProgress } = await import("../product/getPublishProgress.js");
       return handleGetPublishProgress(request, env);
+    }
+    if (op === "list-active-publishes" && request.method === "GET") {
+      const { handleListActivePublishes } = await import("../product/listActivePublishes.js");
+      return handleListActivePublishes(request, env, { adminAll: true });
     }
     if (op === "admin-design-update-diff" && request.method === "GET") {
       const { handleAdminDesignUpdateDiff } = await import("../admin/adminDesignActions.js");
