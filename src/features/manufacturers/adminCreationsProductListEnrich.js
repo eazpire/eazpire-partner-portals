@@ -9,39 +9,49 @@
  */
 
 import { EU_MARKETPLACES, NA_MARKETPLACES } from "../../config/amazonMarketplaces.js";
+import { mapAmazonListingRowToAdminStatus } from "../product/amazonAdminPublish.js";
 import { resolvePlanCountryCodes } from "../catalog/resolvePlanCountries.js";
+import { parseExtraPublicationIdsFromEnv } from "../publish/extraPublications.js";
 import { listPublishActiveSessionRows } from "../publish/publishActiveSessions.js";
 import {
   classifyPrintifyListingStatusFromRow,
   ensurePrintifyListingStatusColumn,
   parsePrintifyImagesJson,
   PRINTIFY_STATUS_LABELS,
+  repairStalePrintifyListingStatusPublishing,
 } from "../publish/printifyListingStatus.js";
 import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
 
 export { indexShopifyNodesById };
 
 const EU_MARKETPLACE_IDS = new Set(Object.values(EU_MARKETPLACES));
-const NA_MARKETPLACE_IDS = new Set(Object.values(NA_MARKETPLACES));
-/** Fully live on Amazon (retail / catalog verified). */
-const AMAZON_LIVE_STATUSES = new Set(["active", "published", "live", "verified"]);
+/** Fully live status strings on D1 amazon_listing.status (also require ASIN/verified via helpers). */
+const AMAZON_LIVE_STATUSES = new Set(["active", "published", "live", "listed", "verified", "suppressed"]);
 /**
- * In-flight or live Amazon listing statuses from D1 `amazon_listing`.
- * Creations Channels facets include these so Amazon EU/US appear while verifying/feed_pending.
+ * In-flight Amazon statuses — count toward Pending Amazon EU/US, not live Amazon EU/US.
  */
-const AMAZON_CHANNEL_PRESENT_STATUSES = new Set([
-  ...AMAZON_LIVE_STATUSES,
+const AMAZON_PENDING_STATUSES = new Set([
   "verifying",
   "feed_pending",
   "submitted",
   "processing",
   "pending",
-  "dry_run_ok",
+  "publishing",
+  "queued",
+  "pending_indexing",
 ]);
 
 /** Fixed sales-channel keys a Creations product can be published on (incl. Amazon from D1). */
 export function publicationChannelKeys() {
-  return ["eazpire", "onlineshop", "eazpire_headless", "amazon_eu", "amazon_us"];
+  return [
+    "eazpire",
+    "onlineshop",
+    "eazpire_headless",
+    "amazon_eu",
+    "amazon_us",
+    "pending_amazon_eu",
+    "pending_amazon_us",
+  ];
 }
 
 const CHANNEL_LABELS = {
@@ -50,20 +60,89 @@ const CHANNEL_LABELS = {
   eazpire_headless: "eazpire Headless",
   amazon_eu: "Amazon EU",
   amazon_us: "Amazon US",
+  pending_amazon_eu: "Pending Amazon EU",
+  pending_amazon_us: "Pending Amazon US",
 };
 
 export function channelLabelForKey(key) {
   return CHANNEL_LABELS[key] || String(key || "");
 }
 
-/** True when an amazon_listing row should count toward Channels facets / busy Amazon presence. */
+/** @deprecated Prefer isAmazonSuccessfullyPublished / isAmazonPendingPublish — kept for tests. */
 export function isAmazonChannelPresentStatus(status) {
-  return AMAZON_CHANNEL_PRESENT_STATUSES.has(String(status || "").trim().toLowerCase());
+  const st = String(status || "").trim().toLowerCase();
+  return AMAZON_LIVE_STATUSES.has(st) || AMAZON_PENDING_STATUSES.has(st);
 }
 
-/** True when an amazon_listing row is considered fully live. */
+/** True when an amazon_listing.status string alone looks fully live (no ASIN check). */
 export function isAmazonLiveStatus(status) {
   return AMAZON_LIVE_STATUSES.has(String(status || "").trim().toLowerCase());
+}
+
+/**
+ * Truly successfully published on Amazon (retail-live / ASIN / verified).
+ * Uses the same criteria as Admin continent cards (`mapAmazonListingRowToAdminStatus` → published).
+ * @param {{ status?: string|null, asin?: string|null, verified_status?: string|null, feed_id?: string|null, updated_at?: number|null }} row
+ */
+export function isAmazonSuccessfullyPublished(row) {
+  return mapAmazonListingRowToAdminStatus(row) === "published";
+}
+
+/**
+ * Waiting on Amazon (feed/verify/queue) — not failed-terminal and not live yet.
+ * @param {{ status?: string|null, asin?: string|null, verified_status?: string|null, feed_id?: string|null, updated_at?: number|null }} row
+ */
+export function isAmazonPendingPublish(row) {
+  return mapAmazonListingRowToAdminStatus(row) === "publishing";
+}
+
+/** Normalize Shopify Publication GID (accepts numeric id or full gid). */
+export function normalizePublicationGid(gid) {
+  const s = String(gid || "").trim();
+  if (!s) return "";
+  if (s.startsWith("gid://shopify/Publication/")) return s;
+  const num = s.replace(/\D/g, "");
+  return num ? `gid://shopify/Publication/${num}` : s;
+}
+
+/**
+ * True when Shopify GraphQL node is published to Online Store sales channel.
+ * Prefers `publications.channel.name`; falls back to ACTIVE status when publications absent.
+ */
+export function nodePublishedToOnlineStore(node, { fallbackActive = true } = {}) {
+  const edges = node?.publications?.edges;
+  if (Array.isArray(edges) && edges.length) {
+    for (const edge of edges) {
+      const n = edge?.node;
+      if (!n?.isPublished) continue;
+      const name = String(n?.channel?.name || "").trim().toLowerCase();
+      if (name === "online store" || name.includes("online store")) return true;
+    }
+    return false;
+  }
+  if (!fallbackActive) return false;
+  // No publication payload — keep prior ACTIVE heuristic so facets are not empty.
+  return String(node?.status || "").toUpperCase() === "ACTIVE";
+}
+
+/**
+ * True when node is published to any Headless / extra publication ID from env.
+ * @param {object|null} node
+ * @param {Iterable<string>} headlessPublicationGids
+ */
+export function nodePublishedToHeadless(node, headlessPublicationGids) {
+  const allowed = new Set(
+    [...(headlessPublicationGids || [])].map(normalizePublicationGid).filter(Boolean)
+  );
+  if (!allowed.size) return false;
+  const edges = node?.resourcePublications?.edges || [];
+  for (const edge of edges) {
+    const n = edge?.node;
+    if (!n?.isPublished) continue;
+    const pid = normalizePublicationGid(n?.publication?.id);
+    if (pid && allowed.has(pid)) return true;
+  }
+  return false;
 }
 
 function safeJsonParse(raw, fallback) {
@@ -247,7 +326,8 @@ async function loadAmazonListingsByShopifyId(env, shopifyIds) {
     const placeholders = chunk.map(() => "?").join(",");
     try {
       const res = await env.CREATOR_DB.prepare(
-        `SELECT al.marketplace_id, al.status, pd.shopify_product_id
+        `SELECT al.marketplace_id, al.status, al.asin, al.verified_status, al.feed_id,
+                al.updated_at, al.listing_type, pd.shopify_product_id
          FROM amazon_listing al
          JOIN published_designs pd ON pd.id = al.published_design_id
          WHERE REPLACE(REPLACE(TRIM(CAST(pd.shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
@@ -258,7 +338,15 @@ async function loadAmazonListingsByShopifyId(env, shopifyIds) {
         const sid = normalizeShopifyProductId(row.shopify_product_id);
         if (!sid) continue;
         if (!out.has(sid)) out.set(sid, []);
-        out.get(sid).push({ marketplace_id: row.marketplace_id, status: String(row.status || "").toLowerCase() });
+        out.get(sid).push({
+          marketplace_id: row.marketplace_id,
+          status: String(row.status || "").toLowerCase(),
+          asin: row.asin || null,
+          verified_status: row.verified_status || null,
+          feed_id: row.feed_id || null,
+          updated_at: row.updated_at != null ? Number(row.updated_at) : null,
+          listing_type: row.listing_type || null,
+        });
       }
     } catch (e) {
       console.warn("[admin-creations-product-list-enrich] amazon_listing:", e?.message);
@@ -369,6 +457,7 @@ async function loadPrintifyListingMeta(env, shopifyIds, printifyIds) {
 
   try {
     await ensurePrintifyListingStatusColumn(env);
+    await repairStalePrintifyListingStatusPublishing(env);
   } catch (_) {}
 
   const sids = [...new Set((shopifyIds || []).map((id) => normalizeShopifyProductId(id)).filter(Boolean))];
@@ -490,6 +579,8 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     loadCreationsForDesignIds(env, designIds),
   ]);
 
+  const headlessPublicationGids = parseExtraPublicationIdsFromEnv(env);
+
   return list.map((product) => {
     const sid = normalizeShopifyProductId(product.shopify_product_id || product.id);
     const node = resolveNodeForProduct(product, nodesByShopifyId);
@@ -499,24 +590,41 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const current = designId ? creationsById.get(designId) : null;
 
     const amazonRows = sid ? amazonByShopifyId.get(sid) || [] : [];
-    const amazonEuChannel = amazonRows.some(
-      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonChannelPresentStatus(r.status)
+    const amazonEuLive = amazonRows.some(
+      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonSuccessfullyPublished(r)
     );
-    const amazonUsChannel = amazonRows.some(
-      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonChannelPresentStatus(r.status)
+    const amazonUsLive = amazonRows.some(
+      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonSuccessfullyPublished(r)
     );
-    // Live-only flags for bulk UI; channel facets use in-flight statuses too (D1 amazon_listing).
-    const amazonEuListed = amazonRows.some(
-      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonLiveStatus(r.status)
+    const amazonEuPending = amazonRows.some(
+      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonPendingPublish(r)
     );
-    const amazonUsListed = amazonRows.some(
-      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonLiveStatus(r.status)
+    const amazonUsPending = amazonRows.some(
+      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonPendingPublish(r)
     );
+    // Live-only flags for bulk UI (same success criteria as Channels Amazon EU/US).
+    const amazonEuListed = amazonEuLive;
+    const amazonUsListed = amazonUsLive;
+    // Busy / in-flight presence (live OR pending) — used for publish eligibility.
+    const amazonEuChannel = amazonEuLive || amazonEuPending;
+    const amazonUsChannel = amazonUsLive || amazonUsPending;
+
+    const onOnlineStore = node
+      ? nodePublishedToOnlineStore(node)
+      : Number(product.is_active) === 2;
+    const onHeadless = node
+      ? nodePublishedToHeadless(node, headlessPublicationGids)
+      : false;
+    // eazpire = live Shopify product (ACTIVE); Online Store / Headless = real publications.
+    const onEazpire = Number(product.is_active) === 2 || String(node?.status || "").toUpperCase() === "ACTIVE";
 
     const marketLabels = [];
-    if (Number(product.is_active) === 2) marketLabels.push("Online Store");
-    if (amazonEuChannel) marketLabels.push("Amazon EU");
-    if (amazonUsChannel) marketLabels.push("Amazon US");
+    if (onOnlineStore) marketLabels.push("Online Store");
+    if (onHeadless) marketLabels.push("eazpire Headless");
+    if (amazonEuLive) marketLabels.push("Amazon EU");
+    else if (amazonEuPending) marketLabels.push("Pending Amazon EU");
+    if (amazonUsLive) marketLabels.push("Amazon US");
+    else if (amazonUsPending) marketLabels.push("Pending Amazon US");
 
     const profile = product.product_key ? publishProfiles.get(product.product_key) : null;
     const variantCount = Number(node?.totalVariants?.count ?? product.total_variants ?? 0) || 0;
@@ -524,10 +632,13 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const catalogCount = product.product_key ? Number(catalogCountryCounts.get(product.product_key) || 0) : 0;
 
     const channelKeys = publicationChannelKeys().filter((key) => {
-      if (key === "eazpire" || key === "onlineshop") return Number(product.is_active) === 2;
-      if (key === "eazpire_headless") return String(product.listing_origin || "").toLowerCase() === "creator";
-      if (key === "amazon_eu") return amazonEuChannel;
-      if (key === "amazon_us") return amazonUsChannel;
+      if (key === "eazpire") return onEazpire;
+      if (key === "onlineshop") return onOnlineStore;
+      if (key === "eazpire_headless") return onHeadless;
+      if (key === "amazon_eu") return amazonEuLive;
+      if (key === "amazon_us") return amazonUsLive;
+      if (key === "pending_amazon_eu") return amazonEuPending;
+      if (key === "pending_amazon_us") return amazonUsPending;
       return false;
     });
 
@@ -586,6 +697,8 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       amazon_us_listed: amazonUsListed,
       amazon_eu_channel: amazonEuChannel,
       amazon_us_channel: amazonUsChannel,
+      amazon_eu_pending: amazonEuPending,
+      amazon_us_pending: amazonUsPending,
       // Don't re-queue Amazon publish while a D1 listing is already in-flight or live.
       publish_eligible_amazon_eu: !amazonEuChannel && !amazonUsChannel,
       publish_active: busyByShopifyId || busyByProductKey,

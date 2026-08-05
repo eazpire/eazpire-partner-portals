@@ -10800,6 +10800,29 @@ html[data-portal="admin"] .cr-pf-option__count {
   color: var(--muted, #475569);
   flex-shrink: 0;
 }
+/* Classic faceted search: count 0 → grayed / not selectable */
+html[data-portal="admin"] .cr-pf-option--unavailable {
+  opacity: 0.42;
+  pointer-events: none;
+  filter: grayscale(0.35);
+}
+html[data-portal="admin"] .cr-pf-option--unavailable .cr-pf-option__label {
+  color: var(--muted, #94a3b8);
+}
+html[data-portal="admin"] .cr-pf-option--unavailable .cr-pf-option__count {
+  background: var(--surface-2, #e2e8f0);
+  color: #94a3b8;
+}
+html[data-portal="admin"] .cr-pf-triswitch--disabled,
+html[data-portal="admin"] .cr-pf-triswitch[data-cr-pf-disabled="1"] {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+html[data-portal="admin"] .cr-pf-triswitch--disabled button,
+html[data-portal="admin"] .cr-pf-triswitch[data-cr-pf-disabled="1"] button {
+  cursor: not-allowed;
+}
 html[data-portal="admin"] .cr-pf-empty {
   padding: 6px 6px;
   font-size: 12px;

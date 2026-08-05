@@ -7,6 +7,11 @@ import {
   indexShopifyNodesById,
   isAmazonChannelPresentStatus,
   isAmazonLiveStatus,
+  isAmazonSuccessfullyPublished,
+  isAmazonPendingPublish,
+  nodePublishedToHeadless,
+  nodePublishedToOnlineStore,
+  normalizePublicationGid,
 } from "../../src/features/manufacturers/adminCreationsProductListEnrich.js";
 
 function product(overrides = {}) {
@@ -33,25 +38,121 @@ function product(overrides = {}) {
 }
 
 describe("adminCreationsProductListEnrich", () => {
-  it("publicationChannelKeys returns the fixed Creations sales channel list incl. Amazon", () => {
+  it("publicationChannelKeys returns the fixed Creations sales channel list incl. Amazon + Pending", () => {
     expect(publicationChannelKeys()).toEqual([
       "eazpire",
       "onlineshop",
       "eazpire_headless",
       "amazon_eu",
       "amazon_us",
+      "pending_amazon_eu",
+      "pending_amazon_us",
     ]);
     expect(channelLabelForKey("amazon_eu")).toBe("Amazon EU");
     expect(channelLabelForKey("amazon_us")).toBe("Amazon US");
+    expect(channelLabelForKey("pending_amazon_eu")).toBe("Pending Amazon EU");
+    expect(channelLabelForKey("pending_amazon_us")).toBe("Pending Amazon US");
   });
 
-  it("Amazon channel present statuses include verifying/feed_pending from D1", () => {
+  it("Amazon success vs pending mapping uses Admin status criteria (ASIN / verified / in-flight)", () => {
     expect(isAmazonChannelPresentStatus("verifying")).toBe(true);
     expect(isAmazonChannelPresentStatus("feed_pending")).toBe(true);
     expect(isAmazonChannelPresentStatus("active")).toBe(true);
     expect(isAmazonChannelPresentStatus("dry_run_failed")).toBe(false);
     expect(isAmazonLiveStatus("verifying")).toBe(false);
     expect(isAmazonLiveStatus("active")).toBe(true);
+
+    expect(isAmazonSuccessfullyPublished({ status: "feed_pending" })).toBe(false);
+    expect(isAmazonSuccessfullyPublished({ status: "verifying" })).toBe(false);
+    expect(isAmazonSuccessfullyPublished({ status: "feed_pending", asin: "B0TEST" })).toBe(true);
+    expect(isAmazonSuccessfullyPublished({ status: "failed", verified_status: "BUYABLE" })).toBe(true);
+    expect(isAmazonSuccessfullyPublished({ status: "live" })).toBe(true);
+
+    expect(isAmazonPendingPublish({ status: "feed_pending" })).toBe(true);
+    expect(isAmazonPendingPublish({ status: "verifying" })).toBe(true);
+    expect(isAmazonPendingPublish({ status: "feed_pending", asin: "B0TEST" })).toBe(false);
+    expect(isAmazonPendingPublish({ status: "dry_run_failed" })).toBe(false);
+    expect(isAmazonPendingPublish({ status: "failed", verified_status: "FAILED", feed_id: "1" })).toBe(
+      false
+    );
+  });
+
+  it("Headless channel uses resourcePublications publication IDs (not listing_origin)", () => {
+    const headlessGid = "gid://shopify/Publication/293707546906";
+    expect(normalizePublicationGid("293707546906")).toBe(headlessGid);
+    expect(
+      nodePublishedToHeadless(
+        {
+          resourcePublications: {
+            edges: [
+              {
+                node: {
+                  isPublished: true,
+                  publication: { id: headlessGid },
+                },
+              },
+            ],
+          },
+        },
+        [headlessGid]
+      )
+    ).toBe(true);
+    expect(
+      nodePublishedToHeadless(
+        {
+          resourcePublications: {
+            edges: [
+              {
+                node: {
+                  isPublished: true,
+                  publication: { id: "gid://shopify/Publication/other" },
+                },
+              },
+            ],
+          },
+        },
+        [headlessGid]
+      )
+    ).toBe(false);
+    // listing_origin alone must NOT imply Headless
+    expect(nodePublishedToHeadless({ mfListingOrigin: { value: "creator" } }, [headlessGid])).toBe(
+      false
+    );
+  });
+
+  it("Online Store channel uses publications.channel name", () => {
+    expect(
+      nodePublishedToOnlineStore({
+        status: "DRAFT",
+        publications: {
+          edges: [
+            {
+              node: {
+                isPublished: true,
+                channel: { name: "Online Store" },
+              },
+            },
+          ],
+        },
+      })
+    ).toBe(true);
+    expect(
+      nodePublishedToOnlineStore({
+        status: "ACTIVE",
+        publications: {
+          edges: [
+            {
+              node: {
+                isPublished: false,
+                channel: { name: "Online Store" },
+              },
+            },
+          ],
+        },
+      })
+    ).toBe(false);
+    // Fallback when publications missing: ACTIVE
+    expect(nodePublishedToOnlineStore({ status: "ACTIVE" })).toBe(true);
   });
 
   it("countFilledMetafields prefers metafields.edges when present", () => {
@@ -147,6 +248,8 @@ describe("adminCreationsProductListEnrich", () => {
         { key: "onlineshop", label: "Online Store", count: 1 },
         { key: "amazon_eu", label: "Amazon EU", count: 0 },
         { key: "amazon_us", label: "Amazon US", count: 0 },
+        { key: "pending_amazon_eu", label: "Pending Amazon EU", count: 0 },
+        { key: "pending_amazon_us", label: "Pending Amazon US", count: 0 },
       ])
     );
 
@@ -214,7 +317,7 @@ describe("adminCreationsProductListEnrich", () => {
     );
   });
 
-  it("buildProductFilterFacets counts Amazon EU/US channel keys", () => {
+  it("buildProductFilterFacets counts Amazon EU/US and Pending Amazon channel keys", () => {
     const facets = buildProductFilterFacets([
       product({
         channel_keys: ["amazon_eu", "eazpire"],
@@ -228,12 +331,22 @@ describe("adminCreationsProductListEnrich", () => {
         channel_labels: ["Amazon US"],
         channel_count: 1,
       }),
+      product({
+        product_key: "pk-3",
+        id: "1003",
+        channel_keys: ["pending_amazon_us", "eazpire_headless"],
+        channel_labels: ["Pending Amazon US", "eazpire Headless"],
+        channel_count: 2,
+      }),
     ]);
     expect(facets.channels).toEqual(
       expect.arrayContaining([
         { key: "amazon_eu", label: "Amazon EU", count: 1 },
         { key: "amazon_us", label: "Amazon US", count: 1 },
+        { key: "pending_amazon_us", label: "Pending Amazon US", count: 1 },
+        { key: "pending_amazon_eu", label: "Pending Amazon EU", count: 0 },
         { key: "eazpire", label: "eazpire", count: 1 },
+        { key: "eazpire_headless", label: "eazpire Headless", count: 1 },
       ])
     );
   });

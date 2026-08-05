@@ -47,6 +47,22 @@ const PRODUCTS_GQL = `
               }
             }
           }
+          publications(first: 25) {
+            edges {
+              node {
+                isPublished
+                channel { id name }
+              }
+            }
+          }
+          resourcePublications(first: 50) {
+            edges {
+              node {
+                isPublished
+                publication { id }
+              }
+            }
+          }
         }
       }
       pageInfo {

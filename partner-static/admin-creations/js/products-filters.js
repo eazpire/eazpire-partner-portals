@@ -1,9 +1,11 @@
 /**
  * Creations Portal Products — collapsible Product Filter sidebar (IDEA-063).
  * Tri-state switches: exclude (−1) / neutral (0) / include (1) — same logic as shop PLP filters.
+ * Classic faceted search: option counts ignore the option's own section; count 0 → grayed / disabled.
  */
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
+import { bindTriSwitches, facetSectionHtml as sharedFacetSectionHtml } from "./facet-tri-ui.js";
 
 const STORAGE_KEY = "admin_creations_products_filter_collapsed";
 
@@ -61,6 +63,8 @@ const CHANNEL_LABELS = {
   eazpire_headless: "eazpire Headless",
   amazon_eu: "Amazon EU",
   amazon_us: "Amazon US",
+  pending_amazon_eu: "Pending Amazon EU",
+  pending_amazon_us: "Pending Amazon US",
 };
 
 function defaultFilterState() {
@@ -367,48 +371,8 @@ export function applyProductSidebarFilters(items) {
   });
 }
 
-function clampTri(st) {
-  const n = Number(st);
-  if (n === 1 || n === -1) return n;
-  return 0;
-}
-
-function triSwitchHtml(sectionKey, value, state) {
-  const st = clampTri(state);
-  return `<div class="cr-pf-triswitch" data-state="${st}" data-cr-pf-section="${escapeHtml(sectionKey)}" data-cr-pf-key="${escapeHtml(
-    String(value)
-  )}" role="group" aria-label="Filter">
-    <div class="cr-pf-triswitch__track">
-      <div class="cr-pf-triswitch__thumb"></div>
-      <div class="cr-pf-triswitch__labels">
-        <button type="button" data-v="-1" aria-label="Exclude"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--minus">−</span></button>
-        <button type="button" data-v="0" aria-label="Neutral"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--dot"></span></button>
-        <button type="button" data-v="1" aria-label="Include"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--plus">+</span></button>
-      </div>
-    </div>
-  </div>`;
-}
-
 function facetSectionHtml(sectionKey, label, facetList) {
-  const group = filterState.tri[sectionKey] || {};
-  const active = Object.values(group).filter((st) => st === 1 || st === -1).length;
-  const rows = (facetList || [])
-    .map((f) => {
-      const st = clampTri(group[f.key] || 0);
-      return `<div class="cr-pf-option cr-pf-option--tri" data-tri-state="${st}">
-        <span class="cr-pf-option__label" title="${escapeHtml(f.label)}">${escapeHtml(f.label)}</span>
-        <span class="cr-pf-option__count">${f.count}</span>
-        ${triSwitchHtml(sectionKey, f.key, st)}
-      </div>`;
-    })
-    .join("");
-  return `<details class="cr-pf-section" data-cr-pf-group="${escapeHtml(sectionKey)}" open>
-    <summary class="cr-pf-section__summary">
-      <span>${escapeHtml(label)}</span>
-      ${active ? `<span class="cr-pf-section__badge">${active}</span>` : ""}
-    </summary>
-    <div class="cr-pf-section__body">${rows || '<p class="cr-pf-empty">No values</p>'}</div>
-  </details>`;
+  return sharedFacetSectionHtml(sectionKey, label, facetList, filterState.tri[sectionKey] || {});
 }
 
 export function filterSidebarInnerHtml(facets) {
@@ -447,24 +411,7 @@ export function bindFilterSidebar(sidebarEl, { onChange } = {}) {
     searchTimer = setTimeout(notify, 200);
   });
 
-  sidebarEl.querySelectorAll(".cr-pf-triswitch").forEach((sw) => {
-    sw.querySelectorAll("button[data-v]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const section = sw.getAttribute("data-cr-pf-section");
-        const key = sw.getAttribute("data-cr-pf-key");
-        const v = clampTri(parseInt(btn.getAttribute("data-v"), 10));
-        if (!section || key == null || !filterState.tri[section]) return;
-        if (v === 0) delete filterState.tri[section][key];
-        else filterState.tri[section][key] = v;
-        sw.setAttribute("data-state", String(v));
-        const row = sw.closest(".cr-pf-option--tri");
-        if (row) row.setAttribute("data-tri-state", String(v));
-        notify();
-      });
-    });
-  });
+  bindTriSwitches(sidebarEl, { triState: filterState, onChange: notify });
 
   sidebarEl.querySelector("#cr-pf-clear-all")?.addEventListener("click", () => {
     clearAllFilters();
