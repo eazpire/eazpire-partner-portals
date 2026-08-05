@@ -1592,11 +1592,20 @@ export async function handleManufacturerRouter(request, env, ctx) {
     }
     if (op === "admin-creations-product-action-lock" && request.method === "POST") {
       const { handleAdminCreationsProductActionLock } = await import("./adminCreationsProductActionLock.js");
-      return handleAdminCreationsProductActionLock(request, env);
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      // Partner session → inject logged_in_customer_id so isAdminOwner accepts the lock.
+      return handleAdminCreationsProductActionLock(
+        proxyRequestWithAdminOwner(request, admin.owner_id),
+        env
+      );
     }
     if (op === "admin-creations-product-action-unlock" && request.method === "POST") {
       const { handleAdminCreationsProductActionUnlock } = await import("./adminCreationsProductActionLock.js");
-      return handleAdminCreationsProductActionUnlock(request, env);
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsProductActionUnlock(
+        proxyRequestWithAdminOwner(request, admin.owner_id),
+        env
+      );
     }
     if (op === "admin-creations-edit-design" && request.method === "GET") {
       const { handleAdminCreationsEditDesignGet } = await import("./adminCreationsEditDesign.js");

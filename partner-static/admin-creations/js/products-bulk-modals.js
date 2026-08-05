@@ -103,7 +103,8 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
               product_key: item.product_key || "",
               shopify_product_id: item.shopify_product_id || item.id || "",
               published_design_id: item.published_design_id || undefined,
-              continents: ["eu"],
+              // Catalog Channels use "europa" / "amerika" (not "eu" / "us").
+              continents: ["europa"],
               dry_run: false,
               live_submit: true,
             },
@@ -205,7 +206,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
                 product_key: item.product_key || "",
                 shopify_product_id: item.shopify_product_id || item.id || "",
                 published_design_id: item.published_design_id || undefined,
-                continents: ["eu"],
+                continents: ["europa"],
               },
             });
           }
