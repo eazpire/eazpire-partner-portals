@@ -16,6 +16,39 @@ import {
 } from "./product-edit-design-panel.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
 import { openProductUnpublishModal } from "./products-unpublish-modal.js";
+import {
+  applyProductSidebarFilters,
+  computeFacetsFromItems,
+  filterSidebarInnerHtml,
+  bindFilterSidebar,
+  isFilterSidebarCollapsed,
+  setFilterSidebarCollapsed,
+} from "./products-filters.js";
+import {
+  ensureProductsBulkDock,
+  checkboxHtml as productBulkCheckboxHtml,
+  bindBulkCheckboxes,
+  selectionKey as productSelectionKey,
+  selectAllVisible as selectAllProductsVisible,
+  teardownProductsBulkDock as teardownProductsBulkDockInner,
+} from "./products-bulk.js";
+import {
+  openProductsBulkPublishModal,
+  openProductsBulkUnpublishModal,
+  openProductsBulkUpdateModal,
+} from "./products-bulk-modals.js";
+import {
+  getBusyProductKeys,
+  getBusyShopifyIds,
+  setBusyChangeListener,
+  teardownProductsActionDock as teardownProductsActionDockInner,
+} from "./products-action-dock.js";
+
+/** Hide floating bulk selection bar + bulk action progress dock (both body-mounted). */
+export function teardownProductsExtras() {
+  teardownProductsBulkDockInner();
+  teardownProductsActionDockInner();
+}
 
 const SOURCE_FILTERS = [
   { key: "printify", label: "Printify" },
@@ -260,17 +293,20 @@ function productCardHtml(item) {
   const studioListingId = resolveStudioListingId(item);
   const clickable = Boolean(shopifyId);
   const canUnpublish = Boolean(shopifyId || studioListingId);
+  const filterKey = productSelectionKey(item);
   const dataAttrs = [
     clickable ? `data-shopify-id="${escapeHtml(String(shopifyId))}"` : "",
     studioListingId ? `data-studio-listing-id="${escapeHtml(String(studioListingId))}"` : "",
     canUnpublish || clickable ? `data-product-title="${escapeHtml(title)}"` : "",
     clickable ? `tabindex="0" role="button"` : "",
+    filterKey ? `data-product-filter-key="${escapeHtml(filterKey)}"` : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return `<article class="cr-card cr-card--product${clickable ? " cr-card--clickable" : ""}${canUnpublish ? " cr-card--unpublishable" : ""}" data-product-key="${escapeHtml(item.product_key || item.id || "")}" data-cr-grid-groups="${escapeHtml(JSON.stringify(groups))}" data-cr-variant-index="0" data-cr-view-index="0"${dataAttrs ? ` ${dataAttrs}` : ""}>
     <div class="cr-card__title-row">
+      ${filterKey ? productBulkCheckboxHtml(item) : ""}
       <h3 class="cr-card__title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
     </div>
     <div class="cr-card__thumb">
@@ -283,6 +319,11 @@ function productCardHtml(item) {
       <span class="cr-meta-chip badge ${statusBadgeClass(item.is_active)}">${escapeHtml(statusLabel(item.is_active))}</span>
       <span class="cr-meta-chip cr-meta-chip--muted">${escapeHtml(item.source_label || state.source)}</span>
     </div>
+    ${
+      item.needs_update
+        ? `<div class="cr-card__needs-update" aria-label="Needs update"><span class="cr-card__needs-update-pill" title="Design or settings changed since last publish">needs Update</span></div>`
+        : ""
+    }
   </article>`;
 }
 
@@ -300,6 +341,16 @@ function applyFilters() {
   }
   if (state.category !== "all") {
     items = items.filter((p) => p.category === state.category || p.parent_group === state.category);
+  }
+  items = applyProductSidebarFilters(items);
+  const busyKeys = getBusyProductKeys();
+  const busyShopifyIds = getBusyShopifyIds();
+  if (busyKeys.size || busyShopifyIds.size) {
+    items = items.filter((p) => {
+      const key = String(p.product_key || p.id || "").trim();
+      const sid = String(p.shopify_product_id || p.id || "").trim();
+      return !(busyKeys.has(key) || busyShopifyIds.has(sid));
+    });
   }
   return items;
 }
@@ -342,6 +393,33 @@ function renderGrid() {
   if (error) {
     error.hidden = !state.error;
     error.textContent = state.error;
+  }
+  const byKey = new Map(visible.map((item) => [productSelectionKey(item), item]));
+  bindBulkCheckboxes(grid, { getItemByKey: (key) => byKey.get(key) });
+}
+
+function visibleProductsForBulk() {
+  return applyFilters();
+}
+
+async function reloadCurrentSourceItems() {
+  if (state.source === "customer") await loadCustomerProducts();
+  else if (state.source === "shopify") await loadShopifyProducts();
+  else if (state.source === "todify") await loadTodifyProducts();
+  else if (state.source === "samples") await loadSamplesProducts();
+  else await loadPrintifyProducts();
+}
+
+/** Lighter refresh after a bulk action — reloads product data without resetting search/category/sidebar filters. */
+async function refreshProductsAfterBulk() {
+  try {
+    await reloadCurrentSourceItems();
+  } catch (e) {
+    showToast("Error", e.message || "Could not refresh products");
+  } finally {
+    const el = document.getElementById("view-products");
+    refreshFilterSidebarBody(el);
+    renderGrid();
   }
 }
 
@@ -458,6 +536,7 @@ async function fetchProducts() {
     state.loading = false;
     const el = document.getElementById("view-products");
     refreshToolbar(el);
+    refreshFilterSidebarBody(el);
     renderGrid();
   }
 }
@@ -506,14 +585,68 @@ function bindToolbar(el) {
 }
 
 function pageShellHtml() {
+  const filterCollapsed = isFilterSidebarCollapsed();
   return `
-    ${filterToolbarHtml()}
-    <div class="cr-stage">
-      <p class="cr-loading" id="cr-products-loading">Loading products…</p>
-      <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
-      <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
-      <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
+    <div class="catalog-studio cr-products-studio${filterCollapsed ? " catalog-studio--filter-collapsed" : ""}">
+      <div class="catalog-studio-filter-wrap">
+        <aside class="catalog-studio-filter-sidebar" id="cr-pf-sidebar">
+          <div class="catalog-studio-sidebar-head">
+            <span class="catalog-studio-sidebar-label">Filters</span>
+          </div>
+          <div class="cr-pf-body" id="cr-pf-body">${filterSidebarInnerHtml(computeFacetsFromItems(state.items))}</div>
+        </aside>
+        <button type="button" class="catalog-studio-rail catalog-studio-filter-rail" id="cr-pf-toggle" aria-label="${
+          filterCollapsed ? "Expand" : "Collapse"
+        } filter sidebar" title="${filterCollapsed ? "Expand" : "Collapse"}">
+          <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
+          <span class="catalog-studio-rail__labels">
+            <span class="catalog-studio-rail__section">Filter</span>
+            <span class="catalog-studio-rail__action">${filterCollapsed ? "Expand" : "Collapse"}</span>
+          </span>
+        </button>
+      </div>
+      <div class="catalog-studio-main">
+        ${filterToolbarHtml()}
+        <div class="cr-stage">
+          <p class="cr-loading" id="cr-products-loading">Loading products…</p>
+          <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
+          <div class="cr-grid cr-grid--products" id="cr-products-grid" hidden></div>
+          <p class="cr-empty" id="cr-products-empty" hidden>No products match your filters.</p>
+        </div>
+      </div>
     </div>`;
+}
+
+/** Re-render the sidebar facet sections + counts from the currently loaded (unfiltered) items. */
+function refreshFilterSidebarBody(el) {
+  const body = el?.querySelector("#cr-pf-body");
+  if (!body) return;
+  body.innerHTML = filterSidebarInnerHtml(computeFacetsFromItems(state.items));
+  bindFilterSidebar(body, { onChange: () => renderGrid() });
+}
+
+function bindFilterSidebarToggle(el) {
+  const studioEl = el.querySelector(".cr-products-studio");
+  const toggle = el.querySelector("#cr-pf-toggle");
+  if (!studioEl || !toggle) return;
+  toggle.onclick = () => {
+    const next = !isFilterSidebarCollapsed();
+    setFilterSidebarCollapsed(next);
+    studioEl.classList.toggle("catalog-studio--filter-collapsed", next);
+    const label = toggle.querySelector(".catalog-studio-rail__action");
+    if (label) label.textContent = next ? "Expand" : "Collapse";
+    toggle.setAttribute("aria-label", next ? "Expand filter sidebar" : "Collapse filter sidebar");
+    toggle.title = next ? "Expand" : "Collapse";
+  };
+}
+
+function wireProductsBulkDock() {
+  ensureProductsBulkDock(null, {
+    onSelectAll: () => selectAllProductsVisible(visibleProductsForBulk()),
+    onPublish: (items) => openProductsBulkPublishModal(items, { onDone: refreshProductsAfterBulk }),
+    onUnpublish: (items) => openProductsBulkUnpublishModal(items, { onDone: refreshProductsAfterBulk }),
+    onUpdate: (items) => openProductsBulkUpdateModal(items, { onDone: refreshProductsAfterBulk }),
+  });
 }
 
 function detailModalHtml() {
@@ -1033,10 +1166,15 @@ export async function mountProductsPage() {
   if (!el) return;
 
   try {
-    // Close any leftover body-mounted modal from a previous visit.
+    // Close/clear any leftover body-mounted modal, bulk selection or action dock from a previous visit.
     closeProductDetail();
+    teardownProductsExtras();
     el.innerHTML = pageShellHtml();
     bindToolbar(el);
+    bindFilterSidebarToggle(el);
+    bindFilterSidebar(el.querySelector("#cr-pf-body"), { onChange: () => renderGrid() });
+    wireProductsBulkDock();
+    setBusyChangeListener(() => renderGrid());
     ensureDetailDom();
     bindProductCards(el);
     await fetchProducts();

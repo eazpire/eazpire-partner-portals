@@ -8,11 +8,13 @@
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { showToast } from "/creations/shared/js/partner-shell.js";
+import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.js";
 
 const busyProductKeys = new Set();
 const busyShopifyIds = new Set();
 let activeEntries = [];
 let clearTimer = null;
+let onBusyChange = null;
 
 export function getBusyProductKeys() {
   return new Set(busyProductKeys);
@@ -20,6 +22,15 @@ export function getBusyProductKeys() {
 
 export function getBusyShopifyIds() {
   return new Set(busyShopifyIds);
+}
+
+/** Notified whenever a product becomes busy/idle, so the grid can re-filter it in/out. */
+export function setBusyChangeListener(fn) {
+  onBusyChange = typeof fn === "function" ? fn : null;
+}
+
+function notifyBusyChange() {
+  if (typeof onBusyChange === "function") onBusyChange();
 }
 
 function itemProductKey(item) {
@@ -80,18 +91,27 @@ function cardHtml(entry) {
   const { item, status, message } = entry;
   const title = itemTitle(item);
   const preview = item.preview_url || item.grid_views?.[0]?.src || "";
-  return `<article class="cr-dd-prod cr-publish-dock__card cr-products-action-dock__card" data-status="${escapeHtml(
-    status
-  )}">
+  const busy = status === "locking" || status === "running";
+  const overlay = busy
+    ? `<div class="cr-dd-prod__job" aria-live="polite"><div class="cr-dd-prod__spinner" aria-hidden="true"></div><span class="cr-dd-prod__job-label">${escapeHtml(
+        statusLabel(status)
+      )}</span></div>`
+    : status === "error"
+      ? `<div class="cr-dd-prod__job cr-dd-prod__job--error"><span class="cr-dd-prod__job-label">${escapeHtml(
+          message || "Failed"
+        )}</span></div>`
+      : "";
+  return `<article class="cr-dd-prod cr-publish-dock__card cr-products-action-dock__card${
+    status === "error" ? " is-job-error" : ""
+  }" data-status="${escapeHtml(status)}">
     <div class="cr-dd-prod__media">
       ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy" decoding="async" />` : '<span class="cr-card__noimg">No image</span>'}
-      ${status === "locking" || status === "running" ? '<span class="cr-products-action-dock__spinner" aria-hidden="true"></span>' : ""}
+      ${overlay}
     </div>
     <span class="cr-publish-dock__status cr-publish-dock__status--${escapeHtml(status)}">${escapeHtml(
     statusLabel(status)
   )}</span>
     <div class="cr-dd-prod__title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
-    ${message ? `<div class="cr-products-action-dock__message">${escapeHtml(message)}</div>` : ""}
   </article>`;
 }
 
@@ -116,7 +136,10 @@ function renderDock(action) {
   const done = activeEntries.filter((e) => e.status === "done" || e.status === "error").length;
   if (titleEl) titleEl.textContent = `${actionLabel(action)}…`;
   if (countEl) countEl.textContent = `${done}/${activeEntries.length} product${activeEntries.length === 1 ? "" : "s"}`;
-  if (carouselHost) carouselHost.innerHTML = activeEntries.map(cardHtml).join("");
+  if (carouselHost) {
+    carouselHost.innerHTML = productCarouselHtml(activeEntries.map(cardHtml).join(""));
+    bindProdCarousels(carouselHost);
+  }
 }
 
 function clearDockSoonIfIdle() {
@@ -180,6 +203,7 @@ export async function startProductsActionDock(items, { action = "update", runIte
     const sid = itemShopifyId(entry.item);
     if (key) busyProductKeys.add(key);
     if (sid) busyShopifyIds.add(sid);
+    notifyBusyChange();
 
     entry.status = "locking";
     renderDock(action);
@@ -201,6 +225,7 @@ export async function startProductsActionDock(items, { action = "update", runIte
       await releaseProductLock(entry.sessionId);
       if (key) busyProductKeys.delete(key);
       if (sid) busyShopifyIds.delete(sid);
+      notifyBusyChange();
       renderDock(action);
     }
   }
@@ -219,6 +244,7 @@ export function teardownProductsActionDock() {
   activeEntries = [];
   busyProductKeys.clear();
   busyShopifyIds.clear();
+  onBusyChange = null;
   const dock = document.getElementById("cr-products-action-dock");
   if (dock) {
     dock.hidden = true;

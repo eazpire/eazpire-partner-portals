@@ -2,7 +2,7 @@ import { partnerFetch } from "/creations/shared/js/partner-api.js";
 import { initShell, showToast, setTopbarExtra } from "/creations/shared/js/partner-shell.js";
 import { initAdminAppDrawer } from "/creations/shared/js/admin-app-drawer.js";
 import { mountDesignsPage, teardownBulkDock } from "./designs.js";
-import { mountProductsPage, teardownProductDetailModal } from "./products.js";
+import { mountProductsPage, teardownProductDetailModal, teardownProductsExtras } from "./products.js";
 
 const NAV_CORE = [
   { route: "/creations/designs", label: "Designs", icon: "◆" },
@@ -55,11 +55,13 @@ const ROUTES = {
   "/creations/designs": async () => {
     setTopbarExtra("");
     teardownProductDetailModal();
+    teardownProductsExtras();
     await mountDesignsPage();
   },
   "/creations/products": async () => {
     setTopbarExtra("");
     teardownBulkDock();
+    teardownProductsExtras();
     await mountProductsPage();
   },
 };

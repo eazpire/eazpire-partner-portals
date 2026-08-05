@@ -10506,3 +10506,153 @@ html[data-portal="admin"] .cr-unpub-ch {
 html[data-portal="admin"] .cr-unpub-ch:hover {
   background: #f1f5f9;
 }
+
+/* IDEA-063: Admin Creations Products — collapsible filter sidebar (Catalog Studio pattern) */
+html[data-portal="admin"] .cr-products-studio {
+  min-height: 0;
+}
+html[data-portal="admin"] .cr-products-studio .catalog-studio-main {
+  padding: 0 20px 20px;
+}
+html[data-portal="admin"] .cr-pf-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 10px 16px;
+  font-size: 13px;
+}
+html[data-portal="admin"] .cr-pf-search {
+  padding: 2px 2px 8px;
+}
+html[data-portal="admin"] .cr-pf-search__input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+html[data-portal="admin"] .cr-pf-clear {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-3, #f1f5f9);
+  color: var(--muted, #475569);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-pf-clear:hover {
+  background: #e2e8f0;
+  color: var(--text, #0f172a);
+}
+html[data-portal="admin"] .cr-pf-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+html[data-portal="admin"] .cr-pf-section {
+  border-bottom: 1px solid var(--line, #e2e8f0);
+}
+html[data-portal="admin"] .cr-pf-section__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 4px;
+  cursor: pointer;
+  font-weight: 650;
+  font-size: 12px;
+  color: var(--text, #0f172a);
+  list-style: none;
+}
+html[data-portal="admin"] .cr-pf-section__summary::-webkit-details-marker {
+  display: none;
+}
+html[data-portal="admin"] .cr-pf-section__badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ea580c;
+  color: #fff;
+  flex-shrink: 0;
+}
+html[data-portal="admin"] .cr-pf-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 8px 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+html[data-portal="admin"] .cr-pf-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted, #475569);
+}
+html[data-portal="admin"] .cr-pf-option:hover {
+  background: var(--surface-3, #f1f5f9);
+  color: var(--text, #0f172a);
+}
+html[data-portal="admin"] .cr-pf-cb {
+  flex-shrink: 0;
+  accent-color: #ea580c;
+}
+html[data-portal="admin"] .cr-pf-option__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-portal="admin"] .cr-pf-option__count {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface-3, #f1f5f9);
+  color: var(--muted, #475569);
+  flex-shrink: 0;
+}
+html[data-portal="admin"] .cr-pf-empty {
+  padding: 6px 6px;
+  font-size: 12px;
+  color: var(--muted, #475569);
+}
+
+/* Product grid checkbox (multi-select) + busy overlay, shared look with Designs bulk select. */
+html[data-portal="admin"] .cr-card--product.is-selected {
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.55);
+}
+html[data-portal="admin"] .cr-card--product.is-busy {
+  pointer-events: none;
+  opacity: 0.55;
+}
+html[data-portal="admin"] .cr-card__needs-update {
+  display: flex;
+  justify-content: center;
+  padding: 0 10px 12px;
+  margin-top: -2px;
+}
+html[data-portal="admin"] .cr-card__needs-update-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+}

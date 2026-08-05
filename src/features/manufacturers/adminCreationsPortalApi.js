@@ -248,13 +248,17 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     }
 
     const category_tree = buildCategoryTree(products);
+    const { products: finalProducts, facets } = await finalizeProductList(env, products, {
+      nodesByShopifyId: indexShopifyNodesById(nodes),
+    });
     return json(
       {
         ok: true,
-        products,
-        total: products.length,
+        products: finalProducts,
+        total: finalProducts.length,
         category_tree,
         source: "printify",
+        facets,
       },
       200,
       cors
@@ -387,7 +391,12 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
       );
     }
 
-    return json({ ok: true, products: filtered, total: filtered.length, source: "customer" }, 200, cors);
+    const { products: finalProducts, facets } = await finalizeProductList(env, filtered);
+    return json(
+      { ok: true, products: finalProducts, total: finalProducts.length, source: "customer", facets },
+      200,
+      cors
+    );
   } catch (err) {
     console.error("[admin-creations-customer-products]", err);
     return json({ ok: false, error: err?.message || "internal_error" }, 500, cors);
@@ -427,7 +436,14 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
       );
     }
 
-    return json({ ok: true, products, total: products.length, source: "shopify" }, 200, cors);
+    const { products: finalProducts, facets } = await finalizeProductList(env, products, {
+      nodesByShopifyId: indexShopifyNodesById(nodes),
+    });
+    return json(
+      { ok: true, products: finalProducts, total: finalProducts.length, source: "shopify", facets },
+      200,
+      cors
+    );
   } catch (err) {
     console.error("[admin-creations-shopify-products]", err);
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
@@ -535,7 +551,14 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
       );
     }
 
-    return json({ ok: true, products, total: products.length, source: "todify" }, 200, cors);
+    const { products: finalProducts, facets } = await finalizeProductList(env, products, {
+      nodesByShopifyId: indexShopifyNodesById(nodes),
+    });
+    return json(
+      { ok: true, products: finalProducts, total: finalProducts.length, source: "todify", facets },
+      200,
+      cors
+    );
   } catch (err) {
     console.error("[admin-creations-todify-products]", err);
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
@@ -578,7 +601,14 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
       );
     }
 
-    return json({ ok: true, products, total: products.length, source: "samples" }, 200, cors);
+    const { products: finalProducts, facets } = await finalizeProductList(env, products, {
+      nodesByShopifyId: indexShopifyNodesById(nodes),
+    });
+    return json(
+      { ok: true, products: finalProducts, total: finalProducts.length, source: "samples", facets },
+      200,
+      cors
+    );
   } catch (err) {
     console.error("[admin-creations-samples-products]", err);
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
