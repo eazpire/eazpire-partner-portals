@@ -369,7 +369,7 @@ async function loadAllProductBuckets() {
   pushAll(
     tagBucket(printify.products, {
       listingBucket: "printify",
-      filterSource: null,
+      filterSource: "product",
       filterProvider: "printify",
       sourceLabel: "Printify",
       defaultCategory: "Printify",
@@ -378,7 +378,7 @@ async function loadAllProductBuckets() {
   pushAll(
     tagBucket(todify.products, {
       listingBucket: "todify",
-      filterSource: null,
+      filterSource: "product",
       filterProvider: "todify",
       sourceLabel: "Todify",
       defaultCategory: "Todify",

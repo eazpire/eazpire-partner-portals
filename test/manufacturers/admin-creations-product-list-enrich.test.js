@@ -14,6 +14,8 @@ function product(overrides = {}) {
     filter_provider: "printify",
     provider_label: "Printify",
     variant_count: 1,
+    catalog_count: 0,
+    market_count: 0,
     market_labels: [],
     metafields_filled_count: 0,
     channel_count: 0,
@@ -32,7 +34,22 @@ describe("adminCreationsProductListEnrich", () => {
     expect(publicationChannelKeys()).toEqual(["eazpire", "onlineshop", "eazpire_headless"]);
   });
 
-  it("countFilledMetafields counts only non-empty mf* values on a Shopify node", () => {
+  it("countFilledMetafields prefers metafields.edges when present", () => {
+    expect(
+      countFilledMetafields({
+        metafields: {
+          edges: [
+            { node: { value: "a" } },
+            { node: { value: "" } },
+            { node: { value: "b" } },
+          ],
+        },
+        mfPrintifyId: { value: "ignored-when-edges-present" },
+      })
+    ).toBe(2);
+  });
+
+  it("countFilledMetafields falls back to non-empty mf* values", () => {
     expect(
       countFilledMetafields({
         mfPrintifyId: { value: "pf-1" },
@@ -56,7 +73,7 @@ describe("adminCreationsProductListEnrich", () => {
     expect(map.get("456")).toBeTruthy();
   });
 
-  it("buildProductFilterFacets returns total + provider/channel/variant/market buckets with counts", () => {
+  it("buildProductFilterFacets returns exact-count facets for variants/catalogs/branding/metafields", () => {
     const products = [
       product({ product_key: "pk-1", filter_provider: "printify", provider_label: "Printify", variant_count: 1 }),
       product({
@@ -67,7 +84,8 @@ describe("adminCreationsProductListEnrich", () => {
         channel_keys: ["eazpire", "onlineshop"],
         channel_labels: ["eazpire", "Online Store"],
         channel_count: 2,
-        market_labels: ["Online Store"],
+        catalog_count: 52,
+        market_count: 52,
         needs_update: true,
       }),
       product({
@@ -77,8 +95,10 @@ describe("adminCreationsProductListEnrich", () => {
         variant_count: 25,
         metafields_filled_count: 4,
         alt_image_texts: ["Front view"],
-        branding_white_count: 2,
-        branding_black_count: 1,
+        branding_white_count: 10,
+        branding_black_count: 15,
+        catalog_count: 1,
+        market_count: 1,
       }),
     ];
 
@@ -96,8 +116,8 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.variants).toEqual(
       expect.arrayContaining([
         { key: "1", label: "1", count: 1 },
-        { key: "6-20", label: "6-20", count: 1 },
-        { key: "20+", label: "20+", count: 1 },
+        { key: "8", label: "8", count: 1 },
+        { key: "25", label: "25", count: 1 },
       ])
     );
 
@@ -115,17 +135,18 @@ describe("adminCreationsProductListEnrich", () => {
       ])
     );
 
-    expect(facets.markets).toEqual(
+    expect(facets.catalogs).toEqual(
       expect.arrayContaining([
-        { key: "0", label: "0", count: 2 },
-        { key: "Online Store", label: "Online Store", count: 1 },
+        { key: "0", label: "0", count: 1 },
+        { key: "1", label: "1", count: 1 },
+        { key: "52", label: "52", count: 1 },
       ])
     );
 
     expect(facets.metafields).toEqual(
       expect.arrayContaining([
         { key: "0", label: "0", count: 2 },
-        { key: "3-5", label: "3-5", count: 1 },
+        { key: "4", label: "4", count: 1 },
       ])
     );
 
@@ -136,10 +157,17 @@ describe("adminCreationsProductListEnrich", () => {
       ])
     );
 
-    expect(facets.branding).toEqual(
+    expect(facets.branding_white).toEqual(
       expect.arrayContaining([
-        { key: "white", label: "White branding", count: 1 },
-        { key: "black", label: "Black branding", count: 1 },
+        { key: "0", label: "0", count: 2 },
+        { key: "10", label: "10", count: 1 },
+      ])
+    );
+
+    expect(facets.branding_black).toEqual(
+      expect.arrayContaining([
+        { key: "0", label: "0", count: 2 },
+        { key: "15", label: "15", count: 1 },
       ])
     );
 

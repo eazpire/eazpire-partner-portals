@@ -14,15 +14,27 @@ const SECTIONS = [
   { key: "provider", label: "Provider" },
   { key: "channels", label: "Channels" },
   { key: "variants", label: "Variants" },
-  { key: "markets", label: "Markets" },
+  { key: "catalogs", label: "Kataloge" },
   { key: "metafields", label: "Metafields" },
   { key: "channel_count", label: "Channel count" },
   { key: "alt_image_texts", label: "Alt Image Texts" },
-  { key: "branding", label: "White/Black Branding" },
+  { key: "branding_white", label: "White Branding" },
+  { key: "branding_black", label: "Black Branding" },
   { key: "needs_update", label: "Needs Update" },
 ];
 
+/** Exact-count facets — sort options numerically ascending. */
+const NUMERIC_SECTIONS = new Set([
+  "variants",
+  "catalogs",
+  "metafields",
+  "channel_count",
+  "branding_white",
+  "branding_black",
+]);
+
 const SOURCE_LABELS = {
+  product: "Product",
   customer: "Customer",
   samples: "Samples",
   other: "Other",
@@ -78,21 +90,8 @@ export function setFilterSidebarCollapsed(collapsed) {
   } catch (_) {}
 }
 
-function variantBucket(count) {
-  const n = Number(count) || 0;
-  if (n <= 0) return "0";
-  if (n === 1) return "1";
-  if (n <= 5) return "2-5";
-  if (n <= 20) return "6-20";
-  return "20+";
-}
-
-function metafieldBucket(count) {
-  const n = Number(count) || 0;
-  if (n <= 0) return "0";
-  if (n <= 2) return "1-2";
-  if (n <= 5) return "3-5";
-  return "6+";
+function exactCountKey(count) {
+  return String(Math.max(0, Number(count) || 0));
 }
 
 function bucketCount(list, keyFn) {
@@ -109,10 +108,17 @@ function bucketCount(list, keyFn) {
   return counts;
 }
 
-function toFacetList(counts, labelFn) {
+function toFacetList(counts, labelFn, { numeric = false } = {}) {
   return [...counts.entries()]
     .map(([key, count]) => ({ key, label: labelFn ? labelFn(key) : String(key), count }))
-    .sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label)));
+    .sort((a, b) => {
+      if (numeric) {
+        const na = Number(a.key);
+        const nb = Number(b.key);
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      }
+      return b.count - a.count || String(a.label).localeCompare(String(b.label));
+    });
 }
 
 function productFacetKey(p) {
@@ -125,7 +131,7 @@ function productFacetLabel(p) {
 
 function sourceKeyOf(p) {
   const s = String(p.filter_source || "").trim().toLowerCase();
-  if (s === "customer" || s === "samples" || s === "other") return s;
+  if (s === "product" || s === "customer" || s === "samples" || s === "other") return s;
   return null;
 }
 
@@ -146,21 +152,19 @@ function valuesForSection(sectionKey, p) {
     case "channels":
       return Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null;
     case "variants":
-      return variantBucket(p.variant_count);
-    case "markets":
-      return Array.isArray(p.market_labels) && p.market_labels.length ? p.market_labels : "0";
+      return exactCountKey(p.variant_count);
+    case "catalogs":
+      return exactCountKey(p.catalog_count ?? p.market_count);
     case "metafields":
-      return metafieldBucket(p.metafields_filled_count);
+      return exactCountKey(p.metafields_filled_count);
     case "channel_count":
-      return String(Number(p.channel_count) || 0);
+      return exactCountKey(p.channel_count);
     case "alt_image_texts":
       return Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing";
-    case "branding": {
-      const out = [];
-      if (Number(p.branding_white_count) > 0) out.push("white");
-      if (Number(p.branding_black_count) > 0) out.push("black");
-      return out.length ? out : null;
-    }
+    case "branding_white":
+      return exactCountKey(p.branding_white_count);
+    case "branding_black":
+      return exactCountKey(p.branding_black_count);
     case "needs_update":
       return p.needs_update ? "yes" : "no";
     default:
@@ -233,12 +237,12 @@ export function computeFacetsFromItems(items) {
       return (idx >= 0 && hit.channel_labels?.[idx]) || key;
     },
     alt_image_texts: (key) => (key === "has" ? "Has alt text" : "Missing alt text"),
-    branding: (key) => (key === "white" ? "White branding" : "Black branding"),
     needs_update: (key) => (key === "yes" ? "Needs update" : "Up to date"),
   };
 
   // Always show Source / Provider options even when empty in current load
   const baseSource = new Map([
+    ["product", 0],
     ["customer", 0],
     ["samples", 0],
     ["other", 0],
@@ -252,6 +256,7 @@ export function computeFacetsFromItems(items) {
   for (const { key } of SECTIONS) {
     const pool = poolForFacetCounts(list, key);
     const counts = bucketCount(pool, (p) => valuesForSection(key, p));
+    const numeric = NUMERIC_SECTIONS.has(key);
     if (key === "source") {
       for (const [k, v] of counts) baseSource.set(k, v);
       out[key] = toFacetList(baseSource, labelFns.source);
@@ -259,7 +264,7 @@ export function computeFacetsFromItems(items) {
       for (const [k, v] of counts) baseProvider.set(k, v);
       out[key] = toFacetList(baseProvider, labelFns.provider);
     } else {
-      out[key] = toFacetList(counts, labelFns[key]);
+      out[key] = toFacetList(counts, labelFns[key], { numeric });
     }
   }
   return out;

@@ -40,6 +40,13 @@ const PRODUCTS_GQL = `
           mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
           mfProvider: metafield(namespace: "custom", key: "provider") { value }
           mfSample: metafield(namespace: "custom", key: "sample") { value }
+          metafields(first: 100) {
+            edges {
+              node {
+                value
+              }
+            }
+          }
         }
       }
       pageInfo {

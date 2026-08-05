@@ -9,6 +9,7 @@
  */
 
 import { EU_MARKETPLACES, NA_MARKETPLACES } from "../../config/amazonMarketplaces.js";
+import { resolvePlanCountryCodes } from "../catalog/resolvePlanCountries.js";
 import { listPublishActiveSessionRows } from "../publish/publishActiveSessions.js";
 import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
 
@@ -43,9 +44,21 @@ function safeJsonParse(raw, fallback) {
   }
 }
 
-/** Count non-empty `mf*` metafield values present on a Shopify GraphQL node. */
+/**
+ * Count non-empty metafield values on a Shopify GraphQL node.
+ * Prefers `metafields.edges` (full list) when present; falls back to aliased `mf*` fields.
+ */
 export function countFilledMetafields(node) {
   if (!node || typeof node !== "object") return 0;
+  const edges = node.metafields?.edges;
+  if (Array.isArray(edges) && edges.length) {
+    let count = 0;
+    for (const edge of edges) {
+      const value = edge?.node?.value;
+      if (value != null && String(value).trim() !== "") count += 1;
+    }
+    return count;
+  }
   let count = 0;
   for (const key of Object.keys(node)) {
     if (!key.startsWith("mf")) continue;
@@ -244,7 +257,43 @@ async function loadPublishProfilesByProductKey(env, productKeys) {
   return out;
 }
 
-function brandingCountsFromProfile(profile) {
+/**
+ * Exact catalog/country count per product_key from publish plans
+ * (`product_publish_map` + region/country expansion). Used by the "Kataloge" facet.
+ */
+async function loadCatalogCountryCounts(env, productKeys) {
+  const out = new Map();
+  const keys = [...new Set((productKeys || []).map((k) => String(k || "").trim()).filter(Boolean))];
+  if (!env?.CATALOG_DB || !keys.length) return out;
+  const placeholders = keys.map(() => "?").join(",");
+  const countriesByKey = new Map();
+  try {
+    const res = await env.CATALOG_DB.prepare(
+      `SELECT product_key, country_codes_json, region_codes_json, provider_location
+       FROM product_publish_map
+       WHERE product_key IN (${placeholders})`
+    )
+      .bind(...keys)
+      .all();
+    for (const row of res?.results || []) {
+      const pk = String(row.product_key || "").trim();
+      if (!pk) continue;
+      if (!countriesByKey.has(pk)) countriesByKey.set(pk, new Set());
+      const countryCodes = await resolvePlanCountryCodes(env, {
+        regionCodes: safeJsonParse(row.region_codes_json, []) || [],
+        countryCodes: safeJsonParse(row.country_codes_json, []) || [],
+        providerLocation: row.provider_location || null,
+      });
+      for (const cc of countryCodes) countriesByKey.get(pk).add(cc);
+    }
+  } catch (e) {
+    console.warn("[admin-creations-product-list-enrich] product_publish_map catalogs:", e?.message);
+  }
+  for (const [pk, set] of countriesByKey) out.set(pk, set.size);
+  return out;
+}
+
+function brandingCountsFromProfile(profile, variantCountHint = 0) {
   if (!profile) return { white: 0, black: 0 };
   const variants = Array.isArray(profile.variants) ? profile.variants : [];
   let white = 0;
@@ -254,8 +303,12 @@ function brandingCountsFromProfile(profile) {
     if (id && profile.whiteBrandingIds.has(id)) white += 1;
     else black += 1;
   }
-  // No variant list available — fall back to id-count heuristic only.
-  if (!variants.length) white = profile.whiteBrandingIds.size;
+  // No variant list — use white-id count; derive black from Shopify variant total when known.
+  if (!variants.length) {
+    white = profile.whiteBrandingIds.size;
+    const total = Math.max(0, Number(variantCountHint) || 0);
+    black = total > white ? total - white : 0;
+  }
   return { white, black };
 }
 
@@ -300,13 +353,15 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
   const productKeys = list.map((p) => p.product_key).filter(Boolean);
   const shopifyIds = list.map((p) => p.shopify_product_id || p.id).filter(Boolean);
 
-  const [catalogNames, publishLinks, amazonByShopifyId, publishProfiles, busy] = await Promise.all([
-    loadCatalogProductNames(env, productKeys),
-    loadDesignPublishLinks(env, shopifyIds),
-    loadAmazonListingsByShopifyId(env, shopifyIds),
-    loadPublishProfilesByProductKey(env, productKeys),
-    getBusyProductKeysAndShopifyIds(env),
-  ]);
+  const [catalogNames, publishLinks, amazonByShopifyId, publishProfiles, catalogCountryCounts, busy] =
+    await Promise.all([
+      loadCatalogProductNames(env, productKeys),
+      loadDesignPublishLinks(env, shopifyIds),
+      loadAmazonListingsByShopifyId(env, shopifyIds),
+      loadPublishProfilesByProductKey(env, productKeys),
+      loadCatalogCountryCounts(env, productKeys),
+      getBusyProductKeysAndShopifyIds(env),
+    ]);
 
   const designIds = [...publishLinks.values()].map((v) => v.design_id).filter(Boolean);
   const [snapshots, creationsById] = await Promise.all([
@@ -336,7 +391,9 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     if (amazonUsListed) marketLabels.push("Amazon US");
 
     const profile = product.product_key ? publishProfiles.get(product.product_key) : null;
-    const branding = brandingCountsFromProfile(profile);
+    const variantCount = Number(node?.totalVariants?.count ?? product.total_variants ?? 0) || 0;
+    const branding = brandingCountsFromProfile(profile, variantCount);
+    const catalogCount = product.product_key ? Number(catalogCountryCounts.get(product.product_key) || 0) : 0;
 
     const channelKeys = publicationChannelKeys().filter((key) => {
       if (key === "eazpire" || key === "onlineshop") return Number(product.is_active) === 2;
@@ -354,8 +411,9 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       published_design_id: link?.published_design_id || null,
       provider_label: providerLabelForProduct(product),
       filter_provider: filterProviderForProduct(product),
-      variant_count: Number(node?.totalVariants?.count ?? product.total_variants ?? 0) || 0,
-      market_count: marketLabels.length,
+      variant_count: variantCount,
+      catalog_count: catalogCount,
+      market_count: catalogCount,
       market_labels: marketLabels,
       metafields_filled_count: countFilledMetafields(node),
       channel_count: channelKeys.length,
@@ -387,31 +445,25 @@ function bucketCount(list, keyFn) {
   return counts;
 }
 
-function toFacetList(counts, labelFn) {
+function exactCountKey(count) {
+  return String(Math.max(0, Number(count) || 0));
+}
+
+function toFacetList(counts, labelFn, { numeric = false } = {}) {
   return [...counts.entries()]
     .map(([key, count]) => ({ key, label: labelFn ? labelFn(key) : String(key), count }))
-    .sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)));
-}
-
-function variantBucket(count) {
-  const n = Number(count) || 0;
-  if (n <= 0) return "0";
-  if (n === 1) return "1";
-  if (n <= 5) return "2-5";
-  if (n <= 20) return "6-20";
-  return "20+";
-}
-
-function metafieldBucket(count) {
-  const n = Number(count) || 0;
-  if (n <= 0) return "0";
-  if (n <= 2) return "1-2";
-  if (n <= 5) return "3-5";
-  return "6+";
+    .sort((a, b) => {
+      if (numeric) {
+        const na = Number(a.key);
+        const nb = Number(b.key);
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      }
+      return b.count - a.count || String(a.key).localeCompare(String(b.key));
+    });
 }
 
 /**
- * Aggregate enriched products into count-bucketed facets for the Product Filter sidebar.
+ * Aggregate enriched products into exact-count facets for the Product Filter sidebar.
  * Pure/sync — safe to call on the client and in tests.
  * @param {Array<object>} products enriched products (see enrichCreationsProductListFacets)
  */
@@ -428,29 +480,41 @@ export function buildProductFilterFacets(products) {
     (key) => channelLabelForKey(key)
   );
 
-  const variants = toFacetList(bucketCount(list, (p) => variantBucket(p.variant_count)));
+  const variants = toFacetList(bucketCount(list, (p) => exactCountKey(p.variant_count)), null, { numeric: true });
 
-  const markets = toFacetList(
-    bucketCount(list, (p) => (Array.isArray(p.market_labels) && p.market_labels.length ? p.market_labels : "0"))
+  const catalogs = toFacetList(
+    bucketCount(list, (p) => exactCountKey(p.catalog_count ?? p.market_count)),
+    null,
+    { numeric: true }
   );
 
-  const metafields = toFacetList(bucketCount(list, (p) => metafieldBucket(p.metafields_filled_count)));
+  const metafields = toFacetList(
+    bucketCount(list, (p) => exactCountKey(p.metafields_filled_count)),
+    null,
+    { numeric: true }
+  );
 
-  const channelCount = toFacetList(bucketCount(list, (p) => String(Number(p.channel_count) || 0)));
+  const channelCount = toFacetList(
+    bucketCount(list, (p) => exactCountKey(p.channel_count)),
+    null,
+    { numeric: true }
+  );
 
   const altImageTexts = toFacetList(
     bucketCount(list, (p) => (Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing")),
     (key) => (key === "has" ? "Has alt text" : "Missing alt text")
   );
 
-  const branding = toFacetList(
-    bucketCount(list, (p) => {
-      const out = [];
-      if (Number(p.branding_white_count) > 0) out.push("white");
-      if (Number(p.branding_black_count) > 0) out.push("black");
-      return out.length ? out : null;
-    }),
-    (key) => (key === "white" ? "White branding" : "Black branding")
+  const brandingWhite = toFacetList(
+    bucketCount(list, (p) => exactCountKey(p.branding_white_count)),
+    null,
+    { numeric: true }
+  );
+
+  const brandingBlack = toFacetList(
+    bucketCount(list, (p) => exactCountKey(p.branding_black_count)),
+    null,
+    { numeric: true }
   );
 
   const needsUpdate = toFacetList(
@@ -463,11 +527,13 @@ export function buildProductFilterFacets(products) {
     provider,
     channels,
     variants,
-    markets,
+    catalogs,
+    markets: catalogs,
     metafields,
     channel_count: channelCount,
     alt_image_texts: altImageTexts,
-    branding,
+    branding_white: brandingWhite,
+    branding_black: brandingBlack,
     needs_update: needsUpdate,
   };
 }
