@@ -22,6 +22,26 @@ describe("adminCreationsShopifyProductDetail helpers", () => {
     expect(sorted[2].variant_label).toBe("Unassigned");
   });
 
+  it("buildSortedMockups prefers variant_ids color over a wrong alt color", () => {
+    const variants = [
+      { id: 10, option1: "White" },
+      { id: 20, option1: "Red" },
+    ];
+    const sorted = buildSortedMockups(
+      [
+        {
+          id: 1,
+          src: "https://cdn.shopify.com/red-back.jpg?camera_label=back",
+          alt: "White|back",
+          position: 1,
+          variant_ids: [20],
+        },
+      ],
+      { variants }
+    );
+    expect(sorted[0]).toMatchObject({ variant_label: "Red", view: "back" });
+  });
+
   it("buildSortedMockups falls back to variant_ids color when alt wiped", () => {
     const variants = [
       { id: 10, option1: "White" },

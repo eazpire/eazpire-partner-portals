@@ -6,6 +6,7 @@ import {
   countFilledMetafields,
   extractFilledMetafieldMap,
   buildAltImageGroupsFromNode,
+  regroupAltImagesByView,
   indexShopifyNodesById,
   isAmazonChannelPresentStatus,
   isAmazonLiveStatus,
@@ -258,6 +259,11 @@ describe("adminCreationsProductListEnrich", () => {
     expect(groups[0].views[0].is_featured).toBe(true);
     expect(groups[0].views[0].is_preview).toBe(true);
     expect(groups[1].views.map((v) => v.view)).toEqual(["front", "back"]);
+
+    const byView = regroupAltImagesByView(groups);
+    expect(byView.map((g) => g.view)).toEqual(["front", "back", "lifestyle"]);
+    expect(byView[0].variants.map((v) => v.variant_label)).toEqual(["Black", "Red"]);
+    expect(byView[1].variants.map((v) => v.variant_label)).toEqual(["Red"]);
   });
 
   it("indexShopifyNodesById normalizes ids and skips unresolvable nodes", () => {

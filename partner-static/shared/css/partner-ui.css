@@ -9419,7 +9419,8 @@ html[data-portal="admin"] .cr-alt-overview-scroll {
   padding-right: 2px;
 }
 html[data-portal="admin"] .cr-alt-product,
-html[data-portal="admin"] .cr-alt-variant {
+html[data-portal="admin"] .cr-alt-variant,
+html[data-portal="admin"] .cr-alt-view {
   border: 1px solid var(--line, #e2e8f0);
   border-radius: 12px;
   background: #fff;

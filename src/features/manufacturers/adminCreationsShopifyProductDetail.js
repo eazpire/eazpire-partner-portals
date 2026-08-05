@@ -179,7 +179,9 @@ export function buildSortedMockups(images, variantsOrOpts = null) {
     const parsed = parseMockupAlt(alt);
     const fromVariants = inferMockupColorFromVariantIds(img, colorByVariantId);
     const fromSrc = inferMockupViewFromSrc(src);
-    const variantLabel = parsed?.color || fromVariants || "Unassigned";
+    // Prefer Shopify variant_ids→option1 over alt color — alts can be wrong after
+    // cross-color orphan matching bugs (Softstyle White|back on a Red mockup).
+    const variantLabel = fromVariants || parsed?.color || "Unassigned";
     const view = parsed?.view || fromSrc || "other";
     return {
       id: img?.id != null ? String(img.id) : `img-${index}`,

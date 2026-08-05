@@ -511,24 +511,24 @@ function formatViewLabel(view) {
   return raw.replace(/[_-]+/g, " ");
 }
 
-function altViewSlideHtml(view) {
-  const src = String(view?.src || "").trim();
+function altVariantSlideHtml(slide) {
+  const src = String(slide?.src || "").trim();
   if (!src) return "";
-  const alt = String(view?.alt || "").trim();
-  const viewLabel = formatViewLabel(view?.view);
+  const alt = String(slide?.alt || "").trim();
+  const variantLabel = String(slide?.variant_label || "Default").trim() || "Default";
   const badges = [];
-  if (view?.is_featured) badges.push("Featured");
-  else if (view?.is_preview) badges.push("Main");
+  if (slide?.is_featured) badges.push("Featured");
+  else if (slide?.is_preview) badges.push("Main");
   const badgeHtml = badges
     .map((b) => `<span class="cr-alt-slide__badge">${escapeHtml(b)}</span>`)
     .join("");
   return `<figure class="cr-alt-slide">
     <div class="cr-alt-slide__media">
       ${badgeHtml}
-      <img src="${escapeHtml(src)}" alt="${escapeHtml(alt || viewLabel || "Product image")}" loading="lazy" decoding="async" />
+      <img src="${escapeHtml(src)}" alt="${escapeHtml(alt || variantLabel || "Product image")}" loading="lazy" decoding="async" />
     </div>
     <figcaption class="cr-alt-slide__caption">
-      ${viewLabel ? `<span class="cr-alt-slide__view">${escapeHtml(viewLabel)}</span>` : ""}
+      <span class="cr-alt-slide__view">${escapeHtml(variantLabel)}</span>
       ${
         alt
           ? `<span class="cr-alt-slide__alt" title="${escapeHtml(alt)}">${escapeHtml(truncateCell(alt, 64))}</span>`
@@ -536,6 +536,27 @@ function altViewSlideHtml(view) {
       }
     </figcaption>
   </figure>`;
+}
+
+const VIEW_ORDER_CLIENT = {
+  front: 0,
+  back: 1,
+  "front-collar-closeup": 2,
+  sleeve: 3,
+  left: 4,
+  right: 5,
+  folded: 6,
+  folded_2: 7,
+  lifestyle: 8,
+  other: 90,
+};
+
+function viewSortRankClient(view) {
+  const v = String(view || "other")
+    .trim()
+    .toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(VIEW_ORDER_CLIENT, v)) return VIEW_ORDER_CLIENT[v];
+  return VIEW_ORDER_CLIENT.other;
 }
 
 function altVariantGroupsOf(product) {
@@ -578,6 +599,37 @@ function altVariantGroupsOf(product) {
   }));
 }
 
+/** Variant groups → view groups (Ansichten-Container with variant carousels). */
+function altViewGroupsOf(product) {
+  if (Array.isArray(product?.alt_image_view_groups) && product.alt_image_view_groups.length) {
+    return product.alt_image_view_groups;
+  }
+  const byView = new Map();
+  for (const group of altVariantGroupsOf(product)) {
+    const variantLabel = String(group?.variant_label || "Default").trim() || "Default";
+    for (const slide of group?.views || []) {
+      if (!slide?.src) continue;
+      const viewKey = String(slide.view || "other").trim().toLowerCase() || "other";
+      if (!byView.has(viewKey)) byView.set(viewKey, []);
+      byView.get(viewKey).push({
+        ...slide,
+        view: viewKey,
+        variant_label: String(slide.variant_label || variantLabel).trim() || variantLabel,
+      });
+    }
+  }
+  return [...byView.entries()]
+    .map(([view, variants]) => {
+      variants.sort((a, b) => {
+        if (a.is_featured !== b.is_featured) return a.is_featured ? -1 : 1;
+        if (a.is_preview !== b.is_preview) return a.is_preview ? -1 : 1;
+        return String(a.variant_label).localeCompare(String(b.variant_label));
+      });
+      return { view, variants };
+    })
+    .sort((a, b) => viewSortRankClient(a.view) - viewSortRankClient(b.view) || String(a.view).localeCompare(String(b.view)));
+}
+
 function altImageTextsBodyHtml(products) {
   const list = Array.isArray(products) ? products : [];
   if (!list.length) {
@@ -586,25 +638,29 @@ function altImageTextsBodyHtml(products) {
   const productBlocks = list
     .map((p, pIndex) => {
       const title = productTitleOf(p);
-      const groups = altVariantGroupsOf(p);
-      const imageCount = groups.reduce((n, g) => n + (g.views?.length || 0), 0);
-      const variantBlocks = groups.length
-        ? groups
+      const viewGroups = altViewGroupsOf(p);
+      const imageCount = viewGroups.reduce((n, g) => n + (g.variants?.length || 0), 0);
+      const variantCount = new Set(
+        viewGroups.flatMap((g) => (g.variants || []).map((v) => String(v.variant_label || "Default")))
+      ).size;
+      const viewBlocks = viewGroups.length
+        ? viewGroups
             .map((g, vIndex) => {
-              const slides = (g.views || []).map(altViewSlideHtml).filter(Boolean).join("");
-              const openAttr = vIndex === 0 ? " open" : "";
-              return `<details class="cr-alt-variant"${openAttr}>
+              const slides = (g.variants || []).map(altVariantSlideHtml).filter(Boolean).join("");
+              const openAttr = vIndex < 2 ? " open" : "";
+              const viewLabel = formatViewLabel(g.view) || g.view || "Other";
+              return `<details class="cr-alt-variant cr-alt-view"${openAttr}>
                 <summary class="cr-alt-variant__summary">
-                  <span>${escapeHtml(g.variant_label || "Default")}</span>
-                  <span class="cr-alt-variant__count">${g.views?.length || 0} view${
-                (g.views?.length || 0) === 1 ? "" : "s"
+                  <span>${escapeHtml(viewLabel)}</span>
+                  <span class="cr-alt-variant__count">${g.variants?.length || 0} variant${
+                (g.variants?.length || 0) === 1 ? "" : "s"
               }</span>
                 </summary>
                 <div class="cr-alt-variant__body">
                   ${
                     slides
                       ? productCarouselHtml(slides)
-                      : `<p class="cr-pf-empty">No images for this variant</p>`
+                      : `<p class="cr-pf-empty">No variants for this view</p>`
                   }
                 </div>
               </details>`;
@@ -615,25 +671,27 @@ function altImageTextsBodyHtml(products) {
       return `<details class="cr-alt-product"${openAttr}>
         <summary class="cr-alt-product__summary">
           <span class="cr-alt-product__title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-          <span class="cr-alt-product__meta">${groups.length} variant${
-        groups.length === 1 ? "" : "s"
-      } · ${imageCount} image${imageCount === 1 ? "" : "s"}</span>
+          <span class="cr-alt-product__meta">${viewGroups.length} view${
+        viewGroups.length === 1 ? "" : "s"
+      } · ${variantCount} variant${variantCount === 1 ? "" : "s"} · ${imageCount} image${
+        imageCount === 1 ? "" : "s"
+      }</span>
         </summary>
-        <div class="cr-alt-product__body">${variantBlocks}</div>
+        <div class="cr-alt-product__body">${viewBlocks}</div>
       </details>`;
     })
     .join("");
   return `
     <p class="confirm-modal-message cr-alt-overview__summary">
-      Showing image views for <strong>${list.length}</strong> filtered product${
+      Showing <strong>${list.length}</strong> filtered product${
         list.length === 1 ? "" : "s"
-      }. Featured / Main preview is labeled and listed first in its variant.
+      } grouped by view (Front, Back, …). Scroll each carousel for color variants. Featured / Main is labeled.
     </p>
     <div class="cr-alt-overview-scroll" id="cr-alt-overview-body">${productBlocks}</div>`;
 }
 
 /**
- * Info modal: filtered products → variant collapsibles → view carousels (alt texts).
+ * Info modal: filtered products → view collapsibles → variant carousels (alt texts).
  * @param {object[]} products
  */
 export function openAltImageTextsInfoModal(products) {
@@ -646,7 +704,14 @@ export function openAltImageTextsInfoModal(products) {
   });
   configureInfoModal("cr-alt-overview-modal");
   const body = document.getElementById("cr-alt-overview-body") || document.getElementById("modal-body");
-  if (body) bindProdCarousels(body);
+  if (body) {
+    bindProdCarousels(body);
+    body.querySelectorAll("details.cr-alt-view").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (details.open) requestAnimationFrame(() => bindProdCarousels(details));
+      });
+    });
+  }
 }
 
 export function filterSidebarInnerHtml(facets) {

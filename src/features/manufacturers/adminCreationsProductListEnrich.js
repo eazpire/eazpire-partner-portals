@@ -608,6 +608,46 @@ export function buildAltImageGroupsFromNode(node, product = null) {
 }
 
 /**
+ * Flip variant→views groups into view→variants (for Alt Image Texts overview carousel).
+ * @param {Array<{ variant_label: string, views: Array<object> }>} variantGroups
+ * @returns {Array<{ view: string, variants: Array<object> }>}
+ */
+export function regroupAltImagesByView(variantGroups) {
+  /** @type {Map<string, Array<object>>} */
+  const byView = new Map();
+  for (const group of Array.isArray(variantGroups) ? variantGroups : []) {
+    const variantLabel = String(group?.variant_label || "Default").trim() || "Default";
+    for (const slide of Array.isArray(group?.views) ? group.views : []) {
+      if (!slide?.src) continue;
+      const viewKey = String(slide.view || "other").trim().toLowerCase() || "other";
+      if (!byView.has(viewKey)) byView.set(viewKey, []);
+      byView.get(viewKey).push({
+        ...slide,
+        view: viewKey,
+        variant_label: String(slide.variant_label || variantLabel).trim() || variantLabel,
+      });
+    }
+  }
+
+  const viewGroups = [...byView.entries()].map(([view, variants]) => {
+    variants.sort((a, b) => {
+      if (a.is_featured !== b.is_featured) return a.is_featured ? -1 : 1;
+      if (a.is_preview !== b.is_preview) return a.is_preview ? -1 : 1;
+      return String(a.variant_label).localeCompare(String(b.variant_label));
+    });
+    return { view, variants };
+  });
+
+  viewGroups.sort((a, b) => {
+    const rankDiff = viewSortRank(a.view) - viewSortRank(b.view);
+    if (rankDiff !== 0) return rankDiff;
+    return String(a.view).localeCompare(String(b.view));
+  });
+
+  return viewGroups;
+}
+
+/**
  * Load Printify listing status + mock URLs for product list rows (by Shopify / Printify id).
  * @returns {Promise<{ byShopifyId: Map<string, object>, byPrintifyId: Map<string, object> }>}
  */
@@ -852,11 +892,17 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       channel_keys: channelKeys,
       channel_labels: channelKeys.map(channelLabelForKey),
       alt_image_texts: altImageTextsFromNode(node),
-      alt_image_groups: buildAltImageGroupsFromNode(node, {
-        ...product,
-        preview_url: previewUrl,
-        images,
-      }),
+      ...(() => {
+        const alt_image_groups = buildAltImageGroupsFromNode(node, {
+          ...product,
+          preview_url: previewUrl,
+          images,
+        });
+        return {
+          alt_image_groups,
+          alt_image_view_groups: regroupAltImagesByView(alt_image_groups),
+        };
+      })(),
       branding_white_count: branding.white,
       branding_black_count: branding.black,
       needs_update: computeNeedsUpdate(snapshot, current),
