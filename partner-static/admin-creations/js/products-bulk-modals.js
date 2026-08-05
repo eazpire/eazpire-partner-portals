@@ -4,11 +4,20 @@
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, showToast } from "/creations/shared/js/partner-shell.js";
-import { clearSelection, releaseBulkDock, suppressBulkDock } from "./products-bulk.js";
+import {
+  clearSelection,
+  releaseBulkDock,
+  selectionKey,
+  suppressBulkDock,
+} from "./products-bulk.js";
 import { startProductsActionDock } from "./products-action-dock.js";
 
 function productTitle(item) {
   return String(item?.title || item?.catalog_product_name || item?.product_key || "Product").trim() || "Product";
+}
+
+function listingKey(item) {
+  return selectionKey(item);
 }
 
 function setModalBusy(busy, label) {
@@ -30,7 +39,7 @@ function configurePrimaryConfirm(label) {
 }
 
 function productRowHtml(item, { checked = true } = {}) {
-  const key = String(item.filter_product_key || item.product_key || item.id || "");
+  const key = listingKey(item);
   const preview = item.preview_url || item.grid_views?.[0]?.src || "";
   return `<label class="cr-bulk-product-row">
     <input type="checkbox" class="cr-bulk-product-row__cb" data-product-key="${escapeHtml(key)}" ${
@@ -79,7 +88,7 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
     onCancel: () => releaseBulkDock(),
     onSave: async () => {
       const keys = selectedRowsFromRoot("cr-products-publish-body");
-      const selected = eligible.filter((item) => keys.has(String(item.filter_product_key || item.product_key || item.id || "")));
+      const selected = eligible.filter((item) => keys.has(listingKey(item)));
       if (!selected.length) throw new Error("Select at least one product");
       setModalBusy(true, "Publishing…");
       clearSelection();
@@ -123,7 +132,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
     <div class="cr-bulk-scroll" id="cr-products-unpublish-body">
       ${eligible
         .map((item) => {
-          const key = String(item.filter_product_key || item.product_key || item.id || "");
+          const key = listingKey(item);
           const preview = item.preview_url || item.grid_views?.[0]?.src || "";
           const hasAmazonEu = !!(item.amazon_eu_channel || item.amazon_eu_listed);
           return `<div class="cr-unpub-prod" data-product-key="${escapeHtml(key)}">
@@ -159,9 +168,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
       const checked = [...(root?.querySelectorAll(".cr-unpub-ch__cb:checked") || [])];
       if (!checked.length) throw new Error("Select at least one channel");
 
-      const byKey = new Map(
-        eligible.map((item) => [String(item.filter_product_key || item.product_key || item.id || ""), item])
-      );
+      const byKey = new Map(eligible.map((item) => [listingKey(item), item]));
       const targets = new Map(); // key -> { item, eazpire: bool, amazon_eu: bool }
       for (const cb of checked) {
         const key = cb.getAttribute("data-product-key") || "";
@@ -178,7 +185,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
       const { ok, errors } = await startProductsActionDock([...targets.values()].map((t) => t.item), {
         action: "unpublish",
         runItem: async (item) => {
-          const key = String(item.filter_product_key || item.product_key || item.id || "");
+          const key = listingKey(item);
           const target = targets.get(key);
           if (!target) return { ok: true };
           if (target.eazpire) {
@@ -231,7 +238,7 @@ export async function openProductsBulkUpdateModal(items, { onDone } = {}) {
     onCancel: () => releaseBulkDock(),
     onSave: async () => {
       const keys = selectedRowsFromRoot("cr-products-update-body");
-      const selected = eligible.filter((item) => keys.has(String(item.filter_product_key || item.product_key || item.id || "")));
+      const selected = eligible.filter((item) => keys.has(listingKey(item)));
       if (!selected.length) throw new Error("Select at least one product");
       setModalBusy(true, "Updating…");
       clearSelection();

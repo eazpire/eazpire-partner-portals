@@ -4,13 +4,13 @@
  * per-item eligibility flags from adminCreationsProductListEnrich.js.
  */
 
-const selected = new Map(); // filter_product_key -> product item
+import { selectionKey } from "./products-selection-key.js";
+
+export { selectionKey };
+
+const selected = new Map(); // unique listing key -> product item
 /** When true, dock stays hidden even if selection is non-empty (e.g. while a bulk modal is open). */
 let dockSuppressed = false;
-
-export function selectionKey(item) {
-  return String(item?.filter_product_key || item?.product_key || item?.id || "").trim();
-}
 
 export function isSelected(itemOrKey) {
   const key = typeof itemOrKey === "string" ? itemOrKey : selectionKey(itemOrKey);
