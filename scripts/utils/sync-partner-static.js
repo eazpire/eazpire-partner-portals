@@ -58,6 +58,16 @@ function main() {
     copyDir(path.join(ROOT, from), path.join(OUT, to));
   }
 
+  // Admin Cursor Agent shell (IDEA-066) — must survive partner-static wipe/rebuild.
+  // Served at admin.eazpire.com/creations/shared/admin-cursor-agent/* for all portals.
+  const cursorSrc = path.join(ROOT, "shared", "admin-cursor-agent");
+  const cursorDest = path.join(OUT, "shared", "admin-cursor-agent");
+  if (fs.existsSync(cursorSrc)) {
+    copyDir(cursorSrc, cursorDest);
+  } else {
+    console.warn("⚠️  shared/admin-cursor-agent missing — portal Cursor Agent assets not copied");
+  }
+
   const files = walkFiles(OUT, OUT);
   const bundle = {};
   for (const { key, full } of files) {
