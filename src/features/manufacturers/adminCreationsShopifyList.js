@@ -6,70 +6,85 @@
 import { shopifyAPI } from "../../utils/shopify.js";
 import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 
+/** Shared Product selection for Creations list enrich (variants / metafields / alts). */
+const PRODUCT_NODE_FIELDS = `
+  id
+  title
+  handle
+  status
+  vendor
+  productType
+  tags
+  isGiftCard
+  totalVariants: variantsCount {
+    count
+  }
+  featuredMedia {
+    ... on MediaImage {
+      image { url }
+    }
+  }
+  images(first: 100) {
+    edges {
+      node {
+        url
+        altText
+      }
+    }
+  }
+  mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
+  mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
+  mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
+  mfProvider: metafield(namespace: "custom", key: "provider") { value }
+  mfSample: metafield(namespace: "custom", key: "sample") { value }
+  metafields(first: 100) {
+    edges {
+      node {
+        namespace
+        key
+        value
+      }
+    }
+  }
+  publications(first: 25) {
+    edges {
+      node {
+        isPublished
+        channel { id name }
+      }
+    }
+  }
+  resourcePublications(first: 50) {
+    edges {
+      node {
+        isPublished
+        publication { id }
+      }
+    }
+  }
+`;
+
 const PRODUCTS_GQL = `
   query CreationsAdminProducts($first: Int!, $after: String, $query: String) {
     products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
       edges {
         node {
-          id
-          title
-          handle
-          status
-          vendor
-          productType
-          tags
-          isGiftCard
-          totalVariants: variantsCount {
-            count
-          }
-          featuredMedia {
-            ... on MediaImage {
-              image { url }
-            }
-          }
-          images(first: 100) {
-            edges {
-              node {
-                url
-                altText
-              }
-            }
-          }
-          mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
-          mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
-          mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
-          mfProvider: metafield(namespace: "custom", key: "provider") { value }
-          mfSample: metafield(namespace: "custom", key: "sample") { value }
-          metafields(first: 100) {
-            edges {
-              node {
-                namespace
-                key
-                value
-              }
-            }
-          }
-          publications(first: 25) {
-            edges {
-              node {
-                isPublished
-                channel { id name }
-              }
-            }
-          }
-          resourcePublications(first: 50) {
-            edges {
-              node {
-                isPublished
-                publication { id }
-              }
-            }
-          }
+          ${PRODUCT_NODE_FIELDS}
         }
       }
       pageInfo {
         hasNextPage
         endCursor
+      }
+    }
+  }
+`;
+
+const PRODUCTS_BY_IDS_GQL = `
+  query CreationsAdminProductsByIds($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        ${PRODUCT_NODE_FIELDS}
       }
     }
   }
@@ -370,6 +385,57 @@ export function indexShopifyNodesById(nodes) {
     map.set(sid, node);
   }
   return map;
+}
+
+/**
+ * Fetch Shopify Product nodes by numeric / GID ids (same fields as list scan).
+ * Used when Customer / Studio rows have shopify_product_id but were not part of a
+ * products() scan — without this, enrich emits variant_count=0 / metafields=0 /
+ * Default+No-alt image groups.
+ *
+ * @param {object} env
+ * @param {Array<string|number>} shopifyIds
+ * @returns {Promise<object[]>}
+ */
+export async function fetchShopifyProductNodesByIds(env, shopifyIds) {
+  const ids = [
+    ...new Set(
+      (shopifyIds || [])
+        .map((id) => normalizeShopifyProductId(id))
+        .filter(Boolean)
+        .map((id) => `gid://shopify/Product/${id}`)
+    ),
+  ];
+  if (!ids.length || !env?.SHOPIFY_ACCESS_TOKEN) return [];
+
+  const shopDomain = shopDomainFromEnv(env);
+  const out = [];
+  const CHUNK = 50;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    try {
+      const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
+        method: "POST",
+        body: JSON.stringify({
+          query: PRODUCTS_BY_IDS_GQL,
+          variables: { ids: chunk },
+        }),
+      });
+      const errors = resp?.errors;
+      if (Array.isArray(errors) && errors.length) {
+        console.warn(
+          "[adminCreationsShopifyList] products-by-ids GraphQL errors:",
+          errors.map((e) => e.message).join("; ")
+        );
+      }
+      for (const node of resp?.data?.nodes || []) {
+        if (node?.id) out.push(node);
+      }
+    } catch (e) {
+      console.warn("[adminCreationsShopifyList] products-by-ids failed:", e?.message || e);
+    }
+  }
+  return out;
 }
 
 /**

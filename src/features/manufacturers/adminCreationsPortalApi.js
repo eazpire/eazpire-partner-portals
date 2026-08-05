@@ -7,6 +7,7 @@ import { CAT_REVERSE, buildCategoryTree } from "../admin/catalogConstants.js";
 import {
   shopDomainFromEnv,
   fetchShopifyProductNodesMatching,
+  fetchShopifyProductNodesByIds,
   mapShopifyNodeToProduct,
   loadCustomerStudioShopifyIds,
   loadPublishedDesignsShopifyIndex,
@@ -32,16 +33,48 @@ import {
 } from "../publish/printifyListingStatus.js";
 
 /**
+ * Merge caller-supplied Shopify nodes with any missing ids looked up via `nodes(ids:)`.
+ * Customer / Studio list rows often have shopify_product_id but never went through a
+ * products() scan — without this, enrich shows variant_count=0, metafields=0, Default alts.
+ * @param {object} env
+ * @param {Array<object>} products
+ * @param {Map<string, object>|null|undefined} nodesByShopifyId
+ * @returns {Promise<Map<string, object>>}
+ */
+export async function ensureShopifyNodesForProductList(env, products, nodesByShopifyId = null) {
+  const map =
+    nodesByShopifyId instanceof Map
+      ? new Map(nodesByShopifyId)
+      : indexShopifyNodesById(Object.values(nodesByShopifyId || {}));
+
+  const missing = [];
+  for (const product of products || []) {
+    const sid = normalizeShopifyProductId(product?.shopify_product_id || product?.id);
+    if (!sid || map.has(sid)) continue;
+    missing.push(sid);
+  }
+  if (!missing.length) return map;
+
+  const fetched = await fetchShopifyProductNodesByIds(env, missing);
+  for (const node of fetched) {
+    const sid = normalizeShopifyProductId(node?.id);
+    if (sid) map.set(sid, node);
+  }
+  return map;
+}
+
+/**
  * Enrich + facet-bucket a product list for the Products page (filter sidebar, "Needs
  * Update" badge, bulk eligibility). Pass `nodesByShopifyId` (see indexShopifyNodesById)
- * when the caller already fetched raw Shopify GraphQL nodes, so enrichment can read
- * metafields / alt text / variant counts without a second Shopify round-trip.
+ * when the caller already fetched raw Shopify GraphQL nodes. Any product with a
+ * shopify_product_id still missing from that map is fetched automatically.
  * @param {object} env
  * @param {Array<object>} products
  * @param {{ nodesByShopifyId?: Map<string, object>|null }} [opts]
  */
 export async function finalizeProductList(env, products, { nodesByShopifyId = null } = {}) {
-  const enriched = await enrichCreationsProductListFacets(env, products, nodesByShopifyId);
+  const nodesMap = await ensureShopifyNodesForProductList(env, products, nodesByShopifyId);
+  const enriched = await enrichCreationsProductListFacets(env, products, nodesMap);
   const facets = buildProductFilterFacets(enriched);
   return { products: enriched, facets };
 }
