@@ -277,6 +277,7 @@ function emptyMessageForSource() {
 
 function onProductFiltersChanged() {
   const el = document.getElementById("view-products");
+  // Recompute classic facet counts (skip own section) + gray out zeros, then refresh grid/results.
   refreshFilterSidebarBody(el);
   renderGrid();
 }
@@ -539,10 +540,25 @@ function pageShellHtml() {
 function refreshFilterSidebarBody(el) {
   const body = el?.querySelector("#cr-pf-body");
   if (!body) return;
+  const prevSearch = body.querySelector("#cr-pf-search-input");
+  const hadFocus = document.activeElement === prevSearch;
+  const selStart = prevSearch?.selectionStart;
+  const selEnd = prevSearch?.selectionEnd;
+  const scrollTop = body.scrollTop;
+  // Must recompute facets on every filter change — counts depend on active include/exclude/search.
   body.innerHTML = filterSidebarInnerHtml(computeFacetsFromItems(state.items));
+  body.scrollTop = scrollTop;
   bindFilterSidebar(body, {
-    onChange: () => renderGrid(),
+    // Prior bug: only renderGrid() ran, so sibling facet counts stayed stale after Include/Exclude.
+    onChange: () => onProductFiltersChanged(),
   });
+  const nextSearch = body.querySelector("#cr-pf-search-input");
+  if (hadFocus && nextSearch) {
+    nextSearch.focus();
+    try {
+      if (selStart != null && selEnd != null) nextSearch.setSelectionRange(selStart, selEnd);
+    } catch (_) {}
+  }
 }
 
 function bindFilterSidebarToggle(el) {

@@ -2,6 +2,8 @@
  * Creations Portal Products — collapsible Product Filter sidebar (IDEA-063).
  * Tri-state switches: exclude (−1) / neutral (0) / include (1) — same logic as shop PLP filters.
  * Classic faceted search: option counts ignore the option's own section; count 0 → grayed / disabled.
+ *
+ * Count engine mirrors src/features/admin/adminCreationsProductFilters.js (unit-tested).
  */
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -170,7 +172,8 @@ function bucketCount(list, keyFn) {
     const keys = Array.isArray(key) ? key : [key];
     for (const k of keys) {
       if (k == null || k === "") continue;
-      counts.set(k, (counts.get(k) || 0) + 1);
+      const sk = String(k);
+      counts.set(sk, (counts.get(sk) || 0) + 1);
     }
   }
   return counts;
@@ -253,10 +256,10 @@ function productMatchesValue(p, sectionKey, value) {
  * Shop-style facet match: excludes must not match; if any includes, at least one must match.
  * Sections with only neutrals are ignored.
  */
-function matchesTriFacets(p, skipSection = null) {
+function matchesTriFacets(p, tri, skipSection = null) {
   for (const { key } of SECTIONS) {
     if (skipSection && key === skipSection) continue;
-    const group = filterState.tri[key] || {};
+    const group = tri?.[key] || {};
     const includes = [];
     const excludes = [];
     for (const [val, st] of Object.entries(group)) {
@@ -273,26 +276,63 @@ function matchesTriFacets(p, skipSection = null) {
   return true;
 }
 
-function poolForFacetCounts(items, skipSection) {
-  const needle = filterState.q.trim().toLowerCase();
+function matchQuery(p, q) {
+  const needle = String(q || "").trim().toLowerCase();
+  if (!needle) return true;
+  const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(needle);
+}
+
+function poolForFacetCounts(items, tri, q, skipSection) {
   return (items || []).filter((p) => {
-    if (needle) {
-      const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (!hay.includes(needle)) return false;
-    }
-    return matchesTriFacets(p, skipSection);
+    if (!matchQuery(p, q)) return false;
+    return matchesTriFacets(p, tri, skipSection);
   });
+}
+
+function universePool(items, q) {
+  return (items || []).filter((p) => matchQuery(p, q));
+}
+
+function mergeUniverseCounts(universeKeys, poolCounts, activeTriGroup = {}) {
+  const merged = new Map();
+  for (const k of universeKeys) merged.set(String(k), 0);
+  for (const [k, v] of poolCounts) merged.set(String(k), v);
+  for (const [val, st] of Object.entries(activeTriGroup || {})) {
+    if ((st === 1 || st === -1) && !merged.has(String(val))) merged.set(String(val), 0);
+  }
+  return merged;
+}
+
+function fixedBaseKeys(sectionKey) {
+  if (sectionKey === "source") return ["product", "customer", "samples", "other"];
+  if (sectionKey === "provider") return ["printify", "todify"];
+  if (sectionKey === "printify_status") {
+    return ["published", "unpublished", "unpublished_changes", "publishing", "error"];
+  }
+  if (sectionKey === "channels") return Object.keys(CHANNEL_LABELS);
+  if (sectionKey === "alt_image_texts") return ["has", "missing"];
+  if (sectionKey === "needs_update") return ["yes", "no"];
+  return null;
 }
 
 /**
  * Recompute facet buckets + counts. Counts are relative to other active filters
- * (same section excluded from the pool, shop-style).
+ * (same section excluded from the pool, shop-style). Option keys come from the
+ * search-only universe so values outside the current selection stay at 0.
+ *
+ * @param {object[]} items
+ * @param {{ q?: string, tri?: Record<string, Record<string, number>> }} [override]
+ *        Optional state for tests; defaults to live filterState.
  */
-export function computeFacetsFromItems(items) {
+export function computeFacetsFromItems(items, override = null) {
   const list = Array.isArray(items) ? items : [];
+  const q = override?.q != null ? String(override.q) : filterState.q;
+  const tri = override?.tri || filterState.tri;
+  const uni = universePool(list, q);
 
   const labelFns = {
     source: (key) => SOURCE_LABELS[key] || key,
@@ -312,62 +352,27 @@ export function computeFacetsFromItems(items) {
     printify_status: (key) => PRINTIFY_STATUS_LABELS[key] || key,
   };
 
-  // Always show Source / Provider / Printify Status options even when empty in current load
-  const baseSource = new Map([
-    ["product", 0],
-    ["customer", 0],
-    ["samples", 0],
-    ["other", 0],
-  ]);
-  const baseProvider = new Map([
-    ["printify", 0],
-    ["todify", 0],
-  ]);
-  const basePrintifyStatus = new Map([
-    ["published", 0],
-    ["unpublished", 0],
-    ["unpublished_changes", 0],
-    ["publishing", 0],
-    ["error", 0],
-  ]);
-  const baseChannels = new Map(Object.keys(CHANNEL_LABELS).map((k) => [k, 0]));
-
   const out = { total: list.length };
   for (const { key } of SECTIONS) {
-    const pool = poolForFacetCounts(list, key);
-    const counts = bucketCount(pool, (p) => valuesForSection(key, p));
+    const pool = poolForFacetCounts(list, tri, q, key);
+    const poolCounts = bucketCount(pool, (p) => valuesForSection(key, p));
+    const fixed = fixedBaseKeys(key);
+    const uniCounts = bucketCount(uni, (p) => valuesForSection(key, p));
+    const universeKeys = fixed || [...uniCounts.keys()];
+    const merged = mergeUniverseCounts(universeKeys, poolCounts, tri[key]);
     const numeric = NUMERIC_SECTIONS.has(key);
-    if (key === "source") {
-      for (const [k, v] of counts) baseSource.set(k, v);
-      out[key] = toFacetList(baseSource, labelFns.source);
-    } else if (key === "provider") {
-      for (const [k, v] of counts) baseProvider.set(k, v);
-      out[key] = toFacetList(baseProvider, labelFns.provider);
-    } else if (key === "printify_status") {
-      for (const [k, v] of counts) basePrintifyStatus.set(k, v);
-      out[key] = toFacetList(basePrintifyStatus, labelFns.printify_status);
-    } else if (key === "channels") {
-      for (const [k, v] of counts) baseChannels.set(k, v);
-      out[key] = toFacetList(baseChannels, labelFns.channels);
-    } else {
-      out[key] = toFacetList(counts, labelFns[key], { numeric });
-    }
+    out[key] = toFacetList(merged, labelFns[key], { numeric });
   }
   return out;
 }
 
 /** Apply search + tri-state facets to enriched products. */
 export function applyProductSidebarFilters(items) {
-  const needle = filterState.q.trim().toLowerCase();
+  const q = filterState.q;
+  const tri = filterState.tri;
   return (items || []).filter((p) => {
-    if (needle) {
-      const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (!hay.includes(needle)) return false;
-    }
-    return matchesTriFacets(p, null);
+    if (!matchQuery(p, q)) return false;
+    return matchesTriFacets(p, tri, null);
   });
 }
 
