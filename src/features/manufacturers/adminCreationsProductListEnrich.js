@@ -11,27 +11,59 @@
 import { EU_MARKETPLACES, NA_MARKETPLACES } from "../../config/amazonMarketplaces.js";
 import { resolvePlanCountryCodes } from "../catalog/resolvePlanCountries.js";
 import { listPublishActiveSessionRows } from "../publish/publishActiveSessions.js";
+import {
+  classifyPrintifyListingStatusFromRow,
+  ensurePrintifyListingStatusColumn,
+  parsePrintifyImagesJson,
+  PRINTIFY_STATUS_LABELS,
+} from "../publish/printifyListingStatus.js";
 import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
 
 export { indexShopifyNodesById };
 
 const EU_MARKETPLACE_IDS = new Set(Object.values(EU_MARKETPLACES));
 const NA_MARKETPLACE_IDS = new Set(Object.values(NA_MARKETPLACES));
-const AMAZON_LISTED_STATUSES = new Set(["active", "published", "live", "verified"]);
+/** Fully live on Amazon (retail / catalog verified). */
+const AMAZON_LIVE_STATUSES = new Set(["active", "published", "live", "verified"]);
+/**
+ * In-flight or live Amazon listing statuses from D1 `amazon_listing`.
+ * Creations Channels facets include these so Amazon EU/US appear while verifying/feed_pending.
+ */
+const AMAZON_CHANNEL_PRESENT_STATUSES = new Set([
+  ...AMAZON_LIVE_STATUSES,
+  "verifying",
+  "feed_pending",
+  "submitted",
+  "processing",
+  "pending",
+  "dry_run_ok",
+]);
 
-/** Fixed sales-channel keys a Creations product can be published on. */
+/** Fixed sales-channel keys a Creations product can be published on (incl. Amazon from D1). */
 export function publicationChannelKeys() {
-  return ["eazpire", "onlineshop", "eazpire_headless"];
+  return ["eazpire", "onlineshop", "eazpire_headless", "amazon_eu", "amazon_us"];
 }
 
 const CHANNEL_LABELS = {
   eazpire: "eazpire",
   onlineshop: "Online Store",
   eazpire_headless: "eazpire Headless",
+  amazon_eu: "Amazon EU",
+  amazon_us: "Amazon US",
 };
 
 export function channelLabelForKey(key) {
   return CHANNEL_LABELS[key] || String(key || "");
+}
+
+/** True when an amazon_listing row should count toward Channels facets / busy Amazon presence. */
+export function isAmazonChannelPresentStatus(status) {
+  return AMAZON_CHANNEL_PRESENT_STATUSES.has(String(status || "").trim().toLowerCase());
+}
+
+/** True when an amazon_listing row is considered fully live. */
+export function isAmazonLiveStatus(status) {
+  return AMAZON_LIVE_STATUSES.has(String(status || "").trim().toLowerCase());
 }
 
 function safeJsonParse(raw, fallback) {
@@ -209,24 +241,28 @@ async function loadAmazonListingsByShopifyId(env, shopifyIds) {
   const out = new Map();
   const ids = [...new Set((shopifyIds || []).map((id) => normalizeShopifyProductId(id)).filter(Boolean))];
   if (!env?.CREATOR_DB || !ids.length) return out;
-  const placeholders = ids.map(() => "?").join(",");
-  try {
-    const res = await env.CREATOR_DB.prepare(
-      `SELECT al.marketplace_id, al.status, pd.shopify_product_id
-       FROM amazon_listing al
-       JOIN published_designs pd ON pd.id = al.published_design_id
-       WHERE REPLACE(REPLACE(TRIM(CAST(pd.shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
-    )
-      .bind(...ids)
-      .all();
-    for (const row of res?.results || []) {
-      const sid = normalizeShopifyProductId(row.shopify_product_id);
-      if (!sid) continue;
-      if (!out.has(sid)) out.set(sid, []);
-      out.get(sid).push({ marketplace_id: row.marketplace_id, status: String(row.status || "").toLowerCase() });
+  const CHUNK = 80;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT al.marketplace_id, al.status, pd.shopify_product_id
+         FROM amazon_listing al
+         JOIN published_designs pd ON pd.id = al.published_design_id
+         WHERE REPLACE(REPLACE(TRIM(CAST(pd.shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        if (!sid) continue;
+        if (!out.has(sid)) out.set(sid, []);
+        out.get(sid).push({ marketplace_id: row.marketplace_id, status: String(row.status || "").toLowerCase() });
+      }
+    } catch (e) {
+      console.warn("[admin-creations-product-list-enrich] amazon_listing:", e?.message);
     }
-  } catch (e) {
-    console.warn("[admin-creations-product-list-enrich] amazon_listing:", e?.message);
   }
   return out;
 }
@@ -322,6 +358,82 @@ function altImageTextsFromNode(node) {
   return texts;
 }
 
+/**
+ * Load Printify listing status + mock URLs for product list rows (by Shopify / Printify id).
+ * @returns {Promise<{ byShopifyId: Map<string, object>, byPrintifyId: Map<string, object> }>}
+ */
+async function loadPrintifyListingMeta(env, shopifyIds, printifyIds) {
+  const byShopifyId = new Map();
+  const byPrintifyId = new Map();
+  if (!env?.CREATOR_DB) return { byShopifyId, byPrintifyId };
+
+  try {
+    await ensurePrintifyListingStatusColumn(env);
+  } catch (_) {}
+
+  const sids = [...new Set((shopifyIds || []).map((id) => normalizeShopifyProductId(id)).filter(Boolean))];
+  const pids = [...new Set((printifyIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+
+  const mapRow = (row) => {
+    const status = classifyPrintifyListingStatusFromRow(row);
+    const mocks = parsePrintifyImagesJson(row.printify_images_json);
+    return {
+      status,
+      mocks,
+      published_design_id: row.id != null ? Number(row.id) : null,
+      design_id: row.design_id != null ? String(row.design_id) : null,
+    };
+  };
+
+  const CHUNK = 80;
+  for (let i = 0; i < sids.length; i += CHUNK) {
+    const chunk = sids.slice(i, i + CHUNK);
+    const ph = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT id, design_id, shopify_product_id, printify_product_id, shopify_completion_status,
+                printify_listing_status, printify_images_json
+         FROM published_designs
+         WHERE TRIM(REPLACE(REPLACE(CAST(shopify_product_id AS TEXT), 'gid://shopify/Product/', ''), '.0', '')) IN (${ph})`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        if (sid && !byShopifyId.has(sid)) byShopifyId.set(sid, mapRow(row));
+        const pid = String(row.printify_product_id || "").trim();
+        if (pid && !byPrintifyId.has(pid)) byPrintifyId.set(pid, mapRow(row));
+      }
+    } catch (e) {
+      console.warn("[admin-creations-product-list-enrich] printify meta by shopify:", e?.message);
+    }
+  }
+
+  const missingPids = pids.filter((pid) => !byPrintifyId.has(pid));
+  for (let i = 0; i < missingPids.length; i += CHUNK) {
+    const chunk = missingPids.slice(i, i + CHUNK);
+    const ph = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT id, design_id, shopify_product_id, printify_product_id, shopify_completion_status,
+                printify_listing_status, printify_images_json
+         FROM published_designs
+         WHERE TRIM(CAST(printify_product_id AS TEXT)) IN (${ph})`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const pid = String(row.printify_product_id || "").trim();
+        if (pid && !byPrintifyId.has(pid)) byPrintifyId.set(pid, mapRow(row));
+      }
+    } catch (e) {
+      console.warn("[admin-creations-product-list-enrich] printify meta by printify:", e?.message);
+    }
+  }
+
+  return { byShopifyId, byPrintifyId };
+}
+
 /** Busy set (currently locked/publishing) product keys from admin product-action locks + creator publish sessions. */
 export async function getBusyProductKeysAndShopifyIds(env) {
   const rows = await listPublishActiveSessionRows(env, { adminAll: true });
@@ -352,16 +464,25 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
 
   const productKeys = list.map((p) => p.product_key).filter(Boolean);
   const shopifyIds = list.map((p) => p.shopify_product_id || p.id).filter(Boolean);
+  const printifyIds = list.map((p) => p.printify_product_id).filter(Boolean);
 
-  const [catalogNames, publishLinks, amazonByShopifyId, publishProfiles, catalogCountryCounts, busy] =
-    await Promise.all([
-      loadCatalogProductNames(env, productKeys),
-      loadDesignPublishLinks(env, shopifyIds),
-      loadAmazonListingsByShopifyId(env, shopifyIds),
-      loadPublishProfilesByProductKey(env, productKeys),
-      loadCatalogCountryCounts(env, productKeys),
-      getBusyProductKeysAndShopifyIds(env),
-    ]);
+  const [
+    catalogNames,
+    publishLinks,
+    amazonByShopifyId,
+    publishProfiles,
+    catalogCountryCounts,
+    busy,
+    printifyMeta,
+  ] = await Promise.all([
+    loadCatalogProductNames(env, productKeys),
+    loadDesignPublishLinks(env, shopifyIds),
+    loadAmazonListingsByShopifyId(env, shopifyIds),
+    loadPublishProfilesByProductKey(env, productKeys),
+    loadCatalogCountryCounts(env, productKeys),
+    getBusyProductKeysAndShopifyIds(env),
+    loadPrintifyListingMeta(env, shopifyIds, printifyIds),
+  ]);
 
   const designIds = [...publishLinks.values()].map((v) => v.design_id).filter(Boolean);
   const [snapshots, creationsById] = await Promise.all([
@@ -378,17 +499,24 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const current = designId ? creationsById.get(designId) : null;
 
     const amazonRows = sid ? amazonByShopifyId.get(sid) || [] : [];
+    const amazonEuChannel = amazonRows.some(
+      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonChannelPresentStatus(r.status)
+    );
+    const amazonUsChannel = amazonRows.some(
+      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonChannelPresentStatus(r.status)
+    );
+    // Live-only flags for bulk UI; channel facets use in-flight statuses too (D1 amazon_listing).
     const amazonEuListed = amazonRows.some(
-      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && AMAZON_LISTED_STATUSES.has(r.status)
+      (r) => EU_MARKETPLACE_IDS.has(r.marketplace_id) && isAmazonLiveStatus(r.status)
     );
     const amazonUsListed = amazonRows.some(
-      (r) => r.marketplace_id === NA_MARKETPLACES.US && AMAZON_LISTED_STATUSES.has(r.status)
+      (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonLiveStatus(r.status)
     );
 
     const marketLabels = [];
     if (Number(product.is_active) === 2) marketLabels.push("Online Store");
-    if (amazonEuListed) marketLabels.push("Amazon EU");
-    if (amazonUsListed) marketLabels.push("Amazon US");
+    if (amazonEuChannel) marketLabels.push("Amazon EU");
+    if (amazonUsChannel) marketLabels.push("Amazon US");
 
     const profile = product.product_key ? publishProfiles.get(product.product_key) : null;
     const variantCount = Number(node?.totalVariants?.count ?? product.total_variants ?? 0) || 0;
@@ -398,17 +526,48 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const channelKeys = publicationChannelKeys().filter((key) => {
       if (key === "eazpire" || key === "onlineshop") return Number(product.is_active) === 2;
       if (key === "eazpire_headless") return String(product.listing_origin || "").toLowerCase() === "creator";
+      if (key === "amazon_eu") return amazonEuChannel;
+      if (key === "amazon_us") return amazonUsChannel;
       return false;
     });
 
     const busyByShopifyId = sid ? busy.shopifyIds.has(sid) : false;
     const busyByProductKey = product.product_key ? busy.productKeys.has(String(product.product_key)) : false;
 
+    const pid = String(product.printify_product_id || "").trim();
+    const pMeta =
+      (sid && printifyMeta.byShopifyId.get(sid)) ||
+      (pid && printifyMeta.byPrintifyId.get(pid)) ||
+      null;
+    const printifyStatus =
+      product.printify_status ||
+      pMeta?.status ||
+      classifyPrintifyListingStatusFromRow({
+        printify_product_id: pid,
+        shopify_product_id: sid,
+        shopify_completion_status: product.shopify_completion_status,
+        printify_listing_status: product.printify_listing_status,
+      });
+
+    // Prefer Shopify images; for Printify-only / empty Shopify media use stored Printify mocks.
+    const existingImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
+    const mockUrls = Array.isArray(pMeta?.mocks) ? pMeta.mocks : [];
+    let images = existingImages;
+    let previewUrl = product.preview_url || null;
+    if (!images.length && mockUrls.length) {
+      images = mockUrls;
+      previewUrl = mockUrls[0];
+    } else if (!previewUrl && mockUrls.length) {
+      previewUrl = mockUrls[0];
+    }
+
     return {
       ...product,
+      preview_url: previewUrl,
+      images,
       catalog_product_name: (product.product_key && catalogNames.get(product.product_key)) || null,
-      design_id: designId,
-      published_design_id: link?.published_design_id || null,
+      design_id: designId || pMeta?.design_id || product.design_id || null,
+      published_design_id: link?.published_design_id || pMeta?.published_design_id || product.published_design_id || null,
       provider_label: providerLabelForProduct(product),
       filter_provider: filterProviderForProduct(product),
       variant_count: variantCount,
@@ -425,9 +584,14 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       needs_update: computeNeedsUpdate(snapshot, current),
       amazon_eu_listed: amazonEuListed,
       amazon_us_listed: amazonUsListed,
-      publish_eligible_amazon_eu: !amazonEuListed && !amazonUsListed,
+      amazon_eu_channel: amazonEuChannel,
+      amazon_us_channel: amazonUsChannel,
+      // Don't re-queue Amazon publish while a D1 listing is already in-flight or live.
+      publish_eligible_amazon_eu: !amazonEuChannel && !amazonUsChannel,
       publish_active: busyByShopifyId || busyByProductKey,
       filter_product_key: String(product.product_key || product.id || sid || ""),
+      printify_status: printifyStatus || null,
+      printify_mock_urls: mockUrls,
     };
   });
 }
@@ -475,10 +639,13 @@ export function buildProductFilterFacets(products) {
     (key) => list.find((p) => (p.filter_provider || "unknown") === key)?.provider_label || key
   );
 
-  const channels = toFacetList(
-    bucketCount(list, (p) => (Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null)),
-    (key) => channelLabelForKey(key)
+  const baseChannels = new Map(publicationChannelKeys().map((k) => [k, 0]));
+  const channelCounts = bucketCount(
+    list,
+    (p) => (Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null)
   );
+  for (const [k, v] of channelCounts) baseChannels.set(k, v);
+  const channels = toFacetList(baseChannels, (key) => channelLabelForKey(key));
 
   const variants = toFacetList(bucketCount(list, (p) => exactCountKey(p.variant_count)), null, { numeric: true });
 
@@ -522,6 +689,20 @@ export function buildProductFilterFacets(products) {
     (key) => (key === "yes" ? "Needs update" : "Up to date")
   );
 
+  const basePrintifyStatus = new Map([
+    ["published", 0],
+    ["unpublished", 0],
+    ["unpublished_changes", 0],
+    ["publishing", 0],
+    ["error", 0],
+  ]);
+  const printifyStatusCounts = bucketCount(list, (p) => p.printify_status || null);
+  for (const [k, v] of printifyStatusCounts) basePrintifyStatus.set(k, v);
+  const printifyStatus = toFacetList(
+    basePrintifyStatus,
+    (key) => PRINTIFY_STATUS_LABELS[key] || key
+  );
+
   return {
     total: list.length,
     provider,
@@ -535,5 +716,6 @@ export function buildProductFilterFacets(products) {
     branding_white: brandingWhite,
     branding_black: brandingBlack,
     needs_update: needsUpdate,
+    printify_status: printifyStatus,
   };
 }

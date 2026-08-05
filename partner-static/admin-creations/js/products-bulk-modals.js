@@ -108,7 +108,9 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
 
 /** Unpublish selected products from eazpire (Shopify) and/or Amazon EU (DE). */
 export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
-  const eligible = (items || []).filter((p) => p.shopify_product_id || p.id || p.amazon_eu_listed);
+  const eligible = (items || []).filter(
+    (p) => p.shopify_product_id || p.id || p.amazon_eu_channel || p.amazon_eu_listed || p.amazon_us_channel || p.amazon_us_listed
+  );
   if (!eligible.length) {
     releaseBulkDock();
     showToast("Unpublish", "No eligible products selected");
@@ -123,6 +125,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
         .map((item) => {
           const key = String(item.filter_product_key || item.product_key || item.id || "");
           const preview = item.preview_url || item.grid_views?.[0]?.src || "";
+          const hasAmazonEu = !!(item.amazon_eu_channel || item.amazon_eu_listed);
           return `<div class="cr-unpub-prod" data-product-key="${escapeHtml(key)}">
             <div class="cr-unpub-prod__head">
               <span class="cr-bulk-product-row__media">${
@@ -135,7 +138,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
                 key
               )}" checked /> <span>eazpire</span></label>
               ${
-                item.amazon_eu_listed
+                hasAmazonEu
                   ? `<label class="cr-unpub-ch"><input type="checkbox" class="cr-unpub-ch__cb" data-channel="amazon_eu" data-product-key="${escapeHtml(
                       key
                     )}" checked /> <span>Amazon EU (DE)</span></label>`

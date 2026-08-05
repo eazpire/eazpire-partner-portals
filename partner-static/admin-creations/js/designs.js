@@ -18,6 +18,16 @@ import {
   setPublishSessionsListener,
   getPublishingDesignIds,
 } from "./designs-publish-dock.js";
+import {
+  filterState,
+  clearAllFilters,
+  isFilterSidebarCollapsed,
+  setFilterSidebarCollapsed,
+  filterSidebarInnerHtml,
+  bindFilterSidebar,
+  serializeTriFilters,
+  emptyFacets,
+} from "./designs-filters.js";
 
 export function teardownBulkDock() {
   teardownBulkDockInner();
@@ -25,32 +35,14 @@ export function teardownBulkDock() {
   teardownPublishDock();
 }
 
-const SOURCE_FILTERS = [
-  { key: "all", label: "All" },
-  { key: "generate", label: "Generations" },
-  { key: "upload", label: "Uploads" },
-  { key: "automate", label: "Automations" },
-];
-
-const USAGE_FILTERS = [
-  { key: "all", label: "All" },
-  { key: "sample", label: "Sample" },
-  { key: "product", label: "Product" },
-];
-
 const state = {
-  library: "active",
-  source: "all",
-  usage: "all",
-  q: "",
-  qDebounced: "",
   offset: 0,
   limit: 48,
   loading: false,
   items: [],
   total: 0,
   hasMore: false,
-  searchTimer: null,
+  facets: emptyFacets(),
 };
 
 function sourceBucketLabel(bucket) {
@@ -69,51 +61,6 @@ function formatDateTime(ms) {
   } catch {
     return d.toISOString();
   }
-}
-
-function matchesUsage(item, usage) {
-  if (usage === "all") return true;
-  const pub = Number(item.publish_count || 0);
-  if (usage === "product") return pub > 0;
-  if (usage === "sample") return item.item_kind === "creation" && pub === 0;
-  return true;
-}
-
-function filterToolbarHtml() {
-  const libActive = state.library === "active";
-  return `
-    <div class="cr-toolbar panel">
-      <div class="cr-toolbar__row cr-toolbar__row--primary">
-        <div class="cr-search" role="search">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" id="cr-designs-search" placeholder="Search designs, users, creators, job ids…" aria-label="Search designs" autocomplete="off" value="${escapeHtml(state.q)}" />
-        </div>
-        <div class="cr-switch" role="group" aria-label="Library status">
-          <button type="button" class="cr-switch__btn ${libActive ? "active" : ""}" data-cr-library="active">Active</button>
-          <button type="button" class="cr-switch__btn ${!libActive ? "active" : ""}" data-cr-library="inactive">Inactive</button>
-        </div>
-      </div>
-      <div class="cr-toolbar__row">
-        <div class="cr-filter-group">
-          <span class="cr-filter-label">Source</span>
-          <div class="cr-chips" role="group" aria-label="Source filter">
-            ${SOURCE_FILTERS.map(
-              (f) =>
-                `<button type="button" class="cr-chip ${state.source === f.key ? "active" : ""}" data-cr-source="${f.key}">${escapeHtml(f.label)}</button>`
-            ).join("")}
-          </div>
-        </div>
-        <div class="cr-filter-group">
-          <span class="cr-filter-label">Usage</span>
-          <div class="cr-chips" role="group" aria-label="Usage filter">
-            ${USAGE_FILTERS.map(
-              (f) =>
-                `<button type="button" class="cr-chip ${state.usage === f.key ? "active" : ""}" data-cr-usage="${f.key}">${escapeHtml(f.label)}</button>`
-            ).join("")}
-          </div>
-        </div>
-      </div>
-    </div>`;
 }
 
 function designOriginalUrl(item) {
@@ -726,7 +673,7 @@ function isDesignPublishing(item) {
 
 function getVisibleItems() {
   // Hide designs that are currently publishing (shown in the publish floating bar instead).
-  return state.items.filter((item) => matchesUsage(item, state.usage) && !isDesignPublishing(item));
+  return state.items.filter((item) => !isDesignPublishing(item));
 }
 
 function afterBulkChange() {
@@ -794,6 +741,80 @@ function renderGrid() {
   }
 }
 
+function refreshFilterSidebarBody(el) {
+  const body = el?.querySelector("#cr-df-body");
+  if (!body) return;
+  const prevSearch = body.querySelector("#cr-df-search-input");
+  const hadFocus = document.activeElement === prevSearch;
+  const selStart = prevSearch?.selectionStart;
+  const selEnd = prevSearch?.selectionEnd;
+  const scrollTop = body.scrollTop;
+  body.innerHTML = filterSidebarInnerHtml(state.facets);
+  body.scrollTop = scrollTop;
+  bindFilterSidebar(body, {
+    onChange: () => {
+      clearSelection();
+      fetchList({ append: false });
+    },
+  });
+  const nextSearch = body.querySelector("#cr-df-search-input");
+  if (hadFocus && nextSearch) {
+    nextSearch.focus();
+    try {
+      if (selStart != null && selEnd != null) nextSearch.setSelectionRange(selStart, selEnd);
+    } catch (_) {}
+  }
+}
+
+function bindFilterSidebarToggle(el) {
+  const studioEl = el.querySelector(".cr-designs-studio");
+  const toggle = el.querySelector("#cr-df-toggle");
+  if (!studioEl || !toggle) return;
+  toggle.onclick = () => {
+    const next = !isFilterSidebarCollapsed();
+    setFilterSidebarCollapsed(next);
+    studioEl.classList.toggle("catalog-studio--filter-collapsed", next);
+    const label = toggle.querySelector(".catalog-studio-rail__action");
+    if (label) label.textContent = next ? "Expand" : "Collapse";
+    toggle.setAttribute("aria-label", next ? "Expand filter sidebar" : "Collapse filter sidebar");
+    toggle.title = next ? "Expand" : "Collapse";
+  };
+}
+
+function pageShellHtml() {
+  const filterCollapsed = isFilterSidebarCollapsed();
+  return `
+    <div class="catalog-studio cr-designs-studio${filterCollapsed ? " catalog-studio--filter-collapsed" : ""}">
+      <div class="catalog-studio-filter-wrap">
+        <aside class="catalog-studio-filter-sidebar" id="cr-df-sidebar">
+          <div class="catalog-studio-sidebar-head">
+            <span class="catalog-studio-sidebar-label">Filters</span>
+          </div>
+          <div class="cr-pf-body" id="cr-df-body">${filterSidebarInnerHtml(state.facets)}</div>
+        </aside>
+        <button type="button" class="catalog-studio-rail catalog-studio-filter-rail" id="cr-df-toggle" aria-label="${
+          filterCollapsed ? "Expand" : "Collapse"
+        } filter sidebar" title="${filterCollapsed ? "Expand" : "Collapse"}">
+          <span class="catalog-studio-rail__arrow-zone" aria-hidden="true"><span class="catalog-studio-rail__arrow">‹</span></span>
+          <span class="catalog-studio-rail__labels">
+            <span class="catalog-studio-rail__section">Filter</span>
+            <span class="catalog-studio-rail__action">${filterCollapsed ? "Expand" : "Collapse"}</span>
+          </span>
+        </button>
+      </div>
+      <div class="catalog-studio-main">
+        <div class="cr-stage">
+          <p class="cr-loading" id="cr-designs-loading">Loading designs…</p>
+          <div class="cr-grid" id="cr-designs-grid" hidden></div>
+          <p class="cr-empty" id="cr-designs-empty" hidden>No designs match your filters.</p>
+          <div class="cr-load-more-wrap">
+            <button type="button" class="btn btn-secondary" id="cr-designs-more" hidden>Load more</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function fetchList({ append = false } = {}) {
   if (state.loading) return;
   state.loading = true;
@@ -807,9 +828,9 @@ async function fetchList({ append = false } = {}) {
   try {
     const data = await partnerFetch("admin-creations-list", {
       query: {
-        library: state.library,
-        source: state.source,
-        q: state.qDebounced,
+        q: filterState.q.trim(),
+        tri: serializeTriFilters(),
+        include_facets: "1",
         offset: state.offset,
         limit: state.limit,
       },
@@ -819,6 +840,12 @@ async function fetchList({ append = false } = {}) {
     state.total = typeof data.total === "number" ? data.total : state.items.length;
     state.hasMore = !!data.has_more;
     state.offset = state.items.length;
+    if (data.facets && typeof data.facets === "object") {
+      state.facets = { ...emptyFacets(), ...data.facets };
+      const el = document.getElementById("view-designs");
+      // Preserve open/scroll feel: rebuild sidebar when facets refresh (not on append-only)
+      if (!append) refreshFilterSidebarBody(el);
+    }
   } catch (e) {
     showToast("Error", e.message || "Could not load designs");
     if (!append) state.items = [];
@@ -828,55 +855,7 @@ async function fetchList({ append = false } = {}) {
   }
 }
 
-function scheduleSearch() {
-  clearTimeout(state.searchTimer);
-  state.searchTimer = setTimeout(() => {
-    state.qDebounced = state.q;
-    fetchList({ append: false });
-  }, 280);
-}
-
-function bindToolbar(el) {
-  el.querySelector("#cr-designs-search")?.addEventListener("input", (e) => {
-    state.q = String(e.target.value || "").trim();
-    scheduleSearch();
-  });
-
-  el.querySelectorAll("[data-cr-library]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const lib = btn.dataset.crLibrary === "inactive" ? "inactive" : "active";
-      if (state.library === lib) return;
-      state.library = lib;
-      clearSelection();
-      el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
-      bindToolbar(el);
-      fetchList({ append: false });
-    });
-  });
-
-  el.querySelectorAll("[data-cr-source]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const next = btn.dataset.crSource || "all";
-      if (state.source === next) return;
-      state.source = next;
-      clearSelection();
-      el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
-      bindToolbar(el);
-      fetchList({ append: false });
-    });
-  });
-
-  el.querySelectorAll("[data-cr-usage]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const next = btn.dataset.crUsage || "all";
-      if (state.usage === next) return;
-      state.usage = next;
-      el.querySelector(".cr-toolbar").outerHTML = filterToolbarHtml();
-      bindToolbar(el);
-      renderGrid();
-    });
-  });
-
+function bindLoadMore(el) {
   el.querySelector("#cr-designs-more")?.addEventListener("click", () => {
     if (!state.hasMore || state.loading) return;
     fetchList({ append: true });
@@ -888,17 +867,10 @@ export async function mountDesignsPage() {
   if (!el) return;
 
   clearSelection();
+  clearAllFilters();
+  state.facets = emptyFacets();
 
-  el.innerHTML = `
-    ${filterToolbarHtml()}
-    <div class="cr-stage">
-      <p class="cr-loading" id="cr-designs-loading">Loading designs…</p>
-      <div class="cr-grid" id="cr-designs-grid" hidden></div>
-      <p class="cr-empty" id="cr-designs-empty" hidden>No designs match your filters.</p>
-      <div class="cr-load-more-wrap">
-        <button type="button" class="btn btn-secondary" id="cr-designs-more" hidden>Load more</button>
-      </div>
-    </div>`;
+  el.innerHTML = pageShellHtml();
 
   ensureBulkDock(el, {
     onSelectAll: () => selectAllVisible(getVisibleItems()),
@@ -919,6 +891,8 @@ export async function mountDesignsPage() {
   });
   startPublishDockWatch();
 
-  bindToolbar(el);
+  bindFilterSidebarToggle(el);
+  refreshFilterSidebarBody(el);
+  bindLoadMore(el);
   await fetchList({ append: false });
 }

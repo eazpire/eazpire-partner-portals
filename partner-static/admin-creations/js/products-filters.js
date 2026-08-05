@@ -12,6 +12,7 @@ const SECTIONS = [
   { key: "source", label: "Source" },
   { key: "product", label: "Product" },
   { key: "provider", label: "Provider" },
+  { key: "printify_status", label: "Printify Status" },
   { key: "channels", label: "Channels" },
   { key: "variants", label: "Variants" },
   { key: "catalogs", label: "Kataloge" },
@@ -22,6 +23,14 @@ const SECTIONS = [
   { key: "branding_black", label: "Black Branding" },
   { key: "needs_update", label: "Needs Update" },
 ];
+
+const PRINTIFY_STATUS_LABELS = {
+  published: "Published",
+  unpublished: "Unpublished",
+  unpublished_changes: "Unpublished Changes",
+  publishing: "Publishing",
+  error: "Error",
+};
 
 /** Exact-count facets — sort options numerically ascending. */
 const NUMERIC_SECTIONS = new Set([
@@ -43,6 +52,15 @@ const SOURCE_LABELS = {
 const PROVIDER_LABELS = {
   printify: "Printify",
   todify: "Todify",
+};
+
+/** Always-visible Channels options (counts filled from D1/Shopify enrichment). */
+const CHANNEL_LABELS = {
+  eazpire: "eazpire",
+  onlineshop: "Online Store",
+  eazpire_headless: "eazpire Headless",
+  amazon_eu: "Amazon EU",
+  amazon_us: "Amazon US",
 };
 
 function defaultFilterState() {
@@ -167,6 +185,8 @@ function valuesForSection(sectionKey, p) {
       return exactCountKey(p.branding_black_count);
     case "needs_update":
       return p.needs_update ? "yes" : "no";
+    case "printify_status":
+      return p.printify_status || null;
     default:
       return null;
   }
@@ -232,15 +252,17 @@ export function computeFacetsFromItems(items) {
     },
     provider: (key) => PROVIDER_LABELS[key] || key,
     channels: (key) => {
+      if (CHANNEL_LABELS[key]) return CHANNEL_LABELS[key];
       const hit = list.find((p) => (p.channel_keys || []).includes(key));
       const idx = hit ? (hit.channel_keys || []).indexOf(key) : -1;
       return (idx >= 0 && hit.channel_labels?.[idx]) || key;
     },
     alt_image_texts: (key) => (key === "has" ? "Has alt text" : "Missing alt text"),
     needs_update: (key) => (key === "yes" ? "Needs update" : "Up to date"),
+    printify_status: (key) => PRINTIFY_STATUS_LABELS[key] || key,
   };
 
-  // Always show Source / Provider options even when empty in current load
+  // Always show Source / Provider / Printify Status options even when empty in current load
   const baseSource = new Map([
     ["product", 0],
     ["customer", 0],
@@ -251,6 +273,14 @@ export function computeFacetsFromItems(items) {
     ["printify", 0],
     ["todify", 0],
   ]);
+  const basePrintifyStatus = new Map([
+    ["published", 0],
+    ["unpublished", 0],
+    ["unpublished_changes", 0],
+    ["publishing", 0],
+    ["error", 0],
+  ]);
+  const baseChannels = new Map(Object.keys(CHANNEL_LABELS).map((k) => [k, 0]));
 
   const out = { total: list.length };
   for (const { key } of SECTIONS) {
@@ -263,6 +293,12 @@ export function computeFacetsFromItems(items) {
     } else if (key === "provider") {
       for (const [k, v] of counts) baseProvider.set(k, v);
       out[key] = toFacetList(baseProvider, labelFns.provider);
+    } else if (key === "printify_status") {
+      for (const [k, v] of counts) basePrintifyStatus.set(k, v);
+      out[key] = toFacetList(basePrintifyStatus, labelFns.printify_status);
+    } else if (key === "channels") {
+      for (const [k, v] of counts) baseChannels.set(k, v);
+      out[key] = toFacetList(baseChannels, labelFns.channels);
     } else {
       out[key] = toFacetList(counts, labelFns[key], { numeric });
     }

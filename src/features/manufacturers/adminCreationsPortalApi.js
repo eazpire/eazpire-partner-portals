@@ -23,6 +23,13 @@ import {
   enrichCreationsProductListFacets,
   buildProductFilterFacets,
 } from "./adminCreationsProductListEnrich.js";
+import {
+  classifyPrintifyListingStatusFromRow,
+  ensurePrintifyListingStatusColumn,
+  extractPrintifyMockUrls,
+  parsePrintifyImagesJson,
+  persistPrintifyListingSnapshot,
+} from "../publish/printifyListingStatus.js";
 
 /**
  * Enrich + facet-bucket a product list for the Products page (filter sidebar, "Needs
@@ -37,6 +44,17 @@ export async function finalizeProductList(env, products, { nodesByShopifyId = nu
   const enriched = await enrichCreationsProductListFacets(env, products, nodesByShopifyId);
   const facets = buildProductFilterFacets(enriched);
   return { products: enriched, facets };
+}
+
+/** Default/max page size for Creations Products buckets (D1 has ~1k+ Shopify-linked rows). */
+const PRODUCT_LIST_DEFAULT_LIMIT = 2500;
+const PRODUCT_LIST_MAX_LIMIT = 5000;
+
+function parseProductListLimit(url, { defaultLimit = PRODUCT_LIST_DEFAULT_LIMIT } = {}) {
+  return Math.min(
+    PRODUCT_LIST_MAX_LIMIT,
+    Math.max(1, Number(url?.searchParams?.get("limit")) || defaultLimit)
+  );
 }
 
 export function proxyRequestWithAdminOwner(request, ownerId) {
@@ -211,7 +229,7 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
   }
 
   const url = new URL(request.url);
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const limit = parseProductListLimit(url);
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
   const isActive = url.searchParams.get("is_active");
   const activeFilter =
@@ -225,6 +243,7 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
+      maxScan: 10000,
       matchFn: (node) =>
         isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
         !isCustomerStudioShopifyProduct(node, customerStudioIds),
@@ -233,6 +252,87 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "printify", printifyLinks));
 
     products = await enrichPrintifyCategories(env, products);
+
+    // Printify-only listings (not yet on Shopify) — still show with Printify mockups.
+    try {
+      if (!env.CREATOR_DB) throw new Error("creator_db_unavailable");
+      await ensurePrintifyListingStatusColumn(env);
+      const seenPrintify = new Set(
+        products.map((p) => String(p.printify_product_id || "").trim()).filter(Boolean)
+      );
+      const seenShopify = new Set(
+        products.map((p) => normalizeShopifyProductId(p.shopify_product_id || p.id)).filter(Boolean)
+      );
+      const pdRes = await env.CREATOR_DB.prepare(
+        `SELECT id, design_id, owner_id, product_key, product_name, printify_product_id,
+                shopify_product_id, shopify_completion_status, printify_listing_status,
+                printify_images_json, visibility, updated_at
+         FROM published_designs
+         WHERE printify_product_id IS NOT NULL
+           AND TRIM(CAST(printify_product_id AS TEXT)) != ''
+           AND (
+             shopify_product_id IS NULL
+             OR TRIM(CAST(shopify_product_id AS TEXT)) = ''
+             OR TRIM(CAST(shopify_product_id AS TEXT)) = '0'
+           )
+         ORDER BY COALESCE(updated_at, published_at, 0) DESC
+         LIMIT ?`
+      )
+        .bind(limit)
+        .all();
+
+      let printifyMockFetches = 0;
+      for (const row of pdRes?.results || []) {
+        const pid = String(row.printify_product_id || "").trim();
+        if (!pid || seenPrintify.has(pid)) continue;
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        if (sid && seenShopify.has(sid)) continue;
+        let mocks = parsePrintifyImagesJson(row.printify_images_json);
+        // Cap live fetches so list stays fast; persist mocks for next load.
+        if (!mocks.length && env.PRINTIFY_API_KEY && printifyMockFetches < 8) {
+          printifyMockFetches += 1;
+          try {
+            const { getPrintifyProduct } = await import("../../utils/printify.js");
+            const live = await getPrintifyProduct(env, pid);
+            mocks = extractPrintifyMockUrls(live);
+            if (live) {
+              await persistPrintifyListingSnapshot(env, row.id, { printifyProduct: live, images: mocks });
+            }
+          } catch (fetchErr) {
+            console.warn(
+              "[admin-creations-printify-products] printify mock fetch:",
+              fetchErr?.message || fetchErr
+            );
+          }
+        }
+        const status = classifyPrintifyListingStatusFromRow(row) || "unpublished";
+        const title = String(row.product_name || row.product_key || `Printify ${pid}`).trim();
+        products.push({
+          id: `printify-only:${row.id}`,
+          product_key: String(row.product_key || row.id),
+          title,
+          preview_url: mocks[0] || null,
+          images: mocks,
+          category: "Printify (not on Shopify)",
+          owner_id: String(row.owner_id || ""),
+          owner_label: row.owner_id ? `Owner ${row.owner_id}` : "Admin",
+          shopify_product_id: null,
+          printify_product_id: pid,
+          is_active: 0,
+          source: "printify",
+          source_label: "Printify",
+          design_id: row.design_id != null ? String(row.design_id) : null,
+          published_design_id: row.id != null ? Number(row.id) : null,
+          shopify_completion_status: row.shopify_completion_status || "pending_shopify",
+          printify_status: status,
+          printify_listing_status: row.printify_listing_status || status,
+          listing_origin: "printify_only",
+        });
+        seenPrintify.add(pid);
+      }
+    } catch (pdErr) {
+      console.warn("[admin-creations-printify-products] printify-only rows:", pdErr?.message || pdErr);
+    }
 
     if (activeFilter != null) {
       products = products.filter((p) => Number(p.is_active) === activeFilter);
@@ -276,8 +376,9 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
     return json({ ok: false, error: "database_unavailable" }, 500, cors);
   }
 
-  const limit = Math.min(500, Math.max(1, Number(new URL(request.url).searchParams.get("limit")) || 200));
-  const q = String(new URL(request.url).searchParams.get("q") || "").trim().toLowerCase();
+  const url = new URL(request.url);
+  const limit = parseProductListLimit(url, { defaultLimit: PRODUCT_LIST_DEFAULT_LIMIT });
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
     const products = [];
@@ -411,7 +512,7 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   }
 
   const url = new URL(request.url);
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const limit = parseProductListLimit(url);
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
@@ -419,7 +520,7 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      maxScan: 3000,
+      maxScan: 10000,
       queryStr: NATIVE_SHOPIFY_STORE_QUERY,
       matchFn: (node) => isShopifyResidualProduct(node),
     });
@@ -458,7 +559,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
   }
 
   const url = new URL(request.url);
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const limit = parseProductListLimit(url);
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
@@ -469,7 +570,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      maxScan: 3000,
+      maxScan: 10000,
       matchFn: (node) => isTodifyPartnerShopifyProduct(node),
     });
 
@@ -573,7 +674,7 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
   }
 
   const url = new URL(request.url);
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+  const limit = parseProductListLimit(url);
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
@@ -584,7 +685,7 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      maxScan: 3000,
+      maxScan: 10000,
       matchFn: (node) =>
         isSampleShopifyProduct(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds),
     });

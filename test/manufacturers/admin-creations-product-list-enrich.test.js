@@ -2,8 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   buildProductFilterFacets,
   publicationChannelKeys,
+  channelLabelForKey,
   countFilledMetafields,
   indexShopifyNodesById,
+  isAmazonChannelPresentStatus,
+  isAmazonLiveStatus,
 } from "../../src/features/manufacturers/adminCreationsProductListEnrich.js";
 
 function product(overrides = {}) {
@@ -30,8 +33,25 @@ function product(overrides = {}) {
 }
 
 describe("adminCreationsProductListEnrich", () => {
-  it("publicationChannelKeys returns the fixed Creations sales channel list", () => {
-    expect(publicationChannelKeys()).toEqual(["eazpire", "onlineshop", "eazpire_headless"]);
+  it("publicationChannelKeys returns the fixed Creations sales channel list incl. Amazon", () => {
+    expect(publicationChannelKeys()).toEqual([
+      "eazpire",
+      "onlineshop",
+      "eazpire_headless",
+      "amazon_eu",
+      "amazon_us",
+    ]);
+    expect(channelLabelForKey("amazon_eu")).toBe("Amazon EU");
+    expect(channelLabelForKey("amazon_us")).toBe("Amazon US");
+  });
+
+  it("Amazon channel present statuses include verifying/feed_pending from D1", () => {
+    expect(isAmazonChannelPresentStatus("verifying")).toBe(true);
+    expect(isAmazonChannelPresentStatus("feed_pending")).toBe(true);
+    expect(isAmazonChannelPresentStatus("active")).toBe(true);
+    expect(isAmazonChannelPresentStatus("dry_run_failed")).toBe(false);
+    expect(isAmazonLiveStatus("verifying")).toBe(false);
+    expect(isAmazonLiveStatus("active")).toBe(true);
   });
 
   it("countFilledMetafields prefers metafields.edges when present", () => {
@@ -125,6 +145,8 @@ describe("adminCreationsProductListEnrich", () => {
       expect.arrayContaining([
         { key: "eazpire", label: "eazpire", count: 1 },
         { key: "onlineshop", label: "Online Store", count: 1 },
+        { key: "amazon_eu", label: "Amazon EU", count: 0 },
+        { key: "amazon_us", label: "Amazon US", count: 0 },
       ])
     );
 
@@ -184,5 +206,35 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.total).toBe(0);
     expect(facets.provider).toEqual([]);
     expect(facets.needs_update).toEqual([]);
+    expect(facets.channels).toEqual(
+      expect.arrayContaining([
+        { key: "amazon_eu", label: "Amazon EU", count: 0 },
+        { key: "amazon_us", label: "Amazon US", count: 0 },
+      ])
+    );
+  });
+
+  it("buildProductFilterFacets counts Amazon EU/US channel keys", () => {
+    const facets = buildProductFilterFacets([
+      product({
+        channel_keys: ["amazon_eu", "eazpire"],
+        channel_labels: ["Amazon EU", "eazpire"],
+        channel_count: 2,
+      }),
+      product({
+        product_key: "pk-2",
+        id: "1002",
+        channel_keys: ["amazon_us"],
+        channel_labels: ["Amazon US"],
+        channel_count: 1,
+      }),
+    ]);
+    expect(facets.channels).toEqual(
+      expect.arrayContaining([
+        { key: "amazon_eu", label: "Amazon EU", count: 1 },
+        { key: "amazon_us", label: "Amazon US", count: 1 },
+        { key: "eazpire", label: "eazpire", count: 1 },
+      ])
+    );
   });
 });

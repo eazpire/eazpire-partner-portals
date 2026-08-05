@@ -57,7 +57,10 @@ const PRODUCTS_GQL = `
   }
 `;
 
-const DEFAULT_MAX_SCAN = 2000;
+/** Admin Products page can hold thousands of live listings — scan past the old 2k ceiling. */
+const DEFAULT_MAX_SCAN = 10000;
+/** Hard cap for matched / returned Shopify product nodes per list call. */
+const MAX_PRODUCT_NODES = 5000;
 
 export function shopDomainFromEnv(env) {
   const raw = String(env?.SHOPIFY_SHOP || env?.SHOPIFY_SHOP_DOMAIN || "")
@@ -357,7 +360,7 @@ export function indexShopifyNodesById(nodes) {
  */
 export async function fetchShopifyProductNodes(env, opts = {}) {
   const shopDomain = shopDomainFromEnv(env);
-  const limit = Math.min(250, Math.max(1, Number(opts.limit) || 50));
+  const limit = Math.min(MAX_PRODUCT_NODES, Math.max(1, Number(opts.limit) || 50));
   const queryStr = String(opts.queryStr || "").trim();
   const items = [];
   let cursor = null;
@@ -394,8 +397,8 @@ export async function fetchShopifyProductNodes(env, opts = {}) {
 export async function fetchShopifyProductNodesMatching(env, opts = {}) {
   const matchFn = typeof opts.matchFn === "function" ? opts.matchFn : () => true;
   const shopDomain = shopDomainFromEnv(env);
-  const limit = Math.min(250, Math.max(1, Number(opts.limit) || 50));
-  const maxScan = Math.min(5000, Math.max(limit, Number(opts.maxScan) || DEFAULT_MAX_SCAN));
+  const limit = Math.min(MAX_PRODUCT_NODES, Math.max(1, Number(opts.limit) || 50));
+  const maxScan = Math.min(20000, Math.max(limit, Number(opts.maxScan) || DEFAULT_MAX_SCAN));
   const queryStr = String(opts.queryStr || "").trim();
 
   const items = [];

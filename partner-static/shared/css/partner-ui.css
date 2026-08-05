@@ -2201,7 +2201,8 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
     width: calc(100% + 32px);
   }
 
-  html[data-portal="admin"] #view-products.creations-layout.view.active {
+  html[data-portal="admin"] #view-products.creations-layout.view.active,
+  html[data-portal="admin"] #view-designs.creations-layout.view.active {
     margin: -16px;
     width: calc(100% + 32px);
   }
@@ -10512,9 +10513,10 @@ html[data-portal="admin"] .cr-unpub-ch:hover {
   background: #f1f5f9;
 }
 
-/* IDEA-063: Admin Creations Products — collapsible filter sidebar (Catalog Studio pattern).
-   Viewport-locked split: filter pane and product grid scroll independently (not via .main). */
-html[data-portal="admin"] #view-products.creations-layout.view.active {
+/* IDEA-063 / IDEA-064: Admin Creations Products + Designs — collapsible filter sidebars.
+   Viewport-locked split: filter pane and content grid scroll independently (not via .main). */
+html[data-portal="admin"] #view-products.creations-layout.view.active,
+html[data-portal="admin"] #view-designs.creations-layout.view.active {
   margin: -28px;
   width: calc(100% + 56px);
   max-width: none;
@@ -10525,23 +10527,27 @@ html[data-portal="admin"] #view-products.creations-layout.view.active {
   gap: 0;
   overflow: hidden;
 }
-html[data-portal="admin"] .cr-products-studio {
+html[data-portal="admin"] .cr-products-studio,
+html[data-portal="admin"] .cr-designs-studio {
   flex: 1;
   min-height: 0;
   height: 100%;
   overflow: hidden;
 }
-html[data-portal="admin"] .cr-products-studio .catalog-studio-filter-wrap {
+html[data-portal="admin"] .cr-products-studio .catalog-studio-filter-wrap,
+html[data-portal="admin"] .cr-designs-studio .catalog-studio-filter-wrap {
   align-self: stretch;
   min-height: 0;
   max-height: 100%;
 }
-html[data-portal="admin"] .cr-products-studio .catalog-studio-filter-sidebar {
+html[data-portal="admin"] .cr-products-studio .catalog-studio-filter-sidebar,
+html[data-portal="admin"] .cr-designs-studio .catalog-studio-filter-sidebar {
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
 }
-html[data-portal="admin"] .cr-products-studio .catalog-studio-main {
+html[data-portal="admin"] .cr-products-studio .catalog-studio-main,
+html[data-portal="admin"] .cr-designs-studio .catalog-studio-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -10550,10 +10556,12 @@ html[data-portal="admin"] .cr-products-studio .catalog-studio-main {
   flex-direction: column;
   padding: 16px 20px 20px;
 }
-html[data-portal="admin"] .cr-products-studio .cr-toolbar {
+html[data-portal="admin"] .cr-products-studio .cr-toolbar,
+html[data-portal="admin"] .cr-designs-studio .cr-toolbar {
   flex-shrink: 0;
 }
-html[data-portal="admin"] .cr-products-studio .cr-stage {
+html[data-portal="admin"] .cr-products-studio .cr-stage,
+html[data-portal="admin"] .cr-designs-studio .cr-stage {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;

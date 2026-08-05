@@ -321,9 +321,12 @@ function tagBucket(products, { listingBucket, filterSource, filterProvider, sour
   }));
 }
 
+/** Match server default — avoid silent 100-row undercount on Products page. */
+const PRODUCT_BUCKET_LIMIT = 2500;
+
 async function fetchBucket(op) {
   try {
-    const data = await partnerFetch(op);
+    const data = await partnerFetch(op, { query: { limit: PRODUCT_BUCKET_LIMIT } });
     return { ok: true, products: Array.isArray(data.products) ? data.products : [], data };
   } catch (e) {
     if (e.data?.error === "shopify_not_configured") {
