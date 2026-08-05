@@ -38,6 +38,47 @@ export function clearAllFilters() {
   for (const { key } of SECTIONS) filterState.tri[key] = {};
 }
 
+/** Resolve label for an active tri value from facet buckets. */
+function labelForFacetValue(sectionKey, value, facets) {
+  const list = facets?.[sectionKey];
+  if (Array.isArray(list)) {
+    const hit = list.find((f) => String(f.key) === String(value));
+    if (hit?.label) return String(hit.label);
+  }
+  return String(value);
+}
+
+/**
+ * Active chips for the Results bar (Include / Exclude + search string).
+ * @param {Record<string, Array<{ key: string, label: string }>>} [facets]
+ */
+export function collectActiveFilterChips(facets) {
+  const include = [];
+  const exclude = [];
+  for (const { key, label } of SECTIONS) {
+    const group = filterState.tri[key] || {};
+    for (const [val, st] of Object.entries(group)) {
+      if (st !== 1 && st !== -1) continue;
+      const valueLabel = labelForFacetValue(key, val, facets);
+      const chip = {
+        section: key,
+        value: String(val),
+        label: `${label}: ${valueLabel}`,
+      };
+      if (st === 1) include.push(chip);
+      else exclude.push(chip);
+    }
+  }
+  return { include, exclude, search: filterState.q.trim() };
+}
+
+/** Set one tri value back to neutral. */
+export function removeTriFilter(section, value) {
+  const group = filterState.tri[section];
+  if (!group) return;
+  delete group[String(value)];
+}
+
 function countActiveTri() {
   let n = 0;
   for (const { key } of SECTIONS) {

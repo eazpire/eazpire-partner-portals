@@ -23,7 +23,12 @@ import {
   bindFilterSidebar,
   isFilterSidebarCollapsed,
   setFilterSidebarCollapsed,
+  filterState,
+  clearAllFilters,
+  collectActiveFilterChips,
+  removeTriFilter,
 } from "./products-filters.js";
+import { filterResultsBarHtml, bindFilterResultsBar } from "./filter-results-bar.js";
 import {
   ensureProductsBulkDock,
   checkboxHtml as productBulkCheckboxHtml,
@@ -270,6 +275,42 @@ function emptyMessageForSource() {
   return "No products match your filters.";
 }
 
+function onProductFiltersChanged() {
+  const el = document.getElementById("view-products");
+  refreshFilterSidebarBody(el);
+  renderGrid();
+}
+
+function refreshResultsBar(el, visibleCount) {
+  const host = el?.querySelector("#cr-pf-results") || document.getElementById("cr-pf-results");
+  if (!host) return;
+  const facets = computeFacetsFromItems(state.items);
+  const chips = collectActiveFilterChips(facets);
+  host.innerHTML = filterResultsBarHtml({
+    count: visibleCount,
+    nounSingular: "product",
+    nounPlural: "products",
+    searchQuery: chips.search,
+    includeChips: chips.include,
+    excludeChips: chips.exclude,
+    loading: state.loading && !state.items.length,
+  });
+  bindFilterResultsBar(host, {
+    onClearSearch: () => {
+      filterState.q = "";
+      onProductFiltersChanged();
+    },
+    onRemoveTri: (section, value) => {
+      removeTriFilter(section, value);
+      onProductFiltersChanged();
+    },
+    onClearAll: () => {
+      clearAllFilters();
+      onProductFiltersChanged();
+    },
+  });
+}
+
 function renderGrid() {
   const grid = document.getElementById("cr-products-grid");
   const empty = document.getElementById("cr-products-empty");
@@ -292,6 +333,7 @@ function renderGrid() {
   }
   const byKey = new Map(visible.map((item) => [productSelectionKey(item), item]));
   bindBulkCheckboxes(grid, { getItemByKey: (key) => byKey.get(key) });
+  refreshResultsBar(document.getElementById("view-products"), visible.length);
 }
 
 function visibleProductsForBulk() {
@@ -482,6 +524,7 @@ function pageShellHtml() {
         </button>
       </div>
       <div class="catalog-studio-main">
+        <div id="cr-pf-results" class="cr-results-bar" role="region" aria-label="Filter results"></div>
         <div class="cr-stage">
           <p class="cr-loading" id="cr-products-loading">Loading products…</p>
           <p class="cr-error" id="cr-products-error" hidden role="alert"></p>

@@ -27,7 +27,10 @@ import {
   bindFilterSidebar,
   serializeTriFilters,
   emptyFacets,
+  collectActiveFilterChips,
+  removeTriFilter,
 } from "./designs-filters.js";
+import { filterResultsBarHtml, bindFilterResultsBar } from "./filter-results-bar.js";
 
 export function teardownBulkDock() {
   teardownBulkDockInner();
@@ -48,6 +51,7 @@ const state = {
 function sourceBucketLabel(bucket) {
   if (bucket === "upload") return "Upload";
   if (bucket === "automate") return "Automate";
+  if (bucket === "admin") return "Admin";
   return "Generate";
 }
 
@@ -720,6 +724,41 @@ function bindGridInteractions(grid) {
   });
 }
 
+function onDesignFiltersChanged() {
+  clearSelection();
+  // Sidebar re-syncs when fetch returns facets; Results bar updates in renderGrid.
+  fetchList({ append: false });
+}
+
+function refreshResultsBar(el) {
+  const host = el?.querySelector("#cr-df-results") || document.getElementById("cr-df-results");
+  if (!host) return;
+  const chips = collectActiveFilterChips(state.facets);
+  host.innerHTML = filterResultsBarHtml({
+    count: state.total,
+    nounSingular: "design",
+    nounPlural: "designs",
+    searchQuery: chips.search,
+    includeChips: chips.include,
+    excludeChips: chips.exclude,
+    loading: state.loading && !state.items.length,
+  });
+  bindFilterResultsBar(host, {
+    onClearSearch: () => {
+      filterState.q = "";
+      onDesignFiltersChanged();
+    },
+    onRemoveTri: (section, value) => {
+      removeTriFilter(section, value);
+      onDesignFiltersChanged();
+    },
+    onClearAll: () => {
+      clearAllFilters();
+      onDesignFiltersChanged();
+    },
+  });
+}
+
 function renderGrid() {
   const grid = document.getElementById("cr-designs-grid");
   const empty = document.getElementById("cr-designs-empty");
@@ -739,6 +778,8 @@ function renderGrid() {
     more.hidden = !state.hasMore;
     more.disabled = state.loading;
   }
+
+  refreshResultsBar(document.getElementById("view-designs"));
 }
 
 function refreshFilterSidebarBody(el) {
@@ -752,11 +793,9 @@ function refreshFilterSidebarBody(el) {
   body.innerHTML = filterSidebarInnerHtml(state.facets);
   body.scrollTop = scrollTop;
   bindFilterSidebar(body, {
-    onChange: () => {
-      clearSelection();
-      fetchList({ append: false });
-    },
+    onChange: () => onDesignFiltersChanged(),
   });
+  refreshResultsBar(el);
   const nextSearch = body.querySelector("#cr-df-search-input");
   if (hadFocus && nextSearch) {
     nextSearch.focus();
@@ -803,6 +842,7 @@ function pageShellHtml() {
         </button>
       </div>
       <div class="catalog-studio-main">
+        <div id="cr-df-results" class="cr-results-bar" role="region" aria-label="Filter results"></div>
         <div class="cr-stage">
           <p class="cr-loading" id="cr-designs-loading">Loading designs…</p>
           <div class="cr-grid" id="cr-designs-grid" hidden></div>
