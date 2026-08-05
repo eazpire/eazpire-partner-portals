@@ -266,6 +266,69 @@ describe("adminCreationsProductListEnrich", () => {
     expect(byView[1].variants.map((v) => v.variant_label)).toEqual(["Red"]);
   });
 
+  it("enrich prefers Shopify node variants / metafields / Color|view alts (Customer Softstyle)", async () => {
+    const { enrichCreationsProductListFacets } = await import(
+      "../../src/features/manufacturers/adminCreationsProductListEnrich.js"
+    );
+    const node = {
+      id: "gid://shopify/Product/10351905505562",
+      status: "ACTIVE",
+      totalVariants: { count: 55 },
+      featuredMedia: { image: { url: "https://cdn.example/white-front.jpg" } },
+      images: {
+        edges: [
+          {
+            node: {
+              url: "https://cdn.example/white-front.jpg",
+              altText: "White|front|preview-default",
+            },
+          },
+          { node: { url: "https://cdn.example/white-back.jpg", altText: "White|back" } },
+          { node: { url: "https://cdn.example/red-front.jpg", altText: "Red|front|preview-default" } },
+        ],
+      },
+      metafields: {
+        edges: [
+          { node: { namespace: "custom", key: "product_key", value: "unisex-softstyle-cotton-tee" } },
+          { node: { namespace: "custom", key: "printify_product_id", value: "pf-1" } },
+        ],
+      },
+      publications: { edges: [] },
+      resourcePublications: { edges: [] },
+    };
+    const nodes = indexShopifyNodesById([node]);
+    const [row] = await enrichCreationsProductListFacets(
+      {},
+      [
+        {
+          id: "studio:1",
+          product_key: "unisex-softstyle-cotton-tee",
+          title: "Softstyle",
+          shopify_product_id: "10351905505562",
+          source: "customer",
+          images: ["https://cdn.example/studio-stub.jpg"],
+          grid_views: [
+            {
+              src: "https://cdn.example/studio-stub.jpg",
+              view: "front",
+              variant_label: "Default",
+              alt: "",
+            },
+          ],
+        },
+      ],
+      nodes
+    );
+    expect(row.variant_count).toBe(55);
+    expect(row.metafields_filled_count).toBe(2);
+    expect(row.alt_image_texts).toEqual([
+      "White|front|preview-default",
+      "White|back",
+      "Red|front|preview-default",
+    ]);
+    expect(row.alt_image_groups.map((g) => g.variant_label).sort()).toEqual(["Red", "White"]);
+  });
+
   it("indexShopifyNodesById normalizes ids and skips unresolvable nodes", () => {
     const map = indexShopifyNodesById([
       { id: "gid://shopify/Product/123" },

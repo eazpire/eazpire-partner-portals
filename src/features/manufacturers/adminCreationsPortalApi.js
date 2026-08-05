@@ -33,9 +33,98 @@ import {
 } from "../publish/printifyListingStatus.js";
 
 /**
+ * Resolve real Shopify product ids from D1 when list rows carry a stale / wrong
+ * shopify_product_id (e.g. customer id) or only a Printify / design id.
+ * @param {object} env
+ * @param {Array<object>} products
+ * @returns {Promise<Map<string, string>>} key `pf:<printifyId>` or `design:<designId>` → shopify id
+ */
+async function resolveShopifyIdsFromPublishedDesigns(env, products) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  if (!env?.CREATOR_DB) return out;
+
+  const printifyIds = [
+    ...new Set(
+      (products || [])
+        .map((p) => String(p?.printify_product_id || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const designIds = [
+    ...new Set(
+      (products || [])
+        .map((p) => String(p?.design_id || "").trim())
+        .filter((id) => /^\d+$/.test(id))
+    ),
+  ];
+  if (!printifyIds.length && !designIds.length) return out;
+
+  const CHUNK = 80;
+  for (let i = 0; i < printifyIds.length; i += CHUNK) {
+    const chunk = printifyIds.slice(i, i + CHUNK);
+    const ph = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT design_id, printify_product_id, shopify_product_id
+         FROM published_designs
+         WHERE TRIM(CAST(printify_product_id AS TEXT)) IN (${ph})
+           AND shopify_product_id IS NOT NULL
+           AND TRIM(CAST(shopify_product_id AS TEXT)) != ''`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        const pid = String(row.printify_product_id || "").trim();
+        if (sid && pid && !out.has(`pf:${pid}`)) out.set(`pf:${pid}`, sid);
+        const did = String(row.design_id ?? "").trim();
+        if (sid && did && !out.has(`design:${did}`)) out.set(`design:${did}`, sid);
+      }
+    } catch (e) {
+      console.warn("[ensureShopifyNodes] printify→shopify resolve failed:", e?.message || e);
+    }
+  }
+
+  const missingDesigns = designIds.filter((id) => !out.has(`design:${id}`));
+  for (let i = 0; i < missingDesigns.length; i += CHUNK) {
+    const chunk = missingDesigns.slice(i, i + CHUNK);
+    const ph = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT design_id, printify_product_id, shopify_product_id
+         FROM published_designs
+         WHERE CAST(design_id AS TEXT) IN (${ph})
+           AND shopify_product_id IS NOT NULL
+           AND TRIM(CAST(shopify_product_id AS TEXT)) != ''`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        const did = String(row.design_id ?? "").trim();
+        if (sid && did && !out.has(`design:${did}`)) out.set(`design:${did}`, sid);
+        const pid = String(row.printify_product_id || "").trim();
+        if (sid && pid && !out.has(`pf:${pid}`)) out.set(`pf:${pid}`, sid);
+      }
+    } catch (e) {
+      console.warn("[ensureShopifyNodes] design→shopify resolve failed:", e?.message || e);
+    }
+  }
+
+  return out;
+}
+
+/**
  * Merge caller-supplied Shopify nodes with any missing ids looked up via `nodes(ids:)`.
- * Customer / Studio list rows often have shopify_product_id but never went through a
- * products() scan — without this, enrich shows variant_count=0, metafields=0, Default alts.
+ * Customer / Studio Softstyle rows often:
+ *   - never went through a products() scan, or
+ *   - store a wrong shopify_product_id (customer id) while printify_product_id is correct
+ * Without a real Product node, enrich shows variant_count=0, metafields=0, Default alts.
+ *
+ * Mutates `product.shopify_product_id` when a better id is resolved from D1 so enrich
+ * can look up the node.
+ *
  * @param {object} env
  * @param {Array<object>} products
  * @param {Map<string, object>|null|undefined} nodesByShopifyId
@@ -46,19 +135,48 @@ export async function ensureShopifyNodesForProductList(env, products, nodesBySho
     nodesByShopifyId instanceof Map
       ? new Map(nodesByShopifyId)
       : indexShopifyNodesById(Object.values(nodesByShopifyId || {}));
+  const list = Array.isArray(products) ? products : [];
 
   const missing = [];
-  for (const product of products || []) {
+  for (const product of list) {
     const sid = normalizeShopifyProductId(product?.shopify_product_id || product?.id);
     if (!sid || map.has(sid)) continue;
     missing.push(sid);
   }
-  if (!missing.length) return map;
+  if (missing.length) {
+    const fetched = await fetchShopifyProductNodesByIds(env, missing);
+    for (const node of fetched) {
+      const sid = normalizeShopifyProductId(node?.id);
+      if (sid) map.set(sid, node);
+    }
+  }
 
-  const fetched = await fetchShopifyProductNodesByIds(env, missing);
-  for (const node of fetched) {
-    const sid = normalizeShopifyProductId(node?.id);
-    if (sid) map.set(sid, node);
+  // Rows still without a node: invalid shopify id (customer id) or studio-only id.
+  const unresolved = list.filter((p) => {
+    const sid = normalizeShopifyProductId(p?.shopify_product_id || p?.id);
+    return !sid || !map.has(sid);
+  });
+  if (!unresolved.length) return map;
+
+  const resolved = await resolveShopifyIdsFromPublishedDesigns(env, unresolved);
+  const extraSids = [];
+  for (const product of unresolved) {
+    const pid = String(product?.printify_product_id || "").trim();
+    const did = String(product?.design_id || "").trim();
+    const sid =
+      (pid && resolved.get(`pf:${pid}`)) ||
+      (did && resolved.get(`design:${did}`)) ||
+      "";
+    if (!sid) continue;
+    product.shopify_product_id = sid;
+    if (!map.has(sid)) extraSids.push(sid);
+  }
+  if (extraSids.length) {
+    const fetched = await fetchShopifyProductNodesByIds(env, extraSids);
+    for (const node of fetched) {
+      const sid = normalizeShopifyProductId(node?.id);
+      if (sid) map.set(sid, node);
+    }
   }
   return map;
 }
