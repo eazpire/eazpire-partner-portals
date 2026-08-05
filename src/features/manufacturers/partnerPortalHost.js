@@ -22,6 +22,7 @@ async function maybeInjectCursor(res, hostname, pathname) {
     partnerAuthBase: "https://admin.eazpire.com",
     cssUrl: "https://admin.eazpire.com/creations/shared/admin-cursor-agent/shell.css",
     jsUrl: "https://admin.eazpire.com/creations/shared/admin-cursor-agent/shell.js",
+    consoleJsUrl: "https://admin.eazpire.com/creations/shared/admin-cursor-agent/console-early.js",
   });
 }
 
