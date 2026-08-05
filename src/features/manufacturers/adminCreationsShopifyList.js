@@ -19,6 +19,9 @@ const PRODUCTS_GQL = `
           productType
           tags
           isGiftCard
+          totalVariants: variantsCount {
+            count
+          }
           featuredMedia {
             ... on MediaImage {
               image { url }
@@ -322,7 +325,23 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     provider: provider || null,
     source,
     source_label: sourceLabel,
+    total_variants: Number(node?.totalVariants?.count) || 0,
   };
+}
+
+/**
+ * Build a Map<normalizedShopifyId, node> from a list of raw Shopify GraphQL product nodes
+ * (e.g. the output of fetchShopifyProductNodesMatching), for list-enrichment lookups
+ * (see adminCreationsProductListEnrich.js).
+ */
+export function indexShopifyNodesById(nodes) {
+  const map = new Map();
+  for (const node of nodes || []) {
+    const sid = normalizeShopifyProductId(node?.id);
+    if (!sid) continue;
+    map.set(sid, node);
+  }
+  return map;
 }
 
 /**

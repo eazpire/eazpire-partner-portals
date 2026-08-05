@@ -16,8 +16,28 @@ import {
   isTodifyPartnerShopifyProduct,
   isSampleShopifyProduct,
   normalizeShopifyProductId,
+  indexShopifyNodesById,
   NATIVE_SHOPIFY_STORE_QUERY,
 } from "./adminCreationsShopifyList.js";
+import {
+  enrichCreationsProductListFacets,
+  buildProductFilterFacets,
+} from "./adminCreationsProductListEnrich.js";
+
+/**
+ * Enrich + facet-bucket a product list for the Products page (filter sidebar, "Needs
+ * Update" badge, bulk eligibility). Pass `nodesByShopifyId` (see indexShopifyNodesById)
+ * when the caller already fetched raw Shopify GraphQL nodes, so enrichment can read
+ * metafields / alt text / variant counts without a second Shopify round-trip.
+ * @param {object} env
+ * @param {Array<object>} products
+ * @param {{ nodesByShopifyId?: Map<string, object>|null }} [opts]
+ */
+export async function finalizeProductList(env, products, { nodesByShopifyId = null } = {}) {
+  const enriched = await enrichCreationsProductListFacets(env, products, nodesByShopifyId);
+  const facets = buildProductFilterFacets(enriched);
+  return { products: enriched, facets };
+}
 
 export function proxyRequestWithAdminOwner(request, ownerId) {
   const url = new URL(request.url);
