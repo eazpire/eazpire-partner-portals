@@ -50,19 +50,11 @@ export function teardownProductsExtras() {
   teardownProductsActionDockInner();
 }
 
-const SOURCE_FILTERS = [
-  { key: "printify", label: "Printify" },
-  { key: "todify", label: "Todify" },
-  { key: "customer", label: "Customer" },
-  { key: "samples", label: "Personalizable samples" },
-  { key: "shopify", label: "Shopify" },
-];
-
 /**
- * Sources whose list `id` is a Shopify product id (safe fallback when shopify_product_id is missing).
+ * Buckets whose list `id` is a Shopify product id (safe fallback when shopify_product_id is missing).
  * Customer / studio pseudo-ids (`studio:26`) must never be treated as Shopify ids.
  */
-const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "samples"]);
+const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "samples", "other"]);
 
 function isNumericShopifyId(raw) {
   const s = String(raw || "").trim();
@@ -74,7 +66,8 @@ function isNumericShopifyId(raw) {
 function resolveShopifyProductId(item) {
   const fromField = String(item?.shopify_product_id || "").trim();
   if (isNumericShopifyId(fromField)) return fromField.replace(/\.0+$/, "");
-  if (SHOPIFY_ROW_ID_SOURCES.has(state.source)) {
+  const bucket = String(item?.listing_bucket || item?.source || "").trim();
+  if (SHOPIFY_ROW_ID_SOURCES.has(bucket)) {
     const id = String(item?.id || "").trim();
     if (isNumericShopifyId(id)) return id.replace(/\.0+$/, "");
   }
@@ -86,7 +79,10 @@ function resolveStudioListingId(item) {
   const id = String(item?.id || "").trim();
   const m = /^studio:(\d+)$/i.exec(id);
   if (m) return m[1];
-  if ((state.source === "customer" || item?.source === "customer") && !resolveShopifyProductId(item)) {
+  if (
+    (item?.listing_bucket === "customer" || item?.filter_source === "customer" || item?.source === "customer") &&
+    !resolveShopifyProductId(item)
+  ) {
     if (/^\d+$/.test(id)) return id;
   }
   return "";
@@ -105,16 +101,9 @@ const DETAIL_MENUS = [
 const VALUE_TRUNCATE = 160;
 
 const state = {
-  source: "printify",
-  category: "all",
-  q: "",
-  qDebounced: "",
   loading: false,
   error: "",
   items: [],
-  categories: [],
-  categoryTree: [],
-  searchTimer: null,
   fetchGen: 0,
   detail: {
     open: false,
@@ -160,70 +149,6 @@ function formatMoney(amount, currency) {
   } catch {
     return `${n.toFixed(2)} ${currency || ""}`.trim();
   }
-}
-
-function categoriesForToolbar() {
-  const cats = [{ key: "all", label: "All", count: state.items.length }];
-  const seen = new Set(["all"]);
-  for (const group of state.categoryTree || []) {
-    for (const child of group.children || []) {
-      if (!child?.name || seen.has(child.name)) continue;
-      seen.add(child.name);
-      cats.push({ key: child.name, label: child.name, count: child.count });
-    }
-  }
-  for (const p of state.items) {
-    const cat = p.category;
-    if (!cat || seen.has(cat)) continue;
-    seen.add(cat);
-    cats.push({
-      key: cat,
-      label: cat,
-      count: state.items.filter((x) => x.category === cat).length,
-    });
-  }
-  return cats;
-}
-
-function filterToolbarHtml() {
-  const cats = categoriesForToolbar();
-  return `
-    <div class="cr-toolbar panel">
-      <div class="cr-toolbar__row cr-toolbar__row--primary">
-        <div class="cr-search" role="search">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" id="cr-products-search" placeholder="Search products…" aria-label="Search products" autocomplete="off" value="${escapeHtml(state.q)}" />
-        </div>
-      </div>
-      <div class="cr-toolbar__row">
-        <div class="cr-filter-group cr-filter-group--carousel">
-          <span class="cr-filter-label">Category</span>
-          <div class="cr-carousel" id="cr-cat-carousel">
-            <button type="button" class="cr-carousel__arrow cr-carousel__arrow--prev" id="cr-cat-prev" aria-label="Scroll categories left">‹</button>
-            <div class="cr-carousel__track" id="cr-cat-track">
-              ${cats
-                .map(
-                  (c) =>
-                    `<button type="button" class="cr-chip ${state.category === c.key ? "active" : ""}" data-cr-category="${escapeHtml(c.key)}">${escapeHtml(c.label)}${c.count != null ? `<span class="cr-chip__count">${c.count}</span>` : ""}</button>`
-                )
-                .join("")}
-            </div>
-            <button type="button" class="cr-carousel__arrow cr-carousel__arrow--next" id="cr-cat-next" aria-label="Scroll categories right">›</button>
-          </div>
-        </div>
-      </div>
-      <div class="cr-toolbar__row">
-        <div class="cr-filter-group">
-          <span class="cr-filter-label">Source</span>
-          <div class="cr-chips" role="group" aria-label="Product source">
-            ${SOURCE_FILTERS.map(
-              (f) =>
-                `<button type="button" class="cr-chip ${state.source === f.key ? "active" : ""}" data-cr-source="${f.key}">${escapeHtml(f.label)}</button>`
-            ).join("")}
-          </div>
-        </div>
-      </div>
-    </div>`;
 }
 
 function overlayStyleFromPlacement(placement) {
@@ -317,7 +242,7 @@ function productCardHtml(item) {
       ${item.category ? `<span class="cr-meta-chip">${escapeHtml(item.category)}</span>` : ""}
       ${item.owner_label ? `<span class="cr-meta-chip">${escapeHtml(item.owner_label)}</span>` : ""}
       <span class="cr-meta-chip badge ${statusBadgeClass(item.is_active)}">${escapeHtml(statusLabel(item.is_active))}</span>
-      <span class="cr-meta-chip cr-meta-chip--muted">${escapeHtml(item.source_label || state.source)}</span>
+      <span class="cr-meta-chip cr-meta-chip--muted">${escapeHtml(item.source_label || item.listing_bucket || "—")}</span>
     </div>
     ${
       item.needs_update
@@ -328,21 +253,7 @@ function productCardHtml(item) {
 }
 
 function applyFilters() {
-  let items = [...state.items];
-  const needle = state.qDebounced.toLowerCase();
-  if (needle) {
-    items = items.filter((p) => {
-      const hay = [p.title, p.product_key, p.category, p.owner_label, p.creator_name, p.parent_group]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(needle);
-    });
-  }
-  if (state.category !== "all") {
-    items = items.filter((p) => p.category === state.category || p.parent_group === state.category);
-  }
-  items = applyProductSidebarFilters(items);
+  let items = applyProductSidebarFilters(state.items);
   const busyKeys = getBusyProductKeys();
   const busyShopifyIds = getBusyShopifyIds();
   if (busyKeys.size || busyShopifyIds.size) {
@@ -356,21 +267,6 @@ function applyFilters() {
 }
 
 function emptyMessageForSource() {
-  if (state.source === "printify") {
-    return "No Printify-sourced Shopify listings found (products with a Printify link).";
-  }
-  if (state.source === "todify") {
-    return "No Todify-sourced Shopify listings found (provider = Todify).";
-  }
-  if (state.source === "samples") {
-    return "No personalizable sample products found (custom.sample = yes).";
-  }
-  if (state.source === "shopify") {
-    return "No residual Shopify products found (gift cards and other native leftovers).";
-  }
-  if (state.source === "customer") {
-    return "No Shop Design Studio customer products found.";
-  }
   return "No products match your filters.";
 }
 
@@ -402,18 +298,132 @@ function visibleProductsForBulk() {
   return applyFilters();
 }
 
-async function reloadCurrentSourceItems() {
-  if (state.source === "customer") await loadCustomerProducts();
-  else if (state.source === "shopify") await loadShopifyProducts();
-  else if (state.source === "todify") await loadTodifyProducts();
-  else if (state.source === "samples") await loadSamplesProducts();
-  else await loadPrintifyProducts();
+function dedupeKey(p) {
+  const sid = String(p.shopify_product_id || "").trim();
+  if (sid && !/^studio:/i.test(sid)) return `sid:${sid}`;
+  const pk = String(p.product_key || "").trim();
+  if (pk) return `pk:${pk}:${p.listing_bucket || p.source || ""}`;
+  return `id:${p.id || Math.random()}`;
 }
 
-/** Lighter refresh after a bulk action — reloads product data without resetting search/category/sidebar filters. */
+function tagBucket(products, { listingBucket, filterSource, filterProvider, sourceLabel, defaultCategory }) {
+  return (products || []).map((p) => ({
+    ...p,
+    listing_bucket: listingBucket,
+    filter_source: filterSource || null,
+    filter_provider: filterProvider || p.filter_provider || null,
+    source_label: p.source_label || sourceLabel,
+    source: listingBucket,
+    category: p.category || p.product_type || defaultCategory,
+    is_active: p.is_active != null ? p.is_active : p.status === "ACTIVE" ? 2 : 0,
+    filter_product_key: p.filter_product_key || p.product_key || null,
+    catalog_product_name: p.catalog_product_name || p.product_key || p.title || null,
+  }));
+}
+
+async function fetchBucket(op) {
+  try {
+    const data = await partnerFetch(op);
+    return { ok: true, products: Array.isArray(data.products) ? data.products : [], data };
+  } catch (e) {
+    if (e.data?.error === "shopify_not_configured") {
+      return { ok: false, shopifyMissing: true, products: [], error: e };
+    }
+    return { ok: false, products: [], error: e };
+  }
+}
+
+/** Load Printify + Todify + Customer + Samples + Other (residual) in parallel. */
+async function loadAllProductBuckets() {
+  const [printify, todify, customer, samples, other] = await Promise.all([
+    fetchBucket("admin-creations-printify-products"),
+    fetchBucket("admin-creations-todify-products"),
+    fetchBucket("admin-creations-customer-products"),
+    fetchBucket("admin-creations-samples-products"),
+    fetchBucket("admin-creations-shopify-products"),
+  ]);
+
+  if (
+    printify.shopifyMissing &&
+    todify.shopifyMissing &&
+    samples.shopifyMissing &&
+    other.shopifyMissing &&
+    !customer.ok
+  ) {
+    state.items = [];
+    state.error = "Shopify API is not configured on this worker yet.";
+    return;
+  }
+
+  const merged = [];
+  const seen = new Set();
+  const pushAll = (rows) => {
+    for (const p of rows) {
+      const key = dedupeKey(p);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(p);
+    }
+  };
+
+  pushAll(
+    tagBucket(printify.products, {
+      listingBucket: "printify",
+      filterSource: null,
+      filterProvider: "printify",
+      sourceLabel: "Printify",
+      defaultCategory: "Printify",
+    })
+  );
+  pushAll(
+    tagBucket(todify.products, {
+      listingBucket: "todify",
+      filterSource: null,
+      filterProvider: "todify",
+      sourceLabel: "Todify",
+      defaultCategory: "Todify",
+    })
+  );
+  pushAll(
+    tagBucket(customer.products, {
+      listingBucket: "customer",
+      filterSource: "customer",
+      filterProvider: null,
+      sourceLabel: "Customer",
+      defaultCategory: "Customer products",
+    }).map((p) => ({ ...p, is_active: p.is_active != null ? p.is_active : 2 }))
+  );
+  pushAll(
+    tagBucket(samples.products, {
+      listingBucket: "samples",
+      filterSource: "samples",
+      filterProvider: null,
+      sourceLabel: "Samples",
+      defaultCategory: "Personalizable samples",
+    })
+  );
+  pushAll(
+    tagBucket(other.products, {
+      listingBucket: "other",
+      filterSource: "other",
+      filterProvider: null,
+      sourceLabel: "Other",
+      defaultCategory: "Other",
+    })
+  );
+
+  const hardErrors = [printify, todify, customer, samples, other].filter((r) => !r.ok && !r.shopifyMissing && r.error);
+  if (!merged.length && hardErrors.length) {
+    throw hardErrors[0].error;
+  }
+
+  state.items = merged;
+}
+
+/** Lighter refresh after a bulk action — keeps sidebar filter state. */
 async function refreshProductsAfterBulk() {
   try {
-    await reloadCurrentSourceItems();
+    await loadAllProductBuckets();
   } catch (e) {
     showToast("Error", e.message || "Could not refresh products");
   } finally {
@@ -423,93 +433,6 @@ async function refreshProductsAfterBulk() {
   }
 }
 
-function initCategoryCarousel(el) {
-  const track = el.querySelector("#cr-cat-track");
-  const prev = el.querySelector("#cr-cat-prev");
-  const next = el.querySelector("#cr-cat-next");
-  if (!track) return;
-  const scrollBy = () => Math.max(160, track.clientWidth * 0.6);
-  prev?.addEventListener("click", () => track.scrollBy({ left: -scrollBy(), behavior: "smooth" }));
-  next?.addEventListener("click", () => track.scrollBy({ left: scrollBy(), behavior: "smooth" }));
-}
-
-async function loadPrintifyProducts() {
-  try {
-    const data = await partnerFetch("admin-creations-printify-products");
-    const products = Array.isArray(data.products) ? data.products : [];
-    state.items = products.map((p) => ({
-      ...p,
-      source_label: "Printify",
-      product_key: p.product_key,
-    }));
-    state.categoryTree = Array.isArray(data.category_tree) ? data.category_tree : [];
-  } catch (e) {
-    if (e.data?.error === "shopify_not_configured") {
-      state.items = [];
-      state.categoryTree = [];
-      state.error = "Shopify API is not configured on this worker yet.";
-      return;
-    }
-    throw e;
-  }
-}
-
-async function loadCustomerProducts() {
-  const data = await partnerFetch("admin-creations-customer-products");
-  const products = Array.isArray(data.products) ? data.products : [];
-  state.items = products.map((p) => ({
-    ...p,
-    source_label: "Customer",
-    category: p.category || "Customer products",
-    is_active: 2,
-  }));
-  state.categoryTree = [];
-}
-
-async function loadShopifyBucketProducts(op, sourceLabel, defaultCategory) {
-  try {
-    const data = await partnerFetch(op);
-    const products = Array.isArray(data.products) ? data.products : [];
-    state.items = products.map((p) => ({
-      ...p,
-      source_label: p.source_label || sourceLabel,
-      is_active: p.is_active != null ? p.is_active : p.status === "ACTIVE" ? 2 : 0,
-      category: p.category || p.product_type || defaultCategory,
-    }));
-    state.categoryTree = [];
-  } catch (e) {
-    if (e.data?.error === "shopify_not_configured") {
-      state.items = [];
-      state.categoryTree = [];
-      state.error = "Shopify API is not configured on this worker yet.";
-      return;
-    }
-    throw e;
-  }
-}
-
-async function loadShopifyProducts() {
-  await loadShopifyBucketProducts("admin-creations-shopify-products", "Shopify", "Shopify");
-}
-
-async function loadTodifyProducts() {
-  await loadShopifyBucketProducts("admin-creations-todify-products", "Todify", "Todify");
-}
-
-async function loadSamplesProducts() {
-  await loadShopifyBucketProducts(
-    "admin-creations-samples-products",
-    "Personalizable samples",
-    "Personalizable samples"
-  );
-}
-
-function refreshToolbar(el) {
-  const toolbar = el?.querySelector(".cr-toolbar");
-  if (toolbar) toolbar.outerHTML = filterToolbarHtml();
-  if (el) bindToolbar(el);
-}
-
 async function fetchProducts() {
   const gen = ++state.fetchGen;
   state.loading = true;
@@ -517,71 +440,21 @@ async function fetchProducts() {
   renderGrid();
 
   try {
-    if (state.source === "customer") await loadCustomerProducts();
-    else if (state.source === "shopify") await loadShopifyProducts();
-    else if (state.source === "todify") await loadTodifyProducts();
-    else if (state.source === "samples") await loadSamplesProducts();
-    else await loadPrintifyProducts();
+    await loadAllProductBuckets();
     if (gen !== state.fetchGen) return;
-    state.category = "all";
   } catch (e) {
     if (gen !== state.fetchGen) return;
     const msg = e.message || "Could not load products";
     state.error = msg;
     state.items = [];
-    state.categoryTree = [];
     showToast("Error", msg);
   } finally {
     if (gen !== state.fetchGen) return;
     state.loading = false;
     const el = document.getElementById("view-products");
-    refreshToolbar(el);
     refreshFilterSidebarBody(el);
     renderGrid();
   }
-}
-
-function scheduleSearch() {
-  clearTimeout(state.searchTimer);
-  state.searchTimer = setTimeout(() => {
-    state.qDebounced = state.q;
-    renderGrid();
-  }, 220);
-}
-
-function bindToolbar(el) {
-  if (!el) return;
-  el.querySelector("#cr-products-search")?.addEventListener("input", (e) => {
-    state.q = String(e.target.value || "").trim();
-    scheduleSearch();
-  });
-
-  el.querySelectorAll("[data-cr-source]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const next = btn.dataset.crSource;
-      if (!next || state.source === next) return;
-      state.source = next;
-      state.category = "all";
-      state.error = "";
-      state.items = [];
-      state.categoryTree = [];
-      refreshToolbar(el);
-      renderGrid();
-      fetchProducts();
-    });
-  });
-
-  el.querySelectorAll("[data-cr-category]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const next = btn.dataset.crCategory || "all";
-      if (state.category === next) return;
-      state.category = next;
-      refreshToolbar(el);
-      renderGrid();
-    });
-  });
-
-  initCategoryCarousel(el);
 }
 
 function pageShellHtml() {
@@ -606,7 +479,6 @@ function pageShellHtml() {
         </button>
       </div>
       <div class="catalog-studio-main">
-        ${filterToolbarHtml()}
         <div class="cr-stage">
           <p class="cr-loading" id="cr-products-loading">Loading products…</p>
           <p class="cr-error" id="cr-products-error" hidden role="alert"></p>
@@ -617,12 +489,14 @@ function pageShellHtml() {
     </div>`;
 }
 
-/** Re-render the sidebar facet sections + counts from the currently loaded (unfiltered) items. */
+/** Re-render the sidebar facet sections + counts from the currently loaded items. */
 function refreshFilterSidebarBody(el) {
   const body = el?.querySelector("#cr-pf-body");
   if (!body) return;
   body.innerHTML = filterSidebarInnerHtml(computeFacetsFromItems(state.items));
-  bindFilterSidebar(body, { onChange: () => renderGrid() });
+  bindFilterSidebar(body, {
+    onChange: () => renderGrid(),
+  });
 }
 
 function bindFilterSidebarToggle(el) {
@@ -1170,9 +1044,8 @@ export async function mountProductsPage() {
     closeProductDetail();
     teardownProductsExtras();
     el.innerHTML = pageShellHtml();
-    bindToolbar(el);
     bindFilterSidebarToggle(el);
-    bindFilterSidebar(el.querySelector("#cr-pf-body"), { onChange: () => renderGrid() });
+    refreshFilterSidebarBody(el);
     wireProductsBulkDock();
     setBusyChangeListener(() => renderGrid());
     ensureDetailDom();

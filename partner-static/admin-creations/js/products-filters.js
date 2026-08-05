@@ -1,14 +1,16 @@
 /**
- * Creations Portal Products — collapsible Product Filter sidebar (Catalog Studio pattern), IDEA-063.
- * Client-side facet computation mirrors src/features/manufacturers/adminCreationsProductListEnrich.js
- * (buildProductFilterFacets) but runs on the already-enriched product rows returned by the list APIs.
+ * Creations Portal Products — collapsible Product Filter sidebar (IDEA-063).
+ * Tri-state switches: exclude (−1) / neutral (0) / include (1) — same logic as shop PLP filters.
  */
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
 
 const STORAGE_KEY = "admin_creations_products_filter_collapsed";
 
+/** Facet sections in display order. */
 const SECTIONS = [
+  { key: "source", label: "Source" },
+  { key: "product", label: "Product" },
   { key: "provider", label: "Provider" },
   { key: "channels", label: "Channels" },
   { key: "variants", label: "Variants" },
@@ -20,18 +22,22 @@ const SECTIONS = [
   { key: "needs_update", label: "Needs Update" },
 ];
 
+const SOURCE_LABELS = {
+  customer: "Customer",
+  samples: "Samples",
+  other: "Other",
+};
+
+const PROVIDER_LABELS = {
+  printify: "Printify",
+  todify: "Todify",
+};
+
 function defaultFilterState() {
   return {
     q: "",
-    provider: new Set(),
-    channels: new Set(),
-    variants: new Set(),
-    markets: new Set(),
-    metafields: new Set(),
-    channel_count: new Set(),
-    alt_image_texts: new Set(),
-    branding: new Set(),
-    needs_update: new Set(),
+    /** @type {Record<string, Record<string, number>>} section -> value -> -1|0|1 */
+    tri: Object.fromEntries(SECTIONS.map((s) => [s.key, {}])),
   };
 }
 
@@ -39,12 +45,23 @@ export const filterState = defaultFilterState();
 
 export function clearAllFilters() {
   filterState.q = "";
-  for (const { key } of SECTIONS) filterState[key].clear();
+  for (const { key } of SECTIONS) filterState.tri[key] = {};
+}
+
+function countActiveTri() {
+  let n = 0;
+  for (const { key } of SECTIONS) {
+    const group = filterState.tri[key] || {};
+    for (const st of Object.values(group)) {
+      if (st === 1 || st === -1) n += 1;
+    }
+  }
+  return n;
 }
 
 export function hasActiveFilters() {
   if (filterState.q.trim()) return true;
-  return SECTIONS.some(({ key }) => filterState[key].size > 0);
+  return countActiveTri() > 0;
 }
 
 export function isFilterSidebarCollapsed() {
@@ -84,7 +101,10 @@ function bucketCount(list, keyFn) {
     const key = keyFn(item);
     if (key == null) continue;
     const keys = Array.isArray(key) ? key : [key];
-    for (const k of keys) counts.set(k, (counts.get(k) || 0) + 1);
+    for (const k of keys) {
+      if (k == null || k === "") continue;
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
   }
   return counts;
 }
@@ -92,157 +112,221 @@ function bucketCount(list, keyFn) {
 function toFacetList(counts, labelFn) {
   return [...counts.entries()]
     .map(([key, count]) => ({ key, label: labelFn ? labelFn(key) : String(key), count }))
-    .sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)));
+    .sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label)));
 }
 
-/**
- * Recompute all sidebar facet buckets + counts from the currently loaded (unfiltered) items.
- * Mirrors the server-side `buildProductFilterFacets` shape.
- */
-export function computeFacetsFromItems(items) {
-  const list = Array.isArray(items) ? items : [];
+function productFacetKey(p) {
+  return String(p.filter_product_key || p.product_key || "").trim() || null;
+}
 
-  const provider = toFacetList(
-    bucketCount(list, (p) => p.filter_provider || p.source || "unknown"),
-    (key) => list.find((p) => (p.filter_provider || p.source) === key)?.provider_label || key
-  );
+function productFacetLabel(p) {
+  return String(p.catalog_product_name || p.product_key || "Product").trim() || "Product";
+}
 
-  const channels = toFacetList(
-    bucketCount(list, (p) => (Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null)),
-    (key) => list.find((p) => (p.channel_keys || []).includes(key))?.channel_labels?.[
-      (list.find((p) => (p.channel_keys || []).includes(key))?.channel_keys || []).indexOf(key)
-    ] || key
-  );
+function sourceKeyOf(p) {
+  const s = String(p.filter_source || "").trim().toLowerCase();
+  if (s === "customer" || s === "samples" || s === "other") return s;
+  return null;
+}
 
-  const variants = toFacetList(bucketCount(list, (p) => variantBucket(p.variant_count)));
+function providerKeyOf(p) {
+  const s = String(p.filter_provider || "").trim().toLowerCase();
+  if (s === "printify" || s === "todify") return s;
+  return null;
+}
 
-  const markets = toFacetList(
-    bucketCount(list, (p) => (Array.isArray(p.market_labels) && p.market_labels.length ? p.market_labels : "0"))
-  );
-
-  const metafields = toFacetList(bucketCount(list, (p) => metafieldBucket(p.metafields_filled_count)));
-
-  const channelCount = toFacetList(bucketCount(list, (p) => String(Number(p.channel_count) || 0)));
-
-  const altImageTexts = toFacetList(
-    bucketCount(list, (p) => (Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing")),
-    (key) => (key === "has" ? "Has alt text" : "Missing alt text")
-  );
-
-  const branding = toFacetList(
-    bucketCount(list, (p) => {
+function valuesForSection(sectionKey, p) {
+  switch (sectionKey) {
+    case "source":
+      return sourceKeyOf(p);
+    case "product":
+      return productFacetKey(p);
+    case "provider":
+      return providerKeyOf(p);
+    case "channels":
+      return Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null;
+    case "variants":
+      return variantBucket(p.variant_count);
+    case "markets":
+      return Array.isArray(p.market_labels) && p.market_labels.length ? p.market_labels : "0";
+    case "metafields":
+      return metafieldBucket(p.metafields_filled_count);
+    case "channel_count":
+      return String(Number(p.channel_count) || 0);
+    case "alt_image_texts":
+      return Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing";
+    case "branding": {
       const out = [];
       if (Number(p.branding_white_count) > 0) out.push("white");
       if (Number(p.branding_black_count) > 0) out.push("black");
       return out.length ? out : null;
-    }),
-    (key) => (key === "white" ? "White branding" : "Black branding")
-  );
-
-  const needsUpdate = toFacetList(
-    bucketCount(list, (p) => (p.needs_update ? "yes" : "no")),
-    (key) => (key === "yes" ? "Needs update" : "Up to date")
-  );
-
-  return {
-    total: list.length,
-    provider,
-    channels,
-    variants,
-    markets,
-    metafields,
-    channel_count: channelCount,
-    alt_image_texts: altImageTexts,
-    branding,
-    needs_update: needsUpdate,
-  };
+    }
+    case "needs_update":
+      return p.needs_update ? "yes" : "no";
+    default:
+      return null;
+  }
 }
 
-function matchesFacetSet(selected, valueOrList) {
-  if (!selected.size) return true;
-  const values = Array.isArray(valueOrList) ? valueOrList : [valueOrList];
-  return values.some((v) => selected.has(v));
+function productMatchesValue(p, sectionKey, value) {
+  const raw = valuesForSection(sectionKey, p);
+  if (raw == null) return false;
+  const list = Array.isArray(raw) ? raw.map(String) : [String(raw)];
+  return list.includes(String(value));
 }
 
-/** Apply the current filterState (search + facet selections) to a list of enriched products. */
-export function applyProductSidebarFilters(items) {
-  let list = Array.isArray(items) ? items : [];
+/**
+ * Shop-style facet match: excludes must not match; if any includes, at least one must match.
+ * Sections with only neutrals are ignored.
+ */
+function matchesTriFacets(p, skipSection = null) {
+  for (const { key } of SECTIONS) {
+    if (skipSection && key === skipSection) continue;
+    const group = filterState.tri[key] || {};
+    const includes = [];
+    const excludes = [];
+    for (const [val, st] of Object.entries(group)) {
+      if (st === 1) includes.push(val);
+      if (st === -1) excludes.push(val);
+    }
+    for (const ex of excludes) {
+      if (productMatchesValue(p, key, ex)) return false;
+    }
+    if (includes.length) {
+      if (!includes.some((inc) => productMatchesValue(p, key, inc))) return false;
+    }
+  }
+  return true;
+}
 
+function poolForFacetCounts(items, skipSection) {
   const needle = filterState.q.trim().toLowerCase();
-  if (needle) {
-    list = list.filter((p) => {
+  return (items || []).filter((p) => {
+    if (needle) {
       const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      return hay.includes(needle);
-    });
-  }
+      if (!hay.includes(needle)) return false;
+    }
+    return matchesTriFacets(p, skipSection);
+  });
+}
 
-  if (filterState.provider.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.provider, p.filter_provider || p.source || "unknown"));
-  }
-  if (filterState.channels.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.channels, p.channel_keys || []));
-  }
-  if (filterState.variants.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.variants, variantBucket(p.variant_count)));
-  }
-  if (filterState.markets.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.markets, p.market_labels?.length ? p.market_labels : "0"));
-  }
-  if (filterState.metafields.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.metafields, metafieldBucket(p.metafields_filled_count)));
-  }
-  if (filterState.channel_count.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.channel_count, String(Number(p.channel_count) || 0)));
-  }
-  if (filterState.alt_image_texts.size) {
-    list = list.filter((p) =>
-      matchesFacetSet(filterState.alt_image_texts, p.alt_image_texts?.length ? "has" : "missing")
-    );
-  }
-  if (filterState.branding.size) {
-    list = list.filter((p) => {
-      const keys = [];
-      if (Number(p.branding_white_count) > 0) keys.push("white");
-      if (Number(p.branding_black_count) > 0) keys.push("black");
-      return matchesFacetSet(filterState.branding, keys);
-    });
-  }
-  if (filterState.needs_update.size) {
-    list = list.filter((p) => matchesFacetSet(filterState.needs_update, p.needs_update ? "yes" : "no"));
-  }
+/**
+ * Recompute facet buckets + counts. Counts are relative to other active filters
+ * (same section excluded from the pool, shop-style).
+ */
+export function computeFacetsFromItems(items) {
+  const list = Array.isArray(items) ? items : [];
 
-  return list;
+  const labelFns = {
+    source: (key) => SOURCE_LABELS[key] || key,
+    product: (key) => {
+      const hit = list.find((p) => productFacetKey(p) === key);
+      return hit ? productFacetLabel(hit) : key;
+    },
+    provider: (key) => PROVIDER_LABELS[key] || key,
+    channels: (key) => {
+      const hit = list.find((p) => (p.channel_keys || []).includes(key));
+      const idx = hit ? (hit.channel_keys || []).indexOf(key) : -1;
+      return (idx >= 0 && hit.channel_labels?.[idx]) || key;
+    },
+    alt_image_texts: (key) => (key === "has" ? "Has alt text" : "Missing alt text"),
+    branding: (key) => (key === "white" ? "White branding" : "Black branding"),
+    needs_update: (key) => (key === "yes" ? "Needs update" : "Up to date"),
+  };
+
+  // Always show Source / Provider options even when empty in current load
+  const baseSource = new Map([
+    ["customer", 0],
+    ["samples", 0],
+    ["other", 0],
+  ]);
+  const baseProvider = new Map([
+    ["printify", 0],
+    ["todify", 0],
+  ]);
+
+  const out = { total: list.length };
+  for (const { key } of SECTIONS) {
+    const pool = poolForFacetCounts(list, key);
+    const counts = bucketCount(pool, (p) => valuesForSection(key, p));
+    if (key === "source") {
+      for (const [k, v] of counts) baseSource.set(k, v);
+      out[key] = toFacetList(baseSource, labelFns.source);
+    } else if (key === "provider") {
+      for (const [k, v] of counts) baseProvider.set(k, v);
+      out[key] = toFacetList(baseProvider, labelFns.provider);
+    } else {
+      out[key] = toFacetList(counts, labelFns[key]);
+    }
+  }
+  return out;
+}
+
+/** Apply search + tri-state facets to enriched products. */
+export function applyProductSidebarFilters(items) {
+  const needle = filterState.q.trim().toLowerCase();
+  return (items || []).filter((p) => {
+    if (needle) {
+      const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return matchesTriFacets(p, null);
+  });
+}
+
+function clampTri(st) {
+  const n = Number(st);
+  if (n === 1 || n === -1) return n;
+  return 0;
+}
+
+function triSwitchHtml(sectionKey, value, state) {
+  const st = clampTri(state);
+  return `<div class="cr-pf-triswitch" data-state="${st}" data-cr-pf-section="${escapeHtml(sectionKey)}" data-cr-pf-key="${escapeHtml(
+    String(value)
+  )}" role="group" aria-label="Filter">
+    <div class="cr-pf-triswitch__track">
+      <div class="cr-pf-triswitch__thumb"></div>
+      <div class="cr-pf-triswitch__labels">
+        <button type="button" data-v="-1" aria-label="Exclude"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--minus">−</span></button>
+        <button type="button" data-v="0" aria-label="Neutral"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--dot"></span></button>
+        <button type="button" data-v="1" aria-label="Include"><span class="cr-pf-triswitch__glyph cr-pf-triswitch__glyph--plus">+</span></button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function facetSectionHtml(sectionKey, label, facetList) {
-  const selected = filterState[sectionKey];
+  const group = filterState.tri[sectionKey] || {};
+  const active = Object.values(group).filter((st) => st === 1 || st === -1).length;
   const rows = (facetList || [])
-    .map(
-      (f) => `<label class="cr-pf-option">
-        <input type="checkbox" class="cr-pf-cb" data-cr-pf-section="${escapeHtml(sectionKey)}" data-cr-pf-key="${escapeHtml(String(f.key))}" ${
-        selected.has(f.key) ? "checked" : ""
-      } />
-        <span class="cr-pf-option__label">${escapeHtml(f.label)}</span>
+    .map((f) => {
+      const st = clampTri(group[f.key] || 0);
+      return `<div class="cr-pf-option cr-pf-option--tri" data-tri-state="${st}">
+        <span class="cr-pf-option__label" title="${escapeHtml(f.label)}">${escapeHtml(f.label)}</span>
         <span class="cr-pf-option__count">${f.count}</span>
-      </label>`
-    )
+        ${triSwitchHtml(sectionKey, f.key, st)}
+      </div>`;
+    })
     .join("");
   return `<details class="cr-pf-section" data-cr-pf-group="${escapeHtml(sectionKey)}" open>
     <summary class="cr-pf-section__summary">
       <span>${escapeHtml(label)}</span>
-      ${selected.size ? `<span class="cr-pf-section__badge">${selected.size}</span>` : ""}
+      ${active ? `<span class="cr-pf-section__badge">${active}</span>` : ""}
     </summary>
     <div class="cr-pf-section__body">${rows || '<p class="cr-pf-empty">No values</p>'}</div>
   </details>`;
 }
 
-/** Full innerHTML for the filter sidebar body (search + facet sections + clear-all). */
 export function filterSidebarInnerHtml(facets) {
   const f = facets || {};
-  const activeCount = SECTIONS.reduce((sum, { key }) => sum + filterState[key].size, 0) + (filterState.q.trim() ? 1 : 0);
+  const activeCount = countActiveTri() + (filterState.q.trim() ? 1 : 0);
   return `
     <div class="cr-pf-search">
       <input type="search" id="cr-pf-search-input" class="cr-pf-search__input" placeholder="Search products…" value="${escapeHtml(
@@ -255,22 +339,13 @@ export function filterSidebarInnerHtml(facets) {
         : ""
     }
     <div class="cr-pf-sections">
-      ${facetSectionHtml("provider", "Provider", f.provider)}
-      ${facetSectionHtml("channels", "Channels", f.channels)}
-      ${facetSectionHtml("variants", "Variants", f.variants)}
-      ${facetSectionHtml("markets", "Markets", f.markets)}
-      ${facetSectionHtml("metafields", "Metafields", f.metafields)}
-      ${facetSectionHtml("channel_count", "Channel count", f.channel_count)}
-      ${facetSectionHtml("alt_image_texts", "Alt Image Texts", f.alt_image_texts)}
-      ${facetSectionHtml("branding", "White/Black Branding", f.branding)}
-      ${facetSectionHtml("needs_update", "Needs Update", f.needs_update)}
+      ${SECTIONS.map(({ key, label }) => facetSectionHtml(key, label, f[key])).join("")}
     </div>`;
 }
 
 /**
- * Bind the filter sidebar (search input, facet checkboxes, clear-all).
- * @param {HTMLElement} sidebarEl element containing the sidebar innerHTML (see filterSidebarInnerHtml)
- * @param {{ onChange: () => void }} handlers called whenever the filter state changes
+ * @param {HTMLElement} sidebarEl
+ * @param {{ onChange: () => void }} handlers
  */
 export function bindFilterSidebar(sidebarEl, { onChange } = {}) {
   if (!sidebarEl) return;
@@ -285,21 +360,37 @@ export function bindFilterSidebar(sidebarEl, { onChange } = {}) {
     searchTimer = setTimeout(notify, 200);
   });
 
-  sidebarEl.querySelectorAll(".cr-pf-cb").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const section = cb.getAttribute("data-cr-pf-section");
-      const key = cb.getAttribute("data-cr-pf-key");
-      if (!section || key == null || !filterState[section]) return;
-      if (cb.checked) filterState[section].add(key);
-      else filterState[section].delete(key);
-      notify();
+  sidebarEl.querySelectorAll(".cr-pf-triswitch").forEach((sw) => {
+    sw.querySelectorAll("button[data-v]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const section = sw.getAttribute("data-cr-pf-section");
+        const key = sw.getAttribute("data-cr-pf-key");
+        const v = clampTri(parseInt(btn.getAttribute("data-v"), 10));
+        if (!section || key == null || !filterState.tri[section]) return;
+        if (v === 0) delete filterState.tri[section][key];
+        else filterState.tri[section][key] = v;
+        sw.setAttribute("data-state", String(v));
+        const row = sw.closest(".cr-pf-option--tri");
+        if (row) row.setAttribute("data-tri-state", String(v));
+        notify();
+      });
     });
   });
 
   sidebarEl.querySelector("#cr-pf-clear-all")?.addEventListener("click", () => {
     clearAllFilters();
+    const search = sidebarEl.querySelector("#cr-pf-search-input");
+    if (search) search.value = "";
+    sidebarEl.querySelectorAll(".cr-pf-triswitch").forEach((sw) => {
+      sw.setAttribute("data-state", "0");
+      sw.closest(".cr-pf-option--tri")?.setAttribute("data-tri-state", "0");
+    });
+    sidebarEl.querySelectorAll(".cr-pf-section__badge").forEach((b) => b.remove());
+    sidebarEl.querySelector("#cr-pf-clear-all")?.remove();
     notify();
   });
 }
 
-export { SECTIONS as PRODUCT_FILTER_SECTIONS };
+export { SECTIONS as PRODUCT_FILTER_SECTIONS, SOURCE_LABELS, PROVIDER_LABELS };
