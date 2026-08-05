@@ -3,6 +3,27 @@
  */
 
 import { getPartnerStaticFallback } from "./partnerStaticFallback.js";
+import { withAdminCursorAgentInjection } from "../../utils/adminCursorAgentInject.js";
+
+function cursorPortalForHost(hostname, pathname) {
+  if (hostname === "partner.eazpire.com" || hostname === "partner.local.eazpire.com") return "partner";
+  if (pathname.startsWith("/creations")) return "admin-creations";
+  if (pathname.startsWith("/partner")) return "admin-partner";
+  if (pathname.startsWith("/brands")) return "admin-brands";
+  if (pathname.startsWith("/audience")) return "admin-audience";
+  return "admin";
+}
+
+async function maybeInjectCursor(res, hostname, pathname) {
+  const ct = String(res.headers.get("content-type") || "");
+  if (!ct.includes("text/html")) return res;
+  return withAdminCursorAgentInjection(res, {
+    portal: cursorPortalForHost(hostname, pathname),
+    partnerAuthBase: "https://admin.eazpire.com",
+    cssUrl: "https://admin.eazpire.com/creations/shared/admin-cursor-agent/shell.css",
+    jsUrl: "https://admin.eazpire.com/creations/shared/admin-cursor-agent/shell.js",
+  });
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -185,10 +206,14 @@ export async function handlePartnerPortalRequest(request, env) {
   </div>
 </body>
 </html>`;
-    return new Response(html, {
-      status: 200,
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-    });
+    return maybeInjectCursor(
+      new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      }),
+      url.hostname,
+      url.pathname
+    );
   }
 
   const key = resolveAssetKey(url.hostname, url.pathname);
@@ -197,15 +222,19 @@ export async function handlePartnerPortalRequest(request, env) {
   // Inline bundle first — avoids PARTNER_ASSETS hangs that caused Cloudflare 522s.
   const fallback = getPartnerStaticFallback(key);
   if (fallback) {
-    return new Response(fallback.body, {
-      status: 200,
-      headers: {
-        "content-type": fallback.contentType,
-        "cache-control": key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
-          ? "no-store"
-          : "public, max-age=300",
-      },
-    });
+    return maybeInjectCursor(
+      new Response(fallback.body, {
+        status: 200,
+        headers: {
+          "content-type": fallback.contentType,
+          "cache-control": key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
+            ? "no-store"
+            : "public, max-age=300",
+        },
+      }),
+      url.hostname,
+      url.pathname
+    );
   }
 
   const assetRes = await fetchAsset(env, key);
@@ -219,7 +248,11 @@ export async function handlePartnerPortalRequest(request, env) {
         ? "no-store"
         : "public, max-age=300"
     );
-    return new Response(assetRes.body, { status: assetRes.status, headers });
+    return maybeInjectCursor(
+      new Response(assetRes.body, { status: assetRes.status, headers }),
+      url.hostname,
+      url.pathname
+    );
   }
 
   if (key.endsWith(".ico")) {

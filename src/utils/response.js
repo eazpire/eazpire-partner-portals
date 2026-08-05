@@ -34,6 +34,11 @@ export function getCorsHeaders(request) {
     "https://play.eazpire.com",
     "https://ads.eazpire.com",
     "https://brand.eazpire.com",
+    "https://creator.eazpire.com",
+    "https://matrix.eazpire.com",
+    "https://map.eazpire.com",
+    "https://universe.eazpire.com",
+    "https://roadmap.eazpire.com",
     // Shopify-Store
     "https://allyoucanpink.myshopify.com",
   ];
@@ -49,6 +54,10 @@ export function getCorsHeaders(request) {
     }
     // Shopify preview pattern: *.myshopify.com
     else if (originLower.includes(".myshopify.com")) {
+      allowOrigin = origin;
+    }
+    // Any eazpire.com subdomain (Admin Cursor Agent Shell + portals)
+    else if (originLower.endsWith(".eazpire.com") || originLower === "https://eazpire.com") {
       allowOrigin = origin;
     }
   }
