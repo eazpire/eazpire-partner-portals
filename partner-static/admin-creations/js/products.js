@@ -551,6 +551,7 @@ function refreshFilterSidebarBody(el) {
   bindFilterSidebar(body, {
     // Prior bug: only renderGrid() ran, so sibling facet counts stayed stale after Include/Exclude.
     onChange: () => onProductFiltersChanged(),
+    getFilteredItems: () => applyProductSidebarFilters(state.items),
   });
   const nextSearch = body.querySelector("#cr-pf-search-input");
   if (hadFocus && nextSearch) {

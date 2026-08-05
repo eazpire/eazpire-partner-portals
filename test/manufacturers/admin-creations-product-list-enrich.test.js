@@ -4,6 +4,8 @@ import {
   publicationChannelKeys,
   channelLabelForKey,
   countFilledMetafields,
+  extractFilledMetafieldMap,
+  buildAltImageGroupsFromNode,
   indexShopifyNodesById,
   isAmazonChannelPresentStatus,
   isAmazonLiveStatus,
@@ -183,6 +185,81 @@ describe("adminCreationsProductListEnrich", () => {
     expect(countFilledMetafields(null)).toBe(0);
   });
 
+  it("extractFilledMetafieldMap builds namespace.key map from edges", () => {
+    expect(
+      extractFilledMetafieldMap({
+        metafields: {
+          edges: [
+            { node: { namespace: "custom", key: "product_key", value: "pk-1" } },
+            { node: { namespace: "custom", key: "provider", value: "" } },
+            { node: { namespace: "descriptors", key: "subtitle", value: "Hello" } },
+            { node: { namespace: "custom", key: "missing_ns_skip", value: "x" } }, // still has ns+key
+          ],
+        },
+        mfPrintifyId: { value: "ignored-when-edges-present" },
+      })
+    ).toEqual({
+      "custom.product_key": "pk-1",
+      "descriptors.subtitle": "Hello",
+      "custom.missing_ns_skip": "x",
+    });
+  });
+
+  it("extractFilledMetafieldMap falls back to aliased mf* fields", () => {
+    expect(
+      extractFilledMetafieldMap({
+        mfPrintifyId: { value: "pf-1" },
+        mfProductKey: { value: "" },
+        mfProvider: { value: "printify" },
+        mfSample: { value: null },
+      })
+    ).toEqual({
+      "custom.printify_product_id": "pf-1",
+      "custom.provider": "printify",
+    });
+    expect(extractFilledMetafieldMap(null)).toEqual({});
+  });
+
+  it("buildAltImageGroupsFromNode groups by Color|view alt and marks Featured first", () => {
+    const groups = buildAltImageGroupsFromNode({
+      featuredMedia: { image: { url: "https://cdn.example/black-front.jpg" } },
+      images: {
+        edges: [
+          {
+            node: {
+              url: "https://cdn.example/red-back.jpg",
+              altText: "Red|back",
+            },
+          },
+          {
+            node: {
+              url: "https://cdn.example/black-front.jpg",
+              altText: "Black|front|preview-default",
+            },
+          },
+          {
+            node: {
+              url: "https://cdn.example/black-lifestyle.jpg",
+              altText: "Black|lifestyle",
+            },
+          },
+          {
+            node: {
+              url: "https://cdn.example/red-front.jpg",
+              altText: "Red|front",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(groups.map((g) => g.variant_label)).toEqual(["Black", "Red"]);
+    expect(groups[0].views.map((v) => v.view)).toEqual(["front", "lifestyle"]);
+    expect(groups[0].views[0].is_featured).toBe(true);
+    expect(groups[0].views[0].is_preview).toBe(true);
+    expect(groups[1].views.map((v) => v.view)).toEqual(["front", "back"]);
+  });
+
   it("indexShopifyNodesById normalizes ids and skips unresolvable nodes", () => {
     const map = indexShopifyNodesById([
       { id: "gid://shopify/Product/123" },
@@ -253,12 +330,7 @@ describe("adminCreationsProductListEnrich", () => {
       ])
     );
 
-    expect(facets.channel_count).toEqual(
-      expect.arrayContaining([
-        { key: "0", label: "0", count: 2 },
-        { key: "2", label: "2", count: 1 },
-      ])
-    );
+    expect(facets.channel_count).toBeUndefined();
 
     expect(facets.catalogs).toEqual(
       expect.arrayContaining([

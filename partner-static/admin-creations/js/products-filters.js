@@ -7,7 +7,20 @@
  */
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
+import { openModal, closeModal } from "/creations/shared/js/partner-shell.js";
 import { bindTriSwitches, facetSectionHtml as sharedFacetSectionHtml } from "./facet-tri-ui.js";
+import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.js";
+
+const INFO_ICON_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="5" r="1" fill="currentColor"/><path d="M8 7.25v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+
+function sectionInfoIconHtml(dataAttr, label) {
+  return `<button type="button" class="cr-pf-section__info" ${dataAttr} aria-label="${escapeHtml(
+    label
+  )}" title="${escapeHtml(label)}">${INFO_ICON_SVG}</button>`;
+}
+
+const METAFIELDS_INFO_ICON = sectionInfoIconHtml("data-cr-pf-metafields-info", "Metafields overview");
+const ALT_IMAGE_INFO_ICON = sectionInfoIconHtml("data-cr-pf-alt-info", "Alt image texts overview");
 
 const STORAGE_KEY = "admin_creations_products_filter_collapsed";
 
@@ -21,7 +34,6 @@ const SECTIONS = [
   { key: "variants", label: "Variants" },
   { key: "catalogs", label: "Kataloge" },
   { key: "metafields", label: "Metafields" },
-  { key: "channel_count", label: "Channel count" },
   { key: "alt_image_texts", label: "Alt Image Texts" },
   { key: "branding_white", label: "White Branding" },
   { key: "branding_black", label: "Black Branding" },
@@ -41,7 +53,6 @@ const NUMERIC_SECTIONS = new Set([
   "variants",
   "catalogs",
   "metafields",
-  "channel_count",
   "branding_white",
   "branding_black",
 ]);
@@ -228,8 +239,6 @@ function valuesForSection(sectionKey, p) {
       return exactCountKey(p.catalog_count ?? p.market_count);
     case "metafields":
       return exactCountKey(p.metafields_filled_count);
-    case "channel_count":
-      return exactCountKey(p.channel_count);
     case "alt_image_texts":
       return Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing";
     case "branding_white":
@@ -377,7 +386,267 @@ export function applyProductSidebarFilters(items) {
 }
 
 function facetSectionHtml(sectionKey, label, facetList) {
-  return sharedFacetSectionHtml(sectionKey, label, facetList, filterState.tri[sectionKey] || {});
+  let headerExtraHtml = "";
+  if (sectionKey === "metafields") headerExtraHtml = METAFIELDS_INFO_ICON;
+  else if (sectionKey === "alt_image_texts") headerExtraHtml = ALT_IMAGE_INFO_ICON;
+  const opts = headerExtraHtml ? { headerExtraHtml } : undefined;
+  return sharedFacetSectionHtml(sectionKey, label, facetList, filterState.tri[sectionKey] || {}, opts);
+}
+
+function configureInfoModal(extraClass) {
+  const modal = document.querySelector("#modal-backdrop .modal");
+  if (extraClass) modal?.classList.add(extraClass);
+  const saveBtn = document.getElementById("modal-save");
+  if (saveBtn) saveBtn.style.display = "none";
+  const cancelBtn = document.getElementById("modal-cancel");
+  if (cancelBtn) cancelBtn.textContent = "Close";
+}
+
+function productTitleOf(p) {
+  return String(p?.title || p?.catalog_product_name || p?.product_key || "Product").trim() || "Product";
+}
+
+function truncateCell(value, max = 72) {
+  const s = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * Column keys = union of metafields filled on at least one product in the filtered set.
+ * @param {object[]} products
+ * @returns {string[]}
+ */
+export function collectFilledMetafieldColumns(products) {
+  const keys = new Set();
+  for (const p of products || []) {
+    const map = p?.metafields_map && typeof p.metafields_map === "object" ? p.metafields_map : null;
+    if (!map) continue;
+    for (const [k, v] of Object.entries(map)) {
+      if (v == null || String(v).trim() === "") continue;
+      keys.add(String(k));
+    }
+  }
+  return [...keys].sort((a, b) => a.localeCompare(b));
+}
+
+function metafieldMatrixBodyHtml(products) {
+  const list = Array.isArray(products) ? products : [];
+  const columns = collectFilledMetafieldColumns(list);
+  if (!list.length) {
+    return `<p class="confirm-modal-message">No products match the current filters.</p>`;
+  }
+  if (!columns.length) {
+    return `<p class="confirm-modal-message">No filled metafields on the ${list.length} filtered product${
+      list.length === 1 ? "" : "s"
+    }.</p>`;
+  }
+  const head = columns
+    .map((col) => `<th scope="col" title="${escapeHtml(col)}">${escapeHtml(col)}</th>`)
+    .join("");
+  const rows = list
+    .map((p) => {
+      const title = productTitleOf(p);
+      const preview = p.preview_url || p.grid_views?.[0]?.src || "";
+      const map = p?.metafields_map && typeof p.metafields_map === "object" ? p.metafields_map : {};
+      const cells = columns
+        .map((col) => {
+          const raw = map[col];
+          if (raw == null || String(raw).trim() === "") {
+            return `<td class="cr-mf-matrix__empty"></td>`;
+          }
+          const full = String(raw);
+          const short = truncateCell(full);
+          return `<td title="${escapeHtml(full)}">${escapeHtml(short)}</td>`;
+        })
+        .join("");
+      return `<tr>
+        <th scope="row" class="cr-mf-matrix__product">
+          <span class="cr-mf-matrix__media">${
+            preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy" />` : ""
+          }</span>
+          <span class="cr-mf-matrix__title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+        </th>
+        ${cells}
+      </tr>`;
+    })
+    .join("");
+  return `
+    <p class="confirm-modal-message cr-mf-matrix__summary">
+      Showing <strong>${list.length}</strong> filtered product${list.length === 1 ? "" : "s"} ·
+      <strong>${columns.length}</strong> metafield column${columns.length === 1 ? "" : "s"}
+      (filled on at least one product; empty cells mean missing on that product).
+    </p>
+    <div class="cr-mf-matrix-scroll">
+      <table class="cr-mf-matrix">
+        <thead>
+          <tr>
+            <th scope="col" class="cr-mf-matrix__product-col">Product</th>
+            ${head}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/**
+ * Info modal: product × metafield matrix for the currently filtered set.
+ * @param {object[]} products
+ */
+export function openMetafieldsInfoModal(products) {
+  openModal({
+    title: "Metafields overview",
+    bodyHtml: metafieldMatrixBodyHtml(products),
+    onSave: async () => {
+      closeModal();
+    },
+  });
+  configureInfoModal("cr-mf-matrix-modal");
+}
+
+function formatViewLabel(view) {
+  const raw = String(view || "").trim();
+  if (!raw || raw === "other") return "";
+  return raw.replace(/[_-]+/g, " ");
+}
+
+function altViewSlideHtml(view) {
+  const src = String(view?.src || "").trim();
+  if (!src) return "";
+  const alt = String(view?.alt || "").trim();
+  const viewLabel = formatViewLabel(view?.view);
+  const badges = [];
+  if (view?.is_featured) badges.push("Featured");
+  else if (view?.is_preview) badges.push("Main");
+  const badgeHtml = badges
+    .map((b) => `<span class="cr-alt-slide__badge">${escapeHtml(b)}</span>`)
+    .join("");
+  return `<figure class="cr-alt-slide">
+    <div class="cr-alt-slide__media">
+      ${badgeHtml}
+      <img src="${escapeHtml(src)}" alt="${escapeHtml(alt || viewLabel || "Product image")}" loading="lazy" decoding="async" />
+    </div>
+    <figcaption class="cr-alt-slide__caption">
+      ${viewLabel ? `<span class="cr-alt-slide__view">${escapeHtml(viewLabel)}</span>` : ""}
+      ${
+        alt
+          ? `<span class="cr-alt-slide__alt" title="${escapeHtml(alt)}">${escapeHtml(truncateCell(alt, 64))}</span>`
+          : `<span class="cr-alt-slide__alt cr-alt-slide__alt--empty">No alt text</span>`
+      }
+    </figcaption>
+  </figure>`;
+}
+
+function altVariantGroupsOf(product) {
+  if (Array.isArray(product?.alt_image_groups) && product.alt_image_groups.length) {
+    return product.alt_image_groups;
+  }
+  // Client fallback when enrich map missing (older payload): group grid_views by variant_label.
+  const views = Array.isArray(product?.grid_views) ? product.grid_views.filter((v) => v?.src) : [];
+  if (!views.length) {
+    const urls = Array.isArray(product?.images) ? product.images : product?.preview_url ? [product.preview_url] : [];
+    if (!urls.length) return [];
+    return [
+      {
+        variant_label: "Default",
+        views: urls.filter(Boolean).map((src, i) => ({
+          src,
+          alt: "",
+          view: i === 0 ? "front" : `view ${i + 1}`,
+          is_preview: i === 0,
+          is_featured: i === 0,
+        })),
+      },
+    ];
+  }
+  const byVariant = new Map();
+  views.forEach((v, index) => {
+    const key = String(v.variant_label || "Default").trim() || "Default";
+    if (!byVariant.has(key)) byVariant.set(key, []);
+    byVariant.get(key).push({
+      src: v.src,
+      alt: v.alt || "",
+      view: v.view || (index === 0 ? "front" : "other"),
+      is_preview: Boolean(v.is_preview),
+      is_featured: Boolean(v.is_preview && index === 0),
+    });
+  });
+  return [...byVariant.entries()].map(([variant_label, groupViews]) => ({
+    variant_label,
+    views: groupViews,
+  }));
+}
+
+function altImageTextsBodyHtml(products) {
+  const list = Array.isArray(products) ? products : [];
+  if (!list.length) {
+    return `<p class="confirm-modal-message">No products match the current filters.</p>`;
+  }
+  const productBlocks = list
+    .map((p, pIndex) => {
+      const title = productTitleOf(p);
+      const groups = altVariantGroupsOf(p);
+      const imageCount = groups.reduce((n, g) => n + (g.views?.length || 0), 0);
+      const variantBlocks = groups.length
+        ? groups
+            .map((g, vIndex) => {
+              const slides = (g.views || []).map(altViewSlideHtml).filter(Boolean).join("");
+              const openAttr = vIndex === 0 ? " open" : "";
+              return `<details class="cr-alt-variant"${openAttr}>
+                <summary class="cr-alt-variant__summary">
+                  <span>${escapeHtml(g.variant_label || "Default")}</span>
+                  <span class="cr-alt-variant__count">${g.views?.length || 0} view${
+                (g.views?.length || 0) === 1 ? "" : "s"
+              }</span>
+                </summary>
+                <div class="cr-alt-variant__body">
+                  ${
+                    slides
+                      ? productCarouselHtml(slides)
+                      : `<p class="cr-pf-empty">No images for this variant</p>`
+                  }
+                </div>
+              </details>`;
+            })
+            .join("")
+        : `<p class="cr-pf-empty">No images available</p>`;
+      const openAttr = pIndex < 3 ? " open" : "";
+      return `<details class="cr-alt-product"${openAttr}>
+        <summary class="cr-alt-product__summary">
+          <span class="cr-alt-product__title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+          <span class="cr-alt-product__meta">${groups.length} variant${
+        groups.length === 1 ? "" : "s"
+      } · ${imageCount} image${imageCount === 1 ? "" : "s"}</span>
+        </summary>
+        <div class="cr-alt-product__body">${variantBlocks}</div>
+      </details>`;
+    })
+    .join("");
+  return `
+    <p class="confirm-modal-message cr-alt-overview__summary">
+      Showing image views for <strong>${list.length}</strong> filtered product${
+        list.length === 1 ? "" : "s"
+      }. Featured / Main preview is labeled and listed first in its variant.
+    </p>
+    <div class="cr-alt-overview-scroll" id="cr-alt-overview-body">${productBlocks}</div>`;
+}
+
+/**
+ * Info modal: filtered products → variant collapsibles → view carousels (alt texts).
+ * @param {object[]} products
+ */
+export function openAltImageTextsInfoModal(products) {
+  openModal({
+    title: "Alt image texts overview",
+    bodyHtml: altImageTextsBodyHtml(products),
+    onSave: async () => {
+      closeModal();
+    },
+  });
+  configureInfoModal("cr-alt-overview-modal");
+  const body = document.getElementById("cr-alt-overview-body") || document.getElementById("modal-body");
+  if (body) bindProdCarousels(body);
 }
 
 export function filterSidebarInnerHtml(facets) {
@@ -401,9 +670,9 @@ export function filterSidebarInnerHtml(facets) {
 
 /**
  * @param {HTMLElement} sidebarEl
- * @param {{ onChange: () => void }} handlers
+ * @param {{ onChange?: () => void, getFilteredItems?: () => object[] }} handlers
  */
-export function bindFilterSidebar(sidebarEl, { onChange } = {}) {
+export function bindFilterSidebar(sidebarEl, { onChange, getFilteredItems } = {}) {
   if (!sidebarEl) return;
   const notify = () => {
     if (typeof onChange === "function") onChange();
@@ -417,6 +686,30 @@ export function bindFilterSidebar(sidebarEl, { onChange } = {}) {
   });
 
   bindTriSwitches(sidebarEl, { triState: filterState, onChange: notify });
+
+  const filteredItems = () => {
+    const items =
+      typeof getFilteredItems === "function" ? getFilteredItems() : applyProductSidebarFilters([]);
+    return Array.isArray(items) ? items : [];
+  };
+
+  const bindInfoButton = (selector, openFn) => {
+    sidebarEl.querySelectorAll(selector).forEach((btn) => {
+      const openInfo = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openFn(filteredItems());
+      };
+      btn.addEventListener("click", openInfo);
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+  };
+
+  bindInfoButton("[data-cr-pf-metafields-info]", openMetafieldsInfoModal);
+  bindInfoButton("[data-cr-pf-alt-info]", openAltImageTextsInfoModal);
 
   sidebarEl.querySelector("#cr-pf-clear-all")?.addEventListener("click", () => {
     clearAllFilters();

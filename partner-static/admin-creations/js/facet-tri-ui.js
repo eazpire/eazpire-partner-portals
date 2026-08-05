@@ -66,16 +66,18 @@ export function facetOptionRowHtml(sectionKey, facet, triState) {
  * @param {string} label
  * @param {Array<{ key: string, label: string, count?: number }>} facetList
  * @param {Record<string, number>} triGroup
+ * @param {{ headerExtraHtml?: string }} [opts]
  */
-export function facetSectionHtml(sectionKey, label, facetList, triGroup = {}) {
+export function facetSectionHtml(sectionKey, label, facetList, triGroup = {}, opts = {}) {
   const group = triGroup || {};
   const active = Object.values(group).filter((st) => st === 1 || st === -1).length;
   const rows = (facetList || [])
     .map((f) => facetOptionRowHtml(sectionKey, f, clampTri(group[f.key] || 0)))
     .join("");
+  const extra = opts?.headerExtraHtml ? String(opts.headerExtraHtml) : "";
   return `<details class="cr-pf-section" data-cr-pf-group="${escapeHtml(sectionKey)}" open>
     <summary class="cr-pf-section__summary">
-      <span>${escapeHtml(label)}</span>
+      <span class="cr-pf-section__title">${escapeHtml(label)}${extra}</span>
       ${active ? `<span class="cr-pf-section__badge">${active}</span>` : ""}
     </summary>
     <div class="cr-pf-section__body">${rows || '<p class="cr-pf-empty">No values</p>'}</div>

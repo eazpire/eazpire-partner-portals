@@ -21,6 +21,11 @@ import {
   repairStalePrintifyListingStatusPublishing,
 } from "../publish/printifyListingStatus.js";
 import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
+import {
+  inferMockupViewFromSrc,
+  MOCKUP_VIEW_ORDER,
+  parseMockupAlt,
+} from "./adminCreationsShopifyProductDetail.js";
 
 export { indexShopifyNodesById };
 
@@ -155,6 +160,45 @@ function safeJsonParse(raw, fallback) {
   }
 }
 
+/** Aliased Shopify GQL metafields → `namespace.key` (list query fallback). */
+const MF_ALIAS_TO_KEY = {
+  mfPrintifyId: "custom.printify_product_id",
+  mfProductKey: "custom.product_key",
+  mfListingOrigin: "custom.listing_origin",
+  mfProvider: "custom.provider",
+  mfSample: "custom.sample",
+};
+
+/**
+ * Map of filled metafields on a Shopify GraphQL node (`namespace.key` → value string).
+ * Prefers `metafields.edges` when present; falls back to aliased `mf*` fields.
+ * Empty / missing values are omitted (columns are the union across the filtered set).
+ */
+export function extractFilledMetafieldMap(node) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  if (!node || typeof node !== "object") return out;
+  const edges = node.metafields?.edges;
+  if (Array.isArray(edges) && edges.length) {
+    for (const edge of edges) {
+      const n = edge?.node;
+      const value = n?.value;
+      if (value == null || String(value).trim() === "") continue;
+      const ns = String(n?.namespace || "").trim();
+      const key = String(n?.key || "").trim();
+      if (!ns || !key) continue;
+      out[`${ns}.${key}`] = String(value);
+    }
+    return out;
+  }
+  for (const [alias, fieldKey] of Object.entries(MF_ALIAS_TO_KEY)) {
+    const value = node[alias]?.value;
+    if (value == null || String(value).trim() === "") continue;
+    out[fieldKey] = String(value);
+  }
+  return out;
+}
+
 /**
  * Count non-empty metafield values on a Shopify GraphQL node.
  * Prefers `metafields.edges` (full list) when present; falls back to aliased `mf*` fields.
@@ -170,13 +214,7 @@ export function countFilledMetafields(node) {
     }
     return count;
   }
-  let count = 0;
-  for (const key of Object.keys(node)) {
-    if (!key.startsWith("mf")) continue;
-    const value = node[key]?.value;
-    if (value != null && String(value).trim() !== "") count += 1;
-  }
-  return count;
+  return Object.keys(extractFilledMetafieldMap(node)).length;
 }
 
 function resolveNodeForProduct(product, nodesByShopifyId) {
@@ -446,6 +484,129 @@ function altImageTextsFromNode(node) {
   return texts;
 }
 
+function normalizeImageKey(url) {
+  return String(url || "")
+    .split("?")[0]
+    .trim()
+    .toLowerCase();
+}
+
+function viewSortRank(view) {
+  const v = String(view || "other")
+    .trim()
+    .toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(MOCKUP_VIEW_ORDER, v)) return MOCKUP_VIEW_ORDER[v];
+  return MOCKUP_VIEW_ORDER.other;
+}
+
+/**
+ * Group product images by variant (from Color|view|preview-default alt) for the
+ * Alt Image Texts overview modal. Featured / Main slides sort first within a variant.
+ *
+ * @param {object|null|undefined} node Shopify GQL product node
+ * @param {object|null|undefined} [product] list row fallback (grid_views / images / preview_url)
+ * @returns {Array<{ variant_label: string, views: Array<object> }>}
+ */
+export function buildAltImageGroupsFromNode(node, product = null) {
+  const featuredKey = normalizeImageKey(
+    node?.featuredMedia?.image?.url || product?.preview_url || ""
+  );
+
+  /** @type {Array<{ src: string, alt: string, view: string, variant_label: string, is_preview: boolean, is_featured: boolean, position: number }>} */
+  let slides = [];
+  const edges = node?.images?.edges;
+  if (Array.isArray(edges) && edges.length) {
+    slides = edges
+      .map((edge, index) => {
+        const src = String(edge?.node?.url || "").trim();
+        if (!src) return null;
+        const alt = String(edge?.node?.altText || "").trim();
+        const parsed = parseMockupAlt(alt);
+        const fromSrc = inferMockupViewFromSrc(src);
+        const isFeatured = Boolean(featuredKey && normalizeImageKey(src) === featuredKey);
+        return {
+          src,
+          alt,
+          view: parsed?.view || fromSrc || (index === 0 ? "front" : "other"),
+          variant_label: parsed?.color || "Default",
+          is_preview: Boolean(parsed?.isPreview) || isFeatured,
+          is_featured: isFeatured,
+          position: index + 1,
+        };
+      })
+      .filter(Boolean);
+  } else if (Array.isArray(product?.grid_views) && product.grid_views.length) {
+    slides = product.grid_views
+      .map((v, index) => {
+        const src = String(v?.src || "").trim();
+        if (!src) return null;
+        const alt = String(v?.alt || "").trim();
+        const parsed = parseMockupAlt(alt);
+        const isFeatured = Boolean(featuredKey && normalizeImageKey(src) === featuredKey);
+        return {
+          src,
+          alt,
+          view: String(v?.view || parsed?.view || (index === 0 ? "front" : "other")).toLowerCase(),
+          variant_label: String(v?.variant_label || parsed?.color || "Default").trim() || "Default",
+          is_preview: Boolean(v?.is_preview || parsed?.isPreview || isFeatured),
+          is_featured: isFeatured || Boolean(v?.is_preview && index === 0),
+          position: index + 1,
+        };
+      })
+      .filter(Boolean);
+  } else {
+    const urls = Array.isArray(product?.images)
+      ? product.images
+      : product?.preview_url
+        ? [product.preview_url]
+        : [];
+    slides = urls
+      .map((u, index) => {
+        const src = String(u || "").trim();
+        if (!src) return null;
+        const isFeatured = Boolean(featuredKey && normalizeImageKey(src) === featuredKey) || index === 0;
+        return {
+          src,
+          alt: "",
+          view: index === 0 ? "front" : `view ${index + 1}`,
+          variant_label: "Default",
+          is_preview: isFeatured,
+          is_featured: isFeatured,
+          position: index + 1,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  /** @type {Map<string, typeof slides>} */
+  const byVariant = new Map();
+  for (const slide of slides) {
+    const key = String(slide.variant_label || "Default").trim() || "Default";
+    if (!byVariant.has(key)) byVariant.set(key, []);
+    byVariant.get(key).push(slide);
+  }
+
+  const groups = [...byVariant.entries()].map(([variant_label, views]) => {
+    views.sort((a, b) => {
+      if (a.is_featured !== b.is_featured) return a.is_featured ? -1 : 1;
+      if (a.is_preview !== b.is_preview) return a.is_preview ? -1 : 1;
+      const viewDiff = viewSortRank(a.view) - viewSortRank(b.view);
+      if (viewDiff !== 0) return viewDiff;
+      return (a.position || 0) - (b.position || 0);
+    });
+    return { variant_label, views };
+  });
+
+  groups.sort((a, b) => {
+    const af = a.views.some((v) => v.is_featured);
+    const bf = b.views.some((v) => v.is_featured);
+    if (af !== bf) return af ? -1 : 1;
+    return String(a.variant_label).localeCompare(String(b.variant_label));
+  });
+
+  return groups;
+}
+
 /**
  * Load Printify listing status + mock URLs for product list rows (by Shopify / Printify id).
  * @returns {Promise<{ byShopifyId: Map<string, object>, byPrintifyId: Map<string, object> }>}
@@ -686,10 +847,16 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       market_count: catalogCount,
       market_labels: marketLabels,
       metafields_filled_count: countFilledMetafields(node),
+      metafields_map: extractFilledMetafieldMap(node),
       channel_count: channelKeys.length,
       channel_keys: channelKeys,
       channel_labels: channelKeys.map(channelLabelForKey),
       alt_image_texts: altImageTextsFromNode(node),
+      alt_image_groups: buildAltImageGroupsFromNode(node, {
+        ...product,
+        preview_url: previewUrl,
+        images,
+      }),
       branding_white_count: branding.white,
       branding_black_count: branding.black,
       needs_update: computeNeedsUpdate(snapshot, current),
@@ -774,12 +941,6 @@ export function buildProductFilterFacets(products) {
     { numeric: true }
   );
 
-  const channelCount = toFacetList(
-    bucketCount(list, (p) => exactCountKey(p.channel_count)),
-    null,
-    { numeric: true }
-  );
-
   const altImageTexts = toFacetList(
     bucketCount(list, (p) => (Array.isArray(p.alt_image_texts) && p.alt_image_texts.length ? "has" : "missing")),
     (key) => (key === "has" ? "Has alt text" : "Missing alt text")
@@ -824,7 +985,6 @@ export function buildProductFilterFacets(products) {
     catalogs,
     markets: catalogs,
     metafields,
-    channel_count: channelCount,
     alt_image_texts: altImageTexts,
     branding_white: brandingWhite,
     branding_black: brandingBlack,

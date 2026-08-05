@@ -27,7 +27,7 @@ const PRODUCTS_GQL = `
               image { url }
             }
           }
-          images(first: 12) {
+          images(first: 100) {
             edges {
               node {
                 url
@@ -43,6 +43,8 @@ const PRODUCTS_GQL = `
           metafields(first: 100) {
             edges {
               node {
+                namespace
+                key
                 value
               }
             }
