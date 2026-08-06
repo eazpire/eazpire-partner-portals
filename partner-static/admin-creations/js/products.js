@@ -45,6 +45,7 @@ import {
 import {
   getBusyProductKeys,
   getBusyShopifyIds,
+  resumeAmazonPublishDockIfNeeded,
   setBusyChangeListener,
   teardownProductsActionDock as teardownProductsActionDockInner,
 } from "./products-action-dock.js";
@@ -1114,6 +1115,11 @@ export async function mountProductsPage() {
     ensureDetailDom();
     bindProductCards(el);
     await fetchProducts();
+    // Restore Amazon floating dock after reload (batch in localStorage / server pending).
+    void resumeAmazonPublishDockIfNeeded({
+      products: state.items || [],
+      onDone: refreshProductsAfterBulk,
+    });
   } catch (e) {
     el.innerHTML = `
       <div class="cr-stage">
