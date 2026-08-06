@@ -9329,6 +9329,19 @@ html[data-portal="admin"] .cr-publish-dock__count {
 html[data-portal="admin"] .cr-publish-dock__carousel {
   min-width: 0;
 }
+/* Floating publish dock: scroll via arrows / trackpad, hide horizontal scrollbar */
+html[data-portal="admin"] .cr-publish-dock .cr-dd-prod-carousel__track,
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod-carousel__track {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 2px;
+}
+html[data-portal="admin"] .cr-publish-dock .cr-dd-prod-carousel__track::-webkit-scrollbar,
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod-carousel__track::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
 html[data-portal="admin"] .cr-publish-dock .cr-dd-prod-carousel .cr-dd-prod {
   width: 132px;
 }
