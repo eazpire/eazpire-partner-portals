@@ -12,6 +12,9 @@
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { showToast } from "/creations/shared/js/partner-shell.js";
 import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.js";
+import { itemPreviewUrl } from "./products-preview-url.js";
+
+export { itemPreviewUrl };
 
 const busyProductKeys = new Set();
 const busyShopifyIds = new Set();
@@ -50,21 +53,6 @@ function itemShopifyId(item) {
 
 function itemTitle(item) {
   return String(item?.title || item?.product_key || "Product").trim() || "Product";
-}
-
-/** Prefer grid mock / Printify mocks — preview_url alone is often empty on Softstyle rows. */
-export function itemPreviewUrl(item) {
-  if (!item || typeof item !== "object") return "";
-  const fromGrid = Array.isArray(item.grid_views)
-    ? item.grid_views.map((v) => v?.src).find(Boolean)
-    : "";
-  const fromImages = Array.isArray(item.images) ? item.images.find(Boolean) : "";
-  const fromPrintify = Array.isArray(item.printify_mock_urls)
-    ? item.printify_mock_urls.find(Boolean)
-    : "";
-  return String(
-    fromGrid || item.preview_url || fromImages || fromPrintify || item.mock_url || ""
-  ).trim();
 }
 
 function actionLabel(action) {

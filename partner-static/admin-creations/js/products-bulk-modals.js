@@ -11,6 +11,7 @@ import {
   suppressBulkDock,
 } from "./products-bulk.js";
 import { startProductsActionDock, startProductsAmazonPublishDock } from "./products-action-dock.js";
+import { itemPreviewUrl } from "./products-preview-url.js";
 
 function productTitle(item) {
   return String(item?.title || item?.catalog_product_name || item?.product_key || "Product").trim() || "Product";
@@ -40,7 +41,7 @@ function configurePrimaryConfirm(label) {
 
 function productRowHtml(item, { checked = true } = {}) {
   const key = listingKey(item);
-  const preview = item.preview_url || item.grid_views?.[0]?.src || "";
+  const preview = itemPreviewUrl(item);
   return `<label class="cr-bulk-product-row">
     <input type="checkbox" class="cr-bulk-product-row__cb" data-product-key="${escapeHtml(key)}" ${
     checked ? "checked" : ""
@@ -124,7 +125,7 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
       ${eligible
         .map((item) => {
           const key = listingKey(item);
-          const preview = item.preview_url || item.grid_views?.[0]?.src || "";
+          const preview = itemPreviewUrl(item);
           const hasAmazonEu = !!(item.amazon_eu_channel || item.amazon_eu_listed);
           return `<div class="cr-unpub-prod" data-product-key="${escapeHtml(key)}">
             <div class="cr-unpub-prod__head">
