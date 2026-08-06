@@ -9318,6 +9318,12 @@ html[data-portal="admin"] .cr-publish-dock__head {
   justify-content: space-between;
   gap: 12px;
 }
+html[data-portal="admin"] .cr-publish-dock__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
 html[data-portal="admin"] .cr-publish-dock__title {
   font-size: 14px;
   font-weight: 700;
@@ -9325,6 +9331,113 @@ html[data-portal="admin"] .cr-publish-dock__title {
 html[data-portal="admin"] .cr-publish-dock__count {
   font-size: 12px;
   opacity: 0.85;
+}
+html[data-portal="admin"] .cr-publish-dock__minimize {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+html[data-portal="admin"] .cr-publish-dock__minimize:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Page-scoped publish queue FAB (left of Agent shell) */
+html[data-portal="admin"] .cr-aq-rail {
+  position: fixed;
+  right: 78px;
+  bottom: 18px;
+  z-index: 2147482490;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+html[data-portal="admin"]:not(:has(.eaz-ca-fab:not([hidden]))) .cr-aq-rail {
+  right: 18px;
+}
+html[data-portal="admin"] .cr-aq-rail[hidden] {
+  display: none !important;
+}
+html[data-portal="admin"] .cr-aq-rail__fab,
+html[data-portal="admin"] .cr-aq-rail__picker {
+  pointer-events: auto;
+}
+html[data-portal="admin"] .cr-aq-rail__fab {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #111827;
+  color: #f9fafb;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+html[data-portal="admin"] .cr-aq-rail__fab:hover {
+  transform: translateY(-1px);
+  background: #1f2937;
+}
+html[data-portal="admin"] .cr-aq-rail__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font: 700 10px/18px ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+}
+html[data-portal="admin"] .cr-aq-rail__picker {
+  width: min(280px, calc(100vw - 40px));
+  max-height: min(360px, 50vh);
+  overflow: auto;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(10px);
+}
+html[data-portal="admin"] .cr-aq-rail__pick {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e2e8f0;
+  padding: 10px 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+html[data-portal="admin"] .cr-aq-rail__pick:hover {
+  background: rgba(37, 99, 235, 0.2);
+}
+html[data-portal="admin"] .cr-aq-rail__pick-title {
+  font: 700 13px/1.3 ui-sans-serif, system-ui, sans-serif;
+}
+html[data-portal="admin"] .cr-aq-rail__pick-meta,
+html[data-portal="admin"] .cr-aq-rail__pick-when {
+  font: 500 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+  opacity: 0.8;
 }
 html[data-portal="admin"] .cr-publish-dock__carousel {
   min-width: 0;

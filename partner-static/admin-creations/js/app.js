@@ -3,6 +3,7 @@ import { initShell, showToast, setTopbarExtra } from "/creations/shared/js/partn
 import { initAdminAppDrawer } from "/creations/shared/js/admin-app-drawer.js";
 import { mountDesignsPage, teardownBulkDock } from "./designs.js";
 import { mountProductsPage, teardownProductDetailModal, teardownProductsExtras } from "./products.js";
+import { setActionQueuePage } from "./action-queue-rail.js";
 
 const NAV_CORE = [
   { route: "/creations/designs", label: "Designs", icon: "◆" },
@@ -56,12 +57,14 @@ const ROUTES = {
     setTopbarExtra("");
     teardownProductDetailModal();
     teardownProductsExtras();
+    setActionQueuePage("designs");
     await mountDesignsPage();
   },
   "/creations/products": async () => {
     setTopbarExtra("");
     teardownBulkDock();
     teardownProductsExtras();
+    setActionQueuePage("products");
     await mountProductsPage();
   },
 };

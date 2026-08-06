@@ -1,37 +1,84 @@
 /**
- * Persist Amazon bulk-publish batch so the floating dock survives reload.
- * Backend queue jobs keep running; this only restores UI + client polling / missing enqueues.
+ * Persist Amazon bulk-publish batches so floating docks survive reload.
+ * Backend queue jobs keep running; this restores UI + client polling / missing enqueues.
+ * Supports multiple parallel batches (queue rail).
  */
 
-const STORAGE_KEY = "cr-amazon-publish-batch-v1";
+const STORAGE_KEY = "cr-amazon-publish-batches-v1";
+const LEGACY_KEY = "cr-amazon-publish-batch-v1";
 
-export function loadAmazonPublishBatch() {
+function readStore() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.entries) || !parsed.entries.length) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.batches)) return parsed;
+    }
+  } catch (_) {}
+  // Migrate legacy single-batch key
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const batch = JSON.parse(legacy);
+      if (batch && Array.isArray(batch.entries) && batch.entries.length) {
+        const store = { batches: [batch] };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+        localStorage.removeItem(LEGACY_KEY);
+        return store;
+      }
+    }
+  } catch (_) {}
+  return { batches: [] };
 }
 
-export function saveAmazonPublishBatch(batch) {
+function writeStore(store) {
   try {
-    if (!batch?.entries?.length) {
+    const batches = (store?.batches || []).filter((b) => Array.isArray(b?.entries) && b.entries.length);
+    if (!batches.length) {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(LEGACY_KEY);
       return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(batch));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ batches }));
   } catch (e) {
     console.warn("[amazon-publish-batch] save failed:", e?.message || e);
   }
 }
 
+export function loadAmazonPublishBatches() {
+  return readStore().batches.slice();
+}
+
+/** @deprecated use loadAmazonPublishBatches — returns newest open batch or null */
+export function loadAmazonPublishBatch() {
+  const open = loadAmazonPublishBatches().filter(batchHasOpenWork);
+  return open.length ? open[open.length - 1] : null;
+}
+
+export function saveAmazonPublishBatch(batch) {
+  if (!batch?.id) return;
+  const store = readStore();
+  const idx = store.batches.findIndex((b) => b.id === batch.id);
+  if (!batch.entries?.length) {
+    if (idx >= 0) store.batches.splice(idx, 1);
+  } else if (idx >= 0) {
+    store.batches[idx] = batch;
+  } else {
+    store.batches.push(batch);
+  }
+  writeStore(store);
+}
+
+export function removeAmazonPublishBatch(batchId) {
+  const store = readStore();
+  store.batches = store.batches.filter((b) => b.id !== batchId);
+  writeStore(store);
+}
+
 export function clearAmazonPublishBatch() {
   try {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_KEY);
   } catch (_) {}
 }
 
@@ -40,6 +87,15 @@ export function batchHasOpenWork(batch) {
   return batch.entries.some((e) => {
     const st = String(e.status || "").toLowerCase();
     return st !== "done" && st !== "error";
+  });
+}
+
+/** True if batch still needs UI (in-flight or errors to review). */
+export function batchNeedsUi(batch) {
+  if (!batch?.entries?.length) return false;
+  return batch.entries.some((e) => {
+    const st = String(e.status || "").toLowerCase();
+    return st !== "done";
   });
 }
 
@@ -64,9 +120,12 @@ export function serializeBatchEntry(item, status = "waiting") {
 
 export function createAmazonPublishBatch(items, { continent = "europa" } = {}) {
   return {
-    id: `amazon-${Date.now()}`,
+    id: `amazon-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     continent: String(continent || "europa").toLowerCase(),
     startedAt: Date.now(),
+    kind: "publish",
+    title: "Amazon publish",
+    minimized: false,
     entries: (items || []).filter(Boolean).map((item) => serializeBatchEntry(item, "waiting")),
   };
 }

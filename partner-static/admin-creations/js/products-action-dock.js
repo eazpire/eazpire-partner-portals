@@ -1,12 +1,9 @@
 /**
- * Creations Portal Products — floating bulk-action progress dock with per-product lock (IDEA-063).
- * Runs a caller-supplied `runItem` for each selected product sequentially, acquiring an
- * admin product-action lock (src/features/manufacturers/adminCreationsProductActionLock.js)
- * before the call and releasing it right after, so the grid can hide/overlay busy products
- * via getBusyProductKeys()/getBusyShopifyIds() while the action is in flight.
+ * Creations Portal Products — floating bulk-action progress docks with per-product lock (IDEA-063).
+ * Supports multiple parallel queues (minimize into page-scoped Publish FAB).
  *
  * Amazon Publish: enqueue then poll until continent is live; dock stays open until every
- * selected product succeeds (errors keep the dock visible).
+ * selected product succeeds (errors keep the dock visible; stale errors can recover).
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -15,26 +12,54 @@ import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.
 import { itemPreviewUrl } from "./products-preview-url.js";
 import {
   batchHasOpenWork,
-  clearAmazonPublishBatch,
+  batchNeedsUi,
   createAmazonPublishBatch,
-  loadAmazonPublishBatch,
+  loadAmazonPublishBatches,
+  removeAmazonPublishBatch,
   saveAmazonPublishBatch,
 } from "./products-amazon-publish-batch.js";
+import {
+  expandActionQueue,
+  minimizeActionQueue,
+  registerActionQueue,
+  unregisterActionQueue,
+  updateActionQueue,
+} from "./action-queue-rail.js";
 
 export { itemPreviewUrl };
 
 const busyProductKeys = new Set();
 const busyShopifyIds = new Set();
-let activeEntries = [];
-let clearTimer = null;
 let onBusyChange = null;
-/** Prevents double-running enqueue/poll loops after reload. */
-let amazonBatchLoopPromise = null;
-let amazonBatchOnDone = null;
+
+/** @type {Map<string, ProductQueue>} */
+const productQueues = new Map();
 
 const AMAZON_LIVE = new Set(["published", "live", "listed"]);
 const AMAZON_FAIL = new Set(["failed", "error", "suppressed", "invalid"]);
-const AMAZON_IN_FLIGHT = new Set(["queued", "publishing", "feed_pending", "processing", "verifying", "pending_indexing"]);
+const AMAZON_IN_FLIGHT = new Set([
+  "queued",
+  "publishing",
+  "feed_pending",
+  "processing",
+  "verifying",
+  "pending_indexing",
+]);
+
+/**
+ * @typedef {object} ProductQueue
+ * @property {string} id
+ * @property {string} action
+ * @property {object} [batch]
+ * @property {Array<object>} entries
+ * @property {boolean} minimized
+ * @property {number} startedAt
+ * @property {HTMLElement|null} dockEl
+ * @property {Promise|null} loopPromise
+ * @property {Function|null} onDone
+ * @property {ReturnType<typeof setTimeout>|null} clearTimer
+ * @property {ReturnType<typeof setInterval>|null} recoverTimer
+ */
 
 export function getBusyProductKeys() {
   return new Set(busyProductKeys);
@@ -44,7 +69,6 @@ export function getBusyShopifyIds() {
   return new Set(busyShopifyIds);
 }
 
-/** Notified whenever a product becomes busy/idle, so the grid can re-filter it in/out. */
 export function setBusyChangeListener(fn) {
   onBusyChange = typeof fn === "function" ? fn : null;
 }
@@ -107,9 +131,10 @@ function entryFromBatchRow(row) {
   };
 }
 
-function syncBatchFromEntries(batch) {
+function syncBatchFromEntries(queue) {
+  const batch = queue.batch;
   if (!batch) return;
-  batch.entries = activeEntries.map((e) => ({
+  batch.entries = queue.entries.map((e) => ({
     shopify_product_id: itemShopifyId(e.item),
     published_design_id:
       e.item.published_design_id != null ? Number(e.item.published_design_id) : null,
@@ -120,7 +145,28 @@ function syncBatchFromEntries(batch) {
     message: e.message || "",
     enqueued: !!e.enqueued,
   }));
+  batch.minimized = !!queue.minimized;
   saveAmazonPublishBatch(batch);
+}
+
+function queueSummary(queue) {
+  const done = queue.entries.filter((e) => e.status === "done").length;
+  const errored = queue.entries.filter((e) => e.status === "error").length;
+  const total = queue.entries.length;
+  return `${done}/${total} done${errored ? ` · ${errored} error${errored === 1 ? "" : "s"}` : ""}`;
+}
+
+function syncRail(queue) {
+  if (!productQueues.has(queue.id)) return;
+  updateActionQueue(queue.id, {
+    title: `${actionLabel(queue.action)}…`,
+    itemCount: queue.entries.length,
+    summary: queueSummary(queue),
+    minimized: !!queue.minimized,
+    startedAt: queue.startedAt,
+    expand: () => expandProductQueue(queue.id),
+    minimize: () => minimizeProductQueue(queue.id),
+  });
 }
 
 async function mapPool(items, concurrency, worker) {
@@ -136,23 +182,40 @@ async function mapPool(items, concurrency, worker) {
   await Promise.all(runners);
 }
 
-function ensureDock() {
-  let dock = document.getElementById("cr-products-action-dock");
-  if (dock) return dock;
+function dockIdFor(queueId) {
+  return `cr-products-action-dock-${queueId}`;
+}
+
+function ensureDock(queue) {
+  const id = dockIdFor(queue.id);
+  let dock = document.getElementById(id);
+  if (dock) {
+    queue.dockEl = dock;
+    return dock;
+  }
   dock = document.createElement("div");
-  dock.id = "cr-products-action-dock";
+  dock.id = id;
   dock.className = "cr-publish-dock cr-products-action-dock";
+  dock.dataset.queueId = queue.id;
   dock.hidden = true;
   dock.setAttribute("aria-hidden", "true");
   dock.innerHTML = `
     <div class="cr-publish-dock__panel" role="status" aria-live="polite">
       <div class="cr-publish-dock__head">
-        <span class="cr-publish-dock__title" id="cr-products-action-dock-title">Working…</span>
-        <span class="cr-publish-dock__count" id="cr-products-action-dock-count"></span>
+        <span class="cr-publish-dock__title" data-role="title">Working…</span>
+        <div class="cr-publish-dock__head-actions">
+          <span class="cr-publish-dock__count" data-role="count"></span>
+          <button type="button" class="cr-publish-dock__minimize" data-role="minimize" title="Minimize" aria-label="Minimize queue">─</button>
+        </div>
       </div>
-      <div class="cr-publish-dock__carousel" id="cr-products-action-dock-carousel"></div>
+      <div class="cr-publish-dock__carousel" data-role="carousel"></div>
     </div>`;
   document.body.appendChild(dock);
+  dock.querySelector('[data-role="minimize"]')?.addEventListener("click", (e) => {
+    e.preventDefault();
+    minimizeActionQueue(queue.id);
+  });
+  queue.dockEl = dock;
   return dock;
 }
 
@@ -190,17 +253,17 @@ function cardHtml(entry) {
   </article>`;
 }
 
-function renderDock(action) {
-  const dock = ensureDock();
-  const titleEl = document.getElementById("cr-products-action-dock-title");
-  const countEl = document.getElementById("cr-products-action-dock-count");
-  const carouselHost = document.getElementById("cr-products-action-dock-carousel");
+function renderQueueDock(queue) {
+  const dock = ensureDock(queue);
+  const titleEl = dock.querySelector('[data-role="title"]');
+  const countEl = dock.querySelector('[data-role="count"]');
+  const carouselHost = dock.querySelector('[data-role="carousel"]');
 
-  if (!activeEntries.length) {
+  if (!queue.entries.length || queue.minimized) {
     dock.hidden = true;
     dock.classList.remove("is-visible");
     dock.setAttribute("aria-hidden", "true");
-    if (carouselHost) carouselHost.innerHTML = "";
+    syncRail(queue);
     return;
   }
 
@@ -208,32 +271,89 @@ function renderDock(action) {
   dock.classList.add("is-visible");
   dock.setAttribute("aria-hidden", "false");
 
-  const done = activeEntries.filter((e) => e.status === "done").length;
-  const errored = activeEntries.filter((e) => e.status === "error").length;
-  const total = activeEntries.length;
+  const done = queue.entries.filter((e) => e.status === "done").length;
+  const errored = queue.entries.filter((e) => e.status === "error").length;
+  const total = queue.entries.length;
+  const action = queue.action;
   if (titleEl) {
     if (errored && done + errored === total) titleEl.textContent = `${actionLabel(action)} — errors`;
     else if (done === total) titleEl.textContent = `${actionLabel(action)} complete`;
     else titleEl.textContent = `${actionLabel(action)}…`;
   }
-  if (countEl) countEl.textContent = `${done}/${total} done${errored ? ` · ${errored} error${errored === 1 ? "" : "s"}` : ""}`;
+  if (countEl) countEl.textContent = queueSummary(queue);
   if (carouselHost) {
-    carouselHost.innerHTML = productCarouselHtml(activeEntries.map(cardHtml).join(""));
+    carouselHost.innerHTML = productCarouselHtml(queue.entries.map(cardHtml).join(""));
     bindProdCarousels(carouselHost);
   }
+  syncRail(queue);
 }
 
-/**
- * Auto-hide dock only when every card is Done (no errors, nothing in flight).
- * Failed Amazon publishes keep the dock so the admin can see which products failed.
- */
-function clearDockSoonIfAllSucceeded() {
-  clearTimeout(clearTimer);
-  clearTimer = setTimeout(() => {
-    if (!activeEntries.length) return;
-    if (activeEntries.some((e) => e.status !== "done")) return;
-    activeEntries = [];
-    renderDock();
+function minimizeProductQueue(id) {
+  const queue = productQueues.get(id);
+  if (!queue) return;
+  queue.minimized = true;
+  if (queue.batch) {
+    queue.batch.minimized = true;
+    saveAmazonPublishBatch(queue.batch);
+  }
+  renderQueueDock(queue);
+}
+
+function expandProductQueue(id) {
+  const queue = productQueues.get(id);
+  if (!queue) return;
+  for (const other of productQueues.values()) {
+    if (other.id !== id && !other.minimized) {
+      other.minimized = true;
+      if (other.batch) {
+        other.batch.minimized = true;
+        saveAmazonPublishBatch(other.batch);
+      }
+      renderQueueDock(other);
+    }
+  }
+  queue.minimized = false;
+  if (queue.batch) {
+    queue.batch.minimized = false;
+    saveAmazonPublishBatch(queue.batch);
+  }
+  renderQueueDock(queue);
+  // Resume recovery polling for error cards
+  startErrorRecovery(queue);
+}
+
+function registerQueueOnRail(queue) {
+  registerActionQueue({
+    id: queue.id,
+    page: "products",
+    kind: queue.action,
+    title: `${actionLabel(queue.action)}…`,
+    startedAt: queue.startedAt,
+    itemCount: queue.entries.length,
+    summary: queueSummary(queue),
+    minimized: !!queue.minimized,
+    expand: () => expandProductQueue(queue.id),
+    minimize: () => minimizeProductQueue(queue.id),
+  });
+}
+
+function destroyQueue(queueId, { removeStorage = false } = {}) {
+  const queue = productQueues.get(queueId);
+  if (!queue) return;
+  if (queue.clearTimer) clearTimeout(queue.clearTimer);
+  if (queue.recoverTimer) clearInterval(queue.recoverTimer);
+  queue.dockEl?.remove();
+  productQueues.delete(queueId);
+  unregisterActionQueue(queueId);
+  if (removeStorage && queue.batch) removeAmazonPublishBatch(queue.batch.id);
+}
+
+function clearDockSoonIfAllSucceeded(queue) {
+  if (queue.clearTimer) clearTimeout(queue.clearTimer);
+  queue.clearTimer = setTimeout(() => {
+    if (!productQueues.has(queue.id)) return;
+    if (queue.entries.some((e) => e.status !== "done")) return;
+    destroyQueue(queue.id, { removeStorage: true });
   }, 3500);
 }
 
@@ -258,7 +378,10 @@ async function acquireProductLock(item, action) {
 async function releaseProductLock(sessionId) {
   if (!sessionId) return;
   try {
-    await partnerFetch("admin-creations-product-action-unlock", { method: "POST", body: { session_id: sessionId } });
+    await partnerFetch("admin-creations-product-action-unlock", {
+      method: "POST",
+      body: { session_id: sessionId },
+    });
   } catch (e) {
     console.warn("[products-action-dock] unlock failed:", e?.message || e);
   }
@@ -268,10 +391,12 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function isStaleQueuedErrorMessage(msg) {
+  return /stuck in queued|without an Amazon feed/i.test(String(msg || ""));
+}
+
 /**
  * Poll admin-amazon-publish-status until europa (or given continent) is live/failed/timeout.
- * @param {string|number} publishedDesignId
- * @param {{ continent?: string, maxMs?: number, onTick?: (info:object) => void }} [opts]
  */
 export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   const id = Number(publishedDesignId);
@@ -279,14 +404,14 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   const continent = String(opts.continent || "europa").trim().toLowerCase() || "europa";
   const maxMs = Number(opts.maxMs) > 0 ? Number(opts.maxMs) : 12 * 60 * 1000;
   const started = Date.now();
-  let delay = 0; // first status check immediately after enqueue
+  let delay = 0;
   let lastStatus = "";
+  let staleFailGraceUsed = 0;
 
   while (Date.now() - started < maxMs) {
     if (delay > 0) await sleep(delay);
     const elapsed = Date.now() - started;
     const query = { published_design_id: String(id) };
-    // Final sync pull near the end of the window
     if (elapsed > maxMs - 45000) query.sync = "1";
     const data = await partnerFetch("admin-amazon-publish-status", { query });
     const cont = data?.continents?.[continent] || null;
@@ -297,101 +422,177 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
     if (cont?.asin || AMAZON_LIVE.has(st)) {
       return { ok: true, status: st || "published", asin: cont?.asin || null, data };
     }
-    if (AMAZON_FAIL.has(st)) {
-      throw new Error(cont?.last_error || cont?.message || `Amazon ${st || "failed"}`);
+    if (AMAZON_IN_FLIGHT.has(st) || st === "publishing" || st === "dry_run_ok") {
+      delay = delay === 0 ? 4000 : Math.min(delay + 2000, 15000);
+      continue;
     }
-    // Still in flight or unknown — keep waiting
+    if (AMAZON_FAIL.has(st)) {
+      const errMsg = cont?.last_error || cont?.message || `Amazon ${st || "failed"}`;
+      // Stale-queued false positive can flip back to verifying after re-enqueue
+      if (isStaleQueuedErrorMessage(errMsg) && staleFailGraceUsed < 8) {
+        staleFailGraceUsed += 1;
+        delay = 6000;
+        continue;
+      }
+      throw new Error(errMsg);
+    }
     delay = delay === 0 ? 4000 : Math.min(delay + 2000, 15000);
   }
-  throw new Error(
-    lastStatus ? `Amazon publish timed out (${lastStatus})` : "Amazon publish timed out"
-  );
+  throw new Error(lastStatus ? `Amazon publish timed out (${lastStatus})` : "Amazon publish timed out");
+}
+
+async function tryRecoverErrorEntry(entry, continent) {
+  if (entry.status !== "error") return false;
+  const pdId = entry.item.published_design_id;
+  if (!pdId) return false;
+  try {
+    const data = await partnerFetch("admin-amazon-publish-status", {
+      query: { published_design_id: String(pdId) },
+    });
+    const cont = data?.continents?.[continent] || null;
+    const st = String(cont?.status || "").toLowerCase();
+    if (cont?.asin || AMAZON_LIVE.has(st)) {
+      entry.status = "done";
+      entry.message = "";
+      entry.enqueued = true;
+      return true;
+    }
+    if (AMAZON_IN_FLIGHT.has(st) || st === "publishing") {
+      entry.status = "publishing";
+      entry.message = "";
+      entry.enqueued = true;
+      return true;
+    }
+    // Still failed — if message was stale-queued but row still failed without feed, keep error
+  } catch (_) {}
+  return false;
+}
+
+function startErrorRecovery(queue) {
+  if (queue.recoverTimer) return;
+  const continent = String(queue.batch?.continent || "europa").toLowerCase();
+  queue.recoverTimer = setInterval(async () => {
+    if (!productQueues.has(queue.id)) {
+      clearInterval(queue.recoverTimer);
+      queue.recoverTimer = null;
+      return;
+    }
+    const errors = queue.entries.filter((e) => e.status === "error");
+    if (!errors.length) return;
+    let changed = false;
+    const recovered = [];
+    for (const entry of errors) {
+      // eslint-disable-next-line no-await-in-loop
+      const ok = await tryRecoverErrorEntry(entry, continent);
+      if (ok) {
+        changed = true;
+        if (entry.status === "publishing") recovered.push(entry);
+      }
+    }
+    if (changed) {
+      syncBatchFromEntries(queue);
+      renderQueueDock(queue);
+      if (recovered.length) {
+        void mapPool(recovered, 4, async (entry) => {
+          await pollAmazonEntry(entry, continent, queue);
+        }).then(() => finishAmazonQueue(queue));
+      }
+    }
+  }, 12000);
 }
 
 /**
- * Run `runItem(item)` sequentially for each item, showing a floating carousel dock with
- * per-product lock + spinner + status. `runItem` should throw (or return `{ ok: false, error }`)
- * on failure; anything else is treated as success.
- *
- * @param {Array<object>} items
- * @param {{
- *   action: "publish"|"unpublish"|"update",
- *   runItem: (item:object) => Promise<any>,
- *   keepOpenUntilAllOk?: boolean,
- *   onDone?: (summary:{ok:number, errors:string[]}) => void
- * }} opts
+ * Sequential non-Amazon bulk actions — each call creates its own queue (can run parallel to Amazon).
  */
-export async function startProductsActionDock(items, { action = "update", runItem, keepOpenUntilAllOk = false, onDone } = {}) {
+export async function startProductsActionDock(
+  items,
+  { action = "update", runItem, keepOpenUntilAllOk = false, onDone } = {}
+) {
   const list = (items || []).filter(Boolean);
   if (!list.length) return { ok: 0, errors: [] };
 
-  clearTimeout(clearTimer);
-  activeEntries = list.map((item) => ({ item, status: "pending", message: "", sessionId: null }));
-  ensureDock();
-  renderDock(action);
+  const queue = {
+    id: `prod-${action}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    action,
+    batch: null,
+    entries: list.map((item) => ({ item, status: "pending", message: "", sessionId: null })),
+    minimized: false,
+    startedAt: Date.now(),
+    dockEl: null,
+    loopPromise: null,
+    onDone: onDone || null,
+    clearTimer: null,
+    recoverTimer: null,
+  };
+
+  // Minimize other expanded product queues
+  for (const other of productQueues.values()) {
+    if (!other.minimized) minimizeProductQueue(other.id);
+  }
+
+  productQueues.set(queue.id, queue);
+  registerQueueOnRail(queue);
+  ensureDock(queue);
+  renderQueueDock(queue);
 
   let ok = 0;
   const errors = [];
 
-  for (const entry of activeEntries) {
-    const key = itemProductKey(entry.item);
-    const sid = itemShopifyId(entry.item);
-    if (key) busyProductKeys.add(key);
-    if (sid) busyShopifyIds.add(sid);
-    notifyBusyChange();
-
-    entry.status = "locking";
-    renderDock(action);
-    entry.sessionId = await acquireProductLock(entry.item, action);
-
-    entry.status = "running";
-    renderDock(action);
-    try {
-      const result = typeof runItem === "function" ? await runItem(entry.item, entry) : { ok: true };
-      if (result && result.ok === false) throw new Error(result.error || result.message || "Action failed");
-      entry.status = "done";
-      entry.message = "";
-      ok += 1;
-    } catch (e) {
-      entry.status = "error";
-      entry.message = e?.message || "Failed";
-      errors.push(`${itemTitle(entry.item)}: ${entry.message}`);
-    } finally {
-      await releaseProductLock(entry.sessionId);
-      entry.sessionId = null;
-      if (key) busyProductKeys.delete(key);
-      if (sid) busyShopifyIds.delete(sid);
+  queue.loopPromise = (async () => {
+    for (const entry of queue.entries) {
+      const key = itemProductKey(entry.item);
+      const sid = itemShopifyId(entry.item);
+      if (key) busyProductKeys.add(key);
+      if (sid) busyShopifyIds.add(sid);
       notifyBusyChange();
-      renderDock(action);
-    }
-  }
 
-  if (ok && !errors.length) {
-    showToast(`${actionLabel(action)} complete`, `${ok} product${ok === 1 ? "" : "s"} ${actionDonePast(action)}`);
-  } else if (ok && errors.length) {
-    showToast(`${actionLabel(action)} partial`, `${ok} ok · ${errors.length} failed`);
-  }
-  if (errors.length) showToast("Error", errors.slice(0, 2).join(" · "));
+      entry.status = "locking";
+      renderQueueDock(queue);
+      entry.sessionId = await acquireProductLock(entry.item, action);
 
-  if (keepOpenUntilAllOk) {
-    if (!errors.length) clearDockSoonIfAllSucceeded();
-    // else: leave dock visible with error cards
-  } else {
-    clearTimeout(clearTimer);
-    clearTimer = setTimeout(() => {
-      if (activeEntries.some((e) => e.status === "pending" || e.status === "locking" || e.status === "running" || e.status === "publishing")) {
-        return;
+      entry.status = "running";
+      renderQueueDock(queue);
+      try {
+        const result = typeof runItem === "function" ? await runItem(entry.item, entry) : { ok: true };
+        if (result && result.ok === false) throw new Error(result.error || result.message || "Action failed");
+        entry.status = "done";
+        entry.message = "";
+        ok += 1;
+      } catch (e) {
+        entry.status = "error";
+        entry.message = e?.message || "Failed";
+        errors.push(`${itemTitle(entry.item)}: ${entry.message}`);
+      } finally {
+        await releaseProductLock(entry.sessionId);
+        entry.sessionId = null;
+        if (key) busyProductKeys.delete(key);
+        if (sid) busyShopifyIds.delete(sid);
+        notifyBusyChange();
+        renderQueueDock(queue);
       }
-      activeEntries = [];
-      renderDock();
-    }, 2500);
-  }
+    }
 
-  if (typeof onDone === "function") await onDone({ ok, errors });
-  return { ok, errors };
+    if (ok && !errors.length) {
+      showToast(`${actionLabel(action)} complete`, `${ok} product${ok === 1 ? "" : "s"} ${actionDonePast(action)}`);
+    } else if (ok && errors.length) {
+      showToast(`${actionLabel(action)} partial`, `${ok} ok · ${errors.length} failed`);
+    }
+    if (errors.length) showToast("Error", errors.slice(0, 2).join(" · "));
+
+    if (keepOpenUntilAllOk) {
+      if (!errors.length) clearDockSoonIfAllSucceeded(queue);
+    } else if (!errors.length) {
+      clearDockSoonIfAllSucceeded(queue);
+    }
+
+    if (typeof queue.onDone === "function") await queue.onDone({ ok, errors });
+    return { ok, errors };
+  })();
+
+  return queue.loopPromise;
 }
 
-async function enqueueAmazonEntry(entry, continent, batch) {
+async function enqueueAmazonEntry(entry, continent, queue) {
   const sid = itemShopifyId(entry.item);
   const key = itemProductKey(entry.item);
   if (sid) busyShopifyIds.add(sid);
@@ -427,29 +628,38 @@ async function enqueueAmazonEntry(entry, continent, batch) {
     entry.enqueued = false;
   } finally {
     await releaseProductLock(lockId);
-    syncBatchFromEntries(batch);
-    renderDock("publish");
+    syncBatchFromEntries(queue);
+    renderQueueDock(queue);
   }
 }
 
-async function pollAmazonEntry(entry, continent, batch) {
-  if (entry.status === "done" || entry.status === "error") return;
+async function pollAmazonEntry(entry, continent, queue) {
+  if (entry.status === "done") return;
   if (entry.status === "waiting" || entry.status === "pending") return;
+  if (entry.status === "error") {
+    const recovered = await tryRecoverErrorEntry(entry, continent);
+    if (!recovered) return;
+    if (entry.status === "done") {
+      syncBatchFromEntries(queue);
+      renderQueueDock(queue);
+      return;
+    }
+  }
   const pdId = entry.item.published_design_id;
   if (!pdId) {
     entry.status = "error";
     entry.message = "missing published_design_id";
-    syncBatchFromEntries(batch);
-    renderDock("publish");
+    syncBatchFromEntries(queue);
+    renderQueueDock(queue);
     return;
   }
   entry.status = "publishing";
-  renderDock("publish");
+  renderQueueDock(queue);
   try {
     await waitForAmazonContinentLive(pdId, {
       continent,
       onTick: () => {
-        if (entry.status === "publishing") renderDock("publish");
+        if (entry.status === "publishing") renderQueueDock(queue);
       },
     });
     entry.status = "done";
@@ -463,197 +673,227 @@ async function pollAmazonEntry(entry, continent, batch) {
     if (sid) busyShopifyIds.delete(sid);
     if (key) busyProductKeys.delete(key);
     notifyBusyChange();
-    syncBatchFromEntries(batch);
-    renderDock("publish");
+    syncBatchFromEntries(queue);
+    renderQueueDock(queue);
   }
 }
 
-/**
- * Core loop: enqueue everything first (Waiting → Publishing), then poll until live.
- * Batch is persisted so reload restores the dock.
- */
-async function runAmazonPublishBatchLoop(batch, { onDone } = {}) {
-  const continent = String(batch.continent || "europa").toLowerCase();
-  const action = "publish";
-
-  // Phase 1 — enqueue all waiting (parallel). Page can be left after this starts.
-  const toEnqueue = activeEntries.filter(
-    (e) => !e.enqueued && e.status !== "done" && e.status !== "error" && e.status !== "publishing"
-  );
-  for (const e of toEnqueue) {
-    e.status = "waiting";
-  }
-  syncBatchFromEntries(batch);
-  renderDock(action);
-
-  await mapPool(toEnqueue, 3, async (entry) => {
-    await enqueueAmazonEntry(entry, continent, batch);
-  });
-
-  // Already-enqueued rows (restore): mark publishing if still open
-  for (const e of activeEntries) {
-    if (e.enqueued && e.status !== "done" && e.status !== "error") {
-      e.status = "publishing";
-    }
-  }
-  syncBatchFromEntries(batch);
-  renderDock(action);
-
-  // Phase 2 — poll all publishing in parallel (Amazon jobs continue server-side)
-  const toPoll = activeEntries.filter((e) => e.status === "publishing");
-  await mapPool(toPoll, 4, async (entry) => {
-    await pollAmazonEntry(entry, continent, batch);
-  });
-
-  const ok = activeEntries.filter((e) => e.status === "done").length;
-  const errors = activeEntries
+async function finishAmazonQueue(queue) {
+  const ok = queue.entries.filter((e) => e.status === "done").length;
+  const errors = queue.entries
     .filter((e) => e.status === "error")
     .map((e) => `${itemTitle(e.item)}: ${e.message || "Failed"}`);
 
   if (ok && !errors.length) {
     showToast("Publishing complete", `${ok} product${ok === 1 ? "" : "s"} published`);
-    clearAmazonPublishBatch();
-    clearDockSoonIfAllSucceeded();
+    clearDockSoonIfAllSucceeded(queue);
   } else if (ok && errors.length) {
     showToast("Publishing partial", `${ok} ok · ${errors.length} failed`);
-    syncBatchFromEntries(batch);
+    syncBatchFromEntries(queue);
+    startErrorRecovery(queue);
   } else if (errors.length) {
     showToast("Error", errors.slice(0, 2).join(" · "));
-    syncBatchFromEntries(batch);
+    syncBatchFromEntries(queue);
+    startErrorRecovery(queue);
   }
 
-  if (typeof onDone === "function") await onDone({ ok, errors });
+  if (typeof queue.onDone === "function") await queue.onDone({ ok, errors });
   return { ok, errors };
 }
 
+async function runAmazonPublishBatchLoop(queue) {
+  const batch = queue.batch;
+  const continent = String(batch.continent || "europa").toLowerCase();
+
+  const toEnqueue = queue.entries.filter(
+    (e) => !e.enqueued && e.status !== "done" && e.status !== "error" && e.status !== "publishing"
+  );
+  for (const e of toEnqueue) e.status = "waiting";
+  syncBatchFromEntries(queue);
+  renderQueueDock(queue);
+
+  await mapPool(toEnqueue, 3, async (entry) => {
+    await enqueueAmazonEntry(entry, continent, queue);
+  });
+
+  for (const e of queue.entries) {
+    if (e.enqueued && e.status !== "done" && e.status !== "error") e.status = "publishing";
+  }
+  // Recover previously persisted errors that may already be in-flight again
+  const errored = queue.entries.filter((e) => e.status === "error");
+  for (const e of errored) {
+    // eslint-disable-next-line no-await-in-loop
+    await tryRecoverErrorEntry(e, continent);
+  }
+  syncBatchFromEntries(queue);
+  renderQueueDock(queue);
+
+  const toPoll = queue.entries.filter((e) => e.status === "publishing");
+  await mapPool(toPoll, 4, async (entry) => {
+    await pollAmazonEntry(entry, continent, queue);
+  });
+
+  return finishAmazonQueue(queue);
+}
+
 /**
- * Amazon EU bulk publish: put all cards in Waiting immediately, enqueue in parallel,
- * persist batch for reload, then poll until Amazon live.
+ * Amazon EU bulk publish: new queue each time (parallel with existing queues).
  */
 export async function startProductsAmazonPublishDock(items, { continent = "europa", onDone } = {}) {
   const list = (items || []).filter(Boolean);
   if (!list.length) return { ok: 0, errors: [] };
 
-  if (amazonBatchLoopPromise) {
-    showToast("Publishing", "Amazon publish batch already running");
-    return amazonBatchLoopPromise;
+  for (const other of productQueues.values()) {
+    if (!other.minimized) minimizeProductQueue(other.id);
   }
 
-  clearTimeout(clearTimer);
-  amazonBatchOnDone = onDone || null;
   const batch = createAmazonPublishBatch(list, { continent });
   saveAmazonPublishBatch(batch);
-  activeEntries = batch.entries.map(entryFromBatchRow);
-  ensureDock();
-  renderDock("publish");
 
-  amazonBatchLoopPromise = runAmazonPublishBatchLoop(batch, { onDone })
+  const queue = {
+    id: batch.id,
+    action: "publish",
+    batch,
+    entries: batch.entries.map(entryFromBatchRow),
+    minimized: false,
+    startedAt: batch.startedAt || Date.now(),
+    dockEl: null,
+    loopPromise: null,
+    onDone: onDone || null,
+    clearTimer: null,
+    recoverTimer: null,
+  };
+
+  productQueues.set(queue.id, queue);
+  registerQueueOnRail(queue);
+  ensureDock(queue);
+  renderQueueDock(queue);
+
+  queue.loopPromise = runAmazonPublishBatchLoop(queue)
     .catch((e) => {
       console.error("[products-action-dock] Amazon batch failed:", e);
       showToast("Error", e?.message || "Amazon publish failed");
       return { ok: 0, errors: [e?.message || "Amazon publish failed"] };
     })
     .finally(() => {
-      amazonBatchLoopPromise = null;
+      queue.loopPromise = null;
     });
-  return amazonBatchLoopPromise;
+
+  return queue.loopPromise;
 }
 
 /**
- * After Products page mount / reload: restore floating dock from localStorage
- * and continue enqueue/poll. Optionally merge server-pending Amazon listings.
- *
- * @param {{ products?: object[], onDone?: Function }} [opts]
+ * After Products page mount / reload: restore all open batches from localStorage.
  */
 export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
-  if (amazonBatchLoopPromise) return amazonBatchLoopPromise;
-
-  let batch = loadAmazonPublishBatch();
   const products = Array.isArray(opts.products) ? opts.products : [];
+  let batches = loadAmazonPublishBatches().filter(batchNeedsUi);
 
-  // Recover server-side in-flight Softstyle (etc.) if localStorage was cleared.
-  if (!batchHasOpenWork(batch) && products.length) {
-    const pending = products.filter(
-      (p) => p?.amazon_eu_pending || (p?.amazon_eu_channel && !p?.amazon_eu_listed)
-    );
-    // Prefer explicit pending flag from enrich
+  if (!batches.length && products.length) {
     const fromPending = products.filter((p) => p?.amazon_eu_pending);
-    const seed = fromPending.length ? fromPending : [];
-    if (seed.length) {
-      batch = createAmazonPublishBatch(seed, { continent: "europa" });
+    if (fromPending.length) {
+      const batch = createAmazonPublishBatch(fromPending, { continent: "europa" });
       for (const row of batch.entries) {
-        row.enqueued = true; // already has amazon_listing in-flight
+        row.enqueued = true;
         row.status = "publishing";
       }
       saveAmazonPublishBatch(batch);
+      batches = [batch];
     }
   }
 
-  if (!batchHasOpenWork(batch)) return null;
+  if (!batches.length) return null;
 
-  clearTimeout(clearTimer);
-  amazonBatchOnDone = opts.onDone || amazonBatchOnDone;
-  activeEntries = batch.entries.map(entryFromBatchRow);
+  // Newest expanded; older minimized
+  batches.sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  const promises = [];
 
-  // Enrich previews/titles from live product list when available
-  if (products.length) {
-    const bySid = new Map(
-      products.map((p) => [String(p.shopify_product_id || p.id || "").replace(/\.0$/, ""), p])
-    );
-    for (const entry of activeEntries) {
-      const live = bySid.get(itemShopifyId(entry.item));
-      if (!live) continue;
-      entry.item = {
-        ...entry.item,
-        ...live,
-        preview_url: itemPreviewUrl(live) || entry.item.preview_url,
-        published_design_id: live.published_design_id || entry.item.published_design_id,
-      };
-      if (live.amazon_eu_listed) {
-        entry.status = "done";
-        entry.enqueued = true;
-      } else if (live.amazon_eu_pending && entry.status !== "error") {
-        entry.status = "publishing";
-        entry.enqueued = true;
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    if (productQueues.has(batch.id) && productQueues.get(batch.id)?.loopPromise) continue;
+
+    const queue = {
+      id: batch.id,
+      action: "publish",
+      batch,
+      entries: batch.entries.map(entryFromBatchRow),
+      minimized: i < batches.length - 1 || !!batch.minimized,
+      startedAt: batch.startedAt || Date.now(),
+      dockEl: null,
+      loopPromise: null,
+      onDone: opts.onDone || null,
+      clearTimer: null,
+      recoverTimer: null,
+    };
+
+    if (products.length) {
+      const bySid = new Map(
+        products.map((p) => [String(p.shopify_product_id || p.id || "").replace(/\.0$/, ""), p])
+      );
+      for (const entry of queue.entries) {
+        const live = bySid.get(itemShopifyId(entry.item));
+        if (!live) continue;
+        entry.item = {
+          ...entry.item,
+          ...live,
+          preview_url: itemPreviewUrl(live) || entry.item.preview_url,
+          published_design_id: live.published_design_id || entry.item.published_design_id,
+        };
+        if (live.amazon_eu_listed) {
+          entry.status = "done";
+          entry.enqueued = true;
+        } else if (live.amazon_eu_pending) {
+          entry.status = "publishing";
+          entry.enqueued = true;
+          entry.message = "";
+        }
       }
+      syncBatchFromEntries(queue);
     }
-    syncBatchFromEntries(batch);
+
+    productQueues.set(queue.id, queue);
+    registerQueueOnRail(queue);
+    ensureDock(queue);
+    renderQueueDock(queue);
+
+    if (queue.entries.some((e) => e.status === "error")) startErrorRecovery(queue);
+
+    queue.loopPromise = runAmazonPublishBatchLoop(queue)
+      .catch((e) => {
+        console.error("[products-action-dock] Amazon resume failed:", e);
+        return { ok: 0, errors: [e?.message || "resume failed"] };
+      })
+      .finally(() => {
+        queue.loopPromise = null;
+      });
+    promises.push(queue.loopPromise);
   }
 
-  ensureDock();
-  renderDock("publish");
-  showToast("Publishing", "Restored Amazon publish progress");
-
-  amazonBatchLoopPromise = runAmazonPublishBatchLoop(batch, { onDone: amazonBatchOnDone })
-    .catch((e) => {
-      console.error("[products-action-dock] Amazon resume failed:", e);
-      showToast("Error", e?.message || "Amazon publish resume failed");
-      return { ok: 0, errors: [e?.message || "resume failed"] };
-    })
-    .finally(() => {
-      amazonBatchLoopPromise = null;
-    });
-  return amazonBatchLoopPromise;
+  if (promises.length) showToast("Publishing", "Restored Amazon publish progress");
+  // Expand newest
+  const newest = batches[batches.length - 1];
+  if (newest) expandActionQueue(newest.id);
+  return Promise.all(promises);
 }
 
 /**
- * Hide dock UI when leaving Products.
- * - In-SPA navigation with an active loop: keep dock DOM (loop still updating).
- * - Full remount / reload: loop is gone; clear UI — resumeAmazonPublishDockIfNeeded restores from localStorage.
+ * Hide dock UI when leaving Products (loops keep running; rail page switch hides FAB).
  */
 export function teardownProductsActionDock({ force = false } = {}) {
-  clearTimeout(clearTimer);
   onBusyChange = null;
-  if (amazonBatchLoopPromise && !force) {
-    return;
+  for (const queue of [...productQueues.values()]) {
+    if (queue.loopPromise && !force) {
+      minimizeProductQueue(queue.id);
+      continue;
+    }
+    if (force) {
+      destroyQueue(queue.id, { removeStorage: false });
+    } else {
+      minimizeProductQueue(queue.id);
+    }
   }
-  activeEntries = [];
-  busyProductKeys.clear();
-  busyShopifyIds.clear();
-  const dock = document.getElementById("cr-products-action-dock");
-  if (dock) {
-    dock.hidden = true;
-    dock.classList.remove("is-visible");
-    dock.setAttribute("aria-hidden", "true");
+  if (force) {
+    busyProductKeys.clear();
+    busyShopifyIds.clear();
   }
 }
