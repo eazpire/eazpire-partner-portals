@@ -442,6 +442,38 @@
   min-height: 14px;
 }
 
+.eaz-ca-sync-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(6, 78, 59, 0.45);
+  color: #d1fae5;
+  font: 600 12px/1.35 inherit;
+}
+.eaz-ca-sync-banner[hidden] {
+  display: none !important;
+}
+.eaz-ca-sync-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.eaz-ca-sync-banner-x {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #a7f3d0;
+  font: 700 16px/1 inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.eaz-ca-sync-banner-x:hover {
+  color: #ecfdf5;
+}
+
 .eaz-ca-crop-overlay {
   position: fixed;
   inset: 0;

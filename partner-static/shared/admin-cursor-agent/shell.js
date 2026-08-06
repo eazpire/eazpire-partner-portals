@@ -43,7 +43,11 @@
     optConsole: false,
     recognition: null,
     listening: false,
+    syncBannerVisible: false,
   };
+
+  var SYNC_BANNER_TEXT =
+    "Synced to GitHub main. On your PC: git pull origin main";
 
   var CONSOLE_MAX = 200;
   /** Prefer recent useful lines when attaching to a prompt (size-safe for Cursor API). */
@@ -420,6 +424,27 @@
 
   function setStatus(msg) {
     if (els.status) els.status.textContent = msg || "";
+  }
+
+  function showSyncBanner() {
+    state.syncBannerVisible = true;
+    if (els.syncBanner) els.syncBanner.hidden = false;
+    setStatus(SYNC_BANNER_TEXT);
+  }
+
+  function hideSyncBanner() {
+    state.syncBannerVisible = false;
+    if (els.syncBanner) els.syncBanner.hidden = true;
+  }
+
+  /** Heuristic: agent result mentions deploy/push success, or always after FINISHED code runs. */
+  function shouldShowSyncHint(poll) {
+    if (!poll || poll.status !== "FINISHED") return false;
+    var text = String((poll && poll.text) || "");
+    if (/NOT DEPLOYED|push failed|deploy failed|not pushed/i.test(text)) return false;
+    // Prefer show when deploy/push mentioned; otherwise still show after successful Done
+    // (web agent runs are code/deploy oriented).
+    return true;
   }
 
   function renderChatList() {
@@ -928,17 +953,27 @@
       }
       liveEls.meta.textContent = (poll && poll.status) || "FINISHED";
       // Clear "Agent running…" immediately when poll reports FINISHED + result.
+      var doneOk = poll && poll.status === "FINISHED";
       finishUi(
-        poll && poll.status === "FINISHED"
-          ? "Done — refreshing live view…"
+        doneOk
+          ? shouldShowSyncHint(poll)
+            ? SYNC_BANNER_TEXT
+            : "Done — refreshing live view…"
           : "Ended: " + ((poll && poll.status) || "unknown")
       );
-      if (poll && poll.status === "FINISHED") refreshViewer(true);
+      if (doneOk) {
+        refreshViewer(true);
+        if (shouldShowSyncHint(poll)) showSyncBanner();
+      }
       await loadChats();
       if (state.chatId) {
         try {
           await openChat(state.chatId, { skipResume: true });
         } catch (eOpen) {}
+      }
+      // Re-assert banner after openChat may refresh status to "Ready".
+      if (doneOk && shouldShowSyncHint(poll) && state.syncBannerVisible) {
+        setStatus(SYNC_BANNER_TEXT);
       }
     }
 
@@ -1240,6 +1275,10 @@
       '<label class="eaz-ca-check"><input type="checkbox" data-ca="opt-console" /> Include browser console</label>' +
       '<p class="eaz-ca-functions-hint">Checked options apply on Send. Console dump = live page logs (not Cloudflare).</p>' +
       "</div>" +
+      '<div class="eaz-ca-sync-banner" data-ca="sync-banner" hidden role="status">' +
+      '<span class="eaz-ca-sync-banner-text"></span>' +
+      '<button type="button" class="eaz-ca-sync-banner-x" data-ca="sync-dismiss" aria-label="Dismiss">×</button>' +
+      "</div>" +
       '<div class="eaz-ca-status" data-ca="status"></div>' +
       '<input type="file" accept="image/*" hidden data-ca="file" />' +
       "</div>" +
@@ -1288,12 +1327,22 @@
       micBtn: root.querySelector('[data-ca="mic"]'),
       tabChat: root.querySelector('[data-ca="tab-chat"]'),
       tabViewer: root.querySelector('[data-ca="tab-viewer"]'),
+      syncBanner: root.querySelector('[data-ca="sync-banner"]'),
+      syncBannerText: root.querySelector(".eaz-ca-sync-banner-text"),
     };
+    if (els.syncBannerText) els.syncBannerText.textContent = SYNC_BANNER_TEXT;
     syncFunctionsUi();
 
     fab.addEventListener("click", function () {
       openShell();
     });
+    var syncDismiss = root.querySelector('[data-ca="sync-dismiss"]');
+    if (syncDismiss) {
+      syncDismiss.addEventListener("click", function () {
+        hideSyncBanner();
+        setStatus("Ready");
+      });
+    }
     root.querySelector('[data-ca="close"]').addEventListener("click", closeShell);
     root.querySelector('[data-ca="new"]').addEventListener("click", function () {
       newChat().catch(function (e) {
