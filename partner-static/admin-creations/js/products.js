@@ -14,6 +14,12 @@ import {
   saveEditDesignWorking,
   discardEditDesignWorking,
 } from "./product-edit-design-panel.js";
+import {
+  createVariantsUiState,
+  renderVariantsPanelHtml,
+  bindVariantsPanel,
+} from "./product-variants-panel.js";
+import { resumeVariantUpdateDockIfNeeded, teardownVariantUpdateDock } from "./products-variant-update-dock.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
 import { openProductUnpublishModal } from "./products-unpublish-modal.js";
 import {
@@ -54,6 +60,7 @@ import {
 export function teardownProductsExtras() {
   teardownProductsBulkDockInner();
   teardownProductsActionDockInner();
+  teardownVariantUpdateDock();
 }
 
 /**
@@ -126,6 +133,8 @@ const state = {
     editDesignUi: null,
     editDesignLoadedFor: "",
     closePromptOpen: false,
+    variantsUi: null,
+    variantsUiProductId: "",
   },
 };
 
@@ -685,43 +694,7 @@ function renderMockupsPanel(product) {
   return html;
 }
 
-function renderVariantsPanel(product) {
-  const variants = Array.isArray(product?.variants) ? product.variants : [];
-  if (!variants.length) {
-    return `<div class="cr-pd-empty">No variants found.</div>`;
-  }
-  const currency = product.currency || "EUR";
-  return `<div class="cr-pd-table-wrap"><table class="cr-pd-table">
-    <thead>
-      <tr>
-        <th>Variant</th>
-        <th>SKU</th>
-        <th>Price</th>
-        <th>Compare at</th>
-        <th>Inventory</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${variants
-        .map((v) => {
-          const title =
-            (Array.isArray(v.options) && v.options.length ? v.options.join(" / ") : null) ||
-            v.title ||
-            "Default";
-          return `<tr>
-            <td>${escapeHtml(title)}</td>
-            <td>${escapeHtml(v.sku || "—")}</td>
-            <td>${formatMoney(v.price, currency)}</td>
-            <td>${formatMoney(v.compare_at_price, currency)}</td>
-            <td>${v.inventory_quantity != null ? escapeHtml(String(v.inventory_quantity)) : "—"}</td>
-          </tr>`;
-        })
-        .join("")}
-    </tbody>
-  </table></div>`;
-}
-
-function metafieldRowsHtml(rows, sectionPrefix) {
+function renderMetafieldsPanel(product) {
   if (!rows.length) return `<div class="cr-pd-empty">None</div>`;
   const byGroup = new Map();
   for (const m of rows) {
@@ -812,7 +785,18 @@ function renderDetailContent() {
   }
 
   if (state.detail.menu === "overview") content.innerHTML = renderOverviewPanelHtml(product);
-  else if (state.detail.menu === "variants") content.innerHTML = renderVariantsPanel(product);
+  else if (state.detail.menu === "variants") {
+    if (!state.detail.variantsUi || state.detail.variantsUiProductId !== product.id) {
+      state.detail.variantsUi = createVariantsUiState(product);
+      state.detail.variantsUiProductId = product.id;
+    } else {
+      state.detail.variantsUi.groups = product.variant_groups || state.detail.variantsUi.groups;
+    }
+    content.innerHTML = renderVariantsPanelHtml(product, state.detail.variantsUi);
+    bindVariantsPanel(content, product, state.detail.variantsUi, {
+      onCloseModal: () => closeProductDetail(),
+    });
+  }
   else if (state.detail.menu === "channels") {
     const chUi = {
       channelState: state.detail.channelState,
@@ -916,6 +900,8 @@ function closeProductDetail() {
   state.detail.expandedValues = new Set();
   state.detail.editDesignUi = null;
   state.detail.editDesignLoadedFor = "";
+  state.detail.variantsUi = null;
+  state.detail.variantsUiProductId = "";
   state.detail.closePromptOpen = false;
   const backdrop = document.getElementById("cr-pd-backdrop");
   if (backdrop) {
@@ -989,6 +975,8 @@ async function openProductDetail(productId, title) {
   state.detail.amazonExpanded = false;
   state.detail.editDesignUi = null;
   state.detail.editDesignLoadedFor = "";
+  state.detail.variantsUi = null;
+  state.detail.variantsUiProductId = "";
   state.detail.closePromptOpen = false;
 
   const backdrop = ensureDetailDom();
@@ -1120,6 +1108,7 @@ export async function mountProductsPage() {
       products: state.items || [],
       onDone: refreshProductsAfterBulk,
     });
+    void resumeVariantUpdateDockIfNeeded();
   } catch (e) {
     el.innerHTML = `
       <div class="cr-stage">

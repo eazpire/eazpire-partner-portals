@@ -3,6 +3,9 @@ import {
   buildProductFilterFacets,
   publicationChannelKeys,
   channelLabelForKey,
+  amazonMarketKeys,
+  amazonMarketLabelForKey,
+  amazonStatusKeys,
   countFilledMetafields,
   extractFilledMetafieldMap,
   buildAltImageGroupsFromNode,
@@ -41,20 +44,10 @@ function product(overrides = {}) {
 }
 
 describe("adminCreationsProductListEnrich", () => {
-  it("publicationChannelKeys returns the fixed Creations sales channel list incl. Amazon + Pending", () => {
-    expect(publicationChannelKeys()).toEqual([
-      "eazpire",
-      "onlineshop",
-      "eazpire_headless",
-      "amazon_eu",
-      "amazon_us",
-      "pending_amazon_eu",
-      "pending_amazon_us",
-    ]);
-    expect(channelLabelForKey("amazon_eu")).toBe("Amazon EU");
-    expect(channelLabelForKey("amazon_us")).toBe("Amazon US");
-    expect(channelLabelForKey("pending_amazon_eu")).toBe("Pending Amazon EU");
-    expect(channelLabelForKey("pending_amazon_us")).toBe("Pending Amazon US");
+  it("publicationChannelKeys returns Shopify Channels only (eazpire Web / Android)", () => {
+    expect(publicationChannelKeys()).toEqual(["onlineshop", "eazpire_headless"]);
+    expect(channelLabelForKey("onlineshop")).toBe("eazpire Web");
+    expect(channelLabelForKey("eazpire_headless")).toBe("eazpire Android");
   });
 
   it("Amazon success vs pending mapping uses Admin status criteria (ASIN / verified / in-flight)", () => {
@@ -348,9 +341,11 @@ describe("adminCreationsProductListEnrich", () => {
         filter_provider: "printify",
         provider_label: "Printify",
         variant_count: 8,
-        channel_keys: ["eazpire", "onlineshop"],
-        channel_labels: ["eazpire", "Online Store"],
-        channel_count: 2,
+        channel_keys: ["onlineshop"],
+        channel_labels: ["eazpire Web"],
+        channel_count: 1,
+        amazon_market_keys: ["amazon_eu", "amazon_de"],
+        amazon_status_keys: ["online"],
         catalog_count: 52,
         market_count: 52,
         needs_update: true,
@@ -388,14 +383,24 @@ describe("adminCreationsProductListEnrich", () => {
       ])
     );
 
-    expect(facets.channels).toEqual(
+    expect(facets.channels).toEqual([
+      { key: "onlineshop", label: "eazpire Web", count: 1 },
+      { key: "eazpire_headless", label: "eazpire Android", count: 0 },
+    ]);
+    expect(facets.amazon_markets.find((f) => f.key === "amazon_eu")).toMatchObject({
+      label: "Amazon EU",
+      count: 1,
+      depth: 0,
+    });
+    expect(facets.amazon_markets.find((f) => f.key === "amazon_de")).toMatchObject({
+      label: "DE",
+      count: 1,
+      depth: 1,
+    });
+    expect(facets.amazon_status).toEqual(
       expect.arrayContaining([
-        { key: "eazpire", label: "eazpire", count: 1 },
-        { key: "onlineshop", label: "Online Store", count: 1 },
-        { key: "amazon_eu", label: "Amazon EU", count: 0 },
-        { key: "amazon_us", label: "Amazon US", count: 0 },
-        { key: "pending_amazon_eu", label: "Pending Amazon EU", count: 0 },
-        { key: "pending_amazon_us", label: "Pending Amazon US", count: 0 },
+        { key: "online", label: "Online", count: 1 },
+        { key: "pending", label: "Pending", count: 0 },
       ])
     );
 
@@ -450,45 +455,53 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.total).toBe(0);
     expect(facets.provider).toEqual([]);
     expect(facets.needs_update).toEqual([]);
-    expect(facets.channels).toEqual(
-      expect.arrayContaining([
-        { key: "amazon_eu", label: "Amazon EU", count: 0 },
-        { key: "amazon_us", label: "Amazon US", count: 0 },
-      ])
-    );
+    expect(facets.channels).toEqual([
+      { key: "onlineshop", label: "eazpire Web", count: 0 },
+      { key: "eazpire_headless", label: "eazpire Android", count: 0 },
+    ]);
+    expect(facets.amazon_markets[0]).toMatchObject({ key: "amazon_eu", label: "Amazon EU", count: 0, depth: 0 });
+    expect(facets.amazon_status).toEqual([
+      { key: "online", label: "Online", count: 0 },
+      { key: "pending", label: "Pending", count: 0 },
+    ]);
   });
 
-  it("buildProductFilterFacets counts Amazon EU/US and Pending Amazon channel keys", () => {
+  it("buildProductFilterFacets splits Channels / Amazon Markets / Amazon Status", () => {
+    expect(amazonMarketKeys()[0]).toBe("amazon_eu");
+    expect(amazonMarketLabelForKey("amazon_na")).toBe("Amazon US");
+    expect(amazonStatusKeys()).toEqual(["online", "pending"]);
+
     const facets = buildProductFilterFacets([
       product({
-        channel_keys: ["amazon_eu", "eazpire"],
-        channel_labels: ["Amazon EU", "eazpire"],
-        channel_count: 2,
+        channel_keys: ["onlineshop"],
+        channel_labels: ["eazpire Web"],
+        amazon_market_keys: ["amazon_eu", "amazon_de"],
+        amazon_status_keys: ["online"],
       }),
       product({
         product_key: "pk-2",
         id: "1002",
-        channel_keys: ["amazon_us"],
-        channel_labels: ["Amazon US"],
-        channel_count: 1,
+        channel_keys: ["eazpire_headless"],
+        channel_labels: ["eazpire Android"],
+        amazon_market_keys: ["amazon_na", "amazon_us"],
+        amazon_status_keys: ["pending"],
       }),
       product({
         product_key: "pk-3",
         id: "1003",
-        channel_keys: ["pending_amazon_us", "eazpire_headless"],
-        channel_labels: ["Pending Amazon US", "eazpire Headless"],
-        channel_count: 2,
+        channel_keys: [],
+        amazon_market_keys: ["amazon_eu", "amazon_fr"],
+        amazon_status_keys: ["online", "pending"],
       }),
     ]);
-    expect(facets.channels).toEqual(
-      expect.arrayContaining([
-        { key: "amazon_eu", label: "Amazon EU", count: 1 },
-        { key: "amazon_us", label: "Amazon US", count: 1 },
-        { key: "pending_amazon_us", label: "Pending Amazon US", count: 1 },
-        { key: "pending_amazon_eu", label: "Pending Amazon EU", count: 0 },
-        { key: "eazpire", label: "eazpire", count: 1 },
-        { key: "eazpire_headless", label: "eazpire Headless", count: 1 },
-      ])
-    );
+    expect(facets.channels).toEqual([
+      { key: "onlineshop", label: "eazpire Web", count: 1 },
+      { key: "eazpire_headless", label: "eazpire Android", count: 1 },
+    ]);
+    expect(facets.amazon_markets.find((f) => f.key === "amazon_eu")?.count).toBe(2);
+    expect(facets.amazon_markets.find((f) => f.key === "amazon_na")?.count).toBe(1);
+    expect(facets.amazon_markets.find((f) => f.key === "amazon_de")?.count).toBe(1);
+    expect(facets.amazon_status.find((f) => f.key === "online")?.count).toBe(2);
+    expect(facets.amazon_status.find((f) => f.key === "pending")?.count).toBe(2);
   });
 });

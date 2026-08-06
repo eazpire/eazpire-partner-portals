@@ -396,12 +396,17 @@ function isStaleQueuedErrorMessage(msg) {
 }
 
 /**
- * Poll admin-amazon-publish-status until europa (or given continent) is live/failed/timeout.
+ * Poll admin-amazon-publish-status until marketplace (or continent rollup) is live/failed/timeout.
  */
 export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   const id = Number(publishedDesignId);
   if (!Number.isFinite(id) || id <= 0) throw new Error("missing published_design_id");
   const continent = String(opts.continent || "europa").trim().toLowerCase() || "europa";
+  const marketCode = String(
+    opts.marketplace_code || opts.marketplace_codes?.[0] || (continent === "amerika" ? "US" : "DE")
+  )
+    .trim()
+    .toUpperCase();
   const maxMs = Number(opts.maxMs) > 0 ? Number(opts.maxMs) : 12 * 60 * 1000;
   const started = Date.now();
   let delay = 0;
@@ -414,10 +419,10 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
     const query = { published_design_id: String(id) };
     if (elapsed > maxMs - 45000) query.sync = "1";
     const data = await partnerFetch("admin-amazon-publish-status", { query });
-    const cont = data?.continents?.[continent] || null;
+    const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
     const st = String(cont?.status || "").toLowerCase();
     lastStatus = st || lastStatus;
-    if (typeof opts.onTick === "function") opts.onTick({ status: st, continent, data, cont });
+    if (typeof opts.onTick === "function") opts.onTick({ status: st, continent, marketCode, data, cont });
 
     if (cont?.asin || AMAZON_LIVE.has(st)) {
       return { ok: true, status: st || "published", asin: cont?.asin || null, data };
@@ -441,15 +446,29 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   throw new Error(lastStatus ? `Amazon publish timed out (${lastStatus})` : "Amazon publish timed out");
 }
 
-async function tryRecoverErrorEntry(entry, continent) {
+function batchMarketCodes(batchOrContinent) {
+  if (batchOrContinent && typeof batchOrContinent === "object") {
+    const codes = Array.isArray(batchOrContinent.marketplace_codes)
+      ? batchOrContinent.marketplace_codes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean)
+      : [];
+    if (codes.length) return codes;
+    const continent = String(batchOrContinent.continent || "europa").toLowerCase();
+    return continent === "amerika" || continent === "us" ? ["US"] : ["DE"];
+  }
+  const continent = String(batchOrContinent || "europa").toLowerCase();
+  return continent === "amerika" || continent === "us" ? ["US"] : ["DE"];
+}
+
+async function tryRecoverErrorEntry(entry, continent, marketplaceCodes = null) {
   if (entry.status !== "error") return false;
   const pdId = entry.item.published_design_id;
   if (!pdId) return false;
+  const marketCode = String(marketplaceCodes?.[0] || (continent === "amerika" ? "US" : "DE")).toUpperCase();
   try {
     const data = await partnerFetch("admin-amazon-publish-status", {
       query: { published_design_id: String(pdId) },
     });
-    const cont = data?.continents?.[continent] || null;
+    const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
     const st = String(cont?.status || "").toLowerCase();
     if (cont?.asin || AMAZON_LIVE.has(st)) {
       entry.status = "done";
@@ -471,6 +490,7 @@ async function tryRecoverErrorEntry(entry, continent) {
 function startErrorRecovery(queue) {
   if (queue.recoverTimer) return;
   const continent = String(queue.batch?.continent || "europa").toLowerCase();
+  const marketplaceCodes = batchMarketCodes(queue.batch);
   queue.recoverTimer = setInterval(async () => {
     if (!productQueues.has(queue.id)) {
       clearInterval(queue.recoverTimer);
@@ -483,7 +503,7 @@ function startErrorRecovery(queue) {
     const recovered = [];
     for (const entry of errors) {
       // eslint-disable-next-line no-await-in-loop
-      const ok = await tryRecoverErrorEntry(entry, continent);
+      const ok = await tryRecoverErrorEntry(entry, continent, marketplaceCodes);
       if (ok) {
         changed = true;
         if (entry.status === "publishing") recovered.push(entry);
@@ -598,6 +618,7 @@ async function enqueueAmazonEntry(entry, continent, queue) {
   if (sid) busyShopifyIds.add(sid);
   if (key) busyProductKeys.add(key);
   notifyBusyChange();
+  const marketplaceCodes = batchMarketCodes(queue.batch || { continent });
 
   let lockId = null;
   try {
@@ -609,6 +630,7 @@ async function enqueueAmazonEntry(entry, continent, queue) {
         shopify_product_id: entry.item.shopify_product_id || entry.item.id || "",
         published_design_id: entry.item.published_design_id || undefined,
         continents: [continent],
+        marketplace_codes: marketplaceCodes,
         dry_run: false,
         live_submit: true,
       },
@@ -634,10 +656,11 @@ async function enqueueAmazonEntry(entry, continent, queue) {
 }
 
 async function pollAmazonEntry(entry, continent, queue) {
+  const marketplaceCodes = batchMarketCodes(queue.batch || { continent });
   if (entry.status === "done") return;
   if (entry.status === "waiting" || entry.status === "pending") return;
   if (entry.status === "error") {
-    const recovered = await tryRecoverErrorEntry(entry, continent);
+    const recovered = await tryRecoverErrorEntry(entry, continent, marketplaceCodes);
     if (!recovered) return;
     if (entry.status === "done") {
       syncBatchFromEntries(queue);
@@ -658,6 +681,7 @@ async function pollAmazonEntry(entry, continent, queue) {
   try {
     await waitForAmazonContinentLive(pdId, {
       continent,
+      marketplace_codes: marketplaceCodes,
       onTick: () => {
         if (entry.status === "publishing") renderQueueDock(queue);
       },
@@ -704,6 +728,7 @@ async function finishAmazonQueue(queue) {
 async function runAmazonPublishBatchLoop(queue) {
   const batch = queue.batch;
   const continent = String(batch.continent || "europa").toLowerCase();
+  const marketplaceCodes = batchMarketCodes(batch);
 
   const toEnqueue = queue.entries.filter(
     (e) => !e.enqueued && e.status !== "done" && e.status !== "error" && e.status !== "publishing"
@@ -723,7 +748,7 @@ async function runAmazonPublishBatchLoop(queue) {
   const errored = queue.entries.filter((e) => e.status === "error");
   for (const e of errored) {
     // eslint-disable-next-line no-await-in-loop
-    await tryRecoverErrorEntry(e, continent);
+    await tryRecoverErrorEntry(e, continent, marketplaceCodes);
   }
   syncBatchFromEntries(queue);
   renderQueueDock(queue);
@@ -737,9 +762,12 @@ async function runAmazonPublishBatchLoop(queue) {
 }
 
 /**
- * Amazon EU bulk publish: new queue each time (parallel with existing queues).
+ * Amazon country bulk publish: new queue each time (parallel with existing queues).
  */
-export async function startProductsAmazonPublishDock(items, { continent = "europa", onDone } = {}) {
+export async function startProductsAmazonPublishDock(
+  items,
+  { continent = "europa", marketplace_codes = null, onDone } = {}
+) {
   const list = (items || []).filter(Boolean);
   if (!list.length) return { ok: 0, errors: [] };
 
@@ -747,7 +775,7 @@ export async function startProductsAmazonPublishDock(items, { continent = "europ
     if (!other.minimized) minimizeProductQueue(other.id);
   }
 
-  const batch = createAmazonPublishBatch(list, { continent });
+  const batch = createAmazonPublishBatch(list, { continent, marketplace_codes });
   saveAmazonPublishBatch(batch);
 
   const queue = {

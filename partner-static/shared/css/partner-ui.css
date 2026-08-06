@@ -7702,6 +7702,193 @@ html[data-portal="admin"] .cr-pd-table th {
 html[data-portal="admin"] .cr-pd-table tr:last-child td {
   border-bottom: 0;
 }
+
+/* Product detail — Variants panel (parent color / child size) */
+html[data-portal="admin"] .cr-pd-variants {
+  position: relative;
+  padding-bottom: 72px;
+}
+html[data-portal="admin"] .cr-pd-vp-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+html[data-portal="admin"] .cr-pd-vp-color {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+html[data-portal="admin"] .cr-pd-vp-color__head {
+  display: grid;
+  grid-template-columns: auto 88px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+html[data-portal="admin"] .cr-pd-vp-color__head::-webkit-details-marker {
+  display: none;
+}
+html[data-portal="admin"] .cr-pd-vp-color__name {
+  font-weight: 700;
+}
+html[data-portal="admin"] .cr-pd-vp-color__count {
+  font-size: 12px;
+  color: var(--muted);
+}
+html[data-portal="admin"] .cr-pd-vp-check input {
+  width: 16px;
+  height: 16px;
+}
+html[data-portal="admin"] .cr-pd-vp-mock {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--line);
+}
+html[data-portal="admin"] .cr-pd-vp-mock img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-portal="admin"] .cr-pd-vp-mock__missing {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  padding: 4px;
+}
+html[data-portal="admin"] .cr-pd-vp-mock__nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 2px 4px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+}
+html[data-portal="admin"] .cr-pd-vp-mock__arrow {
+  border: 0;
+  background: rgba(255, 255, 255, 0.85);
+  color: #111;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-pd-vp-mock__view {
+  font-size: 9px;
+  color: #fff;
+  text-transform: capitalize;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-portal="admin"] .cr-pd-vp-mock__view--solo {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 5px;
+  border-radius: 6px;
+}
+html[data-portal="admin"] .cr-pd-vp-sizes {
+  padding: 0 12px 12px;
+}
+html[data-portal="admin"] .cr-pd-vp-size-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+html[data-portal="admin"] .cr-pd-vp-size-table th,
+html[data-portal="admin"] .cr-pd-vp-size-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+html[data-portal="admin"] .cr-pd-vp-size-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+html[data-portal="admin"] .cr-pd-vp-size-table .cr-pd-vp-mock {
+  width: 56px;
+  height: 56px;
+}
+html[data-portal="admin"] .cr-pd-vp-footer {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 14px 12px;
+  margin-top: 8px;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.96) 24%);
+  z-index: 2;
+}
+html[data-portal="admin"] .cr-pd-vp-update-btn {
+  box-shadow: 0 8px 24px rgba(29, 78, 216, 0.28);
+}
+html[data-portal="admin"] .cr-pd-vp-channels {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+html[data-portal="admin"] .cr-pd-vp-channel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+html[data-portal="admin"] .cr-variant-dock .cr-variant-dock__media {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface-2, #f8fafc);
+}
+html[data-portal="admin"] .cr-variant-dock .cr-variant-dock__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+html[data-portal="admin"] .cr-variant-dock__status {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+}
+html[data-portal="admin"] .cr-variant-dock__status--completed {
+  background: rgba(22, 163, 74, 0.92);
+}
+html[data-portal="admin"] .cr-variant-dock__status--error {
+  background: rgba(220, 38, 38, 0.92);
+}
+
 html[data-portal="admin"] .cr-pd-mf-section + .cr-pd-mf-section {
   margin-top: 28px;
 }
@@ -9350,7 +9537,7 @@ html[data-portal="admin"] .cr-publish-dock__minimize:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* Page-scoped publish queue FAB (left of Agent shell) */
+/* Page-scoped publish queue FAB (left of Agent shell; draggable, per-admin prefs) */
 html[data-portal="admin"] .cr-aq-rail {
   position: fixed;
   right: 78px;
@@ -9361,9 +9548,17 @@ html[data-portal="admin"] .cr-aq-rail {
   align-items: flex-end;
   gap: 8px;
   pointer-events: none;
+  touch-action: none;
 }
 html[data-portal="admin"]:not(:has(.eaz-ca-fab:not([hidden]))) .cr-aq-rail {
   right: 18px;
+}
+html[data-portal="admin"] .cr-aq-rail.eaz-fab--custom-pos {
+  right: auto;
+  bottom: auto;
+}
+html[data-portal="admin"] .cr-aq-rail.eaz-fab--dragging {
+  transition: none;
 }
 html[data-portal="admin"] .cr-aq-rail[hidden] {
   display: none !important;
@@ -9381,7 +9576,9 @@ html[data-portal="admin"] .cr-aq-rail__fab {
   background: #111827;
   color: #f9fafb;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9391,6 +9588,11 @@ html[data-portal="admin"] .cr-aq-rail__fab {
 html[data-portal="admin"] .cr-aq-rail__fab:hover {
   transform: translateY(-1px);
   background: #1f2937;
+}
+html[data-portal="admin"] .cr-aq-rail__fab.eaz-fab--dragging,
+html[data-portal="admin"] .cr-aq-rail.eaz-fab--dragging .cr-aq-rail__fab {
+  cursor: grabbing;
+  transform: none;
 }
 html[data-portal="admin"] .cr-aq-rail__badge {
   position: absolute;
@@ -10058,18 +10260,31 @@ html[data-portal="admin"] .cr-dd-prod__design {
   filter: drop-shadow(0 6px 12px rgba(0,0,0,.35));
   pointer-events: none;
 }
-/* Studio card compositing (Creator parity) */
+/* Studio card compositing (Creator Products Preview parity) */
 html[data-portal="admin"] .cr-dd-compose,
 html[data-portal="admin"] .cr-dd-prod__media.cr-dd-compose {
   position: relative;
   width: 100%;
   height: 100%;
 }
+html[data-portal="admin"] .cr-dd-compose__host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
 html[data-portal="admin"] .cr-dd-compose__slide {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+}
+html[data-portal="admin"] .cr-dd-compose__slide.is-active {
+  opacity: 1;
 }
 html[data-portal="admin"] .cr-dd-compose__frame {
   position: relative;
@@ -10116,11 +10331,47 @@ html[data-portal="admin"] .cr-dd-compose--overview {
   height: 100%;
   min-height: 0;
 }
+/* Floating variant nav — Creator Products Preview Modal parity */
+html[data-portal="admin"] .cr-dd-compose__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.82;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  padding: 0;
+}
+html[data-portal="admin"] .cr-dd-prod:hover .cr-dd-compose__nav,
+html[data-portal="admin"] .cr-dd-prod:focus-within .cr-dd-compose__nav,
+html[data-portal="admin"] .cr-pub-card:hover .cr-dd-compose__nav,
+html[data-portal="admin"] .cr-pub-card:focus-within .cr-dd-compose__nav {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.72);
+}
+html[data-portal="admin"] .cr-dd-compose__nav--prev {
+  left: 4px;
+}
+html[data-portal="admin"] .cr-dd-compose__nav--next {
+  right: 4px;
+}
 html[data-portal="admin"] .cr-pub-card__media .cr-badge,
 html[data-portal="admin"] .cr-dd-prod__media .cr-badge {
   position: absolute;
   left: 8px;
   bottom: 8px;
+  z-index: 6;
 }
 html[data-portal="admin"] .cr-badge--offline {
   background: #334155;
@@ -11259,6 +11510,18 @@ html[data-portal="admin"] .cr-pf-option {
   font-size: 12px;
   color: var(--muted, #475569);
 }
+html[data-portal="admin"] .cr-pf-option--parent .cr-pf-option__label {
+  font-weight: 600;
+}
+
+html[data-portal="admin"] .cr-pf-option--child {
+  padding-left: 1.1rem;
+}
+
+html[data-portal="admin"] .cr-pf-option--child .cr-pf-option__label {
+  opacity: 0.95;
+}
+
 html[data-portal="admin"] .cr-pf-option--tri {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

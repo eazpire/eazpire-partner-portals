@@ -51,6 +51,23 @@ function pageQueues() {
   return [...queues.values()].filter((q) => q.page === currentPage && !q.done);
 }
 
+function bindPublishFabPosition(rail, fab) {
+  if (!rail || !fab || rail.dataset.eazFabPosInit === "1") return;
+  const tryBind = () => {
+    const api = window.EazAdminFabPosition;
+    if (!api || typeof api.bind !== "function") return false;
+    rail.dataset.eazFabPosInit = "1";
+    api.bind(rail, api.keys?.publish || "publish_fab", { handleEl: fab });
+    return true;
+  };
+  if (tryBind()) return;
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries += 1;
+    if (tryBind() || tries >= 40) clearInterval(timer);
+  }, 250);
+}
+
 function ensureRail() {
   let rail = document.getElementById("cr-aq-rail");
   if (rail) return rail;
@@ -66,11 +83,19 @@ function ensureRail() {
     </button>`;
   document.body.appendChild(rail);
 
-  rail.querySelector("#cr-aq-rail-fab")?.addEventListener("click", (e) => {
+  const fab = rail.querySelector("#cr-aq-rail-fab");
+  fab?.addEventListener("click", (e) => {
+    if (fab.getAttribute("data-eaz-fab-suppress-click") === "1" || rail.getAttribute("data-eaz-fab-suppress-click") === "1") {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     onFabClick();
   });
+
+  bindPublishFabPosition(rail, fab);
 
   document.addEventListener(
     "click",

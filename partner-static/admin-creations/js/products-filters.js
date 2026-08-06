@@ -26,11 +26,15 @@ const STORAGE_KEY = "admin_creations_products_filter_collapsed";
 
 /** Facet sections in display order. */
 const SECTIONS = [
+  { key: "category", label: "Category" },
+  { key: "visibility", label: "Visibility" },
   { key: "source", label: "Source" },
   { key: "product", label: "Product" },
   { key: "provider", label: "Provider" },
   { key: "printify_status", label: "Printify Status" },
   { key: "channels", label: "Channels" },
+  { key: "amazon_markets", label: "Amazon Markets" },
+  { key: "amazon_status", label: "Amazon Status" },
   { key: "variants", label: "Variants" },
   { key: "catalogs", label: "Kataloge" },
   { key: "metafields", label: "Metafields" },
@@ -39,6 +43,14 @@ const SECTIONS = [
   { key: "branding_black", label: "Black Branding" },
   { key: "needs_update", label: "Needs Update" },
 ];
+
+const CATEGORY_EMPTY_KEY = "_empty";
+const CATEGORY_EMPTY_LABEL = "Empty / not set";
+
+const VISIBILITY_LABELS = {
+  public: "Public",
+  private: "Private",
+};
 
 const PRINTIFY_STATUS_LABELS = {
   published: "Published",
@@ -69,16 +81,62 @@ const PROVIDER_LABELS = {
   todify: "Todify",
 };
 
-/** Always-visible Channels options (counts filled from D1/Shopify enrichment). */
+/** Shopify Channels only (Online Store / Headless). */
 const CHANNEL_LABELS = {
-  eazpire: "eazpire",
-  onlineshop: "Online Store",
-  eazpire_headless: "eazpire Headless",
-  amazon_eu: "Amazon EU",
-  amazon_us: "Amazon US",
-  pending_amazon_eu: "Pending Amazon EU",
-  pending_amazon_us: "Pending Amazon US",
+  onlineshop: "eazpire Web",
+  eazpire_headless: "eazpire Android",
 };
+
+const CHANNEL_KEYS = Object.keys(CHANNEL_LABELS);
+
+/** Amazon Markets — parents then countries (amazon_na = Amazon US region). */
+const AMAZON_MARKET_KEYS = [
+  "amazon_eu",
+  "amazon_de",
+  "amazon_uk",
+  "amazon_fr",
+  "amazon_nl",
+  "amazon_it",
+  "amazon_es",
+  "amazon_be",
+  "amazon_pl",
+  "amazon_se",
+  "amazon_ie",
+  "amazon_na",
+  "amazon_us",
+  "amazon_ca",
+];
+
+const AMAZON_MARKET_LABELS = {
+  amazon_eu: "Amazon EU",
+  amazon_na: "Amazon US",
+  amazon_de: "DE",
+  amazon_uk: "UK",
+  amazon_fr: "FR",
+  amazon_nl: "NL",
+  amazon_it: "IT",
+  amazon_es: "ES",
+  amazon_be: "BE",
+  amazon_pl: "PL",
+  amazon_se: "SE",
+  amazon_ie: "IE",
+  amazon_us: "US",
+  amazon_ca: "CA",
+};
+
+const AMAZON_STATUS_LABELS = {
+  online: "Online",
+  pending: "Pending",
+};
+
+const AMAZON_STATUS_KEYS = Object.keys(AMAZON_STATUS_LABELS);
+
+function amazonMarketDepth(key) {
+  const k = String(key || "");
+  if (k === "amazon_eu" || k === "amazon_na") return 0;
+  if (k.startsWith("amazon_")) return 1;
+  return 0;
+}
 
 function defaultFilterState() {
   return {
@@ -101,10 +159,14 @@ function labelForFacetValue(sectionKey, value, facets) {
     const hit = list.find((f) => String(f.key) === String(value));
     if (hit?.label) return String(hit.label);
   }
+  if (sectionKey === "category") return value === CATEGORY_EMPTY_KEY ? CATEGORY_EMPTY_LABEL : String(value);
+  if (sectionKey === "visibility") return VISIBILITY_LABELS[value] || value;
   if (sectionKey === "source") return SOURCE_LABELS[value] || value;
   if (sectionKey === "provider") return PROVIDER_LABELS[value] || value;
   if (sectionKey === "printify_status") return PRINTIFY_STATUS_LABELS[value] || value;
   if (sectionKey === "channels") return CHANNEL_LABELS[value] || value;
+  if (sectionKey === "amazon_markets") return AMAZON_MARKET_LABELS[value] || value;
+  if (sectionKey === "amazon_status") return AMAZON_STATUS_LABELS[value] || value;
   if (sectionKey === "needs_update") return value === "yes" ? "Needs update" : "Up to date";
   if (sectionKey === "alt_image_texts") return value === "has" ? "Has alt text" : "Missing alt text";
   return String(value);
@@ -190,17 +252,39 @@ function bucketCount(list, keyFn) {
   return counts;
 }
 
-function toFacetList(counts, labelFn, { numeric = false } = {}) {
-  return [...counts.entries()]
-    .map(([key, count]) => ({ key, label: labelFn ? labelFn(key) : String(key), count }))
-    .sort((a, b) => {
-      if (numeric) {
-        const na = Number(a.key);
-        const nb = Number(b.key);
-        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
-      }
-      return b.count - a.count || String(a.label).localeCompare(String(b.label));
-    });
+function toFacetList(counts, labelFn, { numeric = false, orderedKeys = null, depthFn = null } = {}) {
+  const entries = orderedKeys
+    ? orderedKeys.map((key) => [String(key), counts.get(String(key)) || 0])
+    : [...counts.entries()];
+  const list = entries.map(([key, count]) => ({
+    key,
+    label: labelFn ? labelFn(key) : String(key),
+    count,
+    ...(depthFn ? { depth: depthFn(key) } : {}),
+  }));
+  if (orderedKeys) return list;
+  return list.sort((a, b) => {
+    if (a.key === CATEGORY_EMPTY_KEY) return 1;
+    if (b.key === CATEGORY_EMPTY_KEY) return -1;
+    if (numeric) {
+      const na = Number(a.key);
+      const nb = Number(b.key);
+      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+    }
+    return b.count - a.count || String(a.label).localeCompare(String(b.label));
+  });
+}
+
+function categoryKeyOf(p) {
+  const raw = String(p.filter_category || p.shopify_product_type || p.product_type || "").trim();
+  if (!raw || raw === CATEGORY_EMPTY_KEY) return CATEGORY_EMPTY_KEY;
+  return raw;
+}
+
+function visibilityKeyOf(p) {
+  return String(p.filter_visibility || p.listing_visibility || "").trim().toLowerCase() === "public"
+    ? "public"
+    : "private";
 }
 
 function productFacetKey(p) {
@@ -225,6 +309,10 @@ function providerKeyOf(p) {
 
 function valuesForSection(sectionKey, p) {
   switch (sectionKey) {
+    case "category":
+      return categoryKeyOf(p);
+    case "visibility":
+      return visibilityKeyOf(p);
     case "source":
       return sourceKeyOf(p);
     case "product":
@@ -233,6 +321,10 @@ function valuesForSection(sectionKey, p) {
       return providerKeyOf(p);
     case "channels":
       return Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null;
+    case "amazon_markets":
+      return Array.isArray(p.amazon_market_keys) && p.amazon_market_keys.length ? p.amazon_market_keys : null;
+    case "amazon_status":
+      return Array.isArray(p.amazon_status_keys) && p.amazon_status_keys.length ? p.amazon_status_keys : null;
     case "variants":
       return exactCountKey(p.variant_count);
     case "catalogs":
@@ -288,7 +380,17 @@ function matchesTriFacets(p, tri, skipSection = null) {
 function matchQuery(p, q) {
   const needle = String(q || "").trim().toLowerCase();
   if (!needle) return true;
-  const hay = [p.title, p.product_key, p.catalog_product_name, p.category, p.owner_label]
+  const hay = [
+    p.title,
+    p.product_key,
+    p.catalog_product_name,
+    p.category,
+    p.filter_category,
+    p.shopify_product_type,
+    p.filter_visibility,
+    p.listing_visibility,
+    p.owner_label,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -317,12 +419,16 @@ function mergeUniverseCounts(universeKeys, poolCounts, activeTriGroup = {}) {
 }
 
 function fixedBaseKeys(sectionKey) {
+  if (sectionKey === "category") return [CATEGORY_EMPTY_KEY];
+  if (sectionKey === "visibility") return ["public", "private"];
   if (sectionKey === "source") return ["product", "customer", "samples", "other"];
   if (sectionKey === "provider") return ["printify", "todify"];
   if (sectionKey === "printify_status") {
     return ["published", "unpublished", "unpublished_changes", "publishing", "error"];
   }
-  if (sectionKey === "channels") return Object.keys(CHANNEL_LABELS);
+  if (sectionKey === "channels") return CHANNEL_KEYS.slice();
+  if (sectionKey === "amazon_markets") return AMAZON_MARKET_KEYS.slice();
+  if (sectionKey === "amazon_status") return AMAZON_STATUS_KEYS.slice();
   if (sectionKey === "alt_image_texts") return ["has", "missing"];
   if (sectionKey === "needs_update") return ["yes", "no"];
   return null;
@@ -344,18 +450,17 @@ export function computeFacetsFromItems(items, override = null) {
   const uni = universePool(list, q);
 
   const labelFns = {
+    category: (key) => (key === CATEGORY_EMPTY_KEY ? CATEGORY_EMPTY_LABEL : key),
+    visibility: (key) => VISIBILITY_LABELS[key] || key,
     source: (key) => SOURCE_LABELS[key] || key,
     product: (key) => {
       const hit = list.find((p) => productFacetKey(p) === key);
       return hit ? productFacetLabel(hit) : key;
     },
     provider: (key) => PROVIDER_LABELS[key] || key,
-    channels: (key) => {
-      if (CHANNEL_LABELS[key]) return CHANNEL_LABELS[key];
-      const hit = list.find((p) => (p.channel_keys || []).includes(key));
-      const idx = hit ? (hit.channel_keys || []).indexOf(key) : -1;
-      return (idx >= 0 && hit.channel_labels?.[idx]) || key;
-    },
+    channels: (key) => CHANNEL_LABELS[key] || key,
+    amazon_markets: (key) => AMAZON_MARKET_LABELS[key] || key,
+    amazon_status: (key) => AMAZON_STATUS_LABELS[key] || key,
     alt_image_texts: (key) => (key === "has" ? "Has alt text" : "Missing alt text"),
     needs_update: (key) => (key === "yes" ? "Needs update" : "Up to date"),
     printify_status: (key) => PRINTIFY_STATUS_LABELS[key] || key,
@@ -370,7 +475,12 @@ export function computeFacetsFromItems(items, override = null) {
     const universeKeys = fixed || [...uniCounts.keys()];
     const merged = mergeUniverseCounts(universeKeys, poolCounts, tri[key]);
     const numeric = NUMERIC_SECTIONS.has(key);
-    out[key] = toFacetList(merged, labelFns[key], { numeric });
+    const ordered = key === "amazon_markets" || key === "channels" || key === "amazon_status" ? fixed : null;
+    out[key] = toFacetList(merged, labelFns[key], {
+      numeric,
+      orderedKeys: ordered,
+      depthFn: key === "amazon_markets" ? amazonMarketDepth : null,
+    });
   }
   return out;
 }

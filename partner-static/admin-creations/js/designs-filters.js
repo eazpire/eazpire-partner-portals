@@ -3,7 +3,7 @@
  * Tri-state switches: exclude (−1) / neutral (0) / include (1) — same UX as Products.
  * Facet counts come from the API (classic faceted: skip own section); count 0 → grayed / disabled.
  *
- * Status = Shopify ACTIVE→Online / DRAFT→Draft (not library active/inactive).
+ * Status = library Active / Inactive. Category lives on the Products page.
  */
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -11,9 +11,8 @@ import { bindTriSwitches, facetSectionHtml as sharedFacetSectionHtml } from "./f
 
 const STORAGE_KEY = "admin_creations_designs_filter_collapsed";
 
-/** Facet sections under search (Category first). */
+/** Facet sections under search. */
 const SECTIONS = [
-  { key: "category", label: "Category" },
   { key: "visibility", label: "Visibility" },
   { key: "status", label: "Status" },
   { key: "products", label: "Products" },
@@ -130,14 +129,13 @@ function facetSectionHtml(sectionKey, label, facetList) {
 
 export function emptyFacets() {
   return {
-    category: [{ key: "_empty", label: "Empty / not set", count: 0 }],
     visibility: [
       { key: "public", label: "Public", count: 0 },
       { key: "private", label: "Private", count: 0 },
     ],
     status: [
-      { key: "online", label: "Online", count: 0 },
-      { key: "draft", label: "Draft", count: 0 },
+      { key: "active", label: "Active", count: 0 },
+      { key: "inactive", label: "Inactive", count: 0 },
     ],
     products: [],
     assets: [

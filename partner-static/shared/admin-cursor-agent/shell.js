@@ -364,6 +364,274 @@
     return data;
   }
 
+  /* ---- Draggable floating icons (Agent + Publish FABs), server-persisted ---- */
+  var FAB_DRAG_THRESHOLD = 6;
+  var fabPrefsCache = null;
+  var fabPrefsLoading = null;
+  var fabSaveTimers = {};
+  var fabBoundEls = typeof WeakSet !== "undefined" ? new WeakSet() : null;
+
+  function fabActorId() {
+    return String(state.actorId || CFG.customerId || localStorage.getItem("eaz_admin_owner_id") || "");
+  }
+
+  function fabApiUrl(op) {
+    var u = new URL(CFG.apiBase);
+    u.searchParams.set("op", op);
+    var actor = fabActorId();
+    if (actor) u.searchParams.set("logged_in_customer_id", actor);
+    return u.toString();
+  }
+
+  async function loadFabPrefs(force) {
+    if (!force && fabPrefsCache) return fabPrefsCache;
+    if (!force && fabPrefsLoading) return fabPrefsLoading;
+    fabPrefsLoading = (async function () {
+      try {
+        var res = await fetch(fabApiUrl("admin-floating-icon-prefs"), { credentials: "include" });
+        var data = await res.json().catch(function () {
+          return {};
+        });
+        if (res.ok && data && data.ok) {
+          fabPrefsCache = data.prefs && typeof data.prefs === "object" ? data.prefs : {};
+        } else {
+          fabPrefsCache = fabPrefsCache || {};
+        }
+      } catch (e) {
+        fabPrefsCache = fabPrefsCache || {};
+      } finally {
+        fabPrefsLoading = null;
+      }
+      return fabPrefsCache;
+    })();
+    return fabPrefsLoading;
+  }
+
+  function clearCustomFabPos(el) {
+    if (!el) return;
+    el.classList.remove("eaz-fab--custom-pos", "eaz-fab--dragging");
+    el.style.left = "";
+    el.style.top = "";
+    el.style.right = "";
+    el.style.bottom = "";
+  }
+
+  function applyFabPct(el, pos) {
+    if (!el) return;
+    if (!pos || pos.x_pct == null || pos.y_pct == null) {
+      clearCustomFabPos(el);
+      return;
+    }
+    var xPct = Number(pos.x_pct);
+    var yPct = Number(pos.y_pct);
+    if (!isFinite(xPct) || !isFinite(yPct)) {
+      clearCustomFabPos(el);
+      return;
+    }
+    xPct = Math.min(100, Math.max(0, xPct));
+    yPct = Math.min(100, Math.max(0, yPct));
+    var w = el.offsetWidth || 52;
+    var h = el.offsetHeight || 52;
+    var maxX = Math.max(0, window.innerWidth - w);
+    var maxY = Math.max(0, window.innerHeight - h);
+    var left = (xPct / 100) * maxX;
+    var top = (yPct / 100) * maxY;
+    el.classList.add("eaz-fab--custom-pos");
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
+    el.style.right = "auto";
+    el.style.bottom = "auto";
+  }
+
+  function pctFromElement(el) {
+    var w = el.offsetWidth || 52;
+    var h = el.offsetHeight || 52;
+    var maxX = Math.max(1, window.innerWidth - w);
+    var maxY = Math.max(1, window.innerHeight - h);
+    var rect = el.getBoundingClientRect();
+    return {
+      x_pct: Math.min(100, Math.max(0, (rect.left / maxX) * 100)),
+      y_pct: Math.min(100, Math.max(0, (rect.top / maxY) * 100)),
+    };
+  }
+
+  function scheduleFabSave(key, pos) {
+    if (fabSaveTimers[key]) clearTimeout(fabSaveTimers[key]);
+    fabSaveTimers[key] = setTimeout(function () {
+      fabSaveTimers[key] = null;
+      var body = JSON.stringify({ key: key, x_pct: pos.x_pct, y_pct: pos.y_pct });
+      fetch(fabApiUrl("admin-floating-icon-prefs-save"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: body,
+      })
+        .then(function (res) {
+          return res.json().catch(function () {
+            return {};
+          });
+        })
+        .then(function (data) {
+          if (data && data.ok) {
+            fabPrefsCache = fabPrefsCache || {};
+            fabPrefsCache[key] = { x_pct: pos.x_pct, y_pct: pos.y_pct };
+          }
+        })
+        .catch(function () {});
+    }, 280);
+  }
+
+  function scheduleFabClear(key) {
+    if (fabSaveTimers[key]) clearTimeout(fabSaveTimers[key]);
+    fabSaveTimers[key] = setTimeout(function () {
+      fabSaveTimers[key] = null;
+      fetch(fabApiUrl("admin-floating-icon-prefs-save"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: key, clear: true }),
+      })
+        .then(function (res) {
+          return res.json().catch(function () {
+            return {};
+          });
+        })
+        .then(function (data) {
+          if (data && data.ok && fabPrefsCache) delete fabPrefsCache[key];
+        })
+        .catch(function () {});
+    }, 120);
+  }
+
+  /**
+   * @param {HTMLElement} moveEl element whose position is stored (rail or fab)
+   * @param {string} key agent_fab | publish_fab
+   * @param {{ handleEl?: HTMLElement }} [opts]
+   */
+  function bindFloatingIcon(moveEl, key, opts) {
+    opts = opts || {};
+    if (!moveEl || !key) return;
+    if (fabBoundEls) {
+      if (fabBoundEls.has(moveEl)) return;
+      fabBoundEls.add(moveEl);
+    } else if (moveEl.getAttribute("data-eaz-fab-bound") === "1") {
+      return;
+    } else {
+      moveEl.setAttribute("data-eaz-fab-bound", "1");
+    }
+
+    var handleEl = opts.handleEl || moveEl;
+    handleEl.classList.add("eaz-fab--draggable");
+    handleEl.title = (handleEl.getAttribute("aria-label") || handleEl.title || "Icon") + " — drag to move, double-click to reset";
+
+    loadFabPrefs(false).then(function (prefs) {
+      applyFabPct(moveEl, prefs && prefs[key]);
+    });
+
+    var dragging = false;
+    var moved = false;
+    var startX = 0;
+    var startY = 0;
+    var origLeft = 0;
+    var origTop = 0;
+    var pointerId = null;
+
+    function onPointerDown(ev) {
+      if (ev.button != null && ev.button !== 0) return;
+      var rect = moveEl.getBoundingClientRect();
+      dragging = true;
+      moved = false;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      origLeft = rect.left;
+      origTop = rect.top;
+      pointerId = ev.pointerId;
+      try {
+        handleEl.setPointerCapture(ev.pointerId);
+      } catch (e) {}
+    }
+
+    function onPointerMove(ev) {
+      if (!dragging) return;
+      var dx = ev.clientX - startX;
+      var dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) < FAB_DRAG_THRESHOLD && Math.abs(dy) < FAB_DRAG_THRESHOLD) return;
+      moved = true;
+      moveEl.classList.add("eaz-fab--dragging", "eaz-fab--custom-pos");
+      var w = moveEl.offsetWidth || 52;
+      var h = moveEl.offsetHeight || 52;
+      var left = Math.min(Math.max(0, origLeft + dx), Math.max(0, window.innerWidth - w));
+      var top = Math.min(Math.max(0, origTop + dy), Math.max(0, window.innerHeight - h));
+      moveEl.style.left = Math.round(left) + "px";
+      moveEl.style.top = Math.round(top) + "px";
+      moveEl.style.right = "auto";
+      moveEl.style.bottom = "auto";
+      ev.preventDefault();
+    }
+
+    function onPointerUp(ev) {
+      if (!dragging) return;
+      dragging = false;
+      moveEl.classList.remove("eaz-fab--dragging");
+      try {
+        if (pointerId != null) handleEl.releasePointerCapture(pointerId);
+      } catch (e2) {}
+      pointerId = null;
+      if (moved) {
+        var pos = pctFromElement(moveEl);
+        scheduleFabSave(key, pos);
+        moveEl.setAttribute("data-eaz-fab-suppress-click", "1");
+        handleEl.setAttribute("data-eaz-fab-suppress-click", "1");
+        setTimeout(function () {
+          moveEl.removeAttribute("data-eaz-fab-suppress-click");
+          handleEl.removeAttribute("data-eaz-fab-suppress-click");
+        }, 0);
+      }
+    }
+
+    function onClickCapture(ev) {
+      if (
+        moveEl.getAttribute("data-eaz-fab-suppress-click") === "1" ||
+        handleEl.getAttribute("data-eaz-fab-suppress-click") === "1" ||
+        moved
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        moved = false;
+      }
+    }
+
+    function onDblClick(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      clearCustomFabPos(moveEl);
+      scheduleFabClear(key);
+    }
+
+    function onResize() {
+      if (!moveEl.classList.contains("eaz-fab--custom-pos")) return;
+      var prefs = fabPrefsCache && fabPrefsCache[key];
+      if (prefs) applyFabPct(moveEl, prefs);
+      else applyFabPct(moveEl, pctFromElement(moveEl));
+    }
+
+    handleEl.addEventListener("pointerdown", onPointerDown);
+    handleEl.addEventListener("pointermove", onPointerMove);
+    handleEl.addEventListener("pointerup", onPointerUp);
+    handleEl.addEventListener("pointercancel", onPointerUp);
+    handleEl.addEventListener("click", onClickCapture, true);
+    handleEl.addEventListener("dblclick", onDblClick);
+    window.addEventListener("resize", onResize);
+  }
+
+  global.EazAdminFabPosition = {
+    bind: bindFloatingIcon,
+    apply: applyFabPct,
+    clear: clearCustomFabPos,
+    loadPrefs: loadFabPrefs,
+    keys: { agent: "agent_fab", publish: "publish_fab" },
+  };
+
   async function resolveActorId() {
     if (CFG.customerId) {
       state.actorId = String(CFG.customerId);
@@ -1333,7 +1601,14 @@
     if (els.syncBannerText) els.syncBannerText.textContent = SYNC_BANNER_TEXT;
     syncFunctionsUi();
 
-    fab.addEventListener("click", function () {
+    fab.addEventListener("click", function (ev) {
+      if (fab.getAttribute("data-eaz-fab-suppress-click") === "1") {
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+        return;
+      }
       openShell();
     });
     var syncDismiss = root.querySelector('[data-ca="sync-dismiss"]');
@@ -1482,6 +1757,9 @@
         buildDom();
       }
       els.fab.hidden = false;
+      try {
+        bindFloatingIcon(els.fab, "agent_fab");
+      } catch (bindErr) {}
       updateContextChip();
       return true;
     } catch (e) {

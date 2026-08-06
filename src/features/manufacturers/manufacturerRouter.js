@@ -324,6 +324,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
   "admin-creations-shopify-product-unpublish",
+  "admin-creations-product-variant-update",
   "admin-creations-product-action-lock",
   "admin-creations-product-action-unlock",
   "admin-creations-edit-design",
@@ -1589,6 +1590,12 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsShopifyUnpublish.js"
       );
       return handleAdminCreationsShopifyProductUnpublish(request, env);
+    }
+    if (op === "admin-creations-product-variant-update" && request.method === "POST") {
+      const { handleAdminCreationsProductVariantUpdate } = await import(
+        "./adminCreationsProductVariantUpdate.js"
+      );
+      return handleAdminCreationsProductVariantUpdate(request, env, ctx);
     }
     if (op === "admin-creations-product-action-lock" && request.method === "POST") {
       const { handleAdminCreationsProductActionLock } = await import("./adminCreationsProductActionLock.js");

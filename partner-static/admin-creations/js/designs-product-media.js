@@ -109,22 +109,154 @@ export function synthesizePreviewFromMocks(urls) {
   return slides.length ? { slides } : null;
 }
 
-export function mountComposedMedia(mediaEl, previewConfig, designUrl) {
+const COMPOSE_AUTO_ROTATE_MS = 2500;
+
+export function clearComposeAutoRotate(mediaEl) {
+  if (!mediaEl) return;
+  if (mediaEl.__crDdComposeRotate) {
+    clearInterval(mediaEl.__crDdComposeRotate);
+    mediaEl.__crDdComposeRotate = null;
+  }
+}
+
+/**
+ * Studio compose card media — Creator Products Preview parity:
+ * real catalog mocks + design overlay, floating variant arrows, optional auto-rotate.
+ * @param {HTMLElement} mediaEl
+ * @param {{ slides?: object[] }|null} previewConfig
+ * @param {string} designUrl
+ * @param {{ autoRotate?: boolean }} [opts]
+ */
+export function mountComposedMedia(mediaEl, previewConfig, designUrl, opts = {}) {
   if (!mediaEl) return false;
+  clearComposeAutoRotate(mediaEl);
   mediaEl.innerHTML = "";
   mediaEl.classList.add("cr-dd-compose");
-  const slides = (previewConfig?.slides || []).filter((s) => s?.mock_url);
+  mediaEl.classList.remove("cr-dd-compose--carousel");
+  const slides = (previewConfig?.slides || []).filter((s) => String(s?.mock_url || "").trim());
   if (!slides.length || !designUrl) {
     mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
     return false;
   }
-  const stack = buildComposeStack(slides[0], designUrl);
-  if (stack) {
+
+  if (slides.length === 1) {
+    const stack = buildComposeStack(slides[0], designUrl);
+    if (!stack) {
+      mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
+      return false;
+    }
     mediaEl.appendChild(stack);
     return true;
   }
-  mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
-  return false;
+
+  // Multi-color / multi-variant: floating carousel (Creator Products Preview Modal parity).
+  mediaEl.classList.add("cr-dd-compose--carousel");
+  const host = document.createElement("div");
+  host.className = "cr-dd-compose__host";
+  host.dataset.slideIndex = "0";
+
+  const stackA = buildComposeStack(slides[0], designUrl);
+  if (!stackA) {
+    mediaEl.innerHTML = `<span class="cr-dd-prod__empty">No mock</span>`;
+    return false;
+  }
+  stackA.classList.add("is-active");
+  host.appendChild(stackA);
+  const stackB = buildComposeStack(slides[1] || slides[0], designUrl);
+  if (stackB) {
+    stackB.classList.remove("is-active");
+    host.appendChild(stackB);
+  }
+  mediaEl.appendChild(host);
+
+  const navPrev = document.createElement("button");
+  navPrev.type = "button";
+  navPrev.className = "cr-dd-compose__nav cr-dd-compose__nav--prev";
+  navPrev.setAttribute("aria-label", "Previous mock variant");
+  navPrev.innerHTML = "‹";
+  const navNext = document.createElement("button");
+  navNext.type = "button";
+  navNext.className = "cr-dd-compose__nav cr-dd-compose__nav--next";
+  navNext.setAttribute("aria-label", "Next mock variant");
+  navNext.innerHTML = "›";
+
+  let advancing = false;
+  function advanceSlide(delta) {
+    if (advancing) return;
+    advancing = true;
+    const idx = parseInt(host.dataset.slideIndex || "0", 10);
+    const nextIdx = (idx + delta + slides.length * 100) % slides.length;
+    host.dataset.slideIndex = String(nextIdx);
+    const active = host.querySelector(".cr-dd-compose__slide.is-active");
+    let inactive = host.querySelector(".cr-dd-compose__slide:not(.is-active)");
+    const target = slides[nextIdx];
+    const targetUrl = String(target?.mock_url || "").trim();
+    if (!targetUrl) {
+      advancing = false;
+      return;
+    }
+    if (!inactive) {
+      inactive = buildComposeStack(target, designUrl);
+      if (inactive) {
+        inactive.classList.remove("is-active");
+        host.appendChild(inactive);
+      }
+    } else {
+      const existing = inactive.querySelector(".cr-dd-compose__mock");
+      if (!existing || existing.src !== targetUrl) {
+        inactive.remove();
+        inactive = buildComposeStack(target, designUrl);
+        if (inactive) {
+          inactive.classList.remove("is-active");
+          host.appendChild(inactive);
+        }
+      } else {
+        try {
+          inactive.setAttribute(
+            "data-card-placement",
+            JSON.stringify(normalizePlacement(target?.placement))
+          );
+        } catch (_) {}
+        layoutStack(inactive);
+      }
+    }
+    if (active && inactive) {
+      inactive.classList.add("is-active");
+      active.classList.remove("is-active");
+      if (active !== inactive) active.remove();
+    }
+    requestAnimationFrame(() => {
+      if (inactive) layoutStack(inactive);
+      advancing = false;
+    });
+  }
+
+  navPrev.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    advanceSlide(-1);
+  });
+  navNext.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    advanceSlide(1);
+  });
+  mediaEl.appendChild(navPrev);
+  mediaEl.appendChild(navNext);
+
+  const autoRotate = opts.autoRotate !== false;
+  if (autoRotate) {
+    mediaEl.__crDdComposeRotate = setInterval(() => {
+      if (!mediaEl.isConnected) {
+        clearComposeAutoRotate(mediaEl);
+        return;
+      }
+      try {
+        navNext.click();
+      } catch (_) {}
+    }, COMPOSE_AUTO_ROTATE_MS);
+  }
+  return true;
 }
 
 /** Prefer first studio slide mock, then catalog mock URLs (no design overlay). */

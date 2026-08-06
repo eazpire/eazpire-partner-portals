@@ -340,6 +340,7 @@
     "wear-os:install": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install",
     "wear-os:run-emulator": "powershell -ExecutionPolicy Bypass -File scripts/wear-os/build-wear-os.ps1 -Install -Launch",
     "secrets:meta-instagram": "node scripts/set-meta-instagram-credentials.js",
+    "secrets:topaz": "node scripts/set-topaz-api-key.js",
     "measure:shop-network-audit": "node scripts/test/shop-perf-network-audit.cjs",
     "measure:home-request-audit": "node scripts/test/shop-perf-home-request-audit.cjs",
     "measure:home-request-audit:cold": "PERF_HOME_COLD=1 PERF_HOME_WAIT_MS=5000 node scripts/test/shop-perf-home-request-audit.cjs --cold",

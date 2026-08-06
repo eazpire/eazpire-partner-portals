@@ -1871,26 +1871,28 @@ async function renderProductsPanel(item) {
       if (!media) continue;
       const liveRow = liveByKey.get(key);
       const online = card?.getAttribute("data-online") === "1";
-      if (online) {
-        // Online = Shopify saved featured/mock image (same as storefront), not client re-compose.
-        const liveUrl = liveRow?.image_url || liveRow?.featured_image || "";
-        if (liveUrl) {
-          media.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(liveUrl)}" alt="" loading="lazy" /><span class="cr-badge cr-badge--online">Online</span>`;
-        } else if (mountComposedMedia(media, p.studio_card_preview, designUrl)) {
-          const badge = document.createElement("span");
-          badge.className = "cr-badge cr-badge--online";
-          badge.textContent = "Online";
-          media.appendChild(badge);
-        } else {
-          media.innerHTML = `<span class="cr-dd-prod__empty">No Shopify image</span><span class="cr-badge cr-badge--online">Online</span>`;
-        }
-      } else {
-        mountOfflineProductMedia(media, p, designUrl);
-        const badge = document.createElement("span");
-        badge.className = "cr-badge cr-badge--offline";
-        badge.textContent = "Offline";
-        media.appendChild(badge);
+      // Prefer Design Studio card mocks (real catalog mock + design + color carousel),
+      // same as Creator Products Preview Modal — Online/Offline is only a status badge.
+      const studioPreview = p.studio_card_preview || null;
+      let mounted = false;
+      if (studioPreview?.slides?.length) {
+        mounted = mountComposedMedia(media, studioPreview, designUrl, { autoRotate: true });
       }
+      if (!mounted && online) {
+        const liveUrl = String(liveRow?.image_url || liveRow?.featured_image || "").trim();
+        if (liveUrl) {
+          media.classList.remove("cr-dd-compose", "cr-dd-compose--carousel");
+          media.innerHTML = `<img class="cr-dd-prod__mock" src="${escapeHtml(liveUrl)}" alt="" loading="lazy" />`;
+          mounted = true;
+        }
+      }
+      if (!mounted) {
+        mountOfflineProductMedia(media, p, designUrl);
+      }
+      const badge = document.createElement("span");
+      badge.className = online ? "cr-badge cr-badge--online" : "cr-badge cr-badge--offline";
+      badge.textContent = online ? "Online" : "Offline";
+      media.appendChild(badge);
     }
 
     bindProdCarousels(panel);

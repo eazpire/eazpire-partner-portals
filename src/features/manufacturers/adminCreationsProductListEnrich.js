@@ -20,6 +20,7 @@ import {
   PRINTIFY_STATUS_LABELS,
   repairStalePrintifyListingStatusPublishing,
 } from "../publish/printifyListingStatus.js";
+import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
 import {
   inferMockupViewFromSrc,
@@ -46,31 +47,98 @@ const AMAZON_PENDING_STATUSES = new Set([
   "pending_indexing",
 ]);
 
-/** Fixed sales-channel keys a Creations product can be published on (incl. Amazon from D1). */
+/** EU country codes under Amazon Markets parent `amazon_eu`. */
+export const AMAZON_EU_COUNTRY_CODES = ["DE", "UK", "FR", "NL", "IT", "ES", "BE", "PL", "SE", "IE"];
+/** NA country codes under Amazon Markets parent `amazon_na` (label: Amazon US). */
+export const AMAZON_US_COUNTRY_CODES = ["US", "CA"];
+
+/** All country codes used for Amazon Markets facets. */
+export const AMAZON_FACET_COUNTRY_CODES = [...AMAZON_EU_COUNTRY_CODES, ...AMAZON_US_COUNTRY_CODES];
+
+/**
+ * Shopify sales channels only (Creations Products → Channels filter).
+ * Online Store → eazpire Web; Headless → eazpire Android.
+ */
 export function publicationChannelKeys() {
+  return ["onlineshop", "eazpire_headless"];
+}
+
+/**
+ * Amazon Markets facet keys in display order: region parents, then countries indented in UI.
+ * Parents: amazon_eu / amazon_na (UI label "Amazon US"). Countries: amazon_de … amazon_us, amazon_ca.
+ * Presence = live OR pending on that region/country (status is a separate filter).
+ */
+export function amazonMarketKeys() {
   return [
-    "eazpire",
-    "onlineshop",
-    "eazpire_headless",
     "amazon_eu",
-    "amazon_us",
-    "pending_amazon_eu",
-    "pending_amazon_us",
+    ...AMAZON_EU_COUNTRY_CODES.map((c) => `amazon_${c.toLowerCase()}`),
+    "amazon_na",
+    ...AMAZON_US_COUNTRY_CODES.map((c) => `amazon_${c.toLowerCase()}`),
   ];
 }
 
+/** Depth for hierarchical Markets UI (0 = parent, 1 = country). */
+export function amazonMarketDepth(key) {
+  const k = String(key || "");
+  if (k === "amazon_eu" || k === "amazon_na") return 0;
+  if (k.startsWith("amazon_")) return 1;
+  return 0;
+}
+
+/** Amazon Status facet — Online / Pending (any marketplace). */
+export function amazonStatusKeys() {
+  return ["online", "pending"];
+}
+
 const CHANNEL_LABELS = {
-  eazpire: "eazpire",
-  onlineshop: "Online Store",
-  eazpire_headless: "eazpire Headless",
-  amazon_eu: "Amazon EU",
-  amazon_us: "Amazon US",
-  pending_amazon_eu: "Pending Amazon EU",
-  pending_amazon_us: "Pending Amazon US",
+  onlineshop: "eazpire Web",
+  eazpire_headless: "eazpire Android",
 };
+
+const AMAZON_MARKET_LABELS = {
+  amazon_eu: "Amazon EU",
+  amazon_na: "Amazon US",
+  amazon_de: "DE",
+  amazon_uk: "UK",
+  amazon_fr: "FR",
+  amazon_nl: "NL",
+  amazon_it: "IT",
+  amazon_es: "ES",
+  amazon_be: "BE",
+  amazon_pl: "PL",
+  amazon_se: "SE",
+  amazon_ie: "IE",
+  amazon_us: "US",
+  amazon_ca: "CA",
+};
+
+const AMAZON_STATUS_LABELS = {
+  online: "Online",
+  pending: "Pending",
+};
+
+function countryCodeForMarketplaceId(marketplaceId) {
+  const id = String(marketplaceId || "").trim();
+  if (!id) return null;
+  for (const [cc, mid] of Object.entries(EU_MARKETPLACES)) {
+    if (mid === id) return cc;
+  }
+  for (const [cc, mid] of Object.entries(NA_MARKETPLACES)) {
+    if (mid === id) return cc;
+  }
+  return null;
+}
 
 export function channelLabelForKey(key) {
   return CHANNEL_LABELS[key] || String(key || "");
+}
+
+export function amazonMarketLabelForKey(key) {
+  return AMAZON_MARKET_LABELS[key] || String(key || "");
+}
+
+export function amazonStatusLabelForKey(key) {
+  return AMAZON_STATUS_LABELS[key] || String(key || "");
 }
 
 /** @deprecated Prefer isAmazonSuccessfullyPublished / isAmazonPendingPublish — kept for tests. */
@@ -167,6 +235,7 @@ const MF_ALIAS_TO_KEY = {
   mfListingOrigin: "custom.listing_origin",
   mfProvider: "custom.provider",
   mfSample: "custom.sample",
+  mfVisibility: "custom.visibility",
 };
 
 /**
@@ -243,22 +312,28 @@ function filterProviderForProduct(product) {
   return provider || "unknown";
 }
 
-async function loadCatalogProductNames(env, productKeys) {
+/** Blank/catalog product titles by product_key (same SoT as Products page Product filter). */
+export async function loadCatalogProductNames(env, productKeys) {
   const out = new Map();
   const keys = [...new Set((productKeys || []).map((k) => String(k || "").trim()).filter(Boolean))];
   if (!env?.CATALOG_DB || !keys.length) return out;
-  const placeholders = keys.map(() => "?").join(",");
-  try {
-    const res = await env.CATALOG_DB.prepare(
-      `SELECT product_key, title FROM product_catalog WHERE product_key IN (${placeholders})`
-    )
-      .bind(...keys)
-      .all();
-    for (const row of res?.results || []) {
-      if (row.product_key) out.set(String(row.product_key), row.title || null);
+  const CHUNK = 80;
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const chunk = keys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CATALOG_DB.prepare(
+        `SELECT product_key, title FROM product_catalog WHERE product_key IN (${placeholders})`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        if (row.product_key) out.set(String(row.product_key), row.title || null);
+      }
+    } catch (e) {
+      console.warn("[admin-creations-product-list-enrich] catalog names:", e?.message);
+      break;
     }
-  } catch (e) {
-    console.warn("[admin-creations-product-list-enrich] catalog names:", e?.message);
   }
   return out;
 }
@@ -267,24 +342,79 @@ async function loadDesignPublishLinks(env, shopifyIds) {
   const out = new Map();
   const ids = [...new Set((shopifyIds || []).map((id) => normalizeShopifyProductId(id)).filter(Boolean))];
   if (!env?.CREATOR_DB || !ids.length) return out;
-  const placeholders = ids.map(() => "?").join(",");
-  try {
-    const res = await env.CREATOR_DB.prepare(
-      `SELECT id, design_id, shopify_product_id
-       FROM published_designs
-       WHERE REPLACE(REPLACE(TRIM(CAST(shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
-    )
-      .bind(...ids)
-      .all();
-    for (const row of res?.results || []) {
-      const sid = normalizeShopifyProductId(row.shopify_product_id);
-      if (!sid || out.has(sid)) continue;
-      out.set(sid, { design_id: Number(row.design_id || 0) || null, published_design_id: Number(row.id || 0) || null });
+  const CHUNK = 80;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    try {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT id, design_id, shopify_product_id, visibility
+         FROM published_designs
+         WHERE REPLACE(REPLACE(TRIM(CAST(shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
+      )
+        .bind(...chunk)
+        .all();
+      for (const row of res?.results || []) {
+        const sid = normalizeShopifyProductId(row.shopify_product_id);
+        if (!sid || out.has(sid)) continue;
+        const vis = String(row.visibility || "")
+          .trim()
+          .toLowerCase();
+        out.set(sid, {
+          design_id: Number(row.design_id || 0) || null,
+          published_design_id: Number(row.id || 0) || null,
+          visibility: vis === "public" ? "public" : vis === "private" ? "private" : null,
+        });
+      }
+    } catch (e) {
+      // Older rows / schema without visibility — retry id-only.
+      try {
+        const res = await env.CREATOR_DB.prepare(
+          `SELECT id, design_id, shopify_product_id
+           FROM published_designs
+           WHERE REPLACE(REPLACE(TRIM(CAST(shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '') IN (${placeholders})`
+        )
+          .bind(...chunk)
+          .all();
+        for (const row of res?.results || []) {
+          const sid = normalizeShopifyProductId(row.shopify_product_id);
+          if (!sid || out.has(sid)) continue;
+          out.set(sid, {
+            design_id: Number(row.design_id || 0) || null,
+            published_design_id: Number(row.id || 0) || null,
+            visibility: null,
+          });
+        }
+      } catch (e2) {
+        console.warn("[admin-creations-product-list-enrich] published_designs links:", e2?.message || e?.message);
+      }
     }
-  } catch (e) {
-    console.warn("[admin-creations-product-list-enrich] published_designs links:", e?.message);
   }
   return out;
+}
+
+/** Shopify productType / taxonomy leaf, else Empty key for Products Category facet. */
+function filterCategoryForProduct(product, node) {
+  const fromNodeType = String(node?.productType || "").trim();
+  const fullName = String(node?.category?.fullName || "").trim();
+  const leaf = fullName.includes(">") ? fullName.split(">").pop().trim() : fullName;
+  const fromProduct = String(product?.shopify_product_type || product?.product_type || "").trim();
+  const fromFilter = String(product?.filter_category || "").trim();
+  if (fromFilter && fromFilter !== "_empty") return fromFilter;
+  return fromNodeType || leaf || fromProduct || "_empty";
+}
+
+/** Prefer Shopify custom.visibility metafield; fall back to published_designs.visibility. */
+function filterVisibilityForProduct(product, node, link) {
+  const mfMap = extractFilledMetafieldMap(node);
+  const fromAlias = parseMetafieldValue(node?.mfVisibility?.value).toLowerCase();
+  const fromMap = parseMetafieldValue(mfMap["custom.visibility"]).toLowerCase();
+  const fromProduct = String(product?.filter_visibility || product?.listing_visibility || "")
+    .trim()
+    .toLowerCase();
+  const fromLink = String(link?.visibility || "").trim().toLowerCase();
+  const raw = fromAlias || fromMap || fromProduct || fromLink;
+  return raw === "public" ? "public" : "private";
 }
 
 async function loadDesignPublishSnapshots(env, designIds) {
@@ -803,12 +933,30 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const amazonUsPending = amazonRows.some(
       (r) => r.marketplace_id === NA_MARKETPLACES.US && isAmazonPendingPublish(r)
     );
+    /** @type {Record<string, boolean>} */
+    const amazonCountryLive = {};
+    /** @type {Record<string, boolean>} */
+    const amazonCountryPending = {};
+    for (const r of amazonRows) {
+      const cc = countryCodeForMarketplaceId(r.marketplace_id);
+      if (!cc) continue;
+      const k = cc.toLowerCase();
+      if (isAmazonSuccessfullyPublished(r)) amazonCountryLive[k] = true;
+      if (isAmazonPendingPublish(r)) amazonCountryPending[k] = true;
+    }
+    const amazonNaLive = AMAZON_US_COUNTRY_CODES.some((c) => !!amazonCountryLive[c.toLowerCase()]);
+    const amazonNaPending = AMAZON_US_COUNTRY_CODES.some((c) => !!amazonCountryPending[c.toLowerCase()]);
     // Live-only flags for bulk UI (same success criteria as Channels Amazon EU/US).
     const amazonEuListed = amazonEuLive;
     const amazonUsListed = amazonUsLive;
+    const amazonDeListed = !!amazonCountryLive.de;
+    const amazonDePending = !!amazonCountryPending.de;
     // Busy / in-flight presence (live OR pending) — used for publish eligibility.
     const amazonEuChannel = amazonEuLive || amazonEuPending;
     const amazonUsChannel = amazonUsLive || amazonUsPending;
+    const amazonDeChannel = amazonDeListed || amazonDePending;
+    const amazonAnyOnline = amazonEuLive || amazonNaLive;
+    const amazonAnyPending = amazonEuPending || amazonNaPending;
 
     const onOnlineStore = node
       ? nodePublishedToOnlineStore(node)
@@ -816,32 +964,39 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const onHeadless = node
       ? nodePublishedToHeadless(node, headlessPublicationGids)
       : false;
-    // eazpire = live Shopify product (ACTIVE); Online Store / Headless = real publications.
-    const onEazpire = Number(product.is_active) === 2 || String(node?.status || "").toUpperCase() === "ACTIVE";
 
     const marketLabels = [];
-    if (onOnlineStore) marketLabels.push("Online Store");
-    if (onHeadless) marketLabels.push("eazpire Headless");
-    if (amazonEuLive) marketLabels.push("Amazon EU");
-    else if (amazonEuPending) marketLabels.push("Pending Amazon EU");
-    if (amazonUsLive) marketLabels.push("Amazon US");
-    else if (amazonUsPending) marketLabels.push("Pending Amazon US");
+    if (onOnlineStore) marketLabels.push("eazpire Web");
+    if (onHeadless) marketLabels.push("eazpire Android");
+    if (amazonEuChannel) marketLabels.push("Amazon EU");
+    if (amazonNaLive || amazonNaPending) marketLabels.push("Amazon US");
 
     const profile = product.product_key ? publishProfiles.get(product.product_key) : null;
     const variantCount = Number(node?.totalVariants?.count ?? product.total_variants ?? 0) || 0;
     const branding = brandingCountsFromProfile(profile, variantCount);
     const catalogCount = product.product_key ? Number(catalogCountryCounts.get(product.product_key) || 0) : 0;
 
+    // Shopify sales channels only.
     const channelKeys = publicationChannelKeys().filter((key) => {
-      if (key === "eazpire") return onEazpire;
       if (key === "onlineshop") return onOnlineStore;
       if (key === "eazpire_headless") return onHeadless;
-      if (key === "amazon_eu") return amazonEuLive;
-      if (key === "amazon_us") return amazonUsLive;
-      if (key === "pending_amazon_eu") return amazonEuPending;
-      if (key === "pending_amazon_us") return amazonUsPending;
       return false;
     });
+
+    // Region/country presence (live OR pending) — status filtered separately.
+    const amazonMarketKeysForProduct = amazonMarketKeys().filter((key) => {
+      if (key === "amazon_eu") return amazonEuChannel;
+      if (key === "amazon_na") return amazonNaLive || amazonNaPending;
+      if (key.startsWith("amazon_")) {
+        const cc = key.slice("amazon_".length);
+        return !!amazonCountryLive[cc] || !!amazonCountryPending[cc];
+      }
+      return false;
+    });
+
+    const amazonStatusKeysForProduct = [];
+    if (amazonAnyOnline) amazonStatusKeysForProduct.push("online");
+    if (amazonAnyPending) amazonStatusKeysForProduct.push("pending");
 
     const busyByShopifyId = sid ? busy.shopifyIds.has(sid) : false;
     const busyByProductKey = product.product_key ? busy.productKeys.has(String(product.product_key)) : false;
@@ -891,6 +1046,10 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       channel_count: channelKeys.length,
       channel_keys: channelKeys,
       channel_labels: channelKeys.map(channelLabelForKey),
+      amazon_market_keys: amazonMarketKeysForProduct,
+      amazon_market_labels: amazonMarketKeysForProduct.map(amazonMarketLabelForKey),
+      amazon_status_keys: amazonStatusKeysForProduct,
+      amazon_status_labels: amazonStatusKeysForProduct.map(amazonStatusLabelForKey),
       alt_image_texts: altImageTextsFromNode(node),
       ...(() => {
         const alt_image_groups = buildAltImageGroupsFromNode(node, {
@@ -908,14 +1067,25 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       needs_update: computeNeedsUpdate(snapshot, current),
       amazon_eu_listed: amazonEuListed,
       amazon_us_listed: amazonUsListed,
+      amazon_de_listed: amazonDeListed,
       amazon_eu_channel: amazonEuChannel,
       amazon_us_channel: amazonUsChannel,
+      amazon_de_channel: amazonDeChannel,
       amazon_eu_pending: amazonEuPending,
       amazon_us_pending: amazonUsPending,
-      // Don't re-queue Amazon publish while a D1 listing is already in-flight or live.
-      publish_eligible_amazon_eu: !amazonEuChannel && !amazonUsChannel,
+      amazon_de_pending: amazonDePending,
+      amazon_country_live: amazonCountryLive,
+      amazon_country_pending: amazonCountryPending,
+      // Prefer DE eligibility for bulk publish; keep EU alias for older UI.
+      publish_eligible_amazon_de: !amazonDeChannel,
+      publish_eligible_amazon_eu: !amazonDeChannel,
       publish_active: busyByShopifyId || busyByProductKey,
       filter_product_key: String(product.product_key || product.id || sid || ""),
+      filter_category: filterCategoryForProduct(product, node),
+      shopify_product_type:
+        String(product.shopify_product_type || node?.productType || "").trim() || null,
+      filter_visibility: filterVisibilityForProduct(product, node, link),
+      listing_visibility: filterVisibilityForProduct(product, node, link),
       printify_status: printifyStatus || null,
       printify_mock_urls: mockUrls,
     };
@@ -971,7 +1141,38 @@ export function buildProductFilterFacets(products) {
     (p) => (Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null)
   );
   for (const [k, v] of channelCounts) baseChannels.set(k, v);
-  const channels = toFacetList(baseChannels, (key) => channelLabelForKey(key));
+  // Fixed order: eazpire Web → eazpire Android (do not sort by count/name).
+  const channels = publicationChannelKeys().map((key) => ({
+    key,
+    label: channelLabelForKey(key),
+    count: baseChannels.get(key) || 0,
+  }));
+
+  const baseAmazonMarkets = new Map(amazonMarketKeys().map((k) => [k, 0]));
+  const amazonMarketCounts = bucketCount(
+    list,
+    (p) => (Array.isArray(p.amazon_market_keys) && p.amazon_market_keys.length ? p.amazon_market_keys : null)
+  );
+  for (const [k, v] of amazonMarketCounts) baseAmazonMarkets.set(k, v);
+  const amazon_markets = amazonMarketKeys().map((key) => ({
+    key,
+    label: amazonMarketLabelForKey(key),
+    count: baseAmazonMarkets.get(key) || 0,
+    depth: amazonMarketDepth(key),
+  }));
+
+  const baseAmazonStatus = new Map(amazonStatusKeys().map((k) => [k, 0]));
+  const amazonStatusCounts = bucketCount(
+    list,
+    (p) => (Array.isArray(p.amazon_status_keys) && p.amazon_status_keys.length ? p.amazon_status_keys : null)
+  );
+  for (const [k, v] of amazonStatusCounts) baseAmazonStatus.set(k, v);
+  // Fixed order: Online → Pending.
+  const amazon_status = amazonStatusKeys().map((key) => ({
+    key,
+    label: amazonStatusLabelForKey(key),
+    count: baseAmazonStatus.get(key) || 0,
+  }));
 
   const variants = toFacetList(bucketCount(list, (p) => exactCountKey(p.variant_count)), null, { numeric: true });
 
@@ -1027,6 +1228,8 @@ export function buildProductFilterFacets(products) {
     total: list.length,
     provider,
     channels,
+    amazon_markets,
+    amazon_status,
     variants,
     catalogs,
     markets: catalogs,

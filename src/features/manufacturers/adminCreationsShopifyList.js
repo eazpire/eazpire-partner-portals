@@ -14,6 +14,7 @@ const PRODUCT_NODE_FIELDS = `
   status
   vendor
   productType
+  category { fullName }
   tags
   isGiftCard
   totalVariants: variantsCount {
@@ -37,6 +38,7 @@ const PRODUCT_NODE_FIELDS = `
   mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
   mfProvider: metafield(namespace: "custom", key: "provider") { value }
   mfSample: metafield(namespace: "custom", key: "sample") { value }
+  mfVisibility: metafield(namespace: "custom", key: "visibility") { value }
   metafields(first: 100) {
     edges {
       node {
@@ -350,6 +352,15 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   else if (source === "samples") categoryDefault = "Personalizable samples";
   else if (isGiftCardShopifyProduct(node)) categoryDefault = "Gift card";
 
+  const productType = String(node?.productType || "").trim();
+  const fullName = String(node?.category?.fullName || "").trim();
+  const taxonomyLeaf = fullName.includes(">") ? fullName.split(">").pop().trim() : fullName;
+  const shopifyProductType = productType || taxonomyLeaf || "";
+  const visibilityRaw = String(parseMetafieldValue(node?.mfVisibility?.value) || "")
+    .trim()
+    .toLowerCase();
+  const listingVisibility = visibilityRaw === "public" ? "public" : "private";
+
   return {
     id: shopifyId,
     product_key: productKey,
@@ -357,7 +368,11 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     preview_url: imageUrl,
     images: gridViews.length ? gridViews.map((v) => v.src) : imageUrl ? [imageUrl] : [],
     grid_views: gridViews,
-    category: node?.productType || categoryDefault,
+    category: shopifyProductType || categoryDefault,
+    shopify_product_type: shopifyProductType || null,
+    filter_category: shopifyProductType || "_empty",
+    listing_visibility: listingVisibility,
+    filter_visibility: listingVisibility,
     status: node?.status,
     is_active: shopifyStatusToIsActive(node?.status),
     vendor: node?.vendor || "",

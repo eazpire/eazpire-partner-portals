@@ -1,7 +1,7 @@
 /**
  * Admin Creations → Products modal Channels panel (creator-style UI).
  * No Skill Tree limits — only product Channels unlocks from catalog settings.
- * Amazon publish targets = continents (Europa → DE source, USA → US) for this phase.
+ * Amazon: EU/Amerika parents + per-country publish (direct SP-API, no BIL).
  */
 import { escapeHtml, partnerFetch } from "/creations/shared/js/partner-api.js";
 import { showToast } from "/creations/shared/js/partner-shell.js";
@@ -35,7 +35,7 @@ function unlocksFromProduct(product) {
 }
 
 /**
- * Continent publish targets — prefer API amazon_publish_targets (DE + US phase).
+ * Continent publish targets — prefer API amazon_publish_targets (per-country codes).
  */
 function amazonTargetsFromProduct(product) {
   const apiTargets = product?.channels?.amazon_publish_targets;
@@ -56,10 +56,10 @@ function amazonTargetsFromProduct(product) {
   const src = amz.source_marketplaces || {};
   const targets = [];
 
-  const europaOn =
-    continents.europa === true ||
-    ["FR", "NL", "PL", "UK", "DE", "ES", "IE", "SE", "BE", "IT"].some((c) => !!markets[c]);
-  const amerikaOn = continents.amerika === true || !!markets.US || !!markets.CA;
+  const euCodes = ["FR", "NL", "PL", "UK", "DE", "ES", "IE", "SE", "BE", "IT"].filter((c) => !!markets[c]);
+  const amCodes = ["CA", "US"].filter((c) => !!markets[c]);
+  const europaOn = continents.europa === true || euCodes.length > 0;
+  const amerikaOn = continents.amerika === true || amCodes.length > 0;
 
   if (europaOn) {
     const source = src.europa || "DE";
@@ -67,7 +67,7 @@ function amazonTargetsFromProduct(product) {
       continent: "europa",
       label: "Europa",
       source,
-      publishCodes: [source],
+      publishCodes: euCodes.length ? euCodes : [source],
     });
   }
   if (amerikaOn) {
@@ -75,7 +75,7 @@ function amazonTargetsFromProduct(product) {
       continent: "amerika",
       label: "USA / Amerika",
       source: src.amerika || "US",
-      publishCodes: ["US"],
+      publishCodes: amCodes.length ? amCodes : ["US"],
     });
   }
   return targets;
@@ -231,7 +231,7 @@ export function renderChannelsPanelHtml(product, ui) {
     }" role="listitem" data-cr-ch-amazon-tile>
       ${LOGOS.amazon}
       <div class="cr-ch-tile__top"><h4>Amazon</h4>${statusHtml(amzSt)}</div>
-      <p class="cr-ch-tile__meta">${ui.amazonExpanded ? "▾" : "▸"} Continents · ${
+      <p class="cr-ch-tile__meta">${ui.amazonExpanded ? "▾" : "▸"} Regions · ${
       amzPublished || amzDryOk
     }/${targets.length}${
       publishLabels.length ? ` · publish ${escapeHtml(publishLabels.join(" + "))}` : ""
@@ -265,32 +265,32 @@ export function renderChannelsPanelHtml(product, ui) {
     } else {
       const pdId = product?.published_design_id || product?.amazon_publish?.published_design_id;
       regionsHtml = `${dryRunBannerHtml(product)}
-      <p class="cr-pd-hint">Phase: publish/dry-run only <strong>DE</strong> (Europa source) and <strong>USA</strong>. Other EU markets are display-only until Amazon BIL is set up.${
+      <p class="cr-pd-hint">Direct publish per country (no BIL). Content-ready today: <strong>DE</strong> and <strong>US</strong>. Other countries can be enabled in Catalog Channels for planning.${
         pdId ? ` · published_design #${escapeHtml(String(pdId))}` : " · ⚠ no published_design linked"
       }</p>
       <div class="cr-ch-regions" role="list">${targets
         .map((t) => {
-          const st = ui.channelState[`amazon:${t.continent}`] || {
-            status: "unpublished",
-            queue: false,
-          };
-          const flagCode = t.continent === "amerika" ? "US" : t.source || "DE";
-          const publishCode = (t.publishCodes && t.publishCodes[0]) || t.source || "DE";
-          const codesHint =
-            t.continent === "europa"
-              ? `Publish → Amazon ${publishCode} (source ${t.source}) · EU list display-only`
-              : `Publish → Amazon USA · source ${t.source}`;
-          const canAct = !st.queue;
-          const isPublished = st.status === "published";
-          const dryOk = st.status === "dry_run_ok" || isPublished;
-          const errors = Array.isArray(st.errors) ? st.errors : [];
-          return `<div class="cr-ch-region" role="listitem" data-cr-ch-continent="${escapeHtml(
-            t.continent
-          )}">
-            <div class="cr-ch-region__head">${flagHtml(flagCode)}<strong>${escapeHtml(
-              t.label
-            )}</strong>
-              <span>${escapeHtml(codesHint)}</span></div>
+          const codes = t.publishCodes?.length ? t.publishCodes : [t.source || "DE"];
+          return codes
+            .map((code) => {
+              const stKey = `amazon:${t.continent}:${code}`;
+              const st =
+                ui.channelState[stKey] ||
+                ui.channelState[`amazon:${t.continent}`] || {
+                  status: "unpublished",
+                  queue: false,
+                };
+              const canAct = !st.queue;
+              const isPublished = st.status === "published";
+              const dryOk = st.status === "dry_run_ok" || isPublished;
+              const errors = Array.isArray(st.errors) ? st.errors : [];
+              return `<div class="cr-ch-region" role="listitem" data-cr-ch-continent="${escapeHtml(
+                t.continent
+              )}" data-cr-ch-market="${escapeHtml(code)}">
+            <div class="cr-ch-region__head">${flagHtml(code)}<strong>${escapeHtml(
+                t.label
+              )} · ${escapeHtml(code)}</strong>
+              <span>Publish → Amazon ${escapeHtml(code)}</span></div>
             ${statusHtml(st)}
             ${amazonLinkHtml(st)}
             <div class="cr-ch-actions">
@@ -298,21 +298,23 @@ export function renderChannelsPanelHtml(product, ui) {
                 canAct
                   ? `<button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-dryrun="amazon" data-cr-ch-region="${escapeHtml(
                       t.continent
-                    )}">Dry run</button>`
+                    )}" data-cr-ch-market="${escapeHtml(code)}">Dry run</button>`
                   : ""
               }
               ${
                 canAct && !isPublished
                   ? `<button type="button" class="btn btn-primary cr-ch-btn" data-cr-ch-publish="amazon" data-cr-ch-region="${escapeHtml(
                       t.continent
-                    )}" ${dryOk ? "" : 'title="Run Dry run first (recommended)"'}>Publish live</button>`
+                    )}" data-cr-ch-market="${escapeHtml(code)}" ${
+                      dryOk ? "" : 'title="Run Dry run first (recommended)"'
+                    }>Publish live</button>`
                   : ""
               }
               ${
                 canAct && (isPublished || st.status === "failed" || st.status === "publishing")
                   ? `<button type="button" class="btn btn-secondary cr-ch-btn" data-cr-ch-sync="amazon" data-cr-ch-region="${escapeHtml(
                       t.continent
-                    )}">Refresh from Amazon</button>`
+                    )}" data-cr-ch-market="${escapeHtml(code)}">Refresh from Amazon</button>`
                   : ""
               }
             </div>
@@ -323,6 +325,8 @@ export function renderChannelsPanelHtml(product, ui) {
             }
             ${errorsListHtml(errors)}
           </div>`;
+            })
+            .join("");
         })
         .join("")}
       </div>`;
@@ -425,8 +429,13 @@ export function bindChannelsPanel(root, ui) {
     showToast(live ? "Amazon live" : "Amazon dry run", toastDetail);
   }
 
-  async function runAmazonAction({ continents, live }) {
-    const keys = (continents || []).map((c) => `amazon:${c}`);
+  async function runAmazonAction({ continents, marketplace_codes, live }) {
+    const codes = Array.isArray(marketplace_codes)
+      ? marketplace_codes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean)
+      : [];
+    const keys = codes.length
+      ? (continents || []).flatMap((c) => codes.map((code) => `amazon:${c}:${code}`))
+      : (continents || []).map((c) => `amazon:${c}`);
     for (const key of keys) {
       if (!ui.channelState[key]) ui.channelState[key] = { status: "unpublished", queue: false };
       ui.channelState[key].queue = true;
@@ -441,6 +450,7 @@ export function bindChannelsPanel(root, ui) {
         shopify_product_id: shopifyId,
         published_design_id: publishedDesignId || undefined,
         continents: continents && continents.length ? continents : undefined,
+        marketplace_codes: codes.length ? codes : undefined,
         dry_run: !live,
         live_submit: !!live,
       };
@@ -467,6 +477,7 @@ export function bindChannelsPanel(root, ui) {
 
       if (live && data?.skipped && !data?.queued) {
         applyContinentMap(data.continents || {}, continents || []);
+        if (data.markets) applyMarketMap(data.markets, continents || [], codes);
         showToast(
           "Amazon live",
           data.message || "Already published — nothing enqueued (no duplicate publish)."
@@ -474,7 +485,7 @@ export function bindChannelsPanel(root, ui) {
       } else {
         applyAmazonPublishResult(data, { continents, live });
         if (live && data?.queued && data?.published_design_id) {
-          pollAmazonPublishStatus(data.published_design_id, continents || []);
+          pollAmazonPublishStatus(data.published_design_id, continents || [], codes);
         }
       }
     } catch (e) {
@@ -494,7 +505,7 @@ export function bindChannelsPanel(root, ui) {
     const keys = (continents || []).map((c) => `amazon:${c}`);
     for (const key of keys.length
       ? keys
-      : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:"))) {
+      : Object.keys(ui.channelState).filter((k) => k.startsWith("amazon:") && k.split(":").length === 2)) {
       const continent = key.replace(/^amazon:/, "");
       const cont = contMap[continent];
       if (!cont) continue;
@@ -513,11 +524,37 @@ export function bindChannelsPanel(root, ui) {
     }
   }
 
+  function applyMarketMap(marketMap, continents, codes) {
+    const list = codes?.length
+      ? codes
+      : Object.keys(marketMap || {});
+    for (const code of list) {
+      const cont = marketMap?.[code];
+      if (!cont) continue;
+      const continent =
+        continents?.[0] ||
+        (code === "US" || code === "CA" ? "amerika" : "europa");
+      const key = `amazon:${continent}:${code}`;
+      const st = ui.channelState[key] || { status: "unpublished", queue: false };
+      st.queue = cont.status === "publishing" || cont.status === "queued";
+      st.queueLabel = cont.status === "queued" ? "Live queued" : "Publishing…";
+      st.status = cont.status;
+      st.asin = cont.asin || null;
+      st.product_url = cont.product_url || null;
+      st.seller_central_url = cont.seller_central_url || null;
+      st.lastMessage = [cont.code || code, cont.asin ? `ASIN ${cont.asin}` : cont.amazon_sku, cont.last_error]
+        .filter(Boolean)
+        .join(" · ");
+      st.errors = cont.status === "failed" && cont.last_error ? [cont.last_error] : [];
+      ui.channelState[key] = st;
+    }
+  }
+
   /**
-   * After LIVE enqueue, refresh continent cards from amazon_listing
+   * After LIVE enqueue, refresh continent/market cards from amazon_listing
    * (queued → publishing → published) without reopening the modal.
    */
-  async function pollAmazonPublishStatus(publishedDesignId, continents) {
+  async function pollAmazonPublishStatus(publishedDesignId, continents, marketplaceCodes = []) {
     const id = Number(publishedDesignId);
     if (!Number.isFinite(id) || id <= 0) return;
     const delays = [4000, 8000, 15000, 25000, 40000];
@@ -528,17 +565,27 @@ export function bindChannelsPanel(root, ui) {
         if (i === delays.length - 1) query.sync = "1";
         const data = await partnerFetch("admin-amazon-publish-status", { query });
         const contMap = data?.continents || {};
+        const marketMap = data?.markets || {};
         applyContinentMap(contMap, continents || []);
+        if (Object.keys(marketMap).length) applyMarketMap(marketMap, continents || [], marketplaceCodes);
         let anyTerminal = true;
-        for (const c of continents || []) {
-          const cont = contMap[c];
-          if (!cont || cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
+        if (marketplaceCodes?.length) {
+          for (const code of marketplaceCodes) {
+            const cont = marketMap[code] || contMap[continents?.[0]];
+            if (!cont || cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
+          }
+        } else {
+          for (const c of continents || []) {
+            const cont = contMap[c];
+            if (!cont || cont.status === "publishing" || cont.status === "queued") anyTerminal = false;
+          }
         }
         if (ui.onProductPatch) {
           ui.onProductPatch({
             amazon_publish: {
               published_design_id: id,
               continents: contMap,
+              markets: marketMap,
               listings: data.listings || [],
             },
             published_design_id: id,
@@ -602,8 +649,13 @@ export function bindChannelsPanel(root, ui) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const region = btn.getAttribute("data-cr-ch-region");
+      const market = btn.getAttribute("data-cr-ch-market");
       if (!region) return;
-      runAmazonAction({ continents: [region], live: false });
+      runAmazonAction({
+        continents: [region],
+        marketplace_codes: market ? [market] : undefined,
+        live: false,
+      });
     });
   });
 
@@ -611,26 +663,32 @@ export function bindChannelsPanel(root, ui) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const region = btn.getAttribute("data-cr-ch-region");
+      const market = btn.getAttribute("data-cr-ch-market");
       if (!region) return;
-      const st = ui.channelState[`amazon:${region}`] || {};
+      const st =
+        ui.channelState[market ? `amazon:${region}:${market}` : `amazon:${region}`] || {};
       if (st.status === "published") {
         window.alert(
-          "This continent is already marked published.\n\nUse “Refresh from Amazon” for the live link, or contact support to force-republish."
+          "This marketplace is already marked published.\n\nUse “Refresh from Amazon” for the live link, or contact support to force-republish."
         );
         return;
       }
       if (st.status !== "dry_run_ok" && st.status !== "queued") {
         const ok = window.confirm(
-          "Dry run has not succeeded for this continent yet.\n\nPublish LIVE anyway? This creates real Amazon offers."
+          `Dry run has not succeeded for Amazon ${market || region} yet.\n\nPublish LIVE anyway? This creates real Amazon offers.`
         );
         if (!ok) return;
       } else {
         const ok = window.confirm(
-          "Publish LIVE to Amazon?\n\nThis creates real listings/offers (not a dry run)."
+          `Publish LIVE to Amazon ${market || region}?\n\nThis creates real listings/offers (not a dry run).`
         );
         if (!ok) return;
       }
-      runAmazonAction({ continents: [region], live: true });
+      runAmazonAction({
+        continents: [region],
+        marketplace_codes: market ? [market] : undefined,
+        live: true,
+      });
     });
   });
 

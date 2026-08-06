@@ -458,6 +458,10 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
         }
         const status = classifyPrintifyListingStatusFromRow(row) || "unpublished";
         const title = String(row.product_name || row.product_key || `Printify ${pid}`).trim();
+        const visRaw = String(row.visibility || "")
+          .trim()
+          .toLowerCase();
+        const listingVisibility = visRaw === "public" ? "public" : "private";
         products.push({
           id: `printify-only:${row.id}`,
           product_key: String(row.product_key || row.id),
@@ -465,6 +469,10 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
           preview_url: mocks[0] || null,
           images: mocks,
           category: "Printify (not on Shopify)",
+          filter_category: "_empty",
+          shopify_product_type: null,
+          listing_visibility: listingVisibility,
+          filter_visibility: listingVisibility,
           owner_id: String(row.owner_id || ""),
           owner_label: row.owner_id ? `Owner ${row.owner_id}` : "Admin",
           shopify_product_id: null,

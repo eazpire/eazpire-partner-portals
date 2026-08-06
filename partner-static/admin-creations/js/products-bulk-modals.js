@@ -65,24 +65,27 @@ function selectedRowsFromRoot(rootId) {
 }
 
 /**
- * Publish selected products to Amazon EU (DE) only.
- * Already Amazon-EU-listed or Amazon-US-listed products are excluded from the list entirely.
+ * Publish selected products to Amazon DE (direct SP-API; no BIL).
+ * Products already listed on Amazon DE are excluded.
  */
 export async function openProductsBulkPublishModal(items, { onDone } = {}) {
   const eligible = (items || []).filter(
-    (p) => p.publish_eligible_amazon_eu && !p.amazon_eu_listed && !p.amazon_us_listed
+    (p) =>
+      (p.publish_eligible_amazon_de || p.publish_eligible_amazon_eu) &&
+      !p.amazon_de_listed &&
+      !p.amazon_de_channel
   );
   if (!eligible.length) {
     releaseBulkDock();
-    showToast("Publish", "No eligible products (already listed on Amazon EU/US, or missing Shopify listing)");
+    showToast("Publish", "No eligible products (already listed on Amazon DE, or missing Shopify listing)");
     return;
   }
   suppressBulkDock();
 
   openModal({
-    title: eligible.length === 1 ? "Publish to Amazon EU (DE)" : `Publish ${eligible.length} products to Amazon EU (DE)`,
+    title: eligible.length === 1 ? "Publish to Amazon DE" : `Publish ${eligible.length} products to Amazon DE`,
     bodyHtml: `
-      <p class="confirm-modal-message">Amazon EU (DE marketplace) only. Products already listed on Amazon EU or US are excluded.</p>
+      <p class="confirm-modal-message">Amazon DE only (direct publish, no BIL). Products already listed on Amazon DE are excluded.</p>
       <div class="cr-bulk-scroll" id="cr-products-publish-body">
         ${eligible.map((item) => productRowHtml(item, { checked: true })).join("")}
       </div>`,
@@ -95,6 +98,7 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
       // Return immediately so partner-shell closeModal() runs; dock + Amazon poll continue in background.
       void startProductsAmazonPublishDock(selected, {
         continent: "europa",
+        marketplace_codes: ["DE"],
         onDone: async (summary) => {
           if (typeof onDone === "function") await onDone(summary);
         },
@@ -107,10 +111,18 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
   configurePrimaryConfirm("Publish selected");
 }
 
-/** Unpublish selected products from eazpire (Shopify) and/or Amazon EU (DE). */
+/** Unpublish selected products from eazpire (Shopify) and/or Amazon DE / US. */
 export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
   const eligible = (items || []).filter(
-    (p) => p.shopify_product_id || p.id || p.amazon_eu_channel || p.amazon_eu_listed || p.amazon_us_channel || p.amazon_us_listed
+    (p) =>
+      p.shopify_product_id ||
+      p.id ||
+      p.amazon_de_channel ||
+      p.amazon_de_listed ||
+      p.amazon_eu_channel ||
+      p.amazon_eu_listed ||
+      p.amazon_us_channel ||
+      p.amazon_us_listed
   );
   if (!eligible.length) {
     releaseBulkDock();
@@ -120,13 +132,14 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
   suppressBulkDock();
 
   const body = `
-    <p class="confirm-modal-message">Unpublish from eazpire and/or Amazon EU (DE). Select channels per product.</p>
+    <p class="confirm-modal-message">Unpublish from eazpire and/or Amazon (per country). Select channels per product.</p>
     <div class="cr-bulk-scroll" id="cr-products-unpublish-body">
       ${eligible
         .map((item) => {
           const key = listingKey(item);
           const preview = itemPreviewUrl(item);
-          const hasAmazonEu = !!(item.amazon_eu_channel || item.amazon_eu_listed);
+          const hasAmazonDe = !!(item.amazon_de_channel || item.amazon_de_listed || item.amazon_eu_channel || item.amazon_eu_listed);
+          const hasAmazonUs = !!(item.amazon_us_channel || item.amazon_us_listed);
           return `<div class="cr-unpub-prod" data-product-key="${escapeHtml(key)}">
             <div class="cr-unpub-prod__head">
               <span class="cr-bulk-product-row__media">${
@@ -139,10 +152,17 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
                 key
               )}" checked /> <span>eazpire</span></label>
               ${
-                hasAmazonEu
-                  ? `<label class="cr-unpub-ch"><input type="checkbox" class="cr-unpub-ch__cb" data-channel="amazon_eu" data-product-key="${escapeHtml(
+                hasAmazonDe
+                  ? `<label class="cr-unpub-ch"><input type="checkbox" class="cr-unpub-ch__cb" data-channel="amazon_de" data-product-key="${escapeHtml(
                       key
-                    )}" checked /> <span>Amazon EU (DE)</span></label>`
+                    )}" checked /> <span>Amazon DE</span></label>`
+                  : ""
+              }
+              ${
+                hasAmazonUs
+                  ? `<label class="cr-unpub-ch"><input type="checkbox" class="cr-unpub-ch__cb" data-channel="amazon_us" data-product-key="${escapeHtml(
+                      key
+                    )}" /> <span>Amazon US</span></label>`
                   : ""
               }
             </div>
@@ -161,13 +181,15 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
       if (!checked.length) throw new Error("Select at least one channel");
 
       const byKey = new Map(eligible.map((item) => [listingKey(item), item]));
-      const targets = new Map(); // key -> { item, eazpire: bool, amazon_eu: bool }
+      const targets = new Map(); // key -> { item, eazpire, amazon_de, amazon_us }
       for (const cb of checked) {
         const key = cb.getAttribute("data-product-key") || "";
         const item = byKey.get(key);
         if (!item) continue;
-        if (!targets.has(key)) targets.set(key, { item, eazpire: false, amazon_eu: false });
-        targets.get(key)[cb.getAttribute("data-channel") || ""] = true;
+        if (!targets.has(key)) targets.set(key, { item, eazpire: false, amazon_de: false, amazon_us: false });
+        const ch = cb.getAttribute("data-channel") || "";
+        if (ch === "amazon_eu") targets.get(key).amazon_de = true;
+        else targets.get(key)[ch] = true;
       }
 
       setModalBusy(true, "Unpublishing…");
@@ -190,14 +212,27 @@ export async function openProductsBulkUnpublishModal(items, { onDone } = {}) {
               },
             });
           }
-          if (target.amazon_eu) {
+          if (target.amazon_de) {
             await partnerFetch("admin-amazon-unpublish", {
               method: "POST",
               body: {
                 product_key: item.product_key || "",
                 shopify_product_id: item.shopify_product_id || item.id || "",
                 published_design_id: item.published_design_id || undefined,
+                marketplace_codes: ["DE"],
                 continents: ["europa"],
+              },
+            });
+          }
+          if (target.amazon_us) {
+            await partnerFetch("admin-amazon-unpublish", {
+              method: "POST",
+              body: {
+                product_key: item.product_key || "",
+                shopify_product_id: item.shopify_product_id || item.id || "",
+                published_design_id: item.published_design_id || undefined,
+                marketplace_codes: ["US"],
+                continents: ["amerika"],
               },
             });
           }

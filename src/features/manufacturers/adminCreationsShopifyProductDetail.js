@@ -580,6 +580,105 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       console.warn("[admin-creations-shopify-product-detail] amazon publish lookup:", pdErr?.message || pdErr);
     }
 
+    let printifyProductId = null;
+    let printProviderId = null;
+    let variantConfig = null;
+    let printifyProductData = null;
+    let isTodifyListingResolved = isTodifyListing;
+
+    try {
+      const printifyMf = shopifyMetafields.find((m) => m.namespace === "custom" && m.key === "printify_product_id");
+      printifyProductId = String(printifyMf?.value || "").trim() || null;
+    } catch (_) {}
+
+    if (productKey && env.CATALOG_DB) {
+      try {
+        const profileRow = await env.CATALOG_DB.prepare(
+          `SELECT print_provider_id, product_data_json, source_product_id
+           FROM product_publish_profiles
+           WHERE product_key = ? AND COALESCE(is_active, 1) = 1
+           ORDER BY updated_at DESC
+           LIMIT 1`
+        )
+          .bind(productKey)
+          .first();
+        if (profileRow?.print_provider_id != null) {
+          printProviderId = Number(profileRow.print_provider_id);
+        }
+        if (!printifyProductId && profileRow?.source_product_id) {
+          printifyProductId = String(profileRow.source_product_id).trim() || null;
+        }
+        if (profileRow?.product_data_json) {
+          try {
+            printifyProductData = JSON.parse(String(profileRow.product_data_json));
+          } catch (_) {}
+        }
+      } catch (profErr) {
+        console.warn("[admin-creations-shopify-product-detail] publish profile:", profErr?.message || profErr);
+      }
+    }
+
+    if (published_design_id && !printifyProductId && env.CREATOR_DB) {
+      try {
+        const pdRow = await env.CREATOR_DB.prepare(
+          `SELECT printify_product_id FROM published_designs WHERE id = ? LIMIT 1`
+        )
+          .bind(published_design_id)
+          .first();
+        if (pdRow?.printify_product_id) {
+          printifyProductId = String(pdRow.printify_product_id).trim() || null;
+        }
+      } catch (_) {}
+    }
+
+    if (productKey && printProviderId && env.CREATOR_DB) {
+      try {
+        const cfgRow = await env.CREATOR_DB.prepare(
+          `SELECT config_json FROM product_variant_config
+           WHERE product_key = ? AND print_provider_id = ?
+           LIMIT 1`
+        )
+          .bind(productKey, printProviderId)
+          .first();
+        if (cfgRow?.config_json) {
+          variantConfig = JSON.parse(String(cfgRow.config_json));
+        }
+      } catch (cfgErr) {
+        console.warn("[admin-creations-shopify-product-detail] variant config:", cfgErr?.message || cfgErr);
+      }
+    }
+
+    const shopifyVariants = (p.variants || []).map((v) => mapVariant(v, currency));
+    const shopifyOptions = (p.options || []).map((o) => ({
+      id: o.id,
+      name: o.name,
+      position: o.position,
+      values: o.values || [],
+    }));
+
+    let variant_groups = [];
+    let live_channels = [];
+    try {
+      const { buildVariantGroupsForProductDetail, buildLiveChannelsForVariantUpdate } = await import(
+        "./adminCreationsVariantGroups.js"
+      );
+      variant_groups = buildVariantGroupsForProductDetail({
+        shopifyVariants,
+        shopifyOptions,
+        mockups,
+        variantConfig,
+        printifyProductData,
+      });
+      live_channels = buildLiveChannelsForVariantUpdate({
+        printifyProductId,
+        isTodify: isTodifyListingResolved,
+        amazonPublish: amazon_publish,
+        shopifyProductId: String(p.id),
+      });
+    } catch (vgErr) {
+      console.warn("[admin-creations-shopify-product-detail] variant groups:", vgErr?.message || vgErr);
+    }
+
     return json(
       {
         ok: true,
@@ -601,15 +700,16 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
           published_design_id,
           design_id,
           amazon_publish,
+          printify_product_id: printifyProductId,
+          print_provider_id: printProviderId,
+          variant_config: variantConfig,
+          variant_groups,
+          live_channels,
+          is_todify: isTodifyListingResolved,
           is_gift_card: Boolean(p.gift_card),
           currency,
-          options: (p.options || []).map((o) => ({
-            id: o.id,
-            name: o.name,
-            position: o.position,
-            values: o.values || [],
-          })),
-          variants: (p.variants || []).map((v) => mapVariant(v, currency)),
+          options: shopifyOptions,
+          variants: shopifyVariants,
           mockups,
           metafields: metafieldCategories,
           channels,

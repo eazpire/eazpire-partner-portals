@@ -118,13 +118,19 @@ export function serializeBatchEntry(item, status = "waiting") {
   };
 }
 
-export function createAmazonPublishBatch(items, { continent = "europa" } = {}) {
+export function createAmazonPublishBatch(items, { continent = "europa", marketplace_codes = null } = {}) {
+  const codes = Array.isArray(marketplace_codes)
+    ? marketplace_codes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean)
+    : continent === "amerika" || continent === "us"
+      ? ["US"]
+      : ["DE"];
   return {
     id: `amazon-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     continent: String(continent || "europa").toLowerCase(),
+    marketplace_codes: codes,
     startedAt: Date.now(),
     kind: "publish",
-    title: "Amazon publish",
+    title: codes.length === 1 ? `Amazon ${codes[0]} publish` : "Amazon publish",
     minimized: false,
     entries: (items || []).filter(Boolean).map((item) => serializeBatchEntry(item, "waiting")),
   };

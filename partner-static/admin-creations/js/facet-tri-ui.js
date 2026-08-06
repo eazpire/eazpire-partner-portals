@@ -43,16 +43,20 @@ export function triSwitchHtml(sectionKey, value, state, opts = {}) {
 export function facetOptionRowHtml(sectionKey, facet, triState) {
   const st = clampTri(triState);
   const count = Math.max(0, Number(facet?.count) || 0);
+  const hasDepth = facet && Object.prototype.hasOwnProperty.call(facet, "depth");
+  const depth = hasDepth ? Math.max(0, Number(facet.depth) || 0) : 0;
   // Zero-count options are unavailable; keep interactive only if already include/exclude (clear path).
   const unavailable = count === 0 && st === 0;
   const rowClass = [
     "cr-pf-option",
     "cr-pf-option--tri",
+    hasDepth && depth > 0 ? "cr-pf-option--child" : "",
+    hasDepth && depth === 0 ? "cr-pf-option--parent" : "",
     unavailable ? "cr-pf-option--unavailable" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  return `<div class="${rowClass}" data-tri-state="${st}" data-count="${count}"${
+  return `<div class="${rowClass}" data-tri-state="${st}" data-count="${count}" data-depth="${depth}"${
     unavailable ? ' aria-disabled="true"' : ""
   }>
     <span class="cr-pf-option__label" title="${escapeHtml(facet.label)}">${escapeHtml(facet.label)}</span>
