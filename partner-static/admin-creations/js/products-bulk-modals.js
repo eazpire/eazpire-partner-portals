@@ -10,7 +10,7 @@ import {
   selectionKey,
   suppressBulkDock,
 } from "./products-bulk.js";
-import { startProductsActionDock } from "./products-action-dock.js";
+import { startProductsActionDock, startProductsAmazonPublishDock } from "./products-action-dock.js";
 
 function productTitle(item) {
   return String(item?.title || item?.catalog_product_name || item?.product_key || "Product").trim() || "Product";
@@ -90,27 +90,17 @@ export async function openProductsBulkPublishModal(items, { onDone } = {}) {
       const keys = selectedRowsFromRoot("cr-products-publish-body");
       const selected = eligible.filter((item) => keys.has(listingKey(item)));
       if (!selected.length) throw new Error("Select at least one product");
-      setModalBusy(true, "Publishing…");
       clearSelection();
-      setModalBusy(false);
-
-      const { ok, errors } = await startProductsActionDock(selected, {
-        action: "publish",
-        runItem: (item) =>
-          partnerFetch("admin-amazon-publish", {
-            method: "POST",
-            body: {
-              product_key: item.product_key || "",
-              shopify_product_id: item.shopify_product_id || item.id || "",
-              published_design_id: item.published_design_id || undefined,
-              // Catalog Channels use "europa" / "amerika" (not "eu" / "us").
-              continents: ["europa"],
-              dry_run: false,
-              live_submit: true,
-            },
-          }),
+      // Return immediately so partner-shell closeModal() runs; dock + Amazon poll continue in background.
+      void startProductsAmazonPublishDock(selected, {
+        continent: "europa",
+        onDone: async (summary) => {
+          if (typeof onDone === "function") await onDone(summary);
+        },
+      }).catch((e) => {
+        console.error("[products-bulk] Amazon publish dock failed:", e);
+        showToast("Error", e?.message || "Amazon publish failed");
       });
-      if (typeof onDone === "function") await onDone({ ok, errors });
     },
   });
   configurePrimaryConfirm("Publish selected");

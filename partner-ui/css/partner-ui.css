@@ -9335,6 +9335,25 @@ html[data-portal="admin"] .cr-publish-dock .cr-dd-prod-carousel .cr-dd-prod {
 html[data-portal="admin"] .cr-publish-dock__card {
   position: relative;
 }
+/* Products action dock: ensure mock thumbs always fill the media frame */
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod__media {
+  background: #0f172a;
+}
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod__media > img,
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod__mock {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-portal="admin"] .cr-products-action-dock .cr-dd-prod__job--done {
+  background: rgba(5, 150, 105, 0.72);
+}
+html[data-portal="admin"] .cr-publish-dock__status--publishing,
+html[data-portal="admin"] .cr-publish-dock__status--running,
+html[data-portal="admin"] .cr-publish-dock__status--locking {
+  background: #d97706;
+}
 html[data-portal="admin"] .cr-publish-dock__status {
   display: inline-block;
   margin-top: 6px;
