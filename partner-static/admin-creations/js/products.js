@@ -694,7 +694,7 @@ function renderMockupsPanel(product) {
   return html;
 }
 
-function renderMetafieldsPanel(product) {
+function metafieldRowsHtml(rows, sectionPrefix) {
   if (!rows.length) return `<div class="cr-pd-empty">None</div>`;
   const byGroup = new Map();
   for (const m of rows) {
