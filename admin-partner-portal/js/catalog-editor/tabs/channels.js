@@ -31,7 +31,20 @@ const DEFAULT_MARKET_LABELS = {
 };
 
 const DEFAULT_SOURCE = { europa: "DE", amerika: "US" };
-const CONTENT_READY = new Set(["DE", "US"]);
+/** Keep in sync with src/amazon/amazonMarketplaceContentGate.js */
+const CONTENT_READY = new Set([
+  "DE",
+  "US",
+  "UK",
+  "FR",
+  "IT",
+  "ES",
+  "NL",
+  "BE",
+  "SE",
+  "IE",
+  "PL",
+]);
 
 function ensureState(ctx) {
   if (!ctx.channelsTabState) {
