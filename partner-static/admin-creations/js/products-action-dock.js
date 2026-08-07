@@ -770,7 +770,9 @@ async function runAmazonPublishBatchLoop(queue) {
   syncBatchFromEntries(queue);
   renderQueueDock(queue);
 
-  await mapPool(toEnqueue, 3, async (entry) => {
+  // Concurrency 1: Amazon createFeed is globally rate-limited (~1/min). Parallel enqueues
+  // only pile up jobs that then fight for the same Feeds quota.
+  await mapPool(toEnqueue, 1, async (entry) => {
     await enqueueAmazonEntry(entry, continent, queue);
   });
 
