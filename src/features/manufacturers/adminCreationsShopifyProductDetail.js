@@ -649,6 +649,32 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       }
     }
 
+    if (productKey && printProviderId && env.CREATOR_DB) {
+      try {
+        const tmplRow = await env.CREATOR_DB.prepare(
+          `SELECT product_data_json, variants_product_data_json
+           FROM printify_template_metadata
+           WHERE product_key = ? AND print_provider_id = ?
+             AND (variants_product_data_json IS NOT NULL OR product_data_json IS NOT NULL)
+           ORDER BY updated_at DESC
+           LIMIT 1`
+        )
+          .bind(productKey, printProviderId)
+          .first();
+        const snapRaw =
+          tmplRow?.variants_product_data_json != null && String(tmplRow.variants_product_data_json).trim() !== ""
+            ? tmplRow.variants_product_data_json
+            : tmplRow?.product_data_json;
+        if (snapRaw) {
+          try {
+            printifyProductData = JSON.parse(String(snapRaw));
+          } catch (_) {}
+        }
+      } catch (tmplErr) {
+        console.warn("[admin-creations-shopify-product-detail] template metadata:", tmplErr?.message || tmplErr);
+      }
+    }
+
     if (printifyProductId && env.PRINTIFY_API_KEY && !isTodifyListingResolved) {
       try {
         const { getPrintifyProduct } = await import("../../utils/printify.js");
