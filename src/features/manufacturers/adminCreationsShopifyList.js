@@ -6,8 +6,8 @@
 import { shopifyAPI } from "../../utils/shopify.js";
 import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 
-/** Shared Product selection for Creations list enrich (variants / metafields / alts). */
-const PRODUCT_NODE_FIELDS = `
+/** Classification-only fields for catalog scans (cheap; avoids throttle / CPU kills). */
+const PRODUCT_SCAN_FIELDS = `
   id
   title
   handle
@@ -25,6 +25,17 @@ const PRODUCT_NODE_FIELDS = `
       image { url }
     }
   }
+  mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
+  mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
+  mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
+  mfProvider: metafield(namespace: "custom", key: "provider") { value }
+  mfSample: metafield(namespace: "custom", key: "sample") { value }
+  mfVisibility: metafield(namespace: "custom", key: "visibility") { value }
+`;
+
+/** Full Product selection for Creations list enrich (variants / metafields / alts). */
+const PRODUCT_NODE_FIELDS = `
+  ${PRODUCT_SCAN_FIELDS}
   images(first: 100) {
     edges {
       node {
@@ -33,12 +44,6 @@ const PRODUCT_NODE_FIELDS = `
       }
     }
   }
-  mfPrintifyId: metafield(namespace: "custom", key: "printify_product_id") { value }
-  mfProductKey: metafield(namespace: "custom", key: "product_key") { value }
-  mfListingOrigin: metafield(namespace: "custom", key: "listing_origin") { value }
-  mfProvider: metafield(namespace: "custom", key: "provider") { value }
-  mfSample: metafield(namespace: "custom", key: "sample") { value }
-  mfVisibility: metafield(namespace: "custom", key: "visibility") { value }
   metafields(first: 100) {
     edges {
       node {
@@ -61,6 +66,22 @@ const PRODUCT_NODE_FIELDS = `
       node {
         isPublished
         publication { id }
+      }
+    }
+  }
+`;
+
+const PRODUCTS_SCAN_GQL = `
+  query CreationsAdminProductsScan($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+      edges {
+        node {
+          ${PRODUCT_SCAN_FIELDS}
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -91,6 +112,76 @@ const PRODUCTS_BY_IDS_GQL = `
     }
   }
 `;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function graphqlThrottleMessage(errors) {
+  if (!Array.isArray(errors) || !errors.length) return "";
+  return errors
+    .map((e) => String(e?.message || ""))
+    .join("; ");
+}
+
+function isGraphqlThrottled(errors) {
+  const msg = graphqlThrottleMessage(errors).toLowerCase();
+  return (
+    msg.includes("throttled") ||
+    msg.includes("exceeds") ||
+    msg.includes("rate limit") ||
+    errors.some((e) => String(e?.extensions?.code || "").toUpperCase() === "THROTTLED")
+  );
+}
+
+/**
+ * Shopify Admin GraphQL with light retry on throttle / 429.
+ * @param {object} env
+ * @param {string} shopDomain
+ * @param {{ query: string, variables?: object }} body
+ * @param {{ maxAttempts?: number }} [opts]
+ */
+async function shopifyGraphql(env, shopDomain, body, opts = {}) {
+  const maxAttempts = Math.max(1, Number(opts.maxAttempts) || 4);
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const errors = resp?.errors;
+      if (Array.isArray(errors) && errors.length) {
+        if (isGraphqlThrottled(errors) && attempt < maxAttempts) {
+          await sleep(350 * attempt * attempt);
+          continue;
+        }
+        // Shopify may return partial data alongside field errors — keep usable payloads.
+        if (resp?.data?.products || resp?.data?.nodes) {
+          console.warn(
+            "[adminCreationsShopifyList] GraphQL warnings:",
+            graphqlThrottleMessage(errors)
+          );
+          return resp;
+        }
+        const err = new Error(graphqlThrottleMessage(errors) || "shopify_graphql_error");
+        err.graphqlErrors = errors;
+        throw err;
+      }
+      return resp;
+    } catch (e) {
+      lastErr = e;
+      const status = Number(e?.status) || 0;
+      const retryable = status === 429 || status === 503 || isGraphqlThrottled(e?.graphqlErrors);
+      if (!retryable || attempt >= maxAttempts) throw e;
+      const retryAfterMs = Number.isFinite(Number(e?.retryAfter))
+        ? Math.max(250, Number(e.retryAfter) * 1000)
+        : 350 * attempt * attempt;
+      await sleep(retryAfterMs);
+    }
+  }
+  throw lastErr || new Error("shopify_graphql_failed");
+}
 
 /** Admin Products page can hold thousands of live listings — scan past the old 2k ceiling. */
 const DEFAULT_MAX_SCAN = 10000;
@@ -251,6 +342,13 @@ export const SAMPLES_SHOPIFY_STORE_QUERY = "metafields.custom.sample:yes";
 
 /** Shopify Admin search hint for Todify/partner-direct listings. */
 export const TODIFY_SHOPIFY_STORE_QUERY = "metafields.custom.provider:todify";
+
+/**
+ * Shopify Admin search hint for Printify / creator listings not already loaded from D1.
+ * Keeps orphan metafield listings discoverable without a full-catalog scan.
+ */
+export const PRINTIFY_SHOPIFY_STORE_QUERY =
+  '(metafields.custom.printify_product_id:* OR metafields.custom.provider:printify OR metafields.custom.listing_origin:creator)';
 
 /**
  * Shopify listing originates from Printify when metafield, provider, D1 link, or creator publish says so.
@@ -426,28 +524,22 @@ export async function fetchShopifyProductNodesByIds(env, shopifyIds) {
   const shopDomain = shopDomainFromEnv(env);
   const out = [];
   const CHUNK = 50;
+  let hardFailures = 0;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     try {
-      const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
-        method: "POST",
-        body: JSON.stringify({
-          query: PRODUCTS_BY_IDS_GQL,
-          variables: { ids: chunk },
-        }),
+      const resp = await shopifyGraphql(env, shopDomain, {
+        query: PRODUCTS_BY_IDS_GQL,
+        variables: { ids: chunk },
       });
-      const errors = resp?.errors;
-      if (Array.isArray(errors) && errors.length) {
-        console.warn(
-          "[adminCreationsShopifyList] products-by-ids GraphQL errors:",
-          errors.map((e) => e.message).join("; ")
-        );
-      }
       for (const node of resp?.data?.nodes || []) {
         if (node?.id) out.push(node);
       }
     } catch (e) {
+      hardFailures += 1;
       console.warn("[adminCreationsShopifyList] products-by-ids failed:", e?.message || e);
+      // One chunk can fail (deleted ids / transient); abort only if nothing loaded and many fail.
+      if (hardFailures >= 3 && !out.length) throw e;
     }
   }
   return out;
@@ -467,12 +559,9 @@ export async function fetchShopifyProductNodes(env, opts = {}) {
 
   while (hasNext && items.length < limit) {
     const first = Math.min(50, limit - items.length);
-    const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
-      method: "POST",
-      body: JSON.stringify({
-        query: PRODUCTS_GQL,
-        variables: { first, after: cursor, query: queryStr || null },
-      }),
+    const resp = await shopifyGraphql(env, shopDomain, {
+      query: PRODUCTS_GQL,
+      variables: { first, after: cursor, query: queryStr || null },
     });
 
     const conn = resp?.data?.products;
@@ -489,7 +578,11 @@ export async function fetchShopifyProductNodes(env, opts = {}) {
 }
 
 /**
- * Paginate Shopify products and collect nodes matching matchFn (post-filter).
+ * Paginate Shopify products with a *light* scan query, collect matching ids, then
+ * hydrate full Product nodes (images/metafields/publications) via nodes(ids:).
+ * Avoids the old pattern of pulling 100 images + 100 metafields for every catalog page,
+ * which throttled Shopify and made Admin Products counts jump on each reload.
+ *
  * @param {object} env
  * @param {{ matchFn: (node: object) => boolean, limit?: number, maxScan?: number, queryStr?: string }} opts
  */
@@ -500,19 +593,16 @@ export async function fetchShopifyProductNodesMatching(env, opts = {}) {
   const maxScan = Math.min(20000, Math.max(limit, Number(opts.maxScan) || DEFAULT_MAX_SCAN));
   const queryStr = String(opts.queryStr || "").trim();
 
-  const items = [];
+  const matchedIds = [];
   let cursor = null;
   let hasNext = true;
   let scanned = 0;
 
-  while (hasNext && items.length < limit && scanned < maxScan) {
+  while (hasNext && matchedIds.length < limit && scanned < maxScan) {
     const first = Math.min(50, maxScan - scanned);
-    const resp = await shopifyAPI(env, shopDomain, "graphql.json", {
-      method: "POST",
-      body: JSON.stringify({
-        query: PRODUCTS_GQL,
-        variables: { first, after: cursor, query: queryStr || null },
-      }),
+    const resp = await shopifyGraphql(env, shopDomain, {
+      query: PRODUCTS_SCAN_GQL,
+      variables: { first, after: cursor, query: queryStr || null },
     });
 
     const conn = resp?.data?.products;
@@ -521,15 +611,57 @@ export async function fetchShopifyProductNodesMatching(env, opts = {}) {
       scanned += 1;
       const node = edge?.node;
       if (!node) continue;
-      if (matchFn(node)) items.push(node);
-      if (items.length >= limit) break;
+      if (!matchFn(node)) continue;
+      const sid = normalizeShopifyProductId(node.id);
+      if (!sid) continue;
+      matchedIds.push(sid);
+      if (matchedIds.length >= limit) break;
     }
     hasNext = Boolean(conn?.pageInfo?.hasNextPage);
     cursor = conn?.pageInfo?.endCursor || null;
     if (!edges.length) break;
   }
 
-  return items;
+  if (!matchedIds.length) return [];
+  const fullNodes = await fetchShopifyProductNodesByIds(env, matchedIds);
+  const byId = indexShopifyNodesById(fullNodes);
+  // Preserve scan order; fall back to light node only if hydrate missed an id.
+  return matchedIds.map((sid) => byId.get(sid)).filter(Boolean);
+}
+
+/**
+ * Load Printify/creator Shopify products from D1 published_designs ids (source of truth),
+ * then hydrate full Shopify nodes. Deterministic — no full-catalog scan.
+ *
+ * @param {object} env
+ * @param {{
+ *   limit?: number,
+ *   customerStudioIds?: Set<string>,
+ *   printifyLinks?: Map<string, string>,
+ *   creatorPublishedIds?: Set<string>,
+ * }} opts
+ * @returns {Promise<object[]>}
+ */
+export async function fetchPrintifyShopifyNodesFromD1(env, opts = {}) {
+  const limit = Math.min(MAX_PRODUCT_NODES, Math.max(1, Number(opts.limit) || 2500));
+  const customerStudioIds = opts.customerStudioIds instanceof Set ? opts.customerStudioIds : new Set();
+  let printifyLinks = opts.printifyLinks;
+  let creatorPublishedIds = opts.creatorPublishedIds;
+  if (!(printifyLinks instanceof Map) || !(creatorPublishedIds instanceof Set)) {
+    const idx = await loadPublishedDesignsShopifyIndex(env);
+    printifyLinks = idx.printifyLinks;
+    creatorPublishedIds = idx.creatorPublishedIds;
+  }
+
+  const ids = [...creatorPublishedIds].slice(0, limit);
+  if (!ids.length) return [];
+
+  const nodes = await fetchShopifyProductNodesByIds(env, ids);
+  return nodes.filter(
+    (node) =>
+      isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
+      !isCustomerStudioShopifyProduct(node, customerStudioIds)
+  );
 }
 
 /**
@@ -545,20 +677,30 @@ export async function loadPublishedDesignsShopifyIndex(env) {
 
   try {
     const normSid = sqlNormalizeShopifyProductId();
-    const res = await env.CREATOR_DB.prepare(
-      `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid
-       FROM published_designs
-       WHERE shopify_product_id IS NOT NULL
-         AND TRIM(CAST(shopify_product_id AS TEXT)) != ''
-       ORDER BY published_at DESC`
-    ).all();
-
-    for (const row of res?.results || []) {
-      const sid = normalizeShopifyProductId(row.sid);
-      if (!sid) continue;
-      creatorPublishedIds.add(sid);
-      const pid = String(row.pid || "").trim();
-      if (pid && !printifyLinks.has(sid)) printifyLinks.set(sid, pid);
+    // Page through D1 — a single SELECT can truncate large published_designs tables.
+    const PAGE = 1000;
+    let offset = 0;
+    for (let page = 0; page < 20; page++) {
+      const res = await env.CREATOR_DB.prepare(
+        `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid
+         FROM published_designs
+         WHERE shopify_product_id IS NOT NULL
+           AND TRIM(CAST(shopify_product_id AS TEXT)) != ''
+         ORDER BY COALESCE(published_at, updated_at, 0) DESC
+         LIMIT ? OFFSET ?`
+      )
+        .bind(PAGE, offset)
+        .all();
+      const rows = res?.results || [];
+      for (const row of rows) {
+        const sid = normalizeShopifyProductId(row.sid);
+        if (!sid) continue;
+        creatorPublishedIds.add(sid);
+        const pid = String(row.pid || "").trim();
+        if (pid && !printifyLinks.has(sid)) printifyLinks.set(sid, pid);
+      }
+      if (rows.length < PAGE) break;
+      offset += PAGE;
     }
   } catch (e) {
     console.warn("[admin-creations-shopify-list] published_designs index:", e?.message);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   shopDomainFromEnv,
   normalizeShopifyProductId,
@@ -9,6 +9,10 @@ import {
   isSampleShopifyProduct,
   isNativeShopifyStoreProduct,
   mapShopifyNodeToProduct,
+  fetchPrintifyShopifyNodesFromD1,
+  PRINTIFY_SHOPIFY_STORE_QUERY,
+  TODIFY_SHOPIFY_STORE_QUERY,
+  SAMPLES_SHOPIFY_STORE_QUERY,
 } from "../../src/features/manufacturers/adminCreationsShopifyList.js";
 
 describe("adminCreationsShopifyList", () => {
@@ -260,5 +264,92 @@ describe("adminCreationsShopifyList", () => {
       "https://cdn.example/hoodie-back.png",
     ]);
     expect(row.grid_views.map((v) => v.view)).toEqual(["front", "back"]);
+  });
+
+  it("exposes targeted Shopify search queries (no full-catalog bucket scans)", () => {
+    expect(PRINTIFY_SHOPIFY_STORE_QUERY).toMatch(/printify_product_id|provider:printify|listing_origin:creator/);
+    expect(TODIFY_SHOPIFY_STORE_QUERY).toMatch(/provider:todify/);
+    expect(SAMPLES_SHOPIFY_STORE_QUERY).toMatch(/sample:yes/);
+  });
+
+  it("loadPublishedDesignsShopifyIndex pages past 1000 D1 rows", async () => {
+    const { loadPublishedDesignsShopifyIndex } = await import(
+      "../../src/features/manufacturers/adminCreationsShopifyList.js"
+    );
+    const pages = [];
+    for (let i = 0; i < 1000; i++) pages.push({ sid: String(1000 + i), pid: `pf-${i}` });
+    const page2 = Array.from({ length: 50 }, (_, i) => ({ sid: String(3000 + i), pid: `pf2-${i}` }));
+    let calls = 0;
+    const env = {
+      CREATOR_DB: {
+        prepare() {
+          return {
+            bind() {
+              return {
+                async all() {
+                  calls += 1;
+                  if (calls === 1) return { results: pages };
+                  if (calls === 2) return { results: page2 };
+                  return { results: [] };
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+    const { creatorPublishedIds, printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
+    expect(calls).toBe(2);
+    expect(creatorPublishedIds.size).toBe(1050);
+    expect(printifyLinks.get("1000")).toBe("pf-0");
+    expect(printifyLinks.get("3000")).toBe("pf2-0");
+  });
+
+  it("fetchPrintifyShopifyNodesFromD1 hydrates D1 ids and drops todify/studio", async () => {
+    const shopify = await import("../../src/utils/shopify.js");
+    const spy = vi.spyOn(shopify, "shopifyAPI").mockImplementation(async (_env, _shop, _ep, opts) => {
+      const body = JSON.parse(opts.body);
+      const ids = body.variables.ids || [];
+      return {
+        data: {
+          nodes: ids.map((gid) => {
+            const num = String(gid).replace(/^gid:\/\/shopify\/Product\//, "");
+            if (num === "2") {
+              return { id: gid, title: "Todify", mfProvider: { value: "todify" } };
+            }
+            if (num === "3") {
+              return { id: gid, title: "Studio", mfListingOrigin: { value: "shop" } };
+            }
+            return {
+              id: gid,
+              title: `Printify ${num}`,
+              mfPrintifyId: { value: `pf-${num}` },
+              mfListingOrigin: { value: "creator" },
+            };
+          }),
+        },
+      };
+    });
+
+    try {
+      const nodes = await fetchPrintifyShopifyNodesFromD1(
+        { SHOPIFY_ACCESS_TOKEN: "t", SHOPIFY_SHOP: "allyoucanpink.myshopify.com" },
+        {
+          limit: 50,
+          customerStudioIds: new Set(["3"]),
+          printifyLinks: new Map([
+            ["1", "pf-1"],
+            ["2", "pf-2"],
+            ["3", "pf-3"],
+            ["4", "pf-4"],
+          ]),
+          creatorPublishedIds: new Set(["1", "2", "3", "4"]),
+        }
+      );
+      const ids = nodes.map((n) => normalizeShopifyProductId(n.id)).sort();
+      expect(ids).toEqual(["1", "4"]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

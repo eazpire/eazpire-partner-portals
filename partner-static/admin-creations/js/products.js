@@ -377,26 +377,39 @@ function tagBucket(products, { listingBucket, filterSource, filterProvider, sour
 /** Match server default — avoid silent 100-row undercount on Products page. */
 const PRODUCT_BUCKET_LIMIT = 2500;
 
-async function fetchBucket(op) {
-  try {
-    const data = await partnerFetch(op, { query: { limit: PRODUCT_BUCKET_LIMIT } });
-    return { ok: true, products: Array.isArray(data.products) ? data.products : [], data };
-  } catch (e) {
-    if (e.data?.error === "shopify_not_configured") {
-      return { ok: false, shopifyMissing: true, products: [], error: e };
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchBucket(op, { retries = 2 } = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const data = await partnerFetch(op, { query: { limit: PRODUCT_BUCKET_LIMIT } });
+      return { ok: true, op, products: Array.isArray(data.products) ? data.products : [], data };
+    } catch (e) {
+      lastError = e;
+      if (e.data?.error === "shopify_not_configured") {
+        return { ok: false, op, shopifyMissing: true, products: [], error: e };
+      }
+      if (attempt < retries) {
+        await sleep(400 * (attempt + 1) * (attempt + 1));
+        continue;
+      }
     }
-    return { ok: false, products: [], error: e };
   }
+  return { ok: false, op, products: [], error: lastError };
 }
 
 /** Load Printify + Todify + Customer + Samples + Other (residual) in parallel. */
 async function loadAllProductBuckets() {
+  // Stagger Shopify-heavy buckets slightly so five workers don't throttle each other.
   const [printify, todify, customer, samples, other] = await Promise.all([
     fetchBucket("admin-creations-printify-products"),
-    fetchBucket("admin-creations-todify-products"),
+    sleep(120).then(() => fetchBucket("admin-creations-todify-products")),
     fetchBucket("admin-creations-customer-products"),
-    fetchBucket("admin-creations-samples-products"),
-    fetchBucket("admin-creations-shopify-products"),
+    sleep(240).then(() => fetchBucket("admin-creations-samples-products")),
+    sleep(360).then(() => fetchBucket("admin-creations-shopify-products")),
   ]);
 
   if (
@@ -468,9 +481,20 @@ async function loadAllProductBuckets() {
     })
   );
 
-  const hardErrors = [printify, todify, customer, samples, other].filter((r) => !r.ok && !r.shopifyMissing && r.error);
+  const hardErrors = [printify, todify, customer, samples, other].filter(
+    (r) => !r.ok && !r.shopifyMissing && r.error
+  );
   if (!merged.length && hardErrors.length) {
     throw hardErrors[0].error;
+  }
+  // Partial load used to look "successful" with a random undercount — surface it.
+  if (hardErrors.length) {
+    const names = hardErrors.map((r) => r.op.replace("admin-creations-", "").replace("-products", ""));
+    state.error = "";
+    showToast(
+      "Partial product load",
+      `Some sources failed (${names.join(", ")}). Showing ${merged.length} loaded products — reload to retry.`
+    );
   }
 
   state.items = merged;

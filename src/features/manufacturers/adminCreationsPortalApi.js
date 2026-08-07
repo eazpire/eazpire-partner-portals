@@ -8,6 +8,7 @@ import {
   shopDomainFromEnv,
   fetchShopifyProductNodesMatching,
   fetchShopifyProductNodesByIds,
+  fetchPrintifyShopifyNodesFromD1,
   mapShopifyNodeToProduct,
   loadCustomerStudioShopifyIds,
   loadPublishedDesignsShopifyIndex,
@@ -19,6 +20,9 @@ import {
   normalizeShopifyProductId,
   indexShopifyNodesById,
   NATIVE_SHOPIFY_STORE_QUERY,
+  PRINTIFY_SHOPIFY_STORE_QUERY,
+  TODIFY_SHOPIFY_STORE_QUERY,
+  SAMPLES_SHOPIFY_STORE_QUERY,
 } from "./adminCreationsShopifyList.js";
 import {
   enrichCreationsProductListFacets,
@@ -392,14 +396,43 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
       loadPublishedDesignsShopifyIndex(env),
     ]);
 
-    const nodes = await fetchShopifyProductNodesMatching(env, {
+    // D1 published_designs is the source of truth for creator/Printify listings.
+    // A full Shopify catalog scan with heavy Product fields was throttling mid-page and
+    // returning a different undercount on every Products reload.
+    const d1Nodes = await fetchPrintifyShopifyNodesFromD1(env, {
       limit,
-      maxScan: 10000,
-      matchFn: (node) =>
-        isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
-        !isCustomerStudioShopifyProduct(node, customerStudioIds),
+      customerStudioIds,
+      printifyLinks,
+      creatorPublishedIds,
     });
+    const seenShopify = new Set(
+      d1Nodes.map((n) => normalizeShopifyProductId(n?.id)).filter(Boolean)
+    );
 
+    // Catch orphan Shopify Printify listings that are not (yet) in published_designs.
+    let orphanNodes = [];
+    try {
+      orphanNodes = await fetchShopifyProductNodesMatching(env, {
+        limit: Math.max(0, limit - d1Nodes.length),
+        maxScan: 2500,
+        queryStr: PRINTIFY_SHOPIFY_STORE_QUERY,
+        matchFn: (node) => {
+          const sid = normalizeShopifyProductId(node?.id);
+          if (sid && seenShopify.has(sid)) return false;
+          return (
+            isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
+            !isCustomerStudioShopifyProduct(node, customerStudioIds)
+          );
+        },
+      });
+    } catch (orphanErr) {
+      console.warn(
+        "[admin-creations-printify-products] orphan shopify scan:",
+        orphanErr?.message || orphanErr
+      );
+    }
+
+    const nodes = [...d1Nodes, ...orphanNodes];
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "printify", printifyLinks));
 
     products = await enrichPrintifyCategories(env, products);
@@ -411,9 +444,10 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
       const seenPrintify = new Set(
         products.map((p) => String(p.printify_product_id || "").trim()).filter(Boolean)
       );
-      const seenShopify = new Set(
-        products.map((p) => normalizeShopifyProductId(p.shopify_product_id || p.id)).filter(Boolean)
-      );
+      for (const p of products) {
+        const sid = normalizeShopifyProductId(p.shopify_product_id || p.id);
+        if (sid) seenShopify.add(sid);
+      }
       const pdRes = await env.CREATOR_DB.prepare(
         `SELECT id, design_id, owner_id, product_key, product_name, printify_product_id,
                 shopify_product_id, shopify_completion_status, printify_listing_status,
@@ -729,7 +763,8 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      maxScan: 10000,
+      maxScan: 5000,
+      queryStr: TODIFY_SHOPIFY_STORE_QUERY,
       matchFn: (node) => isTodifyPartnerShopifyProduct(node),
     });
 
@@ -844,7 +879,8 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
-      maxScan: 10000,
+      maxScan: 5000,
+      queryStr: SAMPLES_SHOPIFY_STORE_QUERY,
       matchFn: (node) =>
         isSampleShopifyProduct(node) && !isCustomerStudioShopifyProduct(node, customerStudioIds),
     });
