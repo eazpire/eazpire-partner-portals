@@ -76,12 +76,146 @@ function defaultViewIndex(slides) {
   return frontIdx >= 0 ? frontIdx : 0;
 }
 
-function enabledFromConfig(printifyVariantId, config) {
+function parsePrintifyVariantColorSize(pv, printifyOptions) {
+  const opts = Array.isArray(pv?.options) ? pv.options : [];
+  const colorIdx = resolveColorOptionIndex(printifyOptions);
+  const sizeIdx = resolveSizeOptionIndex(printifyOptions, colorIdx);
+
+  let color = colorIdx >= 0 && opts[colorIdx] != null ? opts[colorIdx] : null;
+  let size = sizeIdx >= 0 && opts[sizeIdx] != null ? opts[sizeIdx] : null;
+
+  if (!color || !size) {
+    const parts = String(pv?.title || "")
+      .split("/")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!color && parts[0]) color = parts[0];
+    if (!size && parts[1]) size = parts[1];
+  }
+
+  return {
+    color: String(color || "Default").trim() || "Default",
+    size: String(size || "One size").trim() || "One size",
+  };
+}
+
+function findShopifyVariantForColorSize(color, size, shopifyVariants, shopifyOptions) {
+  const colorIdx = resolveColorOptionIndex(shopifyOptions);
+  const sizeIdx = resolveSizeOptionIndex(shopifyOptions, colorIdx);
+  const colorKey = normOpt(color);
+  const sizeKey = normOpt(size);
+
+  return (Array.isArray(shopifyVariants) ? shopifyVariants : []).find((sv) => {
+    const svColor =
+      (colorIdx >= 0 ? optionValueAt(sv, colorIdx) : null) || sv.option1 || sv.title || "";
+    const svSize =
+      (sizeIdx >= 0 ? optionValueAt(sv, sizeIdx) : null) ||
+      (Array.isArray(sv.options) && sv.options.length > 1 ? sv.options[sv.options.length - 1] : sv.option2) ||
+      "";
+    return normOpt(svColor) === colorKey && normOpt(svSize) === sizeKey;
+  });
+}
+
+function findTemplateVariantForLive(liveVariant, templateVariants, liveVariants) {
+  const templates = Array.isArray(templateVariants) ? templateVariants : [];
+  const live = Array.isArray(liveVariants) ? liveVariants : [];
+  for (const tv of templates) {
+    const match = findLiveVariantForTemplateVariant(tv, live);
+    if (match && String(match.id) === String(liveVariant?.id)) return tv;
+  }
+  return null;
+}
+
+function printifyPriceToDisplay(amount) {
+  if (amount == null || amount === "") return null;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return String(amount);
+  return (n / 100).toFixed(2);
+}
+
+function resolveVariantEnabled({ liveId, templateId, config, printifyIsEnabled }) {
   const variants = config?.variants;
-  if (!variants || typeof variants !== "object") return true;
-  const row = variants[String(printifyVariantId)];
-  if (!row) return true;
-  return row.enabled !== false;
+  if (variants && typeof variants === "object") {
+    for (const id of [liveId, templateId]) {
+      if (id == null) continue;
+      const row = variants[String(id)];
+      if (row && typeof row === "object" && Object.prototype.hasOwnProperty.call(row, "enabled")) {
+        return row.enabled !== false;
+      }
+    }
+  }
+  if (printifyIsEnabled !== undefined && printifyIsEnabled !== null) {
+    return printifyIsEnabled !== false;
+  }
+  return true;
+}
+
+function buildGroupsFromLivePrintifyVariants({
+  liveVariants,
+  liveOptions,
+  templateVariants,
+  shopifyVariants,
+  shopifyOptions,
+  mockByColor,
+  variantConfig,
+}) {
+  /** @type {Map<string, { color: string, sizes: object[] }>} */
+  const groups = new Map();
+
+  for (const pv of liveVariants) {
+    const { color, size } = parsePrintifyVariantColorSize(pv, liveOptions);
+    const colorKey = String(color).trim() || "Default";
+    if (!groups.has(colorKey)) {
+      groups.set(colorKey, { color: colorKey, sizes: [] });
+    }
+
+    const liveId = pv?.id != null ? String(pv.id) : null;
+    const templateVariant = findTemplateVariantForLive(pv, templateVariants, liveVariants);
+    const templateId = templateVariant?.id != null ? String(templateVariant.id) : null;
+    const shopifyMatch = findShopifyVariantForColorSize(color, size, shopifyVariants, shopifyOptions);
+
+    groups.get(colorKey).sizes.push({
+      shopify_variant_id: shopifyMatch?.id != null ? String(shopifyMatch.id) : null,
+      printify_variant_id: liveId,
+      size: String(size).trim() || "One size",
+      sku: shopifyMatch?.sku || pv?.sku || null,
+      price:
+        shopifyMatch?.price != null
+          ? String(shopifyMatch.price)
+          : printifyPriceToDisplay(pv?.price),
+      compare_at_price:
+        shopifyMatch?.compare_at_price != null ? String(shopifyMatch.compare_at_price) : null,
+      inventory_quantity:
+        shopifyMatch?.inventory_quantity != null ? Number(shopifyMatch.inventory_quantity) : null,
+      enabled: resolveVariantEnabled({
+        liveId,
+        templateId,
+        config: variantConfig,
+        printifyIsEnabled: pv?.is_enabled,
+      }),
+    });
+  }
+
+  return groups;
+}
+
+function finalizeVariantGroups(groups, mockByColor) {
+  const out = [];
+  for (const [, g] of groups) {
+    const mock_slides = mockByColor.get(g.color) || mockByColor.get("Default") || [];
+    const sizes = g.sizes.sort((a, b) => String(a.size).localeCompare(String(b.size), undefined, { numeric: true }));
+    const enabledCount = sizes.filter((s) => s.enabled !== false).length;
+    out.push({
+      color: g.color,
+      mock_slides,
+      default_view_index: defaultViewIndex(mock_slides),
+      enabled: enabledCount > 0,
+      sizes,
+    });
+  }
+
+  out.sort((a, b) => a.color.localeCompare(b.color));
+  return out;
 }
 
 /**
@@ -90,7 +224,8 @@ function enabledFromConfig(printifyVariantId, config) {
  * @param {Array<object>} params.shopifyOptions
  * @param {Array<object>} params.mockups
  * @param {object|null} params.variantConfig
- * @param {object|null} params.printifyProductData — Printify product JSON from catalog
+ * @param {object|null} params.printifyProductData — Printify product JSON from catalog/template snapshot
+ * @param {object|null} params.livePrintifyProductData — live Printify shop product JSON (authoritative variant list)
  */
 export function buildVariantGroupsForProductDetail({
   shopifyVariants = [],
@@ -98,11 +233,28 @@ export function buildVariantGroupsForProductDetail({
   mockups = [],
   variantConfig = null,
   printifyProductData = null,
+  livePrintifyProductData = null,
 } = {}) {
   const mockByColor = buildMockSlidesByColor(mockups);
+  const templateVariants = Array.isArray(printifyProductData?.variants) ? printifyProductData.variants : [];
+  const liveVariants = Array.isArray(livePrintifyProductData?.variants) ? livePrintifyProductData.variants : [];
+
+  if (liveVariants.length) {
+    const groups = buildGroupsFromLivePrintifyVariants({
+      liveVariants,
+      liveOptions: livePrintifyProductData?.options || [],
+      templateVariants,
+      shopifyVariants,
+      shopifyOptions,
+      mockByColor,
+      variantConfig,
+    });
+    return finalizeVariantGroups(groups, mockByColor);
+  }
+
   const colorIdx = resolveColorOptionIndex(shopifyOptions);
   const sizeIdx = resolveSizeOptionIndex(shopifyOptions, colorIdx);
-  const printifyVariants = Array.isArray(printifyProductData?.variants) ? printifyProductData.variants : [];
+  const printifyVariants = templateVariants;
 
   /** @type {Map<string, { color: string, sizes: object[] }>} */
   const groups = new Map();
@@ -123,15 +275,17 @@ export function buildVariantGroupsForProductDetail({
     }
 
     let printifyVariantId = null;
+    let templateVariantId = null;
+    let matchedTemplate = null;
     if (printifyVariants.length) {
       const templateMatch = printifyVariants.find((pv) => {
         const pvOpts = [pv.title, ...(Array.isArray(pv.options) ? pv.options : [])].join(" ");
         return normOpt(pvOpts).includes(normOpt(color)) && normOpt(pvOpts).includes(normOpt(size));
       });
-      const live = templateMatch
-        ? findLiveVariantForTemplateVariant(templateMatch, printifyVariants)
-        : printifyVariants.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`));
-      printifyVariantId = live?.id != null ? String(live.id) : templateMatch?.id != null ? String(templateMatch.id) : null;
+      const titleMatch = printifyVariants.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`));
+      matchedTemplate = templateMatch || titleMatch;
+      templateVariantId = matchedTemplate?.id != null ? String(matchedTemplate.id) : null;
+      printifyVariantId = templateVariantId;
     }
 
     groups.get(colorKey).sizes.push({
@@ -143,27 +297,17 @@ export function buildVariantGroupsForProductDetail({
       compare_at_price: v.compare_at_price != null ? String(v.compare_at_price) : null,
       inventory_quantity: v.inventory_quantity != null ? Number(v.inventory_quantity) : null,
       enabled: printifyVariantId
-        ? enabledFromConfig(printifyVariantId, variantConfig)
+        ? resolveVariantEnabled({
+            liveId: printifyVariantId,
+            templateId: templateVariantId,
+            config: variantConfig,
+            printifyIsEnabled: matchedTemplate?.is_enabled,
+          })
         : true,
     });
   }
 
-  const out = [];
-  for (const [colorKey, g] of groups) {
-    const mock_slides = mockByColor.get(colorKey) || mockByColor.get("Default") || [];
-    const sizes = g.sizes.sort((a, b) => String(a.size).localeCompare(String(b.size), undefined, { numeric: true }));
-    const enabledCount = sizes.filter((s) => s.enabled !== false).length;
-    out.push({
-      color: colorKey,
-      mock_slides,
-      default_view_index: defaultViewIndex(mock_slides),
-      enabled: enabledCount > 0,
-      sizes,
-    });
-  }
-
-  out.sort((a, b) => a.color.localeCompare(b.color));
-  return out;
+  return finalizeVariantGroups(groups, mockByColor);
 }
 
 /**

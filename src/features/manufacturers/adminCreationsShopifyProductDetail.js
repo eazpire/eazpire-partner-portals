@@ -584,6 +584,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
     let printProviderId = null;
     let variantConfig = null;
     let printifyProductData = null;
+    let livePrintifyProductData = null;
     let isTodifyListingResolved = isTodifyListing;
 
     try {
@@ -648,6 +649,18 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       }
     }
 
+    if (printifyProductId && env.PRINTIFY_API_KEY && !isTodifyListingResolved) {
+      try {
+        const { getPrintifyProduct } = await import("../../utils/printify.js");
+        livePrintifyProductData = await getPrintifyProduct(env, printifyProductId);
+      } catch (livePfErr) {
+        console.warn(
+          "[admin-creations-shopify-product-detail] live printify fetch:",
+          livePfErr?.message || livePfErr
+        );
+      }
+    }
+
     const shopifyVariants = (p.variants || []).map((v) => mapVariant(v, currency));
     const shopifyOptions = (p.options || []).map((o) => ({
       id: o.id,
@@ -668,6 +681,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
         mockups,
         variantConfig,
         printifyProductData,
+        livePrintifyProductData,
       });
       live_channels = buildLiveChannelsForVariantUpdate({
         printifyProductId,

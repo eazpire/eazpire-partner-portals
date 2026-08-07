@@ -121,9 +121,10 @@ export function renderVariantsPanelHtml(product, ui) {
   }
 
   const enabledCount = countEnabled(ui.enabled);
+  const totalVariants = groups.reduce((n, g) => n + (g.sizes?.length || 0), 0);
   let html = `<div class="cr-pd-variants">
     <p class="cr-pd-hint">Parent = color · Child = size. Toggle variants to include or exclude them on the next update.</p>
-    <p class="cr-pd-vp-summary"><strong>${enabledCount}</strong> / ${ui.enabled.size} enabled${enabledCount > MAX_ENABLED ? ` · max ${MAX_ENABLED}` : ""}</p>`;
+    <p class="cr-pd-vp-summary"><strong>${enabledCount}</strong> / ${totalVariants} enabled${enabledCount > MAX_ENABLED ? ` · max ${MAX_ENABLED}` : ""}</p>`;
 
   for (const group of groups) {
     const parentKey = `color:${group.color}`;
