@@ -76,6 +76,44 @@ function defaultViewIndex(slides) {
   return frontIdx >= 0 ? frontIdx : 0;
 }
 
+function parseColorSizeFromVariantTitle(title) {
+  const parts = String(title || "")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    color: parts[0] || "",
+    size: parts[1] || "",
+  };
+}
+
+function variantMatchesColorSize(variant, color, size) {
+  const opts = Array.isArray(variant?.options) ? variant.options : [];
+  if (opts.length >= 2) {
+    return normOpt(opts[0]) === normOpt(color) && normOpt(opts[1]) === normOpt(size);
+  }
+  const parsed = parseColorSizeFromVariantTitle(variant?.title);
+  return normOpt(parsed.color) === normOpt(color) && normOpt(parsed.size) === normOpt(size);
+}
+
+function findTemplateVariantForColorSize(color, size, templateVariants) {
+  const list = Array.isArray(templateVariants) ? templateVariants : [];
+  return (
+    list.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`)) ||
+    list.find((pv) => variantMatchesColorSize(pv, color, size)) ||
+    null
+  );
+}
+
+function findLiveVariantForColorSize(color, size, liveVariants) {
+  const list = Array.isArray(liveVariants) ? liveVariants : [];
+  return (
+    list.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`)) ||
+    list.find((pv) => variantMatchesColorSize(pv, color, size)) ||
+    null
+  );
+}
+
 function variantInAdminPool(liveId, templateId, config) {
   const variants = config?.variants;
   if (!variants || typeof variants !== "object") return true;
@@ -97,7 +135,18 @@ function enabledFromAdminConfigOnly(liveId, templateId, config) {
   return false;
 }
 
-function resolveVariantEnabled({ liveId, templateId, config, printifyIsEnabled, adminConfigOnly = false }) {
+function resolveVariantEnabled({
+  liveId,
+  templateId,
+  config,
+  printifyIsEnabled,
+  livePrintifyIsEnabled,
+  preferLivePrintify = false,
+  adminConfigOnly = false,
+}) {
+  if (preferLivePrintify && livePrintifyIsEnabled !== undefined && livePrintifyIsEnabled !== null) {
+    return livePrintifyIsEnabled !== false;
+  }
   if (adminConfigOnly && config?.variants && typeof config.variants === "object") {
     return enabledFromAdminConfigOnly(liveId, templateId, config);
   }
@@ -111,6 +160,9 @@ function resolveVariantEnabled({ liveId, templateId, config, printifyIsEnabled, 
       }
     }
   }
+  if (livePrintifyIsEnabled !== undefined && livePrintifyIsEnabled !== null) {
+    return livePrintifyIsEnabled !== false;
+  }
   if (printifyIsEnabled !== undefined && printifyIsEnabled !== null) {
     return printifyIsEnabled !== false;
   }
@@ -121,27 +173,27 @@ function matchPrintifyIdsForShopifyRow(color, size, templateVariants, liveVarian
   let templateVariantId = null;
   let printifyVariantId = null;
   let matchedTemplate = null;
+  let matchedLive = null;
 
-  if (templateVariants.length) {
-    const templateMatch = templateVariants.find((pv) => {
-      const pvOpts = [pv.title, ...(Array.isArray(pv.options) ? pv.options : [])].join(" ");
-      return normOpt(pvOpts).includes(normOpt(color)) && normOpt(pvOpts).includes(normOpt(size));
-    });
-    const titleMatch = templateVariants.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`));
-    matchedTemplate = templateMatch || titleMatch;
-    templateVariantId = matchedTemplate?.id != null ? String(matchedTemplate.id) : null;
-    if (matchedTemplate && liveVariants.length) {
-      const liveMatch = findLiveVariantForTemplateVariant(matchedTemplate, liveVariants);
-      printifyVariantId = liveMatch?.id != null ? String(liveMatch.id) : templateVariantId;
-    } else {
-      printifyVariantId = templateVariantId;
-    }
-  } else if (liveVariants.length) {
-    const liveMatch = liveVariants.find((pv) => normOpt(pv.title) === normOpt(`${color} / ${size}`));
-    printifyVariantId = liveMatch?.id != null ? String(liveMatch.id) : null;
+  matchedTemplate = findTemplateVariantForColorSize(color, size, templateVariants);
+  templateVariantId = matchedTemplate?.id != null ? String(matchedTemplate.id) : null;
+
+  if (matchedTemplate && liveVariants.length) {
+    matchedLive = findLiveVariantForTemplateVariant(matchedTemplate, liveVariants);
   }
+  if (!matchedLive && liveVariants.length) {
+    matchedLive = findLiveVariantForColorSize(color, size, liveVariants);
+  }
+  printifyVariantId =
+    matchedLive?.id != null ? String(matchedLive.id) : templateVariantId;
 
-  return { printifyVariantId, templateVariantId, matchedTemplate };
+  return {
+    printifyVariantId,
+    templateVariantId,
+    matchedTemplate,
+    matchedLive,
+    livePrintifyIsEnabled: matchedLive?.is_enabled,
+  };
 }
 
 function finalizeVariantGroups(groups, mockByColor) {
@@ -186,6 +238,7 @@ export function buildVariantGroupsForProductDetail({
   const adminConfigOnly = Boolean(
     variantConfig?.variants && typeof variantConfig.variants === "object" && Object.keys(variantConfig.variants).length
   );
+  const preferLivePrintify = liveVariants.length > 0;
 
   const colorIdx = resolveColorOptionIndex(shopifyOptions);
   const sizeIdx = resolveSizeOptionIndex(shopifyOptions, colorIdx);
@@ -211,14 +264,16 @@ export function buildVariantGroupsForProductDetail({
     let printifyVariantId = null;
     let templateVariantId = null;
     let matchedTemplate = null;
+    let livePrintifyIsEnabled = undefined;
     if (templateVariants.length || liveVariants.length) {
       const matched = matchPrintifyIdsForShopifyRow(color, size, templateVariants, liveVariants);
       printifyVariantId = matched.printifyVariantId;
       templateVariantId = matched.templateVariantId;
       matchedTemplate = matched.matchedTemplate;
+      livePrintifyIsEnabled = matched.livePrintifyIsEnabled;
     }
 
-    if (adminConfigOnly) {
+    if (adminConfigOnly && !preferLivePrintify) {
       if (!printifyVariantId && !templateVariantId) continue;
       if (!variantInAdminPool(printifyVariantId, templateVariantId, variantConfig)) continue;
     }
@@ -237,7 +292,9 @@ export function buildVariantGroupsForProductDetail({
             templateId: templateVariantId,
             config: variantConfig,
             printifyIsEnabled: matchedTemplate?.is_enabled,
-            adminConfigOnly,
+            livePrintifyIsEnabled,
+            preferLivePrintify,
+            adminConfigOnly: adminConfigOnly && !preferLivePrintify,
           })
         : true,
     });
