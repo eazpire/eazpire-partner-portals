@@ -282,7 +282,7 @@ function continentsHtml(st) {
       st,
       "europa",
       "Europa",
-      "Parent unlock for the EU account. Toggle countries below (default DE). Publish only for content-ready markets (DE today)."
+      "Parent unlock for the EU account. Toggle countries below. Content-ready publish: DE, UK, FR, IT, ES, NL, BE, SE, IE, PL."
     ) +
     continentGroupHtml(
       st,

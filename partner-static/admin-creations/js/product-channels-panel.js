@@ -265,7 +265,7 @@ export function renderChannelsPanelHtml(product, ui) {
     } else {
       const pdId = product?.published_design_id || product?.amazon_publish?.published_design_id;
       regionsHtml = `${dryRunBannerHtml(product)}
-      <p class="cr-pd-hint">Direct publish per country (no BIL). Content-ready today: <strong>DE</strong> and <strong>US</strong>. Other countries can be enabled in Catalog Channels for planning.${
+      <p class="cr-pd-hint">Direct publish per country (no BIL). Content-ready EU: <strong>DE, UK, FR, IT, ES, NL, BE, SE, IE, PL</strong> · NA: <strong>US</strong>. Other countries can stay enabled in Catalog Channels for planning.${
         pdId ? ` · published_design #${escapeHtml(String(pdId))}` : " · ⚠ no published_design linked"
       }</p>
       <div class="cr-ch-regions" role="list">${targets

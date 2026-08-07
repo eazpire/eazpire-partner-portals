@@ -396,22 +396,26 @@ function isStaleQueuedErrorMessage(msg) {
 }
 
 /**
- * Poll admin-amazon-publish-status until marketplace (or continent rollup) is live/failed/timeout.
+ * Poll admin-amazon-publish-status until all selected marketplaces (or continent rollup) are live/failed/timeout.
  */
 export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   const id = Number(publishedDesignId);
   if (!Number.isFinite(id) || id <= 0) throw new Error("missing published_design_id");
   const continent = String(opts.continent || "europa").trim().toLowerCase() || "europa";
-  const marketCode = String(
-    opts.marketplace_code || opts.marketplace_codes?.[0] || (continent === "amerika" ? "US" : "DE")
-  )
-    .trim()
-    .toUpperCase();
+  const marketCodes = (() => {
+    const fromList = Array.isArray(opts.marketplace_codes)
+      ? opts.marketplace_codes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean)
+      : [];
+    if (fromList.length) return [...new Set(fromList)];
+    const single = String(opts.marketplace_code || "").trim().toUpperCase();
+    if (single) return [single];
+    return [continent === "amerika" ? "US" : "DE"];
+  })();
   const maxMs = Number(opts.maxMs) > 0 ? Number(opts.maxMs) : 12 * 60 * 1000;
   const started = Date.now();
   let delay = 0;
   let lastStatus = "";
-  let staleFailGraceUsed = 0;
+  const staleFailGraceUsed = Object.create(null);
 
   while (Date.now() - started < maxMs) {
     if (delay > 0) await sleep(delay);
@@ -419,27 +423,47 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
     const query = { published_design_id: String(id) };
     if (elapsed > maxMs - 45000) query.sync = "1";
     const data = await partnerFetch("admin-amazon-publish-status", { query });
-    const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
-    const st = String(cont?.status || "").toLowerCase();
-    lastStatus = st || lastStatus;
-    if (typeof opts.onTick === "function") opts.onTick({ status: st, continent, marketCode, data, cont });
 
-    if (cont?.asin || AMAZON_LIVE.has(st)) {
-      return { ok: true, status: st || "published", asin: cont?.asin || null, data };
-    }
-    if (AMAZON_IN_FLIGHT.has(st) || st === "publishing" || st === "dry_run_ok") {
-      delay = delay === 0 ? 4000 : Math.min(delay + 2000, 15000);
-      continue;
-    }
-    if (AMAZON_FAIL.has(st)) {
-      const errMsg = cont?.last_error || cont?.message || `Amazon ${st || "failed"}`;
-      // Stale-queued false positive can flip back to verifying after re-enqueue
-      if (isStaleQueuedErrorMessage(errMsg) && staleFailGraceUsed < 8) {
-        staleFailGraceUsed += 1;
-        delay = 6000;
+    let anyInFlight = false;
+    let allLive = true;
+    const failMsgs = [];
+    let firstLive = null;
+
+    for (const marketCode of marketCodes) {
+      const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
+      const st = String(cont?.status || "").toLowerCase();
+      lastStatus = st || lastStatus;
+      if (typeof opts.onTick === "function") {
+        opts.onTick({ status: st, continent, marketCode, data, cont });
+      }
+
+      if (cont?.asin || AMAZON_LIVE.has(st)) {
+        if (!firstLive) firstLive = { status: st || "published", asin: cont?.asin || null };
         continue;
       }
-      throw new Error(errMsg);
+      allLive = false;
+      if (AMAZON_IN_FLIGHT.has(st) || st === "publishing" || st === "dry_run_ok" || !st) {
+        anyInFlight = true;
+        continue;
+      }
+      if (AMAZON_FAIL.has(st)) {
+        const errMsg = cont?.last_error || cont?.message || `Amazon ${marketCode}: ${st || "failed"}`;
+        if (isStaleQueuedErrorMessage(errMsg) && (staleFailGraceUsed[marketCode] || 0) < 8) {
+          staleFailGraceUsed[marketCode] = (staleFailGraceUsed[marketCode] || 0) + 1;
+          anyInFlight = true;
+          continue;
+        }
+        failMsgs.push(errMsg);
+      } else {
+        anyInFlight = true;
+      }
+    }
+
+    if (allLive && firstLive) {
+      return { ok: true, status: firstLive.status, asin: firstLive.asin, data };
+    }
+    if (failMsgs.length && !anyInFlight) {
+      throw new Error(failMsgs.slice(0, 3).join(" · "));
     }
     delay = delay === 0 ? 4000 : Math.min(delay + 2000, 15000);
   }
@@ -463,20 +487,29 @@ async function tryRecoverErrorEntry(entry, continent, marketplaceCodes = null) {
   if (entry.status !== "error") return false;
   const pdId = entry.item.published_design_id;
   if (!pdId) return false;
-  const marketCode = String(marketplaceCodes?.[0] || (continent === "amerika" ? "US" : "DE")).toUpperCase();
+  const codes = Array.isArray(marketplaceCodes) && marketplaceCodes.length
+    ? marketplaceCodes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean)
+    : [continent === "amerika" ? "US" : "DE"];
   try {
     const data = await partnerFetch("admin-amazon-publish-status", {
       query: { published_design_id: String(pdId) },
     });
-    const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
-    const st = String(cont?.status || "").toLowerCase();
-    if (cont?.asin || AMAZON_LIVE.has(st)) {
+    let allLive = true;
+    let anyInFlight = false;
+    for (const marketCode of codes) {
+      const cont = data?.markets?.[marketCode] || data?.continents?.[continent] || null;
+      const st = String(cont?.status || "").toLowerCase();
+      if (cont?.asin || AMAZON_LIVE.has(st)) continue;
+      allLive = false;
+      if (AMAZON_IN_FLIGHT.has(st) || st === "publishing") anyInFlight = true;
+    }
+    if (allLive) {
       entry.status = "done";
       entry.message = "";
       entry.enqueued = true;
       return true;
     }
-    if (AMAZON_IN_FLIGHT.has(st) || st === "publishing") {
+    if (anyInFlight) {
       entry.status = "publishing";
       entry.message = "";
       entry.enqueued = true;
