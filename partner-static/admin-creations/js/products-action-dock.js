@@ -4,6 +4,10 @@
  *
  * Amazon Publish: enqueue then poll until continent is live/failed; dock auto-hides when
  * every card is terminal (done or error) so a new publish can start without dismiss.
+ *
+ * Polling stops when creator-jobs-amazon-publish is disabled (status.queue_enabled=false /
+ * enqueue queue_disabled) or status stays idle-queued with no feed progress — otherwise the
+ * dock would show "Publishing…" forever while the consumer discards work.
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -18,6 +22,14 @@ import {
   removeAmazonPublishBatch,
   saveAmazonPublishBatch,
 } from "./products-amazon-publish-batch.js";
+import {
+  amazonPublishQueueOffError,
+  amazonPublishStagnantIdleError,
+  amazonPublishStatusFingerprint,
+  amazonPublishStatusLooksIdleQueued,
+  isAmazonPublishQueueOff,
+  shouldAbortAmazonPublishWait,
+} from "./products-amazon-publish-poll-guard.js";
 import {
   expandActionQueue,
   minimizeActionQueue,
@@ -410,6 +422,7 @@ function isStaleQueuedErrorMessage(msg) {
 
 /**
  * Poll admin-amazon-publish-status until all selected marketplaces (or continent rollup) are live/failed/timeout.
+ * Stops early when queue_enabled is false (or idle-queued stagnates) so the dock can settle.
  */
 export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   const id = Number(publishedDesignId);
@@ -429,6 +442,8 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
   let delay = 0;
   let lastStatus = "";
   const staleFailGraceUsed = Object.create(null);
+  let lastFingerprint = "";
+  let stagnantIdlePolls = 0;
 
   while (Date.now() - started < maxMs) {
     if (delay > 0) await sleep(delay);
@@ -436,6 +451,30 @@ export async function waitForAmazonContinentLive(publishedDesignId, opts = {}) {
     const query = { published_design_id: String(id) };
     if (elapsed > maxMs - 45000) query.sync = "1";
     const data = await partnerFetch("admin-amazon-publish-status", { query });
+
+    // Prefer status.queue_enabled — no separate admin-job-controls poll every few seconds.
+    if (isAmazonPublishQueueOff(data)) {
+      throw amazonPublishQueueOffError(data);
+    }
+
+    const queueEnabledKnown = typeof data?.queue_enabled === "boolean";
+    const fingerprint = amazonPublishStatusFingerprint(marketCodes, data, continent);
+    const idleQueued = amazonPublishStatusLooksIdleQueued(marketCodes, data, continent);
+    if (!queueEnabledKnown && idleQueued && fingerprint && fingerprint === lastFingerprint) {
+      stagnantIdlePolls += 1;
+    } else {
+      stagnantIdlePolls = 0;
+      lastFingerprint = fingerprint;
+    }
+    const abort = shouldAbortAmazonPublishWait({
+      queueOff: false,
+      queueEnabledKnown,
+      idleQueued,
+      stagnantIdlePolls,
+    });
+    if (abort.abort && abort.reason === "stagnant_idle") {
+      throw amazonPublishStagnantIdleError();
+    }
 
     let anyInFlight = false;
     let allLive = true;
@@ -507,6 +546,11 @@ async function tryRecoverErrorEntry(entry, continent, marketplaceCodes = null) {
     const data = await partnerFetch("admin-amazon-publish-status", {
       query: { published_design_id: String(pdId) },
     });
+    // Do not flip errors back to "publishing" while the consumer is off — that restarts polling.
+    if (isAmazonPublishQueueOff(data)) {
+      entry.message = amazonPublishQueueOffError(data).message;
+      return false;
+    }
     let allLive = true;
     let anyInFlight = false;
     for (const marketCode of codes) {
@@ -681,6 +725,7 @@ async function enqueueAmazonEntry(entry, continent, queue) {
       },
     });
     if (enqueue && enqueue.ok === false) {
+      if (isAmazonPublishQueueOff(enqueue)) throw amazonPublishQueueOffError(enqueue);
       throw new Error(enqueue.error || enqueue.message || "Amazon publish failed");
     }
     const pdId = enqueue?.published_design_id || entry.item.published_design_id;
@@ -691,7 +736,11 @@ async function enqueueAmazonEntry(entry, continent, queue) {
     entry.message = "";
   } catch (e) {
     entry.status = "error";
-    entry.message = e?.message || "Failed";
+    if (isAmazonPublishQueueOff(e?.data) || e?.code === "queue_disabled") {
+      entry.message = amazonPublishQueueOffError(e?.data || e).message;
+    } else {
+      entry.message = e?.message || "Failed";
+    }
     entry.enqueued = false;
   } finally {
     await releaseProductLock(lockId);
@@ -791,8 +840,18 @@ async function runAmazonPublishBatchLoop(queue) {
 
   // Concurrency 1: Amazon createFeed is globally rate-limited (~1/min). Parallel enqueues
   // only pile up jobs that then fight for the same Feeds quota.
+  let queueOffMessage = "";
   await mapPool(toEnqueue, 1, async (entry) => {
+    if (queueOffMessage) {
+      entry.status = "error";
+      entry.message = queueOffMessage;
+      entry.enqueued = false;
+      return;
+    }
     await enqueueAmazonEntry(entry, continent, queue);
+    if (entry.status === "error" && /queue is (off|disabled)|queue_disabled|creator-jobs-amazon-publish/i.test(entry.message || "")) {
+      queueOffMessage = entry.message;
+    }
   });
 
   for (const e of queue.entries) {
@@ -866,6 +925,7 @@ export async function startProductsAmazonPublishDock(
 
 /**
  * After Products page mount / reload: restore all open batches from localStorage.
+ * If the Amazon publish queue is off, one status check settles publishing cards (no forever-poll).
  */
 export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
   const products = Array.isArray(opts.products) ? opts.products : [];
