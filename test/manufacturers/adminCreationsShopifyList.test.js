@@ -10,6 +10,9 @@ import {
   isNativeShopifyStoreProduct,
   mapShopifyNodeToProduct,
   fetchPrintifyShopifyNodesFromD1,
+  toEpochMs,
+  productRecencyMs,
+  sortProductsNewestFirst,
   PRINTIFY_SHOPIFY_STORE_QUERY,
   TODIFY_SHOPIFY_STORE_QUERY,
   SAMPLES_SHOPIFY_STORE_QUERY,
@@ -214,6 +217,32 @@ describe("adminCreationsShopifyList", () => {
     expect(row.shopify_product_id).toBe("55");
   });
 
+  it("toEpochMs / productRecencyMs / newest-first sort for Admin Products", () => {
+    expect(toEpochMs("2026-08-08T12:00:00.000Z")).toBe(Date.parse("2026-08-08T12:00:00.000Z"));
+    expect(toEpochMs(1_700_000_000)).toBe(1_700_000_000_000);
+    expect(toEpochMs(1_700_000_000_000)).toBe(1_700_000_000_000);
+    const mapped = mapShopifyNodeToProduct(
+      {
+        id: "gid://shopify/Product/91",
+        title: "Recent Tee",
+        status: "ACTIVE",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-08-08T10:00:00.000Z",
+      },
+      "printify",
+      new Map()
+    );
+    expect(mapped.sort_ts).toBe(Date.parse("2026-08-08T10:00:00.000Z"));
+    expect(productRecencyMs(mapped)).toBe(mapped.sort_ts);
+    const list = [
+      { id: "old", sort_ts: 100 },
+      { id: "new", updated_at: 300 },
+      { id: "mid", published_at: 200 },
+    ];
+    sortProductsNewestFirst(list);
+    expect(list.map((p) => p.id)).toEqual(["new", "mid", "old"]);
+  });
+
   it("maps Todify listing origin to Creator and Customer labels", () => {
     const creator = mapShopifyNodeToProduct(
       {
@@ -346,7 +375,8 @@ describe("adminCreationsShopifyList", () => {
           creatorPublishedIds: new Set(["1", "2", "3", "4"]),
         }
       );
-      const ids = nodes.map((n) => normalizeShopifyProductId(n.id)).sort();
+      const ids = nodes.map((n) => normalizeShopifyProductId(n.id));
+      // Preserve D1 Set insertion order (newest-first), not arbitrary hydrate order.
       expect(ids).toEqual(["1", "4"]);
     } finally {
       spy.mockRestore();

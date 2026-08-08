@@ -2,8 +2,8 @@
  * Creations Portal Products — floating bulk-action progress docks with per-product lock (IDEA-063).
  * Supports multiple parallel queues (minimize into page-scoped Publish FAB).
  *
- * Amazon Publish: enqueue then poll until continent is live; dock stays open until every
- * selected product succeeds (errors keep the dock visible; stale errors can recover).
+ * Amazon Publish: enqueue then poll until continent is live/failed; dock auto-hides when
+ * every card is terminal (done or error) so a new publish can start without dismiss.
  */
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
@@ -12,9 +12,9 @@ import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.
 import { itemPreviewUrl } from "./products-preview-url.js";
 import {
   batchHasOpenWork,
-  batchNeedsUi,
   createAmazonPublishBatch,
   loadAmazonPublishBatches,
+  pruneTerminalAmazonPublishBatches,
   removeAmazonPublishBatch,
   saveAmazonPublishBatch,
 } from "./products-amazon-publish-batch.js";
@@ -348,13 +348,26 @@ function destroyQueue(queueId, { removeStorage = false } = {}) {
   if (removeStorage && queue.batch) removeAmazonPublishBatch(queue.batch.id);
 }
 
-function clearDockSoonIfAllSucceeded(queue) {
+function queueIsSettled(queue) {
+  if (!queue?.entries?.length) return true;
+  return queue.entries.every((e) => {
+    const st = String(e.status || "").toLowerCase();
+    return st === "done" || st === "error";
+  });
+}
+
+/** Hide dock + clear storage once every card is done or error (no open jobs). */
+function clearDockSoonWhenSettled(queue, delayMs = 3500) {
   if (queue.clearTimer) clearTimeout(queue.clearTimer);
   queue.clearTimer = setTimeout(() => {
     if (!productQueues.has(queue.id)) return;
-    if (queue.entries.some((e) => e.status !== "done")) return;
+    if (!queueIsSettled(queue)) return;
+    if (queue.recoverTimer) {
+      clearInterval(queue.recoverTimer);
+      queue.recoverTimer = null;
+    }
     destroyQueue(queue.id, { removeStorage: true });
-  }, 3500);
+  }, delayMs);
 }
 
 async function acquireProductLock(item, action) {
@@ -632,10 +645,9 @@ export async function startProductsActionDock(
     }
     if (errors.length) showToast("Error", errors.slice(0, 2).join(" · "));
 
-    if (keepOpenUntilAllOk) {
-      if (!errors.length) clearDockSoonIfAllSucceeded(queue);
-    } else if (!errors.length) {
-      clearDockSoonIfAllSucceeded(queue);
+    // Auto-hide when every card is terminal (toast already covered failures).
+    if (queueIsSettled(queue) && (!keepOpenUntilAllOk || !errors.length)) {
+      clearDockSoonWhenSettled(queue);
     }
 
     if (typeof queue.onDone === "function") await queue.onDone({ ok, errors });
@@ -743,14 +755,21 @@ async function finishAmazonQueue(queue) {
 
   if (ok && !errors.length) {
     showToast("Publishing complete", `${ok} product${ok === 1 ? "" : "s"} published`);
-    clearDockSoonIfAllSucceeded(queue);
   } else if (ok && errors.length) {
     showToast("Publishing partial", `${ok} ok · ${errors.length} failed`);
-    syncBatchFromEntries(queue);
-    startErrorRecovery(queue);
   } else if (errors.length) {
     showToast("Error", errors.slice(0, 2).join(" · "));
-    syncBatchFromEntries(queue);
+  }
+
+  syncBatchFromEntries(queue);
+  // Settled batches (incl. errors) auto-hide — no dismiss needed for a fresh publish.
+  if (queueIsSettled(queue)) {
+    if (queue.recoverTimer) {
+      clearInterval(queue.recoverTimer);
+      queue.recoverTimer = null;
+    }
+    clearDockSoonWhenSettled(queue);
+  } else {
     startErrorRecovery(queue);
   }
 
@@ -850,7 +869,9 @@ export async function startProductsAmazonPublishDock(
  */
 export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
   const products = Array.isArray(opts.products) ? opts.products : [];
-  let batches = loadAmazonPublishBatches().filter(batchNeedsUi);
+  // Drop finished/error-only batches so a prior failed run does not block a new publish.
+  pruneTerminalAmazonPublishBatches();
+  let batches = loadAmazonPublishBatches().filter(batchHasOpenWork);
 
   if (!batches.length && products.length) {
     const fromPending = products.filter((p) => p?.amazon_eu_pending);
@@ -914,12 +935,16 @@ export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
       syncBatchFromEntries(queue);
     }
 
+    // Fully settled after live sync — do not restore UI / recovery loop.
+    if (queueIsSettled(queue)) {
+      removeAmazonPublishBatch(batch.id);
+      continue;
+    }
+
     productQueues.set(queue.id, queue);
     registerQueueOnRail(queue);
     ensureDock(queue);
     renderQueueDock(queue);
-
-    if (queue.entries.some((e) => e.status === "error")) startErrorRecovery(queue);
 
     queue.loopPromise = runAmazonPublishBatchLoop(queue)
       .catch((e) => {
@@ -933,10 +958,10 @@ export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
   }
 
   if (promises.length) showToast("Publishing", "Restored Amazon publish progress");
-  // Expand newest
-  const newest = batches[batches.length - 1];
-  if (newest) expandActionQueue(newest.id);
-  return Promise.all(promises);
+  // Expand newest still-active queue
+  const activeIds = [...productQueues.keys()].filter((id) => String(id).startsWith("amazon-"));
+  if (activeIds.length) expandActionQueue(activeIds[activeIds.length - 1]);
+  return promises.length ? Promise.all(promises) : null;
 }
 
 /**

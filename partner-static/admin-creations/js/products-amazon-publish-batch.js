@@ -90,13 +90,22 @@ export function batchHasOpenWork(batch) {
   });
 }
 
-/** True if batch still needs UI (in-flight or errors to review). */
+/**
+ * True if the dock should stay/restore for this batch.
+ * Only in-flight work — terminal errors do not keep the UI open
+ * (toast already summarized; user can start a new publish cleanly).
+ */
 export function batchNeedsUi(batch) {
-  if (!batch?.entries?.length) return false;
-  return batch.entries.some((e) => {
-    const st = String(e.status || "").toLowerCase();
-    return st !== "done";
-  });
+  return batchHasOpenWork(batch);
+}
+
+/** Drop settled batches (all done/error) from localStorage. */
+export function pruneTerminalAmazonPublishBatches() {
+  const store = readStore();
+  const before = store.batches.length;
+  store.batches = store.batches.filter(batchHasOpenWork);
+  if (store.batches.length !== before) writeStore(store);
+  return before - store.batches.length;
 }
 
 export function serializeBatchEntry(item, status = "waiting") {

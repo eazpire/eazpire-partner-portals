@@ -19,6 +19,9 @@ import {
   isSampleShopifyProduct,
   normalizeShopifyProductId,
   indexShopifyNodesById,
+  applyProductRecencyTimestamps,
+  sortProductsNewestFirst,
+  toEpochMs,
   NATIVE_SHOPIFY_STORE_QUERY,
   PRINTIFY_SHOPIFY_STORE_QUERY,
   TODIFY_SHOPIFY_STORE_QUERY,
@@ -192,11 +195,22 @@ export async function ensureShopifyNodesForProductList(env, products, nodesBySho
  * shopify_product_id still missing from that map is fetched automatically.
  * @param {object} env
  * @param {Array<object>} products
- * @param {{ nodesByShopifyId?: Map<string, object>|null }} [opts]
+ * @param {{
+ *   nodesByShopifyId?: Map<string, object>|null,
+ *   updatedAtBySid?: Map<string, number>|null,
+ * }} [opts]
  */
-export async function finalizeProductList(env, products, { nodesByShopifyId = null } = {}) {
+export async function finalizeProductList(
+  env,
+  products,
+  { nodesByShopifyId = null, updatedAtBySid = null } = {}
+) {
   const nodesMap = await ensureShopifyNodesForProductList(env, products, nodesByShopifyId);
   const enriched = await enrichCreationsProductListFacets(env, products, nodesMap);
+  for (const product of enriched) {
+    applyProductRecencyTimestamps(product, updatedAtBySid);
+  }
+  sortProductsNewestFirst(enriched);
   const facets = buildProductFilterFacets(enriched);
   return { products: enriched, facets };
 }
@@ -391,10 +405,8 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     isActive != null && isActive !== "" ? Math.max(0, Math.min(2, Number.parseInt(isActive, 10) || 0)) : null;
 
   try {
-    const [customerStudioIds, { printifyLinks, creatorPublishedIds }] = await Promise.all([
-      loadCustomerStudioShopifyIds(env),
-      loadPublishedDesignsShopifyIndex(env),
-    ]);
+    const [customerStudioIds, { printifyLinks, creatorPublishedIds, updatedAtBySid }] =
+      await Promise.all([loadCustomerStudioShopifyIds(env), loadPublishedDesignsShopifyIndex(env)]);
 
     // D1 published_designs is the source of truth for creator/Printify listings.
     // A full Shopify catalog scan with heavy Product fields was throttling mid-page and
@@ -451,7 +463,7 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
       const pdRes = await env.CREATOR_DB.prepare(
         `SELECT id, design_id, owner_id, product_key, product_name, printify_product_id,
                 shopify_product_id, shopify_completion_status, printify_listing_status,
-                printify_images_json, visibility, updated_at
+                printify_images_json, visibility, updated_at, published_at
          FROM published_designs
          WHERE printify_product_id IS NOT NULL
            AND TRIM(CAST(printify_product_id AS TEXT)) != ''
@@ -496,6 +508,7 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
           .trim()
           .toLowerCase();
         const listingVisibility = visRaw === "public" ? "public" : "private";
+        const updatedAt = Math.max(toEpochMs(row.updated_at), toEpochMs(row.published_at));
         products.push({
           id: `printify-only:${row.id}`,
           product_key: String(row.product_key || row.id),
@@ -520,6 +533,9 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
           printify_status: status,
           printify_listing_status: row.printify_listing_status || status,
           listing_origin: "printify_only",
+          updated_at: updatedAt,
+          published_at: toEpochMs(row.published_at) || null,
+          sort_ts: updatedAt,
         });
         seenPrintify.add(pid);
       }
@@ -543,6 +559,7 @@ export async function handleAdminCreationsPrintifyProducts(request, env) {
     const category_tree = buildCategoryTree(products);
     const { products: finalProducts, facets } = await finalizeProductList(env, products, {
       nodesByShopifyId: indexShopifyNodesById(nodes),
+      updatedAtBySid,
     });
     return json(
       {
@@ -608,6 +625,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
         mockUrlsJson: row.mock_urls_json,
         previewMockIndex: row.preview_mock_index,
       }), row.design_url, row.placement_json);
+      const updatedAt = toEpochMs(row.updated_at);
       products.push({
         id: String(row.id),
         product_key: String(row.product_key || row.id),
@@ -622,6 +640,8 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
         printify_product_id: row.printify_product_id || null,
         is_active: studioStatusToIsActive(row.shopify_completion_status),
         source: "customer",
+        updated_at: updatedAt,
+        sort_ts: updatedAt,
       });
     }
 
@@ -655,6 +675,7 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
         String(row.product_key || "").trim() ||
         (row.prompt ? String(row.prompt).slice(0, 80) : `Design #${row.design_id || row.id}`);
       const preview = row.preview_url || null;
+      const updatedAt = toEpochMs(row.updated_at);
       products.push({
         id: String(row.id),
         product_key: String(row.product_key || row.id),
@@ -669,10 +690,10 @@ export async function handleAdminCreationsCustomerProducts(request, env) {
         design_id: row.design_id,
         is_active: sid ? 2 : 1,
         source: "customer",
+        updated_at: updatedAt,
+        sort_ts: updatedAt,
       });
     }
-
-    products.sort((a, b) => Number(b.is_active) - Number(a.is_active));
 
     let filtered = products;
     if (q) {
@@ -709,7 +730,7 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const { printifyLinks } = await loadPublishedDesignsShopifyIndex(env);
+    const { printifyLinks, updatedAtBySid } = await loadPublishedDesignsShopifyIndex(env);
 
     const nodes = await fetchShopifyProductNodesMatching(env, {
       limit,
@@ -732,6 +753,7 @@ export async function handleAdminCreationsShopifyProducts(request, env) {
 
     const { products: finalProducts, facets } = await finalizeProductList(env, products, {
       nodesByShopifyId: indexShopifyNodesById(nodes),
+      updatedAtBySid,
     });
     return json(
       { ok: true, products: finalProducts, total: finalProducts.length, source: "shopify", facets },
@@ -756,7 +778,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const [customerStudioIds, { printifyLinks }] = await Promise.all([
+    const [customerStudioIds, { printifyLinks, updatedAtBySid }] = await Promise.all([
       loadCustomerStudioShopifyIds(env),
       loadPublishedDesignsShopifyIndex(env),
     ]);
@@ -814,6 +836,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
           mockUrlsJson: row.mock_urls_json,
           previewMockIndex: row.preview_mock_index,
         }), row.design_url, row.placement_json);
+        const updatedAt = toEpochMs(row.updated_at);
         products.push({
           id: sid || `studio:${row.id}`,
           product_key: String(row.product_key || row.id),
@@ -831,6 +854,8 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
           source_label: "Todify",
           listing_origin: "shop",
           origin_label: "Customer",
+          updated_at: updatedAt,
+          sort_ts: updatedAt,
         });
         if (sid) seenProductIds.add(sid);
       }
@@ -848,6 +873,7 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
 
     const { products: finalProducts, facets } = await finalizeProductList(env, products, {
       nodesByShopifyId: indexShopifyNodesById(nodes),
+      updatedAtBySid,
     });
     return json(
       { ok: true, products: finalProducts, total: finalProducts.length, source: "todify", facets },
@@ -872,7 +898,7 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
 
   try {
-    const [customerStudioIds, { printifyLinks }] = await Promise.all([
+    const [customerStudioIds, { printifyLinks, updatedAtBySid }] = await Promise.all([
       loadCustomerStudioShopifyIds(env),
       loadPublishedDesignsShopifyIndex(env),
     ]);
@@ -899,6 +925,7 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
 
     const { products: finalProducts, facets } = await finalizeProductList(env, products, {
       nodesByShopifyId: indexShopifyNodesById(nodes),
+      updatedAtBySid,
     });
     return json(
       { ok: true, products: finalProducts, total: finalProducts.length, source: "samples", facets },

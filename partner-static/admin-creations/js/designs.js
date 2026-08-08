@@ -640,7 +640,9 @@ function designCardHtml(item) {
     <div class="cr-card__meta">
       <span class="cr-meta-chip" title="User">${escapeHtml(item.user_name || item.owner_id || "—")}</span>
       <span class="cr-meta-chip">${escapeHtml(sourceBucketLabel(item.source_bucket))}</span>
-      <span class="cr-meta-chip">${escapeHtml(formatDateTime(item.created_at))}</span>
+      <span class="cr-meta-chip" title="Last updated">${escapeHtml(
+        formatDateTime(item.sort_ts || item.updated_at || item.created_at)
+      )}</span>
       <span class="cr-meta-chip">${escapeHtml(item.creator_name || "—")}</span>
       <span class="cr-meta-chip">${escapeHtml(libLabel)} ${unsaved}</span>
       <span class="cr-meta-chip">${escapeHtml(item.type || "Classic")}</span>

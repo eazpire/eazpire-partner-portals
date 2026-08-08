@@ -497,7 +497,35 @@ async function loadAllProductBuckets() {
     );
   }
 
+  // Newest changes first across all buckets (Shopify/D1 updated_at / publish time).
+  merged.sort((a, b) => productRecencyMs(b) - productRecencyMs(a));
   state.items = merged;
+}
+
+/** Epoch ms for newest-first Products grid (mirrors worker productRecencyMs). */
+function productRecencyMs(product) {
+  const toMs = (value) => {
+    if (value == null || value === "") return 0;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value <= 0) return 0;
+      return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+    }
+    const raw = String(value).trim();
+    if (!raw) return 0;
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+    }
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return Math.max(
+    toMs(product?.sort_ts),
+    toMs(product?.updated_at),
+    toMs(product?.published_at),
+    toMs(product?.created_at)
+  );
 }
 
 /** Lighter refresh after a bulk action — keeps sidebar filter state. */

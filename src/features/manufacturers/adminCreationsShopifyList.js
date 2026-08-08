@@ -14,6 +14,8 @@ const PRODUCT_SCAN_FIELDS = `
   status
   vendor
   productType
+  createdAt
+  updatedAt
   category { fullName }
   tags
   isGiftCard
@@ -32,6 +34,62 @@ const PRODUCT_SCAN_FIELDS = `
   mfSample: metafield(namespace: "custom", key: "sample") { value }
   mfVisibility: metafield(namespace: "custom", key: "visibility") { value }
 `;
+
+/**
+ * Normalize Shopify ISO timestamps / D1 epoch seconds-or-ms to epoch milliseconds.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function toEpochMs(value) {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value <= 0) return 0;
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  const raw = String(value).trim();
+  if (!raw) return 0;
+  // Numeric strings (D1) — avoid Date.parse treating bare numbers oddly.
+  if (/^-?\d+(\.\d+)?$/.test(raw)) {
+    const asNum = Number(raw);
+    if (!Number.isFinite(asNum) || asNum <= 0) return 0;
+    return asNum < 1e12 ? Math.round(asNum * 1000) : Math.round(asNum);
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Newest meaningful change for Admin Products list ordering. */
+export function productRecencyMs(product) {
+  if (!product || typeof product !== "object") return 0;
+  return Math.max(
+    toEpochMs(product.sort_ts),
+    toEpochMs(product.updated_at),
+    toEpochMs(product.published_at),
+    toEpochMs(product.created_at)
+  );
+}
+
+/**
+ * Stamp sort_ts / updated_at from Shopify + optional D1 published_designs recency.
+ * @param {object} product
+ * @param {Map<string, number>|null} [updatedAtBySid]
+ */
+export function applyProductRecencyTimestamps(product, updatedAtBySid = null) {
+  if (!product || typeof product !== "object") return product;
+  const sid = normalizeShopifyProductId(product.shopify_product_id || product.id);
+  const d1Ts = sid && updatedAtBySid instanceof Map ? toEpochMs(updatedAtBySid.get(sid)) : 0;
+  const sortTs = Math.max(productRecencyMs(product), d1Ts);
+  product.sort_ts = sortTs;
+  if (sortTs > 0) product.updated_at = sortTs;
+  else if (product.updated_at == null) product.updated_at = 0;
+  return product;
+}
+
+/** In-place newest-first sort for Admin Products lists. */
+export function sortProductsNewestFirst(products) {
+  if (!Array.isArray(products)) return [];
+  return products.sort((a, b) => productRecencyMs(b) - productRecencyMs(a));
+}
 
 /** Full Product selection for Creations list enrich (variants / metafields / alts). */
 const PRODUCT_NODE_FIELDS = `
@@ -458,6 +516,9 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     .trim()
     .toLowerCase();
   const listingVisibility = visibilityRaw === "public" ? "public" : "private";
+  const createdAt = toEpochMs(node?.createdAt);
+  const updatedAt = toEpochMs(node?.updatedAt) || createdAt;
+  const sortTs = Math.max(updatedAt, createdAt);
 
   return {
     id: shopifyId,
@@ -482,6 +543,9 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     source,
     source_label: sourceLabel,
     total_variants: Number(node?.totalVariants?.count) || 0,
+    created_at: createdAt || 0,
+    updated_at: updatedAt || 0,
+    sort_ts: sortTs || 0,
   };
 }
 
@@ -657,23 +721,35 @@ export async function fetchPrintifyShopifyNodesFromD1(env, opts = {}) {
   if (!ids.length) return [];
 
   const nodes = await fetchShopifyProductNodesByIds(env, ids);
-  return nodes.filter(
-    (node) =>
-      isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
-      !isCustomerStudioShopifyProduct(node, customerStudioIds)
-  );
+  const byId = indexShopifyNodesById(nodes);
+  // Keep D1 newest-first order (Set insertion order from ORDER BY updated_at DESC).
+  return ids
+    .map((sid) => byId.get(sid))
+    .filter(
+      (node) =>
+        !!node &&
+        isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) &&
+        !isCustomerStudioShopifyProduct(node, customerStudioIds)
+    );
 }
 
 /**
  * published_designs shopify ids — all creator publishes plus optional printify_product_id for backfill.
- * @returns {{ printifyLinks: Map<string, string>, creatorPublishedIds: Set<string> }}
+ * Ordered newest-first by updated_at (falls back to published_at).
+ * @returns {{
+ *   printifyLinks: Map<string, string>,
+ *   creatorPublishedIds: Set<string>,
+ *   updatedAtBySid: Map<string, number>,
+ * }}
  */
 export async function loadPublishedDesignsShopifyIndex(env) {
   /** @type {Map<string, string>} */
   const printifyLinks = new Map();
   /** @type {Set<string>} */
   const creatorPublishedIds = new Set();
-  if (!env?.CREATOR_DB) return { printifyLinks, creatorPublishedIds };
+  /** @type {Map<string, number>} */
+  const updatedAtBySid = new Map();
+  if (!env?.CREATOR_DB) return { printifyLinks, creatorPublishedIds, updatedAtBySid };
 
   try {
     const normSid = sqlNormalizeShopifyProductId();
@@ -682,11 +758,12 @@ export async function loadPublishedDesignsShopifyIndex(env) {
     let offset = 0;
     for (let page = 0; page < 20; page++) {
       const res = await env.CREATOR_DB.prepare(
-        `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid
+        `SELECT ${normSid} AS sid, TRIM(printify_product_id) AS pid,
+                updated_at, published_at
          FROM published_designs
          WHERE shopify_product_id IS NOT NULL
            AND TRIM(CAST(shopify_product_id AS TEXT)) != ''
-         ORDER BY COALESCE(published_at, updated_at, 0) DESC
+         ORDER BY COALESCE(updated_at, published_at, 0) DESC
          LIMIT ? OFFSET ?`
       )
         .bind(PAGE, offset)
@@ -695,7 +772,9 @@ export async function loadPublishedDesignsShopifyIndex(env) {
       for (const row of rows) {
         const sid = normalizeShopifyProductId(row.sid);
         if (!sid) continue;
-        creatorPublishedIds.add(sid);
+        const ts = Math.max(toEpochMs(row.updated_at), toEpochMs(row.published_at));
+        if (!creatorPublishedIds.has(sid)) creatorPublishedIds.add(sid);
+        if (ts > (updatedAtBySid.get(sid) || 0)) updatedAtBySid.set(sid, ts);
         const pid = String(row.pid || "").trim();
         if (pid && !printifyLinks.has(sid)) printifyLinks.set(sid, pid);
       }
@@ -706,7 +785,7 @@ export async function loadPublishedDesignsShopifyIndex(env) {
     console.warn("[admin-creations-shopify-list] published_designs index:", e?.message);
   }
 
-  return { printifyLinks, creatorPublishedIds };
+  return { printifyLinks, creatorPublishedIds, updatedAtBySid };
 }
 
 /** @deprecated Prefer loadPublishedDesignsShopifyIndex — kept for callers that only need printify id map. */
