@@ -21,6 +21,7 @@ import {
 } from "./product-variants-panel.js";
 import { resumeVariantUpdateDockIfNeeded, teardownVariantUpdateDock } from "./products-variant-update-dock.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
+import { openDesignDetailModal } from "./designs-detail-modal.js";
 import { openProductUnpublishModal } from "./products-unpublish-modal.js";
 import {
   applyProductSidebarFilters,
@@ -231,12 +232,16 @@ function productCardHtml(item) {
       : "";
   const shopifyId = resolveShopifyProductId(item);
   const studioListingId = resolveStudioListingId(item);
-  const clickable = Boolean(shopifyId);
+  const isSample = !!item.is_sample;
+  const clickable = Boolean(shopifyId) || isSample;
   const canUnpublish = Boolean(shopifyId || studioListingId);
-  const filterKey = productSelectionKey(item);
+  const filterKey = isSample ? "" : productSelectionKey(item);
   const dataAttrs = [
-    clickable ? `data-shopify-id="${escapeHtml(String(shopifyId))}"` : "",
+    clickable && shopifyId ? `data-shopify-id="${escapeHtml(String(shopifyId))}"` : "",
     studioListingId ? `data-studio-listing-id="${escapeHtml(String(studioListingId))}"` : "",
+    isSample && item.design_id ? `data-sample-design-id="${escapeHtml(String(item.design_id))}"` : "",
+    isSample && item.sample_url ? `data-sample-url="${escapeHtml(String(item.sample_url))}"` : "",
+    isSample ? `data-is-sample="1"` : "",
     canUnpublish || clickable ? `data-product-title="${escapeHtml(title)}"` : "",
     clickable ? `tabindex="0" role="button"` : "",
     filterKey ? `data-product-filter-key="${escapeHtml(filterKey)}"` : "",
@@ -1076,6 +1081,32 @@ function bindDetailModal(backdrop) {
   });
 }
 
+function openSampleProductFromCard(card) {
+  if (!card) return;
+  const designId = String(card.dataset.sampleDesignId || "").trim();
+  const item = (state.items || []).find((p) => {
+    if (!p?.is_sample) return false;
+    if (designId && String(p.design_id || "") === designId) return true;
+    return String(p.id || "") === String(card.dataset.productKey || "");
+  });
+  if (item && item.design_id) {
+    openDesignDetailModal({
+      id: item.design_id,
+      title: item.design_title || item.title,
+      preview_url: item.design_preview_url || item.preview_url,
+      original_url: item.design_preview_url || item.preview_url,
+      metadata: item.metadata || { library_listing_mode: "personalized_sample" },
+      creator_name: item.vendor || "",
+      owner_id: item.owner_id || "",
+      visibility: "public",
+    });
+    return;
+  }
+  if (card.dataset.sampleUrl) {
+    window.open(card.dataset.sampleUrl, "_blank", "noopener");
+  }
+}
+
 function bindProductCards(el) {
   const grid = el.querySelector("#cr-products-grid");
   grid?.addEventListener("click", (e) => {
@@ -1110,18 +1141,46 @@ function bindProductCards(el) {
       card.dataset.crViewIndex = String(viewIndex);
       return;
     }
+    const sampleCard = e.target.closest(".cr-card--product[data-is-sample]");
+    if (sampleCard) {
+      openSampleProductFromCard(sampleCard);
+      return;
+    }
     const card = e.target.closest(".cr-card--product[data-shopify-id]");
     if (!card?.dataset?.shopifyId) return;
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
   grid?.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
+    const sampleCard = e.target.closest?.(".cr-card--product[data-is-sample]");
+    if (sampleCard) {
+      e.preventDefault();
+      openSampleProductFromCard(sampleCard);
+      return;
+    }
     const card = e.target.closest?.(".cr-card--product[data-shopify-id]");
     if (!card?.dataset?.shopifyId) return;
     e.preventDefault();
     openProductDetail(card.dataset.shopifyId, card.dataset.productTitle);
   });
-  bindCardContextMenu(grid, ".cr-card--product[data-shopify-id], .cr-card--product[data-studio-listing-id]", (card, event) => {
+  bindCardContextMenu(grid, ".cr-card--product[data-shopify-id], .cr-card--product[data-studio-listing-id], .cr-card--product[data-is-sample]", (card, event) => {
+    if (card.dataset.isSample === "1") {
+      openContextMenu(
+        event,
+        [
+          { label: "Edit personalization", action: "edit-zones" },
+          { label: "Open sample page", action: "open-sample" },
+        ],
+        async (action) => {
+          if (action === "open-sample" && card.dataset.sampleUrl) {
+            window.open(card.dataset.sampleUrl, "_blank", "noopener");
+            return;
+          }
+          if (action === "edit-zones") openSampleProductFromCard(card);
+        }
+      );
+      return;
+    }
     const shopifyId = card.dataset.shopifyId || "";
     const studioListingId = card.dataset.studioListingId || "";
     const title = card.dataset.productTitle || "";

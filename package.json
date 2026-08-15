@@ -46,6 +46,9 @@
     "dev:design-asset-audit": "npx live-server dev/design-asset-audit --port=3464 --open=/index.html",
     "export:design-asset-audit": "node scripts/test/export-design-asset-audit-data.js",
     "dev:splash-animation-test": "npx live-server dev --port=3463 --open=/splash-animation-test/index.html",
+    "dev:video-transition-lab": "node scripts/test/run-video-transition-lab.mjs",
+    "build:freepd-catalog": "node scripts/test/build-freepd-catalog.mjs",
+    "build:gl-transitions": "node scripts/test/build-gl-transitions-bundle.mjs",
     "dev:prize-cards-preview": "npx live-server . --port=3465 --open=/dev/eazy-prize-cards-preview.html",
     "serve:local-test": "npx --yes live-server local-test --port=8765 --open=/product-carousel-video.html",
     "bootstrap:carousel-test": "node scripts/bootstrap-carousel-test-token.mjs",
@@ -364,6 +367,10 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
+    "gl-transitions": "^1.43.0",
     "playwright": "^1.57.0",
     "vitest": "^4.0.18",
     "wrangler": "^4.85.0"

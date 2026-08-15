@@ -146,6 +146,7 @@ export async function ensureShopifyNodesForProductList(env, products, nodesBySho
 
   const missing = [];
   for (const product of list) {
+    if (product?.is_sample) continue;
     const sid = normalizeShopifyProductId(product?.shopify_product_id || product?.id);
     if (!sid || map.has(sid)) continue;
     missing.push(sid);
@@ -160,6 +161,7 @@ export async function ensureShopifyNodesForProductList(env, products, nodesBySho
 
   // Rows still without a node: invalid shopify id (customer id) or studio-only id.
   const unresolved = list.filter((p) => {
+    if (p?.is_sample) return false;
     const sid = normalizeShopifyProductId(p?.shopify_product_id || p?.id);
     return !sid || !map.has(sid);
   });
@@ -912,6 +914,44 @@ export async function handleAdminCreationsSamplesProducts(request, env) {
     });
 
     let products = nodes.map((node) => mapShopifyNodeToProduct(node, "samples", printifyLinks));
+
+    try {
+      const { loadSamplePublishedListings } = await import("../publish/sampleListingRows.js");
+      const d1Samples = await loadSamplePublishedListings(env, { limit: 2000 });
+      for (const s of d1Samples) {
+        products.push({
+          id: `sample-${s.published_id}`,
+          product_key: s.product_key,
+          title: s.title,
+          preview_url: s.featured_image || s.mockup_url || s.preview_url,
+          grid_views: s.featured_image
+            ? [{ src: s.featured_image, view: "front", variant_label: "Default", is_preview: true }]
+            : [],
+          shopify_product_id: null,
+          printify_product_id: null,
+          design_id: s.design_id,
+          published_design_id: s.published_id,
+          is_sample: true,
+          sample_url: s.sample_url,
+          is_active: 2,
+          source_label: "Samples",
+          listing_bucket: "samples",
+          filter_source: "samples",
+          category: "Personalizable samples",
+          owner_label: s.creator_name ? `Creator ${s.creator_name}` : s.owner_id ? `Owner ${s.owner_id}` : "",
+          owner_id: s.owner_id,
+          vendor: s.creator_name || "",
+          provider: "sample",
+          updated_at: s.updated_at || s.published_at || null,
+          published_at: s.published_at || null,
+          metadata: s.metadata || {},
+          design_preview_url: s.preview_url,
+          design_title: s.design_title,
+        });
+      }
+    } catch (d1Err) {
+      console.warn("[admin-creations-samples-products] D1 samples failed:", d1Err?.message || d1Err);
+    }
 
     if (q) {
       products = products.filter((p) =>
