@@ -10,7 +10,7 @@ import {
   selectionKey,
   suppressBulkDock,
 } from "./products-bulk.js";
-import { startProductsActionDock, startProductsAmazonPublishDock } from "./products-action-dock.js";
+import { startProductsActionDock, startProductsAltTextFixDock, startProductsAmazonPublishDock } from "./products-action-dock.js";
 import { itemPreviewUrl } from "./products-preview-url.js";
 import {
   AMAZON_EU_CONTENT_READY_CODES,
@@ -348,7 +348,7 @@ export async function openProductsBulkFixAltTextsModal(items, { onDone } = {}) {
   openModal({
     title: eligible.length === 1 ? "Fix alt texts" : `Fix alt texts on ${eligible.length} listings`,
     bodyHtml: `
-      <p class="confirm-modal-message">Checks every selected Shopify listing: whether image alt texts are set, whether Color|view labels match the real mockup (lifestyle/back must not be labeled front), and whether the card preview is the primary front image. Then repairs what is wrong.</p>
+      <p class="confirm-modal-message">Queues a server job for every selected Shopify listing: missing or wrong Color|view labels, lifestyle/back labeled as front, and the card preview. If the product is already listed on Amazon, matching main/gallery images are updated there too. You can close this page — the queue keeps running.</p>
       <div class="cr-bulk-scroll" id="cr-products-alt-texts-body">
         ${eligible.map((item) => productRowHtml(item, { checked: true })).join("")}
       </div>`,
@@ -357,25 +357,13 @@ export async function openProductsBulkFixAltTextsModal(items, { onDone } = {}) {
       const keys = selectedRowsFromRoot("cr-products-alt-texts-body");
       const selected = eligible.filter((item) => keys.has(listingKey(item)));
       if (!selected.length) throw new Error("Select at least one product");
-      setModalBusy(true, "Checking…");
+      setModalBusy(true, "Queueing…");
       clearSelection();
       setModalBusy(false);
 
-      const { ok, errors } = await startProductsActionDock(selected, {
-        action: "alt-texts",
-        runItem: (item) =>
-          partnerFetch("admin-creations-fix-alt-texts", {
-            method: "POST",
-            body: {
-              shopify_product_id: item.shopify_product_id || item.id || "",
-              printify_product_id: item.printify_product_id || "",
-              product_key: item.product_key || "",
-              design_id: item.design_id || "",
-            },
-          }),
-      });
-      if (typeof onDone === "function") await onDone({ ok, errors });
+      const { ok, errors } = await startProductsAltTextFixDock(selected, { onDone });
+      return { ok, errors };
     },
   });
-  configurePrimaryConfirm("Check and repair");
+  configurePrimaryConfirm("Queue and repair");
 }

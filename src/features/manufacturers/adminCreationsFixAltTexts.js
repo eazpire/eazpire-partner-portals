@@ -55,7 +55,7 @@ async function lookupPublishedRow(env, sid) {
     `REPLACE(REPLACE(TRIM(CAST(shopify_product_id AS TEXT)), 'gid://shopify/Product/', ''), '.0', '')`;
   try {
     return await env.CREATOR_DB.prepare(
-      `SELECT design_id, product_key, printify_product_id, shopify_product_id
+      `SELECT id, design_id, product_key, printify_product_id, shopify_product_id
        FROM published_designs
        WHERE shopify_product_id IS NOT NULL AND ${norm} = ?
        ORDER BY id DESC LIMIT 1`
@@ -103,29 +103,27 @@ function attachBytes(images, bytesById) {
   }));
 }
 
-export async function handleAdminCreationsFixAltTexts(request, env) {
-  const cors = getCorsHeaders(request);
-  if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
-
-  const { owner_id } = await getAuthUser(request, env);
-  if (!isAdminOwner(owner_id, env)) return json({ ok: false, error: "forbidden" }, 403, cors);
-
-  const body = await request.json().catch(() => ({}));
-  const sid = normSid(body.shopify_product_id || body.id);
-  if (!sid) return json({ ok: false, error: "missing_shopify_product_id" }, 400, cors);
+/**
+ * Check + repair Shopify image alt texts and featured preview for one listing.
+ * Shared by the HTTP op and the durable admin queue consumer.
+ */
+export async function runFixAltTextsForShopifyProduct(env, opts = {}) {
+  const sid = normSid(opts.shopify_product_id || opts.id);
+  if (!sid) return { ok: false, error: "missing_shopify_product_id" };
 
   const shop = shopDomain(env);
   const row = await lookupPublishedRow(env, sid);
-  const printifyId = String(body.printify_product_id || row?.printify_product_id || "").trim();
-  const productKey = String(body.product_key || row?.product_key || "").trim();
+  const printifyId = String(opts.printify_product_id || row?.printify_product_id || "").trim();
+  const productKey = String(opts.product_key || row?.product_key || "").trim();
+  const publishedDesignId = Number(opts.published_design_id || row?.id || 0) || null;
 
   let product;
   try {
     product = (await shopifyAPI(env, shop, `products/${sid}.json`))?.product;
   } catch (e) {
-    return json({ ok: false, error: e?.message || "shopify_fetch_failed" }, 502, cors);
+    return { ok: false, error: e?.message || "shopify_fetch_failed" };
   }
-  if (!product) return json({ ok: false, error: "shopify_product_missing" }, 404, cors);
+  if (!product) return { ok: false, error: "shopify_product_missing" };
 
   const images = product.images || [];
   const bytesById = new Map();
@@ -151,7 +149,6 @@ export async function handleAdminCreationsFixAltTexts(request, env) {
   if (clothing) {
     const afterOrder = (await shopifyAPI(env, shop, `products/${sid}.json`))?.product;
     const fresh = afterOrder?.images || images;
-    // Re-HEAD if new images appeared; otherwise reuse.
     for (const img of fresh) {
       if (!bytesById.has(Number(img.id))) {
         bytesById.set(Number(img.id), await imageBytes(img.src));
@@ -191,19 +188,59 @@ export async function handleAdminCreationsFixAltTexts(request, env) {
     message = after.issues.join(" · ") || "Alt text check found remaining issues.";
   }
 
-  return json(
-    {
-      ok,
-      repaired,
-      message,
-      shopify_product_id: sid,
-      printify_product_id: printifyId || null,
-      product_key: productKey || null,
-      before,
-      after,
-      steps,
-    },
-    ok ? 200 : 200,
-    cors
-  );
+  return {
+    ok,
+    repaired,
+    message,
+    shopify_product_id: sid,
+    printify_product_id: printifyId || null,
+    product_key: productKey || null,
+    published_design_id: publishedDesignId,
+    before,
+    after,
+    steps,
+    after_images: (afterProd?.images || []).map((img) => ({
+      id: img.id,
+      src: img.src,
+      alt: img.alt,
+      position: img.position,
+    })),
+  };
+}
+
+export async function handleAdminCreationsFixAltTexts(request, env) {
+  const cors = getCorsHeaders(request);
+  if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+
+  const { owner_id } = await getAuthUser(request, env);
+  if (!isAdminOwner(owner_id, env)) return json({ ok: false, error: "forbidden" }, 403, cors);
+
+  const body = await request.json().catch(() => ({}));
+  const result = await runFixAltTextsForShopifyProduct(env, body);
+  if (result.error === "missing_shopify_product_id") {
+    return json({ ok: false, error: result.error }, 400, cors);
+  }
+  if (result.error === "shopify_product_missing") {
+    return json({ ok: false, error: result.error }, 404, cors);
+  }
+  if (result.error) {
+    return json({ ok: false, error: result.error }, 502, cors);
+  }
+
+  let amazon = { skipped: true, reason: "not_requested" };
+  if (body.include_amazon !== false) {
+    try {
+      const { syncAmazonListingImagesFromShopify } = await import("../../amazon/syncAmazonListingImagesFromShopify.js");
+      amazon = await syncAmazonListingImagesFromShopify(env, {
+        publishedDesignId: result.published_design_id,
+        productKey: result.product_key,
+        images: result.after_images,
+      });
+    } catch (e) {
+      amazon = { ok: false, skipped: false, error: e?.message || String(e) };
+    }
+  }
+
+  const { after_images: _omit, ...publicResult } = result;
+  return json({ ...publicResult, amazon }, 200, cors);
 }

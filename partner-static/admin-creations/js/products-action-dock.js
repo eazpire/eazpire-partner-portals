@@ -23,6 +23,14 @@ import {
   saveAmazonPublishBatch,
 } from "./products-amazon-publish-batch.js";
 import {
+  altTextBatchHasOpenWork,
+  createAltTextFixBatch,
+  loadAltTextFixBatches,
+  pruneTerminalAltTextFixBatches,
+  removeAltTextFixBatch,
+  saveAltTextFixBatch,
+} from "./products-alt-text-batch.js";
+import {
   amazonPublishQueueOffError,
   amazonPublishStagnantIdleError,
   amazonPublishStatusFingerprint,
@@ -120,7 +128,7 @@ function actionDonePast(action) {
 function statusLabel(status) {
   if (status === "locking") return "Locking…";
   if (status === "running") return "Working…";
-  if (status === "waiting" || status === "pending") return "Waiting…";
+  if (status === "waiting" || status === "pending" || status === "queued") return "Waiting…";
   if (status === "publishing") return "Publishing…";
   if (status === "done") return "Done";
   if (status === "error") return "Error";
@@ -302,14 +310,18 @@ function renderQueueDock(queue) {
   syncRail(queue);
 }
 
+function persistQueueBatch(queue) {
+  if (!queue?.batch) return;
+  queue.batch.minimized = !!queue.minimized;
+  if (queue.action === "alt-texts") saveAltTextFixBatch(queue.batch);
+  else saveAmazonPublishBatch(queue.batch);
+}
+
 function minimizeProductQueue(id) {
   const queue = productQueues.get(id);
   if (!queue) return;
   queue.minimized = true;
-  if (queue.batch) {
-    queue.batch.minimized = true;
-    saveAmazonPublishBatch(queue.batch);
-  }
+  persistQueueBatch(queue);
   renderQueueDock(queue);
 }
 
@@ -319,18 +331,12 @@ function expandProductQueue(id) {
   for (const other of productQueues.values()) {
     if (other.id !== id && !other.minimized) {
       other.minimized = true;
-      if (other.batch) {
-        other.batch.minimized = true;
-        saveAmazonPublishBatch(other.batch);
-      }
+      persistQueueBatch(other);
       renderQueueDock(other);
     }
   }
   queue.minimized = false;
-  if (queue.batch) {
-    queue.batch.minimized = false;
-    saveAmazonPublishBatch(queue.batch);
-  }
+  persistQueueBatch(queue);
   renderQueueDock(queue);
   // Resume recovery polling for error cards
   startErrorRecovery(queue);
@@ -359,7 +365,10 @@ function destroyQueue(queueId, { removeStorage = false } = {}) {
   queue.dockEl?.remove();
   productQueues.delete(queueId);
   unregisterActionQueue(queueId);
-  if (removeStorage && queue.batch) removeAmazonPublishBatch(queue.batch.id);
+  if (removeStorage && queue.batch) {
+    if (queue.action === "alt-texts") removeAltTextFixBatch(queue.batch.id);
+    else removeAmazonPublishBatch(queue.batch.id);
+  }
 }
 
 function queueIsSettled(queue) {
@@ -1029,6 +1038,230 @@ export async function resumeAmazonPublishDockIfNeeded(opts = {}) {
 /**
  * Hide dock UI when leaving Products (loops keep running; rail page switch hides FAB).
  */
+function entryFromAltTextRow(row) {
+  return {
+    item: {
+      shopify_product_id: row.shopify_product_id,
+      id: row.shopify_product_id,
+      published_design_id: row.published_design_id,
+      product_key: row.product_key,
+      title: row.title,
+      preview_url: row.preview_url,
+      grid_views: row.preview_url ? [{ src: row.preview_url }] : [],
+    },
+    status: row.status === "queued" ? "waiting" : row.status || "waiting",
+    message: row.message || "",
+    sessionId: null,
+    enqueued: true,
+  };
+}
+
+function syncAltTextBatchFromEntries(queue) {
+  const batch = queue.batch;
+  if (!batch) return;
+  batch.entries = queue.entries.map((e) => ({
+    shopify_product_id: itemShopifyId(e.item),
+    published_design_id:
+      e.item.published_design_id != null ? Number(e.item.published_design_id) : null,
+    product_key: String(e.item.product_key || "").trim(),
+    title: itemTitle(e.item),
+    preview_url: itemPreviewUrl(e.item),
+    status: e.status === "waiting" ? "queued" : e.status,
+    message: e.message || "",
+  }));
+  batch.minimized = !!queue.minimized;
+  saveAltTextFixBatch(batch);
+}
+
+function applyAltTextStatusRows(queue, rows) {
+  const bySid = new Map(
+    (rows || []).map((r) => [String(r.shopify_product_id || "").replace(/\.0$/, ""), r])
+  );
+  let changed = false;
+  for (const entry of queue.entries) {
+    const live = bySid.get(itemShopifyId(entry.item));
+    if (!live) continue;
+    const nextStatus = live.status === "queued" ? "waiting" : live.status || entry.status;
+    const nextMessage = live.message || "";
+    if (entry.status !== nextStatus || entry.message !== nextMessage) {
+      entry.status = nextStatus;
+      entry.message = nextMessage;
+      changed = true;
+    }
+    if (live.published_design_id && !entry.item.published_design_id) {
+      entry.item.published_design_id = live.published_design_id;
+    }
+  }
+  return changed;
+}
+
+async function pollAltTextFixQueue(queue) {
+  const batchId = queue.batch?.id;
+  if (!batchId) return { ok: 0, errors: [] };
+
+  let delay = 0;
+  const started = Date.now();
+  const maxMs = 3 * 60 * 60 * 1000;
+  while (Date.now() - started < maxMs) {
+    if (delay > 0) await sleep(delay);
+    if (!productQueues.has(queue.id)) return { ok: 0, errors: [] };
+    try {
+      const data = await partnerFetch("admin-creations-fix-alt-texts-status", {
+        query: { batch_id: batchId },
+      });
+      applyAltTextStatusRows(queue, data?.entries || []);
+      for (const entry of queue.entries) {
+        const sid = itemShopifyId(entry.item);
+        const key = itemProductKey(entry.item);
+        const busy = entry.status === "running" || entry.status === "waiting" || entry.status === "queued";
+        if (busy) {
+          if (sid) busyShopifyIds.add(sid);
+          if (key) busyProductKeys.add(key);
+        } else {
+          if (sid) busyShopifyIds.delete(sid);
+          if (key) busyProductKeys.delete(key);
+        }
+      }
+      notifyBusyChange();
+      syncAltTextBatchFromEntries(queue);
+      renderQueueDock(queue);
+      if (data?.settled || queueIsSettled(queue)) break;
+    } catch (e) {
+      console.warn("[products-action-dock] alt-text poll:", e?.message || e);
+    }
+    delay = delay === 0 ? 4000 : Math.min(delay + 1500, 12000);
+  }
+
+  const ok = queue.entries.filter((e) => e.status === "done").length;
+  const errors = queue.entries
+    .filter((e) => e.status === "error")
+    .map((e) => `${itemTitle(e.item)}: ${e.message || "Failed"}`);
+  if (ok && !errors.length) {
+    showToast("Fixing alt texts complete", `${ok} listing${ok === 1 ? "" : "s"} checked and repaired`);
+  } else if (ok && errors.length) {
+    showToast("Fixing alt texts partial", `${ok} ok · ${errors.length} failed`);
+  } else if (errors.length) {
+    showToast("Error", errors.slice(0, 2).join(" · "));
+  }
+  if (queueIsSettled(queue)) clearDockSoonWhenSettled(queue);
+  if (typeof queue.onDone === "function") await queue.onDone({ ok, errors });
+  return { ok, errors };
+}
+
+function mountAltTextFixQueue(batch, { onDone, minimized = false } = {}) {
+  if (!batch?.id || productQueues.has(batch.id)) {
+    const existing = productQueues.get(batch.id);
+    return existing?.loopPromise || Promise.resolve({ ok: 0, errors: [] });
+  }
+
+  for (const other of productQueues.values()) {
+    if (!other.minimized) minimizeProductQueue(other.id);
+  }
+
+  const queue = {
+    id: batch.id,
+    action: "alt-texts",
+    batch,
+    entries: batch.entries.map(entryFromAltTextRow),
+    minimized,
+    startedAt: batch.startedAt || Date.now(),
+    dockEl: null,
+    loopPromise: null,
+    onDone: onDone || null,
+    clearTimer: null,
+    recoverTimer: null,
+  };
+
+  for (const entry of queue.entries) {
+    const sid = itemShopifyId(entry.item);
+    const key = itemProductKey(entry.item);
+    if (sid) busyShopifyIds.add(sid);
+    if (key) busyProductKeys.add(key);
+  }
+  notifyBusyChange();
+
+  productQueues.set(queue.id, queue);
+  registerQueueOnRail(queue);
+  ensureDock(queue);
+  renderQueueDock(queue);
+  saveAltTextFixBatch(batch);
+
+  queue.loopPromise = pollAltTextFixQueue(queue)
+    .catch((e) => {
+      console.error("[products-action-dock] alt-text batch failed:", e);
+      showToast("Error", e?.message || "Alt text fix failed");
+      return { ok: 0, errors: [e?.message || "Alt text fix failed"] };
+    })
+    .finally(() => {
+      queue.loopPromise = null;
+    });
+  return queue.loopPromise;
+}
+
+/**
+ * Enqueue Fix alt texts on the server queue, then show a restoreable dock.
+ */
+export async function startProductsAltTextFixDock(items, { onDone } = {}) {
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return { ok: 0, errors: [] };
+
+  const enqueue = await partnerFetch("admin-creations-enqueue-fix-alt-texts", {
+    method: "POST",
+    body: {
+      items: list.map((item) => ({
+        shopify_product_id: item.shopify_product_id || item.id || "",
+        published_design_id: item.published_design_id || null,
+        printify_product_id: item.printify_product_id || "",
+        product_key: item.product_key || "",
+        design_id: item.design_id || "",
+        title: itemTitle(item),
+        preview_url: itemPreviewUrl(item),
+      })),
+    },
+  });
+
+  const batch = createAltTextFixBatch(enqueue.entries || [], { batchId: enqueue.batch_id });
+  saveAltTextFixBatch(batch);
+  showToast("Fix alt texts queued", `${batch.entries.length} listing${batch.entries.length === 1 ? "" : "s"} — safe to close this page`);
+  return mountAltTextFixQueue(batch, { onDone });
+}
+
+export async function resumeAltTextFixDockIfNeeded(opts = {}) {
+  pruneTerminalAltTextFixBatches();
+  const local = loadAltTextFixBatches().filter(altTextBatchHasOpenWork);
+  let serverBatches = [];
+  try {
+    const data = await partnerFetch("admin-creations-fix-alt-texts-open-batches");
+    serverBatches = Array.isArray(data?.batches) ? data.batches : [];
+  } catch (e) {
+    console.warn("[products-action-dock] alt-text open batches:", e?.message || e);
+  }
+
+  const byId = new Map();
+  for (const batch of local) byId.set(batch.id, batch);
+  for (const raw of serverBatches) {
+    const batch = createAltTextFixBatch(raw.entries || [], { batchId: raw.batch_id });
+    const prev = byId.get(batch.id);
+    if (prev) batch.minimized = !!prev.minimized;
+    byId.set(batch.id, batch);
+  }
+
+  const batches = [...byId.values()].filter(altTextBatchHasOpenWork);
+  if (!batches.length) return null;
+  batches.sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  const promises = [];
+  for (let i = 0; i < batches.length; i++) {
+    promises.push(
+      mountAltTextFixQueue(batches[i], {
+        onDone: opts.onDone,
+        minimized: i < batches.length - 1 || !!batches[i].minimized,
+      })
+    );
+  }
+  if (promises.length) showToast("Fixing alt texts", "Restored queued alt-text progress");
+  return Promise.all(promises);
+}
+
 export function teardownProductsActionDock({ force = false } = {}) {
   onBusyChange = null;
   for (const queue of [...productQueues.values()]) {

@@ -328,6 +328,9 @@ const ADMIN_OPS = new Set([
   "admin-creations-product-action-lock",
   "admin-creations-product-action-unlock",
   "admin-creations-fix-alt-texts",
+  "admin-creations-enqueue-fix-alt-texts",
+  "admin-creations-fix-alt-texts-status",
+  "admin-creations-fix-alt-texts-open-batches",
   "admin-creations-edit-design",
   "admin-creations-edit-design-save",
   "admin-creations-edit-design-update",
@@ -1620,6 +1623,21 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { handleAdminCreationsFixAltTexts } = await import("./adminCreationsFixAltTexts.js");
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminCreationsFixAltTexts(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-creations-enqueue-fix-alt-texts" && request.method === "POST") {
+      const { handleAdminCreationsEnqueueFixAltTexts } = await import("./adminCreationsFixAltTextsQueue.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsEnqueueFixAltTexts(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-creations-fix-alt-texts-status" && request.method === "GET") {
+      const { handleAdminCreationsFixAltTextsStatus } = await import("./adminCreationsFixAltTextsQueue.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsFixAltTextsStatus(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-creations-fix-alt-texts-open-batches" && request.method === "GET") {
+      const { handleAdminCreationsFixAltTextsOpenBatches } = await import("./adminCreationsFixAltTextsQueue.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsFixAltTextsOpenBatches(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
     if (op === "admin-creations-edit-design" && request.method === "GET") {
       const { handleAdminCreationsEditDesignGet } = await import("./adminCreationsEditDesign.js");

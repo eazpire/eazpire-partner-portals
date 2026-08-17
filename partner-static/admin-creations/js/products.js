@@ -53,6 +53,7 @@ import {
 import {
   getBusyProductKeys,
   getBusyShopifyIds,
+  resumeAltTextFixDockIfNeeded,
   resumeAmazonPublishDockIfNeeded,
   setBusyChangeListener,
   teardownProductsActionDock as teardownProductsActionDockInner,
@@ -1221,6 +1222,7 @@ export async function mountProductsPage() {
       products: state.items || [],
       onDone: refreshProductsAfterBulk,
     });
+    void resumeAltTextFixDockIfNeeded({ onDone: refreshProductsAfterBulk });
     void resumeVariantUpdateDockIfNeeded();
   } catch (e) {
     el.innerHTML = `
