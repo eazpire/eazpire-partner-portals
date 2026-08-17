@@ -1,10 +1,33 @@
 /**
- * Creations Portal Designs — multi-select + floating action bar (IDEA-057).
+ * Creations Portal Designs — multi-select + floating action bar (IDEA-057 / IDEA-072).
  */
+
+import { computeDesignBulkActionCounts } from "./designs-bulk-actions.js";
+
+export { computeDesignBulkActionCounts } from "./designs-bulk-actions.js";
 
 const selected = new Map(); // item_key -> design item
 /** When true, dock stays hidden even if selection is non-empty (e.g. while a bulk modal is open). */
 let dockSuppressed = false;
+
+const TILE_ICON = {
+  activate: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>`,
+  deactivate: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>`,
+  public: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+  private: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+  remove: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+  publish: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+  update: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+};
+
+function tileHtml(action, label, extraClass = "") {
+  const cls = extraClass ? ` ${extraClass}` : "";
+  return `<button type="button" class="cr-bulk-dock__tile${cls}" data-cr-bulk="${action}" hidden>
+    <span class="cr-bulk-dock__tile-count" data-cr-bulk-count="${action}">0</span>
+    <span class="cr-bulk-dock__tile-icon" aria-hidden="true">${TILE_ICON[action] || ""}</span>
+    <span class="cr-bulk-dock__tile-label">${label}</span>
+  </button>`;
+}
 
 export function selectionKey(item) {
   return String(item?.item_key || "").trim();
@@ -78,23 +101,30 @@ export function releaseBulkDock() {
   applyDockVisibility();
 }
 
-function libraryStatusOf(item) {
-  return String(item?.library_status || "").trim().toLowerCase() === "inactive" ? "inactive" : "active";
+function applyTile(dock, action, count) {
+  const btn = dock.querySelector(`[data-cr-bulk="${action}"]`);
+  if (!btn || !btn.classList.contains("cr-bulk-dock__tile")) return;
+  const show = Number(count || 0) > 0;
+  btn.hidden = !show;
+  const badge = btn.querySelector("[data-cr-bulk-count]");
+  if (badge) badge.textContent = String(count || 0);
 }
 
 function refreshSelectionUi() {
+  const dock = document.getElementById("cr-designs-bulk-dock");
   const countEl = document.getElementById("cr-bulk-count");
   const n = selected.size;
   applyDockVisibility();
   if (countEl) countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
-  const items = getSelectedItems();
-  const activateBtn = document.querySelector('[data-cr-bulk="activate"]');
-  const deactivateBtn = document.querySelector('[data-cr-bulk="deactivate"]');
-  if (activateBtn) {
-    activateBtn.disabled = !items.some((item) => item?.id && libraryStatusOf(item) === "inactive");
-  }
-  if (deactivateBtn) {
-    deactivateBtn.disabled = !items.some((item) => item?.id && libraryStatusOf(item) === "active");
+  if (dock) {
+    const counts = computeDesignBulkActionCounts(getSelectedItems());
+    applyTile(dock, "activate", counts.activate);
+    applyTile(dock, "deactivate", counts.deactivate);
+    applyTile(dock, "public", counts.public);
+    applyTile(dock, "private", counts.private);
+    applyTile(dock, "update", counts.update);
+    applyTile(dock, "publish", counts.publish);
+    applyTile(dock, "remove", counts.remove);
   }
 
   document.querySelectorAll(".cr-card[data-item-key]").forEach((card) => {
@@ -108,23 +138,31 @@ function refreshSelectionUi() {
 
 export function ensureBulkDock(_rootEl, handlers = {}) {
   let dock = document.getElementById("cr-designs-bulk-dock");
+  if (dock && !dock.querySelector('[data-cr-bulk="public"]')) {
+    dock.remove();
+    dock = null;
+  }
   if (!dock) {
     dock = document.createElement("div");
     dock.id = "cr-designs-bulk-dock";
-    dock.className = "cr-bulk-dock";
+    dock.className = "cr-bulk-dock cr-bulk-dock--designs";
     dock.hidden = true;
     dock.setAttribute("aria-hidden", "true");
     dock.innerHTML = `
       <div class="cr-bulk-dock__panel" role="toolbar" aria-label="Design bulk actions">
-        <span class="cr-bulk-dock__count" id="cr-bulk-count">0 selected</span>
+        <div class="cr-bulk-dock__select">
+          <button type="button" class="cr-bulk-dock__link" data-cr-bulk="all">Select all</button>
+          <button type="button" class="cr-bulk-dock__link" data-cr-bulk="none">Select none</button>
+          <span class="cr-bulk-dock__count" id="cr-bulk-count">0 selected</span>
+        </div>
         <div class="cr-bulk-dock__actions">
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="all">Select all</button>
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="none">Select none</button>
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="activate">Activate</button>
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="deactivate">Deactivate</button>
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn cr-bulk-dock__btn--danger" data-cr-bulk="remove">Remove</button>
-          <button type="button" class="btn btn-primary cr-bulk-dock__btn" data-cr-bulk="publish">Publish</button>
-          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="update">Update</button>
+          ${tileHtml("activate", "Activate")}
+          ${tileHtml("deactivate", "Deactivate")}
+          ${tileHtml("public", "Public")}
+          ${tileHtml("private", "Private")}
+          ${tileHtml("remove", "Remove", "cr-bulk-dock__tile--danger")}
+          ${tileHtml("publish", "Publish", "cr-bulk-dock__tile--primary")}
+          ${tileHtml("update", "Update")}
         </div>
       </div>`;
   }
@@ -141,7 +179,15 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
         releaseBulkDock();
         clearSelection();
       }
-      if (act === "remove" || act === "publish" || act === "update" || act === "activate" || act === "deactivate") {
+      if (
+        act === "remove" ||
+        act === "publish" ||
+        act === "update" ||
+        act === "activate" ||
+        act === "deactivate" ||
+        act === "public" ||
+        act === "private"
+      ) {
         suppressBulkDock();
       }
       if (act === "remove" && typeof handlers.onRemove === "function") handlers.onRemove(getSelectedItems());
@@ -149,6 +195,8 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
       if (act === "update" && typeof handlers.onUpdate === "function") handlers.onUpdate(getSelectedItems());
       if (act === "activate" && typeof handlers.onActivate === "function") handlers.onActivate(getSelectedItems());
       if (act === "deactivate" && typeof handlers.onDeactivate === "function") handlers.onDeactivate(getSelectedItems());
+      if (act === "public" && typeof handlers.onPublic === "function") handlers.onPublic(getSelectedItems());
+      if (act === "private" && typeof handlers.onPrivate === "function") handlers.onPrivate(getSelectedItems());
     };
   });
 

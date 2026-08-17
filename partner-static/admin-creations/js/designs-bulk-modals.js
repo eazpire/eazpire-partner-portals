@@ -1001,3 +1001,75 @@ export async function openLibraryStatusModal(items, { status, onDone } = {}) {
   });
   configurePrimaryConfirm(eligible.length === 1 ? `${verb} design` : `${verb} selected`);
 }
+
+function visibilityOf(item) {
+  const top = item?.visibility;
+  const meta = item?.metadata && typeof item.metadata === "object" ? item.metadata.visibility : "";
+  const raw = top != null && String(top).trim() !== "" ? top : meta;
+  return String(raw || "private").trim().toLowerCase() === "public" ? "public" : "private";
+}
+
+/**
+ * Set selected designs public or private. Does not enqueue product publish.
+ * @param {object[]} items
+ * @param {{ visibility: "public"|"private", onDone?: Function }} opts
+ */
+export async function openVisibilityModal(items, { visibility, onDone } = {}) {
+  const target = visibility === "public" ? "public" : "private";
+  const makingPublic = target === "public";
+  const verb = makingPublic ? "Public" : "Private";
+  const list = (items || []).filter((item) => designIdOf(item));
+  const eligible = list.filter((item) => visibilityOf(item) !== target);
+
+  if (!eligible.length) {
+    releaseBulkDock();
+    showToast(verb, makingPublic ? "No private saved designs selected" : "No public saved designs selected");
+    return;
+  }
+
+  suppressBulkDock();
+  const titles = eligible
+    .map((item) => `<li>${escapeHtml(designTitle(item))}</li>`)
+    .join("");
+  const hint = makingPublic
+    ? "These designs become public. Products are not published and nothing is added to the publish queue."
+    : "These designs become private. Published products stay online and are not unpublished.";
+
+  openModal({
+    title: eligible.length === 1 ? `Set design ${target}` : `Set ${eligible.length} designs ${target}`,
+    bodyHtml: `
+      <p class="confirm-modal-message">${escapeHtml(hint)}</p>
+      <ul class="cr-bulk-product-list">${titles}</ul>`,
+    onCancel: () => releaseBulkDock(),
+    onSave: async () => {
+      setModalBusy(true, makingPublic ? "Setting public…" : "Setting private…");
+      try {
+        const data = await partnerFetch("admin-design-set-visibility", {
+          method: "POST",
+          body: {
+            design_ids: eligible.map((item) => designIdOf(item)),
+            visibility: target,
+          },
+        });
+        const changed = Array.isArray(data?.changed) ? data.changed.length : 0;
+        const unchanged = Array.isArray(data?.unchanged) ? data.unchanged.length : 0;
+        clearSelection();
+        if (changed) {
+          showToast(
+            verb,
+            changed === 1 ? `1 design set to ${target}` : `${changed} designs set to ${target}`
+          );
+        } else if (unchanged) {
+          showToast(verb, "Already in that visibility");
+        }
+        if (typeof onDone === "function") await onDone({ ok: changed, data });
+      } catch (e) {
+        showToast("Error", e?.message || `${verb} failed`);
+        throw e;
+      } finally {
+        setModalBusy(false);
+      }
+    },
+  });
+  configurePrimaryConfirm(eligible.length === 1 ? `Set ${target}` : `Set selected ${target}`);
+}

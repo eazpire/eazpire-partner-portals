@@ -9470,6 +9470,121 @@ html[data-portal="admin"] .cr-bulk-dock__btn--danger {
   border: 0;
   color: #fff;
 }
+html[data-portal="admin"] .cr-bulk-dock--designs {
+  width: min(1100px, calc(100vw - 24px));
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__panel {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 14px;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__select {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  flex: 0 1 auto;
+  margin-right: auto;
+  min-width: 0;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__link {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__link:hover {
+  color: #fff;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__count {
+  margin-left: 4px;
+  white-space: nowrap;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile {
+  position: relative;
+  box-sizing: border-box;
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  padding: 8px 4px 6px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile[hidden] {
+  display: none !important;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile--danger {
+  background: #dc2626;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile--danger:hover {
+  background: #b91c1c;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile--primary {
+  background: #2563eb;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile--primary:hover {
+  background: #1d4ed8;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile-icon svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile-label {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+html[data-portal="admin"] .cr-bulk-dock--designs .cr-bulk-dock__tile-count {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
 /* Active publish progress dock (product carousel with composed mocks) */
 html[data-portal="admin"] .cr-publish-dock {
   position: fixed;

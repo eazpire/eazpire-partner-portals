@@ -4,7 +4,7 @@
 
 import { partnerFetch, escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, showToast, confirmAction, confirmUnsavedChanges } from "/creations/shared/js/partner-shell.js";
-import { openRemoveModal, openPublishModal, openUpdateModal, openLibraryStatusModal } from "./designs-bulk-modals.js";
+import { openRemoveModal, openPublishModal, openUpdateModal, openLibraryStatusModal, openVisibilityModal } from "./designs-bulk-modals.js";
 import {
   mountComposedMedia,
   mountOfflineProductMedia,
@@ -127,9 +127,13 @@ function renderFooter() {
     const isInactive = String(activeItem?.library_status || "").trim().toLowerCase() === "inactive";
     const statusAct = isInactive ? "activate" : "deactivate";
     const statusLabel = isInactive ? "Activate" : "Deactivate";
+    const isPrivate = String(activeItem?.visibility || "").trim().toLowerCase() !== "public";
+    const visAct = isPrivate ? "public" : "private";
+    const visLabel = isPrivate ? "Public" : "Private";
     footer.innerHTML = `
       <button type="button" class="btn btn-secondary" data-cr-dd-act="download">Download</button>
       <button type="button" class="btn btn-secondary" data-cr-dd-act="${statusAct}">${statusLabel}</button>
+      <button type="button" class="btn btn-secondary" data-cr-dd-act="${visAct}">${visLabel}</button>
       <button type="button" class="btn btn-danger" data-cr-dd-act="remove">Remove</button>`;
     return;
   }
@@ -187,6 +191,16 @@ async function handleFooterAction(act) {
   if (act === "activate" || act === "deactivate") {
     await openLibraryStatusModal([activeItem], {
       status: act === "activate" ? "active" : "inactive",
+      onDone: async () => {
+        closeDesignDetailModal();
+        if (typeof onClosed === "function") await onClosed({ reload: true });
+      },
+    });
+    return;
+  }
+  if (act === "public" || act === "private") {
+    await openVisibilityModal([activeItem], {
+      visibility: act === "public" ? "public" : "private",
       onDone: async () => {
         closeDesignDetailModal();
         if (typeof onClosed === "function") await onClosed({ reload: true });

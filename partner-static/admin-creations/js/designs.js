@@ -9,7 +9,7 @@ import {
   clearSelection,
   isSelected,
 } from "./designs-bulk.js";
-import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal, openLibraryStatusModal } from "./designs-bulk-modals.js";
+import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal, openLibraryStatusModal, openVisibilityModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
 import {
@@ -708,12 +708,16 @@ function bindGridInteractions(grid) {
     if (!item || isDesignPublishing(item)) return;
     const canAct = Number(item.id || 0) > 0;
     const isInactive = String(item.library_status || "").trim().toLowerCase() === "inactive";
+    const isPrivate = String(item.visibility || "").trim().toLowerCase() !== "public";
     openContextMenu(
       event,
       [
         isInactive
           ? { label: "Activate", action: "activate", disabled: !canAct }
           : { label: "Deactivate", action: "deactivate", disabled: !canAct },
+        isPrivate
+          ? { label: "Public", action: "public", disabled: !canAct }
+          : { label: "Private", action: "private", disabled: !canAct },
         { label: "Unpublish", action: "unpublish", disabled: !canAct },
         { label: "Remove", action: "remove", danger: true },
       ],
@@ -732,6 +736,14 @@ function bindGridInteractions(grid) {
         }
         if (action === "deactivate") {
           await openLibraryStatusModal([item], { status: "inactive", onDone: afterBulkChange });
+          return;
+        }
+        if (action === "public") {
+          await openVisibilityModal([item], { visibility: "public", onDone: afterBulkChange });
+          return;
+        }
+        if (action === "private") {
+          await openVisibilityModal([item], { visibility: "private", onDone: afterBulkChange });
         }
       }
     );
@@ -939,6 +951,8 @@ export async function mountDesignsPage() {
     onUpdate: (items) => openUpdateModal(items, { onDone: afterBulkChange }),
     onActivate: (items) => openLibraryStatusModal(items, { status: "active", onDone: afterBulkChange }),
     onDeactivate: (items) => openLibraryStatusModal(items, { status: "inactive", onDone: afterBulkChange }),
+    onPublic: (items) => openVisibilityModal(items, { visibility: "public", onDone: afterBulkChange }),
+    onPrivate: (items) => openVisibilityModal(items, { visibility: "private", onDone: afterBulkChange }),
   });
 
   setPublishSessionsListener(() => {
