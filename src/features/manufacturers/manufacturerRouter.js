@@ -343,6 +343,7 @@ const ADMIN_OPS = new Set([
   "admin-design-update-commit",
   "admin-design-unpublish",
   "admin-design-set-visibility",
+  "admin-design-set-library-status",
   "admin-design-shopify-live-products",
   "admin-design-edit-metadata",
   "admin-design-edit-image-preview",
@@ -1686,6 +1687,11 @@ export async function handleManufacturerRouter(request, env, ctx) {
       const { handleAdminDesignSetVisibility } = await import("../admin/adminDesignActions.js");
       const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
       return handleAdminDesignSetVisibility(proxyRequestWithAdminOwner(request, admin.owner_id), env);
+    }
+    if (op === "admin-design-set-library-status" && request.method === "POST") {
+      const { handleAdminDesignSetLibraryStatus } = await import("../admin/adminDesignActions.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminDesignSetLibraryStatus(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
     if (op === "admin-design-shopify-live-products" && request.method === "GET") {
       const { handleAdminDesignShopifyLiveProducts } = await import("../admin/adminDesignActions.js");

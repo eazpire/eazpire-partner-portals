@@ -78,11 +78,24 @@ export function releaseBulkDock() {
   applyDockVisibility();
 }
 
+function libraryStatusOf(item) {
+  return String(item?.library_status || "").trim().toLowerCase() === "inactive" ? "inactive" : "active";
+}
+
 function refreshSelectionUi() {
   const countEl = document.getElementById("cr-bulk-count");
   const n = selected.size;
   applyDockVisibility();
   if (countEl) countEl.textContent = n === 1 ? "1 selected" : `${n} selected`;
+  const items = getSelectedItems();
+  const activateBtn = document.querySelector('[data-cr-bulk="activate"]');
+  const deactivateBtn = document.querySelector('[data-cr-bulk="deactivate"]');
+  if (activateBtn) {
+    activateBtn.disabled = !items.some((item) => item?.id && libraryStatusOf(item) === "inactive");
+  }
+  if (deactivateBtn) {
+    deactivateBtn.disabled = !items.some((item) => item?.id && libraryStatusOf(item) === "active");
+  }
 
   document.querySelectorAll(".cr-card[data-item-key]").forEach((card) => {
     const key = card.getAttribute("data-item-key") || "";
@@ -107,6 +120,8 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
         <div class="cr-bulk-dock__actions">
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="all">Select all</button>
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="none">Select none</button>
+          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="activate">Activate</button>
+          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="deactivate">Deactivate</button>
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn cr-bulk-dock__btn--danger" data-cr-bulk="remove">Remove</button>
           <button type="button" class="btn btn-primary cr-bulk-dock__btn" data-cr-bulk="publish">Publish</button>
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-bulk="update">Update</button>
@@ -126,12 +141,14 @@ export function ensureBulkDock(_rootEl, handlers = {}) {
         releaseBulkDock();
         clearSelection();
       }
-      if (act === "remove" || act === "publish" || act === "update") {
+      if (act === "remove" || act === "publish" || act === "update" || act === "activate" || act === "deactivate") {
         suppressBulkDock();
       }
       if (act === "remove" && typeof handlers.onRemove === "function") handlers.onRemove(getSelectedItems());
       if (act === "publish" && typeof handlers.onPublish === "function") handlers.onPublish(getSelectedItems());
       if (act === "update" && typeof handlers.onUpdate === "function") handlers.onUpdate(getSelectedItems());
+      if (act === "activate" && typeof handlers.onActivate === "function") handlers.onActivate(getSelectedItems());
+      if (act === "deactivate" && typeof handlers.onDeactivate === "function") handlers.onDeactivate(getSelectedItems());
     };
   });
 

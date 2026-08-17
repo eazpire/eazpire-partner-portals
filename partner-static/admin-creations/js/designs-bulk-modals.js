@@ -929,3 +929,75 @@ export async function openUpdateModal(items, { onDone } = {}) {
   });
   configurePrimaryConfirm("Update");
 }
+
+function libraryStatusOf(item) {
+  return String(item?.library_status || "").trim().toLowerCase() === "inactive" ? "inactive" : "active";
+}
+
+/**
+ * Activate or deactivate saved designs without enqueueing product publish.
+ * @param {object[]} items
+ * @param {{ status: "active"|"inactive", onDone?: Function }} opts
+ */
+export async function openLibraryStatusModal(items, { status, onDone } = {}) {
+  const target = status === "inactive" ? "inactive" : "active";
+  const activating = target === "active";
+  const verb = activating ? "Activate" : "Deactivate";
+  const verbLower = activating ? "activate" : "deactivate";
+  const list = (items || []).filter((item) => designIdOf(item));
+  const eligible = list.filter((item) => libraryStatusOf(item) !== target);
+
+  if (!eligible.length) {
+    releaseBulkDock();
+    showToast(verb, activating ? "No inactive saved designs selected" : "No active saved designs selected");
+    return;
+  }
+
+  suppressBulkDock();
+  const titles = eligible
+    .map((item) => `<li>${escapeHtml(designTitle(item))}</li>`)
+    .join("");
+  const hint = activating
+    ? "These designs become active in the creator library. Products are not published and nothing is added to the publish queue."
+    : "These designs become inactive in the creator library. Published products stay online and are not unpublished.";
+
+  openModal({
+    title: eligible.length === 1 ? `${verb} design` : `${verb} ${eligible.length} designs`,
+    bodyHtml: `
+      <p class="confirm-modal-message">${escapeHtml(hint)}</p>
+      <ul class="cr-bulk-product-list">${titles}</ul>`,
+    onCancel: () => releaseBulkDock(),
+    onSave: async () => {
+      setModalBusy(true, activating ? "Activating…" : "Deactivating…");
+      try {
+        const data = await partnerFetch("admin-design-set-library-status", {
+          method: "POST",
+          body: {
+            design_ids: eligible.map((item) => designIdOf(item)),
+            library_status: target,
+          },
+        });
+        const changed = Array.isArray(data?.changed) ? data.changed.length : 0;
+        const unchanged = Array.isArray(data?.unchanged) ? data.unchanged.length : 0;
+        clearSelection();
+        if (changed) {
+          showToast(
+            verb,
+            changed === 1
+              ? `1 design ${verbLower}d`
+              : `${changed} designs ${verbLower}d`
+          );
+        } else if (unchanged) {
+          showToast(verb, "Already in that status");
+        }
+        if (typeof onDone === "function") await onDone({ ok: changed, data });
+      } catch (e) {
+        showToast("Error", e?.message || `${verb} failed`);
+        throw e;
+      } finally {
+        setModalBusy(false);
+      }
+    },
+  });
+  configurePrimaryConfirm(eligible.length === 1 ? `${verb} design` : `${verb} selected`);
+}

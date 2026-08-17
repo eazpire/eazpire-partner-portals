@@ -9,7 +9,7 @@ import {
   clearSelection,
   isSelected,
 } from "./designs-bulk.js";
-import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal } from "./designs-bulk-modals.js";
+import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal, openLibraryStatusModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
 import { bindCardContextMenu, openContextMenu, teardownContextMenu } from "./context-menu.js";
 import {
@@ -706,11 +706,15 @@ function bindGridInteractions(grid) {
     const key = card.getAttribute("data-item-key") || "";
     const item = state.items.find((row) => String(row.item_key || "") === key);
     if (!item || isDesignPublishing(item)) return;
-    const canUnpublish = Number(item.id || 0) > 0;
+    const canAct = Number(item.id || 0) > 0;
+    const isInactive = String(item.library_status || "").trim().toLowerCase() === "inactive";
     openContextMenu(
       event,
       [
-        { label: "Unpublish", action: "unpublish", disabled: !canUnpublish },
+        isInactive
+          ? { label: "Activate", action: "activate", disabled: !canAct }
+          : { label: "Deactivate", action: "deactivate", disabled: !canAct },
+        { label: "Unpublish", action: "unpublish", disabled: !canAct },
         { label: "Remove", action: "remove", danger: true },
       ],
       async (action) => {
@@ -720,6 +724,14 @@ function bindGridInteractions(grid) {
         }
         if (action === "unpublish") {
           await openDesignUnpublishModal(item, { onDone: afterBulkChange });
+          return;
+        }
+        if (action === "activate") {
+          await openLibraryStatusModal([item], { status: "active", onDone: afterBulkChange });
+          return;
+        }
+        if (action === "deactivate") {
+          await openLibraryStatusModal([item], { status: "inactive", onDone: afterBulkChange });
         }
       }
     );
@@ -925,6 +937,8 @@ export async function mountDesignsPage() {
         },
       }),
     onUpdate: (items) => openUpdateModal(items, { onDone: afterBulkChange }),
+    onActivate: (items) => openLibraryStatusModal(items, { status: "active", onDone: afterBulkChange }),
+    onDeactivate: (items) => openLibraryStatusModal(items, { status: "inactive", onDone: afterBulkChange }),
   });
 
   setPublishSessionsListener(() => {

@@ -32,6 +32,7 @@ describe("manufacturerRouter ops", () => {
     expect(isManufacturerOp("admin-design-publish-missing-online")).toBe(true);
     expect(isManufacturerOp("get-publish-progress")).toBe(true);
     expect(isManufacturerOp("admin-design-unpublish")).toBe(true);
+    expect(isManufacturerOp("admin-design-set-library-status")).toBe(true);
     expect(isManufacturerOp("unknown-op")).toBe(false);
   });
 });
