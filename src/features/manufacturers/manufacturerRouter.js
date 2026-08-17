@@ -327,6 +327,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-product-variant-update",
   "admin-creations-product-action-lock",
   "admin-creations-product-action-unlock",
+  "admin-creations-fix-alt-texts",
   "admin-creations-edit-design",
   "admin-creations-edit-design-save",
   "admin-creations-edit-design-update",
@@ -1614,6 +1615,11 @@ export async function handleManufacturerRouter(request, env, ctx) {
         proxyRequestWithAdminOwner(request, admin.owner_id),
         env
       );
+    }
+    if (op === "admin-creations-fix-alt-texts" && request.method === "POST") {
+      const { handleAdminCreationsFixAltTexts } = await import("./adminCreationsFixAltTexts.js");
+      const { proxyRequestWithAdminOwner } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsFixAltTexts(proxyRequestWithAdminOwner(request, admin.owner_id), env);
     }
     if (op === "admin-creations-edit-design" && request.method === "GET") {
       const { handleAdminCreationsEditDesignGet } = await import("./adminCreationsEditDesign.js");

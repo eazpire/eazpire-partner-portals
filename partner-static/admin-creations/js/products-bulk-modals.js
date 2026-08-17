@@ -329,3 +329,53 @@ export async function openProductsBulkUpdateModal(items, { onDone } = {}) {
   });
   configurePrimaryConfirm("Update selected");
 }
+
+/** Check and repair Shopify image alt texts + featured preview for selected listings. */
+export async function openProductsBulkFixAltTextsModal(items, { onDone } = {}) {
+  const eligible = (items || []).filter((p) =>
+    String(p?.shopify_product_id || p?.id || "")
+      .replace("gid://shopify/Product/", "")
+      .replace(/\.0$/, "")
+      .trim()
+  );
+  if (!eligible.length) {
+    releaseBulkDock();
+    showToast("Fix alt texts", "No selected products have a Shopify listing");
+    return;
+  }
+  suppressBulkDock();
+
+  openModal({
+    title: eligible.length === 1 ? "Fix alt texts" : `Fix alt texts on ${eligible.length} listings`,
+    bodyHtml: `
+      <p class="confirm-modal-message">Checks every selected Shopify listing: whether image alt texts are set, whether Color|view labels match the real mockup (lifestyle/back must not be labeled front), and whether the card preview is the primary front image. Then repairs what is wrong.</p>
+      <div class="cr-bulk-scroll" id="cr-products-alt-texts-body">
+        ${eligible.map((item) => productRowHtml(item, { checked: true })).join("")}
+      </div>`,
+    onCancel: () => releaseBulkDock(),
+    onSave: async () => {
+      const keys = selectedRowsFromRoot("cr-products-alt-texts-body");
+      const selected = eligible.filter((item) => keys.has(listingKey(item)));
+      if (!selected.length) throw new Error("Select at least one product");
+      setModalBusy(true, "Checking…");
+      clearSelection();
+      setModalBusy(false);
+
+      const { ok, errors } = await startProductsActionDock(selected, {
+        action: "alt-texts",
+        runItem: (item) =>
+          partnerFetch("admin-creations-fix-alt-texts", {
+            method: "POST",
+            body: {
+              shopify_product_id: item.shopify_product_id || item.id || "",
+              printify_product_id: item.printify_product_id || "",
+              product_key: item.product_key || "",
+              design_id: item.design_id || "",
+            },
+          }),
+      });
+      if (typeof onDone === "function") await onDone({ ok, errors });
+    },
+  });
+  configurePrimaryConfirm("Check and repair");
+}

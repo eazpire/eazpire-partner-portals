@@ -73,12 +73,21 @@ export function releaseBulkDock() {
   applyDockVisibility();
 }
 
+function hasShopifyId(item) {
+  return !!String(item?.shopify_product_id || item?.id || "")
+    .replace("gid://shopify/Product/", "")
+    .replace(/\.0$/, "")
+    .trim();
+}
+
 function syncActionAvailability() {
   const publishBtn = document.querySelector('[data-cr-products-bulk="publish"]');
   const updateBtn = document.querySelector('[data-cr-products-bulk="update"]');
+  const altBtn = document.querySelector('[data-cr-products-bulk="alt-texts"]');
   const items = getSelectedItems();
   if (publishBtn) publishBtn.disabled = !items.some((p) => p.publish_eligible_amazon_eu);
   if (updateBtn) updateBtn.disabled = !items.some((p) => p.needs_update);
+  if (altBtn) altBtn.disabled = !items.some(hasShopifyId);
 }
 
 function refreshSelectionUi() {
@@ -99,6 +108,10 @@ function refreshSelectionUi() {
 
 export function ensureProductsBulkDock(_rootEl, handlers = {}) {
   let dock = document.getElementById("cr-products-bulk-dock");
+  if (dock && !dock.querySelector('[data-cr-products-bulk="alt-texts"]')) {
+    dock.remove();
+    dock = null;
+  }
   if (!dock) {
     dock = document.createElement("div");
     dock.id = "cr-products-bulk-dock";
@@ -113,6 +126,7 @@ export function ensureProductsBulkDock(_rootEl, handlers = {}) {
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="none">Select none</button>
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="unpublish">Unpublish</button>
           <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="update">Update</button>
+          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="alt-texts">Fix alt texts</button>
           <button type="button" class="btn btn-primary cr-bulk-dock__btn" data-cr-products-bulk="publish">Publish</button>
         </div>
       </div>`;
@@ -131,12 +145,13 @@ export function ensureProductsBulkDock(_rootEl, handlers = {}) {
         releaseBulkDock();
         clearSelection();
       }
-      if (act === "publish" || act === "unpublish" || act === "update") {
+      if (act === "publish" || act === "unpublish" || act === "update" || act === "alt-texts") {
         suppressBulkDock();
       }
       if (act === "publish" && typeof handlers.onPublish === "function") handlers.onPublish(getSelectedItems());
       if (act === "unpublish" && typeof handlers.onUnpublish === "function") handlers.onUnpublish(getSelectedItems());
       if (act === "update" && typeof handlers.onUpdate === "function") handlers.onUpdate(getSelectedItems());
+      if (act === "alt-texts" && typeof handlers.onFixAltTexts === "function") handlers.onFixAltTexts(getSelectedItems());
     };
   });
 

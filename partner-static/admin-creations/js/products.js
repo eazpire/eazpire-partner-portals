@@ -48,6 +48,7 @@ import {
   openProductsBulkPublishModal,
   openProductsBulkUnpublishModal,
   openProductsBulkUpdateModal,
+  openProductsBulkFixAltTextsModal,
 } from "./products-bulk-modals.js";
 import {
   getBusyProductKeys,
@@ -650,6 +651,7 @@ function wireProductsBulkDock() {
     onPublish: (items) => openProductsBulkPublishModal(items, { onDone: refreshProductsAfterBulk }),
     onUnpublish: (items) => openProductsBulkUnpublishModal(items, { onDone: refreshProductsAfterBulk }),
     onUpdate: (items) => openProductsBulkUpdateModal(items, { onDone: refreshProductsAfterBulk }),
+    onFixAltTexts: (items) => openProductsBulkFixAltTextsModal(items, { onDone: refreshProductsAfterBulk }),
   });
 }
 
