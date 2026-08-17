@@ -68,64 +68,100 @@ function bindPublishFabPosition(rail, fab) {
   }, 250);
 }
 
+function ensureSidebar() {
+  let sidebar = document.getElementById("cr-aq-sidebar");
+  if (sidebar) return sidebar;
+  sidebar = document.createElement("div");
+  sidebar.id = "cr-aq-sidebar";
+  sidebar.className = "cr-aq-sidebar";
+  sidebar.hidden = true;
+  sidebar.setAttribute("aria-hidden", "true");
+  sidebar.innerHTML = `
+    <div class="cr-aq-sidebar__backdrop" data-aq-close="1"></div>
+    <aside class="cr-aq-sidebar__panel" role="dialog" aria-modal="true" aria-labelledby="cr-aq-sidebar-title">
+      <div class="cr-aq-sidebar__head">
+        <h2 class="cr-aq-sidebar__title" id="cr-aq-sidebar-title">Queues</h2>
+        <button type="button" class="cr-aq-sidebar__close" data-aq-close="1" aria-label="Close queues">×</button>
+      </div>
+      <div class="cr-aq-sidebar__list" id="cr-aq-sidebar-list" role="menu" aria-label="Action queues"></div>
+    </aside>`;
+  document.body.appendChild(sidebar);
+  sidebar.addEventListener("click", (e) => {
+    if (e.target.closest("[data-aq-close]")) {
+      e.preventDefault();
+      closePicker();
+    }
+  });
+  return sidebar;
+}
+
 function ensureRail() {
   let rail = document.getElementById("cr-aq-rail");
-  if (rail) return rail;
-  rail = document.createElement("div");
-  rail.id = "cr-aq-rail";
-  rail.className = "cr-aq-rail";
-  rail.hidden = true;
-  rail.innerHTML = `
-    <div class="cr-aq-rail__picker" id="cr-aq-rail-picker" hidden role="menu" aria-label="Action queues"></div>
+  if (!rail) {
+    rail = document.createElement("div");
+    rail.id = "cr-aq-rail";
+    rail.className = "cr-aq-rail";
+    rail.hidden = true;
+    rail.innerHTML = `
     <button type="button" class="cr-aq-rail__fab" id="cr-aq-rail-fab" title="Show publish queue" aria-label="Show publish queue" aria-expanded="false">
       ${PUBLISH_ICON}
       <span class="cr-aq-rail__badge" id="cr-aq-rail-badge" hidden>0</span>
     </button>`;
-  document.body.appendChild(rail);
+    document.body.appendChild(rail);
+  } else {
+    rail.querySelector("#cr-aq-rail-picker")?.remove();
+  }
+  ensureSidebar();
 
-  const fab = rail.querySelector("#cr-aq-rail-fab");
-  fab?.addEventListener("click", (e) => {
-    if (fab.getAttribute("data-eaz-fab-suppress-click") === "1" || rail.getAttribute("data-eaz-fab-suppress-click") === "1") {
+  if (rail.dataset.aqInit !== "1") {
+    rail.dataset.aqInit = "1";
+    const fab = rail.querySelector("#cr-aq-rail-fab");
+    fab?.addEventListener("click", (e) => {
+      if (fab.getAttribute("data-eaz-fab-suppress-click") === "1" || rail.getAttribute("data-eaz-fab-suppress-click") === "1") {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    onFabClick();
-  });
+      onFabClick();
+    });
 
-  bindPublishFabPosition(rail, fab);
+    bindPublishFabPosition(rail, fab);
 
-  document.addEventListener(
-    "click",
-    (ev) => {
-      if (!pickerOpen) return;
-      const t = ev.target;
-      if (t instanceof Node && rail.contains(t)) return;
-      closePicker();
-    },
-    true
-  );
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && pickerOpen) {
+        ev.preventDefault();
+        closePicker();
+      }
+    });
+  }
 
   return rail;
 }
 
 function closePicker() {
   pickerOpen = false;
-  const picker = document.getElementById("cr-aq-rail-picker");
+  const sidebar = document.getElementById("cr-aq-sidebar");
   const fab = document.getElementById("cr-aq-rail-fab");
-  if (picker) {
-    picker.hidden = true;
-    picker.innerHTML = "";
-  }
   if (fab) fab.setAttribute("aria-expanded", "false");
+  if (!sidebar || sidebar.hidden) return;
+  sidebar.classList.remove("is-open");
+  sidebar.setAttribute("aria-hidden", "true");
+  const finish = () => {
+    if (pickerOpen) return;
+    sidebar.hidden = true;
+    const list = document.getElementById("cr-aq-sidebar-list");
+    if (list) list.innerHTML = "";
+  };
+  window.setTimeout(finish, 280);
 }
 
 function renderPicker(list) {
-  const picker = document.getElementById("cr-aq-rail-picker");
-  if (!picker) return;
-  picker.innerHTML = list
+  const sidebar = ensureSidebar();
+  const host = document.getElementById("cr-aq-sidebar-list");
+  if (!host) return;
+  host.innerHTML = list
     .slice()
     .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
     .map((q) => {
@@ -139,10 +175,7 @@ function renderPicker(list) {
       </button>`;
     })
     .join("");
-  picker.hidden = false;
-  pickerOpen = true;
-  document.getElementById("cr-aq-rail-fab")?.setAttribute("aria-expanded", "true");
-  picker.querySelectorAll("[data-queue-id]").forEach((btn) => {
+  host.querySelectorAll("[data-queue-id]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -151,6 +184,14 @@ function renderPicker(list) {
       if (id) expandActionQueue(id);
     });
   });
+  sidebar.hidden = false;
+  sidebar.setAttribute("aria-hidden", "false");
+  sidebar.classList.remove("is-open");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => sidebar.classList.add("is-open"));
+  });
+  pickerOpen = true;
+  document.getElementById("cr-aq-rail-fab")?.setAttribute("aria-expanded", "true");
 }
 
 function escapeText(s) {

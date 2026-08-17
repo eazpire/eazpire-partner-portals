@@ -9678,8 +9678,7 @@ html[data-portal="admin"] .cr-aq-rail.eaz-fab--dragging {
 html[data-portal="admin"] .cr-aq-rail[hidden] {
   display: none !important;
 }
-html[data-portal="admin"] .cr-aq-rail__fab,
-html[data-portal="admin"] .cr-aq-rail__picker {
+html[data-portal="admin"] .cr-aq-rail__fab {
   pointer-events: auto;
 }
 html[data-portal="admin"] .cr-aq-rail__fab {
@@ -9722,16 +9721,86 @@ html[data-portal="admin"] .cr-aq-rail__badge {
   font: 700 10px/18px ui-sans-serif, system-ui, sans-serif;
   text-align: center;
 }
-html[data-portal="admin"] .cr-aq-rail__picker {
-  width: min(280px, calc(100vw - 40px));
-  max-height: min(360px, 50vh);
+html[data-portal="admin"] .cr-aq-sidebar {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482488;
+  pointer-events: none;
+}
+html[data-portal="admin"] .cr-aq-sidebar[hidden] {
+  display: none !important;
+}
+html[data-portal="admin"] .cr-aq-sidebar.is-open {
+  pointer-events: auto;
+}
+html[data-portal="admin"] .cr-aq-sidebar__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+html[data-portal="admin"] .cr-aq-sidebar.is-open .cr-aq-sidebar__backdrop {
+  opacity: 1;
+}
+html[data-portal="admin"] .cr-aq-sidebar__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(360px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.97);
+  color: #f8fafc;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: -18px 0 40px rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(12px);
+  transform: translateX(100%);
+  transition: transform 0.28s ease;
+}
+html[data-portal="admin"] .cr-aq-sidebar.is-open .cr-aq-sidebar__panel {
+  transform: translateX(0);
+}
+html[data-portal="admin"] .cr-aq-sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  flex: 0 0 auto;
+}
+html[data-portal="admin"] .cr-aq-sidebar__title {
+  margin: 0;
+  font: 700 16px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+html[data-portal="admin"] .cr-aq-sidebar__close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+html[data-portal="admin"] .cr-aq-sidebar__close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+html[data-portal="admin"] .cr-aq-sidebar__list {
+  flex: 1 1 auto;
   overflow: auto;
-  padding: 8px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(10px);
+  padding: 0 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-portal="admin"] .cr-aq-sidebar__backdrop,
+  html[data-portal="admin"] .cr-aq-sidebar__panel {
+    transition: none;
+  }
 }
 html[data-portal="admin"] .cr-aq-rail__pick {
   width: 100%;
@@ -9744,6 +9813,9 @@ html[data-portal="admin"] .cr-aq-rail__pick {
   cursor: pointer;
   display: grid;
   gap: 2px;
+}
+html[data-portal="admin"] .cr-aq-sidebar__list .cr-aq-rail__pick {
+  background: rgba(255, 255, 255, 0.06);
 }
 html[data-portal="admin"] .cr-aq-rail__pick:hover {
   background: rgba(37, 99, 235, 0.2);
