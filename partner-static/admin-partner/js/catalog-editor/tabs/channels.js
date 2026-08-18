@@ -354,7 +354,7 @@ function renderPanel(st) {
                 )}" /></div>
               <div class="field"><label for="ce-ch-amz-browse">Browse node</label>
                 <input id="ce-ch-amz-browse" class="input" type="text" value="${escapeHtml(
-                  settings.browse_node || "1760215031"
+                  settings.browse_node || "1981507031"
                 )}" /></div>
               <div class="field" style="grid-column:1/-1"><label for="ce-ch-amz-ship">Merchant shipping group name</label>
                 <input id="ce-ch-amz-ship" class="input" type="text" value="${escapeHtml(
