@@ -11,12 +11,8 @@ import {
   ensureShopifyPrimaryPreview,
   assignVariantFeaturedImagesByPrimaryView,
 } from "../publish/setImageAltTexts.js";
-import { isClothingListingProduct } from "../publish/shopifyListingSyncFromTemplate.js";
-import {
-  auditListingAltHealth,
-  listingLooksLikeSoftstyleApparel,
-  planSoftstyleSizeViewAssignments,
-} from "../publish/softstyleSizeAltRepair.js";
+import { remapApparelAltsByCdnSize } from "../publish/apparelAltRepairAfterPublish.js";
+import { auditListingAltHealth } from "../publish/softstyleSizeAltRepair.js";
 
 const PRIMARY_VIEW = "front";
 
@@ -32,21 +28,6 @@ function shopDomain(env) {
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
   return shop.includes(".") ? shop : `${shop}.myshopify.com`;
-}
-
-async function imageBytes(url) {
-  try {
-    const head = await fetch(url, { method: "HEAD" });
-    const fromHead = Number(head.headers.get("content-length") || 0);
-    if (fromHead > 0) return fromHead;
-    const get = await fetch(url);
-    const fromGet = Number(get.headers.get("content-length") || 0);
-    if (fromGet > 0) return fromGet;
-    const buf = await get.arrayBuffer();
-    return buf.byteLength;
-  } catch {
-    return 0;
-  }
 }
 
 async function lookupPublishedRow(env, sid) {
@@ -65,42 +46,6 @@ async function lookupPublishedRow(env, sid) {
   } catch {
     return null;
   }
-}
-
-async function applyAltAssignments(env, shop, sid, assignments, currentById) {
-  let updated = 0;
-  let errors = 0;
-  let skipped = 0;
-  for (const [imgId, alt] of assignments) {
-    const cur = currentById.get(Number(imgId)) || "";
-    if (cur === alt) {
-      skipped += 1;
-      continue;
-    }
-    try {
-      const r = await fetch(`https://${shop}/admin/api/2024-10/products/${sid}/images/${imgId}.json`, {
-        method: "PUT",
-        headers: {
-          "X-Shopify-Access-Token": env.SHOPIFY_ACCESS_TOKEN,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ image: { id: imgId, alt } }),
-      });
-      if (r.ok) updated += 1;
-      else errors += 1;
-    } catch {
-      errors += 1;
-    }
-    await new Promise((res) => setTimeout(res, 180));
-  }
-  return { updated, errors, skipped };
-}
-
-function attachBytes(images, bytesById) {
-  return (images || []).map((img) => ({
-    ...img,
-    bytes: bytesById.get(Number(img.id)) || 0,
-  }));
 }
 
 /**
@@ -125,42 +70,23 @@ export async function runFixAltTextsForShopifyProduct(env, opts = {}) {
   }
   if (!product) return { ok: false, error: "shopify_product_missing" };
 
-  const images = product.images || [];
-  const bytesById = new Map();
-  for (const img of images) {
-    bytesById.set(Number(img.id), await imageBytes(img.src));
-  }
-  const withBytes = attachBytes(images, bytesById);
-  const before = auditListingAltHealth(withBytes, { primaryView: PRIMARY_VIEW });
-
-  const clothing =
-    isClothingListingProduct(product.product_type, productKey) ||
-    listingLooksLikeSoftstyleApparel(productKey, product.title, withBytes);
-  const mostlyMissing = before.missingAlt > Math.max(2, Math.floor(images.length * 0.25));
   const steps = [];
-
-  // Softstyle CDN: order/URL matching can swap lifestyle/back onto front.
-  // Only use it when most alts are missing, or the listing is not apparel.
-  if (printifyId && (!clothing || mostlyMissing)) {
-    const altRes = await setImageAltTexts(env, printifyId, sid, null, { productKey });
-    steps.push({ step: "set_image_alt_texts", ...altRes });
-  }
-
-  if (clothing) {
-    const afterOrder = (await shopifyAPI(env, shop, `products/${sid}.json`))?.product;
-    const fresh = afterOrder?.images || images;
-    for (const img of fresh) {
-      if (!bytesById.has(Number(img.id))) {
-        bytesById.set(Number(img.id), await imageBytes(img.src));
-      }
+  const remap = await remapApparelAltsByCdnSize(env, {
+    shopifyProductId: sid,
+    printifyProductId: printifyId,
+    productKey,
+    productTitle: product.title,
+    primaryView: PRIMARY_VIEW,
+  });
+  if (remap.skipped) {
+    if (printifyId) {
+      const altRes = await setImageAltTexts(env, printifyId, sid, null, { productKey });
+      steps.push({ step: "set_image_alt_texts", ...altRes });
     }
-    const planned = planSoftstyleSizeViewAssignments(attachBytes(fresh, bytesById), {
-      primaryView: PRIMARY_VIEW,
-    });
-    const currentById = new Map(fresh.map((img) => [Number(img.id), String(img.alt || "").trim()]));
-    const applied = await applyAltAssignments(env, shop, sid, planned, currentById);
-    steps.push({ step: "size_view_remap", assigned: planned.size, ...applied });
+  } else {
+    steps.push(...(remap.steps || []));
   }
+  const before = remap.before || auditListingAltHealth(product.images || [], { primaryView: PRIMARY_VIEW });
 
   const featured = await ensureShopifyPrimaryPreview(env, sid, PRIMARY_VIEW, {
     retries: 3,
@@ -175,8 +101,15 @@ export async function runFixAltTextsForShopifyProduct(env, opts = {}) {
   steps.push({ step: "variant_previews", ...variants });
 
   const afterProd = (await shopifyAPI(env, shop, `products/${sid}.json`))?.product;
-  const afterImages = attachBytes(afterProd?.images || [], bytesById);
-  const after = auditListingAltHealth(afterImages, { primaryView: PRIMARY_VIEW });
+  const after = auditListingAltHealth(afterProd?.images || [], { primaryView: PRIMARY_VIEW });
+  if (remap.after) {
+    after.frontMislabeled = remap.after.frontMislabeled;
+    after.sizeMismatches = remap.after.sizeMismatches;
+    after.ok = after.ok && remap.after.frontMislabeled === 0 && remap.after.missingAlt === 0;
+    if (remap.after.frontMislabeled > 0 && !after.issues.some((i) => String(i).startsWith("front_mislabeled"))) {
+      after.issues.push(`front_mislabeled:${remap.after.frontMislabeled}`);
+    }
+  }
 
   const repaired = !before.ok && (after.ok || after.frontMislabeled < before.frontMislabeled || after.featured_ok);
   const ok = after.featured_ok && after.frontMislabeled === 0 && after.missingAlt === 0;
