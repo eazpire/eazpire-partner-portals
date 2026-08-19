@@ -10,6 +10,7 @@ import {
   productHasColor,
   summarizeRemoveVariantImpact,
 } from "../../admin-creations-portal/js/products-color-facets.js";
+import { resolveVariantEnabledForCatalogRow } from "../../src/features/product/resolveVariantEnabled.js";
 
 function softstyleProduct() {
   return {
@@ -77,6 +78,44 @@ describe("adminCreationsRemoveColorVariant", () => {
         amazon_eu_listed: true,
       })
     ).toEqual(["printify", "shopify", "amazon_europa"]);
+  });
+});
+
+describe("resolveVariantEnabledForCatalogRow", () => {
+  it("disables a color when the live variant id is in the payload", () => {
+    expect(
+      resolveVariantEnabledForCatalogRow({
+        templateVariant: { id: 1, options: [10] },
+        liveVariant: { id: 101, is_enabled: true },
+        variantsPayload: [{ id: 101, is_enabled: false }],
+        colorEnabled: new Map([["10", true]]),
+        colorIdx: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("keeps a live-disabled row disabled when catalog color ids do not match", () => {
+    expect(
+      resolveVariantEnabledForCatalogRow({
+        templateVariant: { id: 1, options: [99] },
+        liveVariant: { id: 101, is_enabled: false },
+        variantsPayload: [],
+        colorEnabled: new Map([["10", true]]),
+        colorIdx: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("does not default unmatched catalog rows to enabled", () => {
+    expect(
+      resolveVariantEnabledForCatalogRow({
+        templateVariant: { id: 1, options: [99] },
+        liveVariant: null,
+        variantsPayload: [],
+        colorEnabled: null,
+        colorIdx: 0,
+      })
+    ).toBe(false);
   });
 });
 

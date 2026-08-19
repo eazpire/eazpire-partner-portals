@@ -6,7 +6,6 @@
 import { json, getCorsHeaders } from "../../utils/response.js";
 import { syncVariantConfigToCatalog } from "../admin/adminProducts.js";
 import { handleUpdateProductVariants } from "../product/updateProductVariants.js";
-import { syncOneLiveProductFromCatalog } from "../admin/adminSyncLiveCatalogVariantPricing.js";
 import { updateProductProgress, getProgressForSession } from "../publish/progress.js";
 import { upsertPublishActiveSession, deletePublishActiveSession } from "../publish/publishActiveSessions.js";
 
@@ -147,15 +146,7 @@ async function processVariantUpdate(env, ctx, {
 
         const variantsPayload = buildVariantsPayload(variantsMap);
         if (variantsPayload.length) {
-          await syncOneLiveProductFromCatalog(env, {
-            printifyProductId: String(printifyProductId),
-            productKey,
-            printAreaTemplateId: 0,
-            designId: Number(designId) || 0,
-            mode: "align_publish",
-            dryRun: false,
-          });
-
+          // Do not call align_publish here — that re-applies catalog colors and undoes a remove-color.
           const mockReq = {
             url: new URL("https://local/apps/creator-dispatch?op=update-product-variants"),
             method: "POST",
@@ -175,8 +166,30 @@ async function processVariantUpdate(env, ctx, {
         await markChannelProgress(env, progressKey, i, "completed", 100, `${enabledCount} variant(s) updated`);
       } else if (ch === "shopify") {
         await markChannelProgress(env, progressKey, i, "syncing", 60, "Syncing Shopify listing…");
-        await new Promise((r) => setTimeout(r, 1500));
-        await markChannelProgress(env, progressKey, i, "completed", 100, "Shopify sync via Printify");
+        if (!printifyProductId) throw new Error("Printify product not linked");
+        const { publishPrintifyProduct } = await import("../../utils/printify.js");
+        await publishPrintifyProduct(
+          env,
+          printifyProductId,
+          { title: false, description: false, images: false, variants: true, tags: false },
+          {
+            skipMockupGate: true,
+            skipPrintifyPrimaryImage: true,
+            productKey,
+          }
+        );
+        const { ensureShopifyVariantSyncAfterPrintifyPublish } = await import(
+          "../publish/ensureShopifyVariantSync.js"
+        );
+        await ensureShopifyVariantSyncAfterPrintifyPublish(env, {
+          printifyProductId: String(printifyProductId),
+          shopifyProductId,
+          productKey,
+          enabledVariantCount: enabledCount,
+          pollAttempts: 4,
+          pollIntervalMs: 2500,
+        });
+        await markChannelProgress(env, progressKey, i, "completed", 100, "Shopify variants published");
       } else if (ch === "amazon_europa" || ch === "amazon_amerika") {
         const continent = ch === "amazon_amerika" ? "amerika" : "europa";
         const { handleAdminAmazonPublish } = await import("../product/amazonAdminPublish.js");
@@ -276,6 +289,7 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
       mockSlides,
     });
 
+    const waitForResult = body.wait === true || body.await_result === true;
     const work = processVariantUpdate(env, ctx, {
       progressKey,
       sessionId,
@@ -290,16 +304,43 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
       publishedDesignId,
     });
 
-    if (ctx?.waitUntil) ctx.waitUntil(work);
-    else await work;
+    if (!waitForResult && ctx?.waitUntil) {
+      ctx.waitUntil(work);
+      return json(
+        {
+          ok: true,
+          session_id: sessionId,
+          message: "Variant update started",
+        },
+        202,
+        cors
+      );
+    }
+
+    await work;
+    const progress = await getProgressForSession(env, sessionId);
+    const failed = (progress?.products || []).find((p) => p.status === "error");
+    if (failed) {
+      return json(
+        {
+          ok: false,
+          error: "variant_update_failed",
+          message: failed.message || "Variant update failed",
+          session_id: sessionId,
+          channel: failed.channel || null,
+        },
+        500,
+        cors
+      );
+    }
 
     return json(
       {
         ok: true,
         session_id: sessionId,
-        message: "Variant update started",
+        message: "Variant update completed",
       },
-      202,
+      200,
       cors
     );
   } catch (err) {
