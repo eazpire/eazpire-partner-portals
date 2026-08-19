@@ -53,14 +53,32 @@ export function defaultProductFilterState() {
   };
 }
 
+export const LOG_SECTIONS = [
+  { key: "status", label: "Status" },
+  { key: "type", label: "Type" },
+  { key: "source", label: "Source" },
+  { key: "time_range", label: "Time range" },
+  { key: "error", label: "Error" },
+];
+
+const LOG_STATIC_FACETS = {
+  time_range: [
+    { key: "today", label: "Today" },
+    { key: "7d", label: "7 days" },
+    { key: "30d", label: "30 days" },
+    { key: "90d", label: "90 days" },
+    { key: "all", label: "All" },
+  ],
+  error: [
+    { key: "has", label: "Has error" },
+    { key: "none", label: "No error" },
+  ],
+};
+
 export function defaultLogFilterState() {
   return {
-    status: "",
-    type: "",
-    source: "",
-    error: "",
-    time_range: "30d",
     q: "",
+    tri: Object.fromEntries(LOG_SECTIONS.map((s) => [s.key, {}])),
   };
 }
 
@@ -75,17 +93,24 @@ export function countActiveProductFilters(state) {
 }
 
 export function countActiveLogFilters(state) {
-  let n = 0;
-  if (state?.status) n += 1;
-  if (state?.type) n += 1;
-  if (state?.source) n += 1;
-  if (state?.error) n += 1;
-  if (state?.q?.trim()) n += 1;
-  if (state?.time_range && state.time_range !== "30d") n += 1;
+  let n = state?.q?.trim() ? 1 : 0;
+  for (const group of Object.values(state?.tri || {})) {
+    for (const st of Object.values(group || {})) {
+      if (Number(st) === 1 || Number(st) === -1) n += 1;
+    }
+  }
   return n;
 }
 
 export function productTriQuery(state) {
+  return slimTriQuery(state);
+}
+
+export function logTriQuery(state) {
+  return slimTriQuery(state);
+}
+
+function slimTriQuery(state) {
   const out = {};
   for (const [section, group] of Object.entries(state?.tri || {})) {
     const slim = {};
@@ -160,59 +185,45 @@ export function productsFilterHtml(state, facets) {
 
 export function logsFilterHtml(state, facets) {
   const active = countActiveLogFilters(state);
-  const timeRanges = [
-    { key: "today", label: "Today" },
-    { key: "7d", label: "7 days" },
-    { key: "30d", label: "30 days" },
-    { key: "90d", label: "90 days" },
-    { key: "all", label: "All" },
-  ];
-  const errors = [
-    { key: "", label: "Any" },
-    { key: "has", label: "Has error" },
-    { key: "none", label: "No error" },
-  ];
-  const chip = (name, key, label, count) => {
-    const on = String(state[name] || "") === String(key);
-    return `<button type="button" class="jl-chip ${on ? "is-on" : ""}" data-jl-filter="${name}" data-jl-value="${escapeHtml(key)}">${escapeHtml(label)}${count != null ? ` <span>${count}</span>` : ""}</button>`;
+  const lists = {
+    status: facets?.status || [],
+    type: facets?.type || [],
+    source: facets?.source || [],
+    time_range: LOG_STATIC_FACETS.time_range,
+    error: LOG_STATIC_FACETS.error,
   };
   return `
     <div class="cr-pf-search">
       <input type="search" id="jl-log-search" class="cr-pf-search__input" placeholder="Search logs…" value="${escapeHtml(state.q)}" aria-label="Filter logs" />
     </div>
     ${active ? `<button type="button" class="cr-pf-clear" id="jl-log-clear">Clear log filters (${active})</button>` : ""}
-    <div class="jl-filter-block">
-      <h4>Status</h4>
-      <div class="jl-chip-row">
-        ${chip("status", "", "All")}
-        ${(facets?.status || []).map((f) => chip("status", f.key, f.label, f.count)).join("")}
-      </div>
-    </div>
-    <div class="jl-filter-block">
-      <h4>Type</h4>
-      <div class="jl-chip-row">
-        ${chip("type", "", "All")}
-        ${(facets?.type || []).map((f) => chip("type", f.key, f.label, f.count)).join("")}
-      </div>
-    </div>
-    <div class="jl-filter-block">
-      <h4>Source</h4>
-      <div class="jl-chip-row">
-        ${chip("source", "", "All")}
-        ${(facets?.source || []).map((f) => chip("source", f.key, f.label, f.count)).join("")}
-      </div>
-    </div>
-    <div class="jl-filter-block">
-      <h4>Time range</h4>
-      <div class="jl-chip-row">
-        ${timeRanges.map((r) => chip("time_range", r.key, r.label)).join("")}
-      </div>
-    </div>
-    <div class="jl-filter-block">
-      <h4>Error</h4>
-      <div class="jl-chip-row">
-        ${errors.map((r) => chip("error", r.key, r.label)).join("")}
-      </div>
+    <div class="cr-pf-sections">
+      ${LOG_SECTIONS.map(({ key, label }) => {
+        const list = lists[key] || [];
+        if (!list.length) return "";
+        const group = state.tri[key] || {};
+        const on = Object.values(group).filter((st) => Number(st) === 1 || Number(st) === -1).length;
+        return `<details class="cr-pf-section" open>
+          <summary class="cr-pf-section__summary">
+            <span class="cr-pf-section__title">${escapeHtml(label)}</span>
+            ${on ? `<span class="cr-pf-section__badge">${on}</span>` : ""}
+          </summary>
+          <div class="cr-pf-section__body">
+            ${list
+              .map((f) => {
+                const st = Number(group[f.key] || 0);
+                const countHtml =
+                  f.count != null ? `<span class="cr-pf-option__count">${Number(f.count) || 0}</span>` : "";
+                return `<div class="cr-pf-option cr-pf-option--tri" data-tri-state="${st}">
+                  <span class="cr-pf-option__label">${escapeHtml(f.label || f.key)}</span>
+                  ${countHtml}
+                  ${triSwitchHtml(key, f.key, st)}
+                </div>`;
+              })
+              .join("")}
+          </div>
+        </details>`;
+      }).join("")}
     </div>`;
 }
 
@@ -226,20 +237,7 @@ export function bindProductsFilter(root, state, onChange) {
     for (const key of Object.keys(state.tri)) state.tri[key] = {};
     onChange(true);
   });
-  root.querySelectorAll(".cr-pf-triswitch").forEach((el) => {
-    el.querySelectorAll("button[data-v]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        const section = el.getAttribute("data-jl-section");
-        const key = el.getAttribute("data-jl-key");
-        const v = Number(btn.getAttribute("data-v"));
-        if (!state.tri[section]) state.tri[section] = {};
-        if (v === 0) delete state.tri[section][key];
-        else state.tri[section][key] = v;
-        onChange(true);
-      });
-    });
-  });
+  bindTriSwitches(root, state, onChange);
 }
 
 export function bindLogsFilter(root, state, onChange) {
@@ -248,15 +246,30 @@ export function bindLogsFilter(root, state, onChange) {
     onChange();
   });
   root.querySelector("#jl-log-clear")?.addEventListener("click", () => {
-    Object.assign(state, defaultLogFilterState());
+    state.q = "";
+    for (const key of Object.keys(state.tri)) state.tri[key] = {};
     onChange(true);
   });
-  root.querySelectorAll("[data-jl-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const name = btn.getAttribute("data-jl-filter");
-      const value = btn.getAttribute("data-jl-value") || "";
-      state[name] = value;
-      onChange(true);
+  bindTriSwitches(root, state, onChange);
+}
+
+function bindTriSwitches(root, state, onChange) {
+  root.querySelectorAll(".cr-pf-triswitch").forEach((el) => {
+    el.querySelectorAll("button[data-v]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const section = el.getAttribute("data-jl-section");
+        const key = el.getAttribute("data-jl-key");
+        const v = Number(btn.getAttribute("data-v"));
+        if (!state.tri[section]) state.tri[section] = {};
+        if (v === 0) delete state.tri[section][key];
+        else state.tri[section][key] = v;
+        el.setAttribute("data-state", String(v === 1 || v === -1 ? v : 0));
+        const row = el.closest(".cr-pf-option--tri");
+        if (row) row.setAttribute("data-tri-state", String(v === 1 || v === -1 ? v : 0));
+        onChange(true);
+      });
     });
   });
 }

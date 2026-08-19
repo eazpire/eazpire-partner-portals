@@ -7,12 +7,15 @@ import {
   bindProductsFilter,
   bindLogsFilter,
   productTriQuery,
+  logTriQuery,
   countActiveProductFilters,
   countActiveLogFilters,
 } from "./job-logs-filters.js";
+import { jobLogPreviewUrl } from "./job-logs-preview-url.js";
 
 const FILTER_COLLAPSED_KEY = "admin_partner_logs_filter_collapsed";
 const FILTER_TAB_KEY = "admin_partner_logs_filter_tab";
+const ACTIVE_POLL_MS = 3500;
 
 function isFilterCollapsed() {
   try {
@@ -60,17 +63,45 @@ function statusClass(status) {
   return "jl-status--live";
 }
 
+export function liveStatusText(row) {
+  const msg = String(row?.progress_message || "").trim();
+  if (msg) return msg;
+  if (row?.type === "printify_publish") return "Printify publish — waiting for progress";
+  if (row?.type === "shopify_publish") return "Shopify sync in progress";
+  if (row?.type === "amazon_publish") {
+    const cc = String(row.amazon_country || "").trim();
+    return cc ? `Amazon ${cc} submit in progress` : "Amazon submit in progress";
+  }
+  return `${row?.type_label || "Job"} in progress`;
+}
+
+function thumbHtml(row) {
+  const src = jobLogPreviewUrl(row);
+  const active = row.status === "active";
+  const img = src
+    ? `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" />`
+    : `<span class="jl-thumb__empty" aria-hidden="true"></span>`;
+  const spin = active ? `<span class="jl-thumb__spin" aria-hidden="true"></span>` : "";
+  return `<span class="jl-thumb">${img}${spin}</span>`;
+}
+
 function renderList(items) {
   if (!items?.length) {
     return `<div class="empty-state"><div class="icon">☰</div><h3>No matching logs</h3><p>Try another filter, or wait for the next publish / Studio job.</p></div>`;
   }
   return `<ul class="jl-list">${items
     .map((row) => {
+      const active = row.status === "active";
       const err = row.error ? `<p class="jl-row__error">${escapeHtml(row.error)}</p>` : "";
-      return `<li class="jl-row">
+      const live = active
+        ? `<div class="jl-row__live">${escapeHtml(liveStatusText(row))}</div>`
+        : "";
+      return `<li class="jl-row${active ? " is-active" : ""}" data-job-key="${escapeHtml(row.job_key || "")}">
+        ${thumbHtml(row)}
         <span class="jl-status ${statusClass(row.status)}">${escapeHtml(row.status_label || row.status)}</span>
         <div class="jl-row__main">
           <div class="jl-row__title">${escapeHtml(row.title || row.product_title || "Untitled")}</div>
+          ${live}
           <div class="jl-row__meta">
             <span>${escapeHtml(row.type_label || row.type)}</span>
             <span>${escapeHtml(row.source_label || row.source)}</span>
@@ -91,7 +122,9 @@ export async function mountJobLogs(container) {
   let collapsed = isFilterCollapsed();
   let lastPayload = { items: [], product_facets: {}, log_facets: {}, total: 0, groups: null, history_note: null };
   let searchTimer = null;
+  let pollTimer = null;
   let paintedOnce = false;
+  let alive = true;
 
   container.innerHTML = `
     <div class="catalog-studio job-logs ${collapsed ? "catalog-studio--filter-collapsed" : ""}">
@@ -134,6 +167,7 @@ export async function mountJobLogs(container) {
   const filterBody = container.querySelector("#job-logs-filter-body");
   const listEl = container.querySelector("#job-logs-list");
   const summaryEl = container.querySelector("#job-logs-summary");
+  const panelEl = container.querySelector(".catalog-studio-panel");
 
   function paintFilter() {
     if (filterTab === "products") {
@@ -148,32 +182,41 @@ export async function mountJobLogs(container) {
     });
   }
 
-  async function reload(immediate) {
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    if (!alive) return;
+    const hasActive = (lastPayload.items || []).some((row) => row.status === "active");
+    if (!hasActive) return;
+    pollTimer = setTimeout(() => reload(true, { skipFilterPaint: true }), ACTIVE_POLL_MS);
+  }
+
+  async function reload(immediate, { skipFilterPaint } = {}) {
     const run = async () => {
       try {
         const data = await partnerFetch("admin-partner-job-logs", {
           query: {
-            status: logState.status,
-            type: logState.type,
-            source: logState.source,
-            error: logState.error,
-            time_range: logState.time_range,
             q: logState.q,
+            log_tri: JSON.stringify(logTriQuery(logState)),
             product_q: productState.q,
             product_tri: JSON.stringify(productTriQuery(productState)),
           },
         });
+        if (!alive) return;
         lastPayload = data;
         const groups = data.groups?.byStatus || {};
         const productN = countActiveProductFilters(productState);
         const logN = countActiveLogFilters(logState);
         summaryEl.textContent = `${data.total || 0} job(s) · ${groups.active || 0} active · ${groups.completed || 0} completed · ${groups.failed || 0} failed${productN || logN ? ` · filters on` : ""}`;
+        const scrollY = panelEl?.scrollTop || 0;
         listEl.innerHTML = renderList(data.items || []);
-        if (immediate || !paintedOnce) {
+        if (panelEl) panelEl.scrollTop = scrollY;
+        if (!skipFilterPaint && (immediate || !paintedOnce)) {
           paintedOnce = true;
           paintFilter();
         }
+        schedulePoll();
       } catch (e) {
+        if (!alive) return;
         listEl.innerHTML = `<div class="empty-state"><h3>Could not load logs</h3><p>${escapeHtml(e.message || String(e))}</p></div>`;
       }
     };
@@ -203,4 +246,10 @@ export async function mountJobLogs(container) {
   container.querySelector("#job-logs-refresh").onclick = () => reload(true);
   paintFilter();
   await reload(true);
+
+  return () => {
+    alive = false;
+    clearTimeout(searchTimer);
+    clearTimeout(pollTimer);
+  };
 }
