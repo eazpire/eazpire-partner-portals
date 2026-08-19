@@ -867,7 +867,8 @@ html[data-portal="admin"] .stage-desc {
 }
 
 /* Catalog Studio — partner/provider tree + product list */
-html[data-portal="admin"] #view-catalog.layout-stage.active {
+html[data-portal="admin"] #view-catalog.layout-stage.active,
+html[data-portal="admin"] #view-logs.layout-stage.active {
   margin: -28px;
   width: calc(100% + 56px);
   max-width: none;
@@ -877,6 +878,109 @@ html[data-portal="admin"] #view-catalog.layout-stage.active {
   display: flex;
   flex-direction: column;
 }
+
+.job-logs .jl-filter-tabs {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  padding: 0 4px 2px;
+}
+.job-logs .jl-filter-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 8px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.job-logs .jl-filter-tab.is-on {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.job-logs .jl-filter-block {
+  padding: 10px 10px 4px;
+}
+.job-logs .jl-filter-block h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.job-logs .jl-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.job-logs .jl-chip {
+  border: 0;
+  background: var(--surface-3);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.job-logs .jl-chip.is-on {
+  background: #111827;
+  color: #fff;
+}
+.job-logs .jl-chip span {
+  opacity: .7;
+  margin-left: 4px;
+}
+.job-logs .jl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.job-logs .jl-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.job-logs .jl-row__title {
+  font-weight: 700;
+  color: var(--text);
+}
+.job-logs .jl-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.job-logs .jl-row__error {
+  margin: 6px 0 0;
+  color: #b91c1c;
+  font-size: 12px;
+}
+.job-logs .jl-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .02em;
+}
+.job-logs .jl-status--ok { background: #dcfce7; color: #166534; }
+.job-logs .jl-status--err { background: #fee2e2; color: #991b1b; }
+.job-logs .jl-status--live { background: #dbeafe; color: #1d4ed8; }
 .catalog-studio {
   flex: 1;
   display: flex;

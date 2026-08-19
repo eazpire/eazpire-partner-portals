@@ -187,6 +187,21 @@ export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) 
       })),
     };
     if (env.JOBS) await env.JOBS.put(progressKey, JSON.stringify(initialProgress));
+    try {
+      const { recordAdminJobLog, buildJobKey } = await import("../admin/adminJobLogs.js");
+      await recordAdminJobLog(env, {
+        job_key: buildJobKey(["remove-color", sessionId, productKey]),
+        status: "active",
+        type: "variant_change",
+        source: "admin",
+        title: `${color} · ${productKey}`,
+        product_key: productKey,
+        shopify_product_id: shopifyProductId,
+        printify_product_id: printifyProductId,
+        session_id: sessionId,
+        started_at: Date.now(),
+      });
+    } catch (_) {}
 
     const work = (async () => {
       const patch = async (index, status, progress, message) => {
@@ -214,6 +229,20 @@ export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) 
           cur.updated_at = Date.now();
           await env.JOBS.put(progressKey, JSON.stringify(cur));
         }
+        try {
+          const { recordAdminJobLog, buildJobKey } = await import("../admin/adminJobLogs.js");
+          await recordAdminJobLog(env, {
+            job_key: buildJobKey(["remove-color", sessionId, productKey]),
+            status: "completed",
+            type: "variant_change",
+            source: "admin",
+            title: `${color} · ${productKey}`,
+            product_key: productKey,
+            shopify_product_id: shopifyProductId,
+            session_id: sessionId,
+            completed_at: Date.now(),
+          });
+        } catch (_) {}
       } catch (err) {
         const message = err?.message || String(err);
         console.error("[admin-creations-remove-color-variant] background", message);
@@ -229,6 +258,20 @@ export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) 
           cur.updated_at = Date.now();
           await env.JOBS.put(progressKey, JSON.stringify(cur));
         }
+        try {
+          const { recordAdminJobLog, buildJobKey } = await import("../admin/adminJobLogs.js");
+          await recordAdminJobLog(env, {
+            job_key: buildJobKey(["remove-color", sessionId, productKey]),
+            status: "failed",
+            type: "variant_change",
+            source: "admin",
+            title: `${color} · ${productKey}`,
+            product_key: productKey,
+            error: message,
+            session_id: sessionId,
+            completed_at: Date.now(),
+          });
+        } catch (_) {}
       }
     })();
 

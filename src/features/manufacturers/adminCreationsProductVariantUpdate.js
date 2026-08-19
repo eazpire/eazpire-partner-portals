@@ -292,6 +292,24 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
     }
 
     const sessionId = generateSessionId(shopifyProductId);
+    try {
+      const { recordAdminJobLog, buildJobKey } = await import("../admin/adminJobLogs.js");
+      await recordAdminJobLog(env, {
+        job_key: buildJobKey(["variant", sessionId, productKey]),
+        status: "active",
+        type: removeColor ? "variant_change" : "product_update",
+        source: "admin",
+        title: productTitle || productKey,
+        product_key: productKey,
+        product_title: productTitle,
+        design_id: designId,
+        owner_id: ownerId,
+        shopify_product_id: shopifyProductId,
+        printify_product_id: printifyProductId,
+        session_id: sessionId,
+        started_at: Date.now(),
+      });
+    } catch (_) {}
     const { progressKey } = await initializeVariantUpdateProgress(env, {
       sessionId,
       designId: designId || publishedDesignId || 0,
@@ -335,6 +353,24 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
     await work;
     const progress = await getProgressForSession(env, sessionId);
     const failed = (progress?.products || []).find((p) => p.status === "error");
+    try {
+      const { recordAdminJobLog, buildJobKey } = await import("../admin/adminJobLogs.js");
+      await recordAdminJobLog(env, {
+        job_key: buildJobKey(["variant", sessionId, productKey]),
+        status: failed ? "failed" : "completed",
+        type: removeColor ? "variant_change" : "product_update",
+        source: "admin",
+        title: productTitle || productKey,
+        product_key: productKey,
+        product_title: productTitle,
+        design_id: designId,
+        owner_id: ownerId,
+        shopify_product_id: shopifyProductId,
+        error: failed ? String(failed.message || "Variant update failed") : null,
+        session_id: sessionId,
+        completed_at: Date.now(),
+      });
+    } catch (_) {}
     if (failed) {
       return json(
         {

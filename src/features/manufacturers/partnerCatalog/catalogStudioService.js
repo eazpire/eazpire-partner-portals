@@ -1428,6 +1428,20 @@ export async function removeCatalogStudioProduct(env, { productKey }) {
 
   await mfgDb.prepare(`DELETE FROM eazpire_products WHERE product_key = ?`).bind(key).run();
   mfgCleanup.push({ table: "eazpire_products", changes: 1 });
+  try {
+    const { recordAdminJobLog, buildJobKey } = await import("../../admin/adminJobLogs.js");
+    await recordAdminJobLog(env, {
+      job_key: buildJobKey(["catalog-remove", key, Date.now()]),
+      status: "completed",
+      type: "product_removed",
+      source: "admin",
+      title: key,
+      product_key: key,
+      product_title: key,
+      started_at: Date.now(),
+      completed_at: Date.now(),
+    });
+  } catch (_) {}
 
   let catalogCleanup = [];
   if (catalogDb) {

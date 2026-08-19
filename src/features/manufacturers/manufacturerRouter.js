@@ -238,6 +238,7 @@ const ADMIN_OPS = new Set([
   "admin-catalog-studio-set-status",
   "admin-catalog-studio-set-printify-choice",
   "admin-catalog-studio-remove-product",
+  "admin-partner-job-logs",
   "admin-catalog-ops-reconcile",
   "admin-eazpire-product-list",
   "admin-eazpire-product-get",
@@ -885,6 +886,10 @@ export async function handleManufacturerRouter(request, env, ctx) {
         return json(result, status, cors);
       }
       return json(result, 200, cors);
+    }
+    if (op === "admin-partner-job-logs" && request.method === "GET") {
+      const { handleAdminPartnerJobLogs } = await import("../admin/adminJobLogs.js");
+      return handleAdminPartnerJobLogs(request, env);
     }
     if (op === "admin-catalog-studio-remove-product" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
