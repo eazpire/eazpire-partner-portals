@@ -1006,6 +1006,62 @@ html[data-portal="admin"] #view-logs.layout-stage.active {
 .job-logs .jl-status--ok { background: #dcfce7; color: #166534; }
 .job-logs .jl-status--err { background: #fee2e2; color: #991b1b; }
 .job-logs .jl-status--live { background: #dbeafe; color: #1d4ed8; }
+.job-logs .jl-thumb.is-clickable {
+  cursor: zoom-in;
+}
+.job-logs .jl-row__actions {
+  margin-top: 8px;
+}
+.job-logs .jl-fail-btn {
+  appearance: none;
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.job-logs .jl-fail-btn:hover { background: #fef2f2; }
+.job-logs .jl-fail-btn:disabled { opacity: .55; cursor: wait; }
+.jl-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 14000;
+  display: none;
+  place-items: center;
+  padding: 28px;
+  background: rgba(15, 23, 42, .72);
+  backdrop-filter: blur(8px);
+}
+.jl-lightbox.is-open,
+.jl-lightbox:not([hidden]) {
+  display: grid;
+}
+.jl-lightbox[hidden] { display: none !important; }
+.jl-lightbox__img {
+  max-width: min(92vw, 1100px);
+  max-height: 88vh;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+  background: #fff;
+  object-fit: contain;
+}
+.jl-lightbox__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
 
 /* Logs page tri-switch: sky/teal (not Creations Products orange) */
 html[data-portal="admin"] .job-logs .cr-pf-triswitch[data-state='0'] .cr-pf-triswitch__thumb {

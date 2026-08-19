@@ -80,7 +80,10 @@ function thumbHtml(row) {
   const img = src
     ? `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" />`
     : `<span class="jl-thumb__empty" aria-hidden="true"></span>`;
-  return `<span class="jl-thumb">${img}</span>`;
+  const open = src
+    ? ` role="button" tabindex="0" data-jl-preview="${escapeHtml(src)}" aria-label="Open mockup preview"`
+    : "";
+  return `<span class="jl-thumb${src ? " is-clickable" : ""}"${open}>${img}</span>`;
 }
 
 function statusHtml(row) {
@@ -115,6 +118,7 @@ function renderList(items) {
             <span>${escapeHtml(formatWhen(row.updated_at || row.started_at))}</span>
           </div>
           ${err}
+          ${active ? `<div class="jl-row__actions"><button type="button" class="jl-fail-btn" data-jl-fail="${escapeHtml(row.job_key || "")}">Mark failed</button></div>` : ""}
         </div>
         ${statusHtml(row)}
       </li>`;
@@ -168,6 +172,10 @@ export async function mountJobLogs(container) {
           <div class="panel-body" id="job-logs-list"><p class="catalog-studio-loading">Loading logs…</p></div>
         </div>
       </div>
+    </div>
+    <div id="jl-lightbox" class="jl-lightbox" hidden>
+      <button type="button" class="jl-lightbox__close" data-jl-lightbox-close aria-label="Close">×</button>
+      <img class="jl-lightbox__img" alt="Mockup preview" />
     </div>`;
 
   const studioEl = container.querySelector(".job-logs");
@@ -251,6 +259,63 @@ export async function mountJobLogs(container) {
   });
 
   container.querySelector("#job-logs-refresh").onclick = () => reload(true);
+
+  const lightbox = container.querySelector("#jl-lightbox");
+  const lightboxImg = lightbox?.querySelector(".jl-lightbox__img");
+
+  function closeLightbox() {
+    if (!lightbox) return;
+    lightbox.hidden = true;
+    lightbox.classList.remove("is-open");
+    if (lightboxImg) lightboxImg.removeAttribute("src");
+  }
+
+  function openLightbox(src) {
+    if (!lightbox || !lightboxImg || !src) return;
+    lightboxImg.src = src;
+    lightbox.hidden = false;
+    lightbox.classList.add("is-open");
+  }
+
+  lightbox?.addEventListener("click", (event) => {
+    if (event.target === lightbox || event.target.closest("[data-jl-lightbox-close]")) closeLightbox();
+  });
+
+  listEl.addEventListener("click", async (event) => {
+    const failBtn = event.target.closest("[data-jl-fail]");
+    if (failBtn) {
+      const jobKey = failBtn.getAttribute("data-jl-fail");
+      if (!jobKey) return;
+      failBtn.disabled = true;
+      try {
+        await partnerFetch("admin-partner-job-log-resolve", {
+          method: "POST",
+          body: { job_key: jobKey, action: "fail" },
+        });
+        await reload(true, { skipFilterPaint: true });
+      } catch (e) {
+        failBtn.disabled = false;
+        window.alert(e.message || "Could not mark job failed");
+      }
+      return;
+    }
+    const thumb = event.target.closest("[data-jl-preview]");
+    if (thumb) openLightbox(thumb.getAttribute("data-jl-preview"));
+  });
+
+  listEl.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const thumb = event.target.closest("[data-jl-preview]");
+    if (!thumb) return;
+    event.preventDefault();
+    openLightbox(thumb.getAttribute("data-jl-preview"));
+  });
+
+  const onEsc = (event) => {
+    if (event.key === "Escape") closeLightbox();
+  };
+  document.addEventListener("keydown", onEsc);
+
   paintFilter();
   await reload(true);
 
@@ -258,5 +323,7 @@ export async function mountJobLogs(container) {
     alive = false;
     clearTimeout(searchTimer);
     clearTimeout(pollTimer);
+    document.removeEventListener("keydown", onEsc);
+    closeLightbox();
   };
 }
