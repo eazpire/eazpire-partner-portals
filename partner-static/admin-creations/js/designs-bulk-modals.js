@@ -11,7 +11,7 @@ import {
   bindProdCarousels,
   productCarouselHtml,
 } from "./designs-product-media.js";
-import { trackPublishSessions, startPublishDockWatch } from "./designs-publish-dock.js";
+import { trackPublishSessions, startPublishDockWatch, getPublishingDesignIds } from "./designs-publish-dock.js";
 
 const PHASE1_CHANNELS = new Set(["printify", "todify", "shopify"]);
 
@@ -600,7 +600,7 @@ function setPublishModalChrome() {
 }
 
 export async function openPublishModal(items, { onDone } = {}) {
-  const list = (items || []).filter((item) => designIdOf(item));
+  const list = (items || []).filter((item) => designIdOf(item) && !getPublishingDesignIds().has(Number(item?.id || 0)));
   if (!list.length) {
     releaseBulkDock();
     showToast("Publish", "Select at least one saved design");

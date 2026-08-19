@@ -8,6 +8,8 @@ import {
   selectAllVisible,
   clearSelection,
   isSelected,
+  getSelectedItems,
+  setSelected,
 } from "./designs-bulk.js";
 import { openRemoveModal, openPublishModal, openUpdateModal, openDesignUnpublishModal, openLibraryStatusModal, openVisibilityModal } from "./designs-bulk-modals.js";
 import { openDesignDetailModal } from "./designs-detail-modal.js";
@@ -682,6 +684,14 @@ function getVisibleItems() {
   return state.items.filter((item) => !isDesignPublishing(item));
 }
 
+function prunePublishingSelection() {
+  const busy = getPublishingDesignIds();
+  for (const item of getSelectedItems()) {
+    const id = Number(item?.id || 0);
+    if (id && busy.has(id)) setSelected(item, false);
+  }
+}
+
 function afterBulkChange() {
   return fetchList({ append: false });
 }
@@ -791,6 +801,7 @@ function renderGrid() {
   const loading = document.getElementById("cr-designs-loading");
   if (!grid) return;
 
+  prunePublishingSelection();
   const visible = getVisibleItems();
   grid.innerHTML = visible.map(designCardHtml).join("");
   bindGridInteractions(grid);
@@ -942,12 +953,15 @@ export async function mountDesignsPage() {
     onSelectAll: () => selectAllVisible(getVisibleItems()),
     onRemove: (items) => openRemoveModal(items, { onDone: afterBulkChange }),
     onPublish: (items) =>
-      openPublishModal(items, {
-        onDone: async (result) => {
-          await afterBulkChange();
-          return result;
-        },
-      }),
+      openPublishModal(
+        (items || []).filter((item) => !isDesignPublishing(item)),
+        {
+          onDone: async (result) => {
+            await afterBulkChange();
+            return result;
+          },
+        }
+      ),
     onUpdate: (items) => openUpdateModal(items, { onDone: afterBulkChange }),
     onActivate: (items) => openLibraryStatusModal(items, { status: "active", onDone: afterBulkChange }),
     onDeactivate: (items) => openLibraryStatusModal(items, { status: "inactive", onDone: afterBulkChange }),
@@ -959,7 +973,7 @@ export async function mountDesignsPage() {
     // Re-render grid when publishing set changes (hide/show designs).
     renderGrid();
   });
-  startPublishDockWatch();
+  await startPublishDockWatch();
 
   bindFilterSidebarToggle(el);
   refreshFilterSidebarBody(el);

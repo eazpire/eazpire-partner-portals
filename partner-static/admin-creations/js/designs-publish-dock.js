@@ -402,15 +402,16 @@ function restoreBatchMeta() {
 }
 
 export function startPublishDockWatch() {
-  if (pollTimer) return;
   restoreBatchMeta();
-  refreshActivePublishes();
-  pollTimer = setInterval(async () => {
-    const before = getPublishingDesignIds();
-    await refreshActivePublishes();
-    const after = getPublishingDesignIds();
-    if (before.size > 0 && after.size === 0) notify();
-  }, POLL_MS);
+  if (!pollTimer) {
+    pollTimer = setInterval(async () => {
+      const before = getPublishingDesignIds();
+      await refreshActivePublishes();
+      const after = getPublishingDesignIds();
+      if (before.size > 0 && after.size === 0) notify();
+    }, POLL_MS);
+  }
+  return refreshActivePublishes();
 }
 
 export function stopPublishDockWatch() {
