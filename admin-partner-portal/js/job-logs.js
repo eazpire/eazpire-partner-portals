@@ -77,12 +77,19 @@ export function liveStatusText(row) {
 
 function thumbHtml(row) {
   const src = jobLogPreviewUrl(row);
-  const active = row.status === "active";
   const img = src
     ? `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" />`
     : `<span class="jl-thumb__empty" aria-hidden="true"></span>`;
-  const spin = active ? `<span class="jl-thumb__spin" aria-hidden="true"></span>` : "";
-  return `<span class="jl-thumb">${img}${spin}</span>`;
+  return `<span class="jl-thumb">${img}</span>`;
+}
+
+function statusHtml(row) {
+  const active = row.status === "active";
+  const spin = active ? `<span class="jl-status__spin" aria-hidden="true"></span>` : "";
+  return `<div class="jl-row__status">
+        ${spin}
+        <span class="jl-status ${statusClass(row.status)}">${escapeHtml(row.status_label || row.status)}</span>
+      </div>`;
 }
 
 function renderList(items) {
@@ -98,7 +105,6 @@ function renderList(items) {
         : "";
       return `<li class="jl-row${active ? " is-active" : ""}" data-job-key="${escapeHtml(row.job_key || "")}">
         ${thumbHtml(row)}
-        <span class="jl-status ${statusClass(row.status)}">${escapeHtml(row.status_label || row.status)}</span>
         <div class="jl-row__main">
           <div class="jl-row__title">${escapeHtml(row.title || row.product_title || "Untitled")}</div>
           ${live}
@@ -110,6 +116,7 @@ function renderList(items) {
           </div>
           ${err}
         </div>
+        ${statusHtml(row)}
       </li>`;
     })
     .join("")}</ul>`;

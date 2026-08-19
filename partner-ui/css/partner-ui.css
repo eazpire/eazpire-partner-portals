@@ -910,7 +910,7 @@ html[data-portal="admin"] #view-logs.layout-stage.active {
 }
 .job-logs .jl-row {
   display: grid;
-  grid-template-columns: 44px auto 1fr;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
   padding: 12px 4px;
@@ -942,16 +942,14 @@ html[data-portal="admin"] #view-logs.layout-stage.active {
   background:
     linear-gradient(135deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
 }
-.job-logs .jl-thumb__spin {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
+.job-logs .jl-status__spin {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.55);
-  border-top-color: #0ea5e9;
+  border: 2px solid #bfdbfe;
+  border-top-color: #2563eb;
   border-radius: 50%;
   animation: jl-spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 .job-logs .jl-row.is-active .jl-thumb {
   animation: jl-thumb-pulse 1.6s ease-in-out infinite;
@@ -986,12 +984,19 @@ html[data-portal="admin"] #view-logs.layout-stage.active {
   color: #b91c1c;
   font-size: 12px;
 }
+.job-logs .jl-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: end;
+  padding-top: 2px;
+  white-space: nowrap;
+}
 .job-logs .jl-status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 24px;
-  margin-top: 10px;
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 11px;
