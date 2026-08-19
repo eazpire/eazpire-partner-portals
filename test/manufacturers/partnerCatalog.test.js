@@ -122,6 +122,21 @@ describe("PAT field mapping", () => {
     expect(studio.print_provider_id).toBe(30);
     const auto = patRowToAutoPublishConfig(pat);
     expect(auto.auto_publish_enabled).toBe(true);
+    expect(auto.use_settings).toBe("creator");
+    expect(auto.amazon_markets).toEqual({});
+  });
+
+  it("maps admin use settings and amazon markets from PAT", () => {
+    const auto = patRowToAutoPublishConfig({
+      auto_publish_enabled: 1,
+      automation_shopify_sync_enabled: 1,
+      automation_amazon_publish_enabled: 1,
+      automation_use_settings: "admin",
+      automation_amazon_markets_json: '{"DE":true,"FR":false}',
+    });
+    expect(auto.use_settings).toBe("admin");
+    expect(auto.amazon_markets.DE).toBe(true);
+    expect(auto.amazon_markets.FR).toBe(false);
   });
 });
 

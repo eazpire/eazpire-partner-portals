@@ -24,6 +24,11 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
   const catalogDb = env.CATALOG_DB;
   if (!mfgDb || !catalogDb) return { ok: false, error: "database_unavailable" };
 
+  try {
+    const { ensurePatAutomationColumns } = await import("../../publish/catalogPatAutomation.js");
+    await ensurePatAutomationColumns(env);
+  } catch (_) {}
+
   const product = await mfgDb.prepare(`SELECT * FROM eazpire_products WHERE product_key = ?`).bind(productKey).first();
   if (!product) return { ok: false, error: "product_not_in_master" };
 
@@ -128,6 +133,7 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
             is_active = ?, publish_enabled = ?,
             auto_publish_enabled = ?, automation_shopify_sync_enabled = ?,
             automation_amazon_publish_enabled = ?, automation_social_json = ?,
+            automation_use_settings = ?, automation_amazon_markets_json = ?,
             updated_at = ?
            WHERE id = ?`
         )
@@ -148,6 +154,8 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
           autoFields.automation_shopify_sync_enabled,
           autoFields.automation_amazon_publish_enabled,
           autoFields.automation_social_json,
+          autoFields.automation_use_settings,
+          autoFields.automation_amazon_markets_json,
           now,
           v.catalog_pat_id
         )
@@ -163,8 +171,8 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
            sort_order, is_active, publish_enabled, print_areas_snapshot_json, qr_logo_snapshot_json,
            shopify_design_placement, product_version_config_json, printify_print_area_groups_json,
            auto_publish_enabled, automation_shopify_sync_enabled, automation_amazon_publish_enabled,
-           automation_social_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           automation_social_json, automation_use_settings, automation_amazon_markets_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         productKey,
@@ -184,6 +192,8 @@ export async function mirrorEazpireProductToCatalogDb(env, productKey) {
         autoFields.automation_shopify_sync_enabled,
         autoFields.automation_amazon_publish_enabled,
         autoFields.automation_social_json,
+        autoFields.automation_use_settings,
+        autoFields.automation_amazon_markets_json,
         now,
         now
       )

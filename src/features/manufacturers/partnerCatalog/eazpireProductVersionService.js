@@ -65,11 +65,14 @@ export function patRowToStudioConfig(pat) {
 }
 
 export function patRowToAutoPublishConfig(pat) {
+  const useSettings = String(pat.automation_use_settings || "").trim().toLowerCase();
   return {
     auto_publish_enabled: !!pat.auto_publish_enabled,
     automation_shopify_sync_enabled: !!pat.automation_shopify_sync_enabled,
     automation_amazon_publish_enabled: !!pat.automation_amazon_publish_enabled,
     automation_social: parseJson(pat.automation_social_json, null),
+    use_settings: useSettings === "admin" ? "admin" : "creator",
+    amazon_markets: parseJson(pat.automation_amazon_markets_json, {}),
   };
 }
 

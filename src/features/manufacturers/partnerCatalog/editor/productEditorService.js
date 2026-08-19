@@ -1483,16 +1483,30 @@ export async function saveAutomations(env, versionId, body) {
     return saveCatalogAutomations(env, versionId, body);
   }
   const db = env.MANUFACTURER_DB;
+  const existing = await getProductVersion(db, versionId);
+  if (!existing) return { ok: false, error: "not_found" };
+  const { automationConfigFromSaveBody, anyAutoPublishChannelOn } = await import(
+    "../../../publish/productAutomationConfig.js"
+  );
+  const prev = existing.auto_publish_config || {};
   const auto = {
-    auto_publish_enabled: !!body.auto_publish_enabled,
-    automation_shopify_sync_enabled: !!body.automation_shopify_sync_enabled,
-    automation_amazon_publish_enabled: !!body.automation_amazon_publish_enabled,
-    automation_social: body.automation_social ?? null,
+    ...automationConfigFromSaveBody(body, prev),
+    automation_social: body.automation_social !== undefined ? body.automation_social : prev.automation_social ?? null,
   };
   const version = await updateProductVersion(db, versionId, { auto_publish_config: auto });
   if (!version) return { ok: false, error: "not_found" };
   if (body.auto_mirror !== false) await mirrorEazpireProductToCatalogDb(env, version.product_key);
-  return { ok: true, version };
+  let backfill = null;
+  if (anyAutoPublishChannelOn(auto) && body.skip_backfill !== true) {
+    try {
+      const { enqueueProductAutomationBackfill } = await import("../../../publish/productAutomationBackfill.js");
+      backfill = await enqueueProductAutomationBackfill(env, { productKey: version.product_key });
+    } catch (bfErr) {
+      console.warn("[saveAutomations] backfill enqueue:", bfErr?.message || bfErr);
+      backfill = { enqueued: false, reason: String(bfErr?.message || bfErr) };
+    }
+  }
+  return { ok: true, version, backfill };
 }
 
 export async function getPublishedBundle(env, productKey) {

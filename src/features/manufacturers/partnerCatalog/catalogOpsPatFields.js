@@ -16,11 +16,20 @@ export function studioConfigToPatFields(studioConfig) {
 
 export function autoPublishConfigToPatFields(autoConfig) {
   const ac = autoConfig || {};
+  const useSettings = String(ac.use_settings || ac.automation_use_settings || "creator").trim().toLowerCase();
+  const markets = ac.amazon_markets || ac.automation_amazon_markets || null;
   return {
     auto_publish_enabled: ac.auto_publish_enabled ? 1 : 0,
     automation_shopify_sync_enabled: ac.automation_shopify_sync_enabled ? 1 : 0,
     automation_amazon_publish_enabled: ac.automation_amazon_publish_enabled ? 1 : 0,
-    automation_social_json: ac.automation_social != null ? JSON.stringify(ac.automation_social) : null,
+    automation_social_json:
+      ac.automation_social == null
+        ? null
+        : typeof ac.automation_social === "string"
+          ? ac.automation_social
+          : JSON.stringify(ac.automation_social),
+    automation_use_settings: useSettings === "admin" ? "admin" : "creator",
+    automation_amazon_markets_json: markets != null ? JSON.stringify(markets) : null,
   };
 }
 

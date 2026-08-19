@@ -204,6 +204,18 @@ describe("partner catalog editor assets (smoke)", () => {
     }
   });
 
+  it("automations tab has Use Settings + Auto Publish switches, no social JSON editor", () => {
+    const src = readFileSync(join(portal, "tabs/automations.js"), "utf8");
+    expect(src).toContain("Use Settings");
+    expect(src).toContain("ce-auto-use-settings");
+    expect(src).toContain("Auto Publish");
+    expect(src).toContain("ce-auto-amz-eu");
+    expect(src).toContain("amazon_markets");
+    expect(src).not.toContain("automation_social JSON");
+    expect(src).not.toContain("ce-auto-social");
+    expect(src).not.toContain("Social automations");
+  });
+
   it("catalog studio opens editor and mirror from product list", () => {
     const appSrc = readFileSync(join(root, "admin-partner-portal/js/app.js"), "utf8");
     expect(appSrc).toContain('import { mountCatalogStudio } from "./catalog-studio.js"');

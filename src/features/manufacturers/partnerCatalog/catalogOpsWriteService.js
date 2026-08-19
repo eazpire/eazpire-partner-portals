@@ -1419,35 +1419,86 @@ export async function saveCatalogAutomations(env, versionId, body) {
   const existing = await getPatRow(env, patId);
   if (!existing) return { ok: false, error: "not_found" };
 
+  const { ensurePatAutomationColumns } = await import("../../publish/catalogPatAutomation.js");
+  const { automationConfigFromSaveBody, anyAutoPublishChannelOn } = await import(
+    "../../publish/productAutomationConfig.js"
+  );
+  await ensurePatAutomationColumns(env);
+
+  const existingCfg = {
+    use_settings: existing.automation_use_settings,
+    amazon_markets: existing.automation_amazon_markets_json,
+    auto_publish_enabled: existing.auto_publish_enabled,
+    automation_shopify_sync_enabled: existing.automation_shopify_sync_enabled,
+    automation_amazon_publish_enabled: existing.automation_amazon_publish_enabled,
+    automation_social: existing.automation_social_json,
+  };
   const auto = {
-    auto_publish_enabled: !!body.auto_publish_enabled,
-    automation_shopify_sync_enabled: !!body.automation_shopify_sync_enabled,
-    automation_amazon_publish_enabled: !!body.automation_amazon_publish_enabled,
-    automation_social: body.automation_social ?? null,
+    ...automationConfigFromSaveBody(body, existingCfg),
+    automation_social:
+      body.automation_social !== undefined ? body.automation_social : existing.automation_social_json != null
+        ? existing.automation_social_json
+        : null,
   };
   const autoFields = autoPublishConfigToPatFields(auto);
   const now = Date.now();
 
-  await db
-    .prepare(
-      `UPDATE print_area_printify_templates SET
-        auto_publish_enabled = ?, automation_shopify_sync_enabled = ?,
-        automation_amazon_publish_enabled = ?, automation_social_json = ?, updated_at = ?
-       WHERE id = ?`
-    )
-    .bind(
-      autoFields.auto_publish_enabled,
-      autoFields.automation_shopify_sync_enabled,
-      autoFields.automation_amazon_publish_enabled,
-      autoFields.automation_social_json,
-      now,
-      patId
-    )
-    .run();
+  try {
+    await db
+      .prepare(
+        `UPDATE print_area_printify_templates SET
+          auto_publish_enabled = ?, automation_shopify_sync_enabled = ?,
+          automation_amazon_publish_enabled = ?, automation_social_json = ?,
+          automation_use_settings = ?, automation_amazon_markets_json = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(
+        autoFields.auto_publish_enabled,
+        autoFields.automation_shopify_sync_enabled,
+        autoFields.automation_amazon_publish_enabled,
+        typeof autoFields.automation_social_json === "string" || autoFields.automation_social_json == null
+          ? autoFields.automation_social_json
+          : JSON.stringify(autoFields.automation_social_json),
+        autoFields.automation_use_settings,
+        autoFields.automation_amazon_markets_json,
+        now,
+        patId
+      )
+      .run();
+  } catch (colErr) {
+    const msg = String(colErr?.message || colErr);
+    if (!msg.includes("no such column")) throw colErr;
+    await db
+      .prepare(
+        `UPDATE print_area_printify_templates SET
+          auto_publish_enabled = ?, automation_shopify_sync_enabled = ?,
+          automation_amazon_publish_enabled = ?, automation_social_json = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(
+        autoFields.auto_publish_enabled,
+        autoFields.automation_shopify_sync_enabled,
+        autoFields.automation_amazon_publish_enabled,
+        autoFields.automation_social_json,
+        now,
+        patId
+      )
+      .run();
+  }
 
   const versions = await listCatalogOpsProductVersions(env, existing.product_key);
   const version = versions.find((v) => Number(v.catalog_pat_id) === patId) || null;
-  return { ok: true, version, _ops_source: "catalog-db" };
+  let backfill = null;
+  if (anyAutoPublishChannelOn(auto) && body.skip_backfill !== true) {
+    try {
+      const { enqueueProductAutomationBackfill } = await import("../../publish/productAutomationBackfill.js");
+      backfill = await enqueueProductAutomationBackfill(env, { productKey: existing.product_key });
+    } catch (bfErr) {
+      console.warn("[saveCatalogAutomations] backfill enqueue:", bfErr?.message || bfErr);
+      backfill = { enqueued: false, reason: String(bfErr?.message || bfErr) };
+    }
+  }
+  return { ok: true, version, backfill, _ops_source: "catalog-db" };
 }
 
 /** D1 rejects NaN/undefined binds — coerce optional numbers for COALESCE updates. */

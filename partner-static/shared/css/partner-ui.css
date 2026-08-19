@@ -5535,6 +5535,80 @@ body.catalog-editor-open #partner-toast {
   padding: 10px;
 }
 
+.ce-auto-panel {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ce-auto-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px 16px;
+}
+.ce-auto-segment {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.ce-auto-segment__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px 18px;
+  cursor: pointer;
+  font-weight: 600;
+  background: var(--surface-2);
+}
+.ce-auto-segment__opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.ce-auto-segment__opt.is-active {
+  background: #111827;
+  color: #fff;
+}
+.ce-auto-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ce-auto-switch-row:last-child {
+  border-bottom: 0;
+}
+.ce-auto-amazon {
+  padding: 8px 0 4px 8px;
+  border-left: 2px solid rgba(251, 191, 36, 0.45);
+  margin: 4px 0 0 6px;
+}
+.ce-auto-amz-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.ce-auto-amz-country {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.ce-auto-amz-country.is-on {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
 /* Catalog editor — Templates tab sections */
 .ce-tpl-panel__head {
   display: flex;
