@@ -290,6 +290,8 @@ function imageUrlFromNode(node) {
 
 const COLOR_OPTION_NAMES = new Set(["color", "colors", "colour", "colours", "farbe", "farben"]);
 
+const GENERIC_LIVE_COLOR_LABELS = new Set(["default", "default title", "unassigned", "none", "n/a", "-"]);
+
 /** Live sellable colors from Shopify variants — not leftover mockup alt labels. */
 export function liveColorsFromShopifyNode(node) {
   const labels = [];
@@ -299,10 +301,11 @@ export function liveColorsFromShopifyNode(node) {
   for (const v of nodes) {
     const opts = Array.isArray(v?.selectedOptions) ? v.selectedOptions : [];
     const colorOpt = opts.find((o) => COLOR_OPTION_NAMES.has(String(o?.name || "").toLowerCase()));
-    const raw = String(colorOpt?.value || opts[0]?.value || "").trim();
+    // Only the Color option — never Size / first option, never leftover image alts.
+    const raw = String(colorOpt?.value || "").trim();
     if (!raw) continue;
     const norm = raw.toLowerCase();
-    if (norm === "default" || norm === "unassigned") continue;
+    if (GENERIC_LIVE_COLOR_LABELS.has(norm)) continue;
     if (seen.has(norm)) continue;
     seen.add(norm);
     labels.push(raw);

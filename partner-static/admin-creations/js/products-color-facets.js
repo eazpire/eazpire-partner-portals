@@ -109,9 +109,10 @@ export function colorLabelsOf(item) {
     seen.add(norm);
     labels.push(label);
   };
-  const live = Array.isArray(item?.live_colors) ? item.live_colors : [];
-  if (live.length) {
-    for (const label of live) push(label);
+  // live_colors is authoritative once the list API attached it (even if empty).
+  // Do not fall back to leftover mockup / grid_view labels after a color was removed.
+  if (Array.isArray(item?.live_colors)) {
+    for (const label of item.live_colors) push(label);
     return labels;
   }
   for (const view of Array.isArray(item?.grid_views) ? item.grid_views : []) {
@@ -127,6 +128,13 @@ export function productHasColor(item, color) {
   const want = normalizeColorLabel(color);
   if (!want) return false;
   return colorLabelsOf(item).some((label) => normalizeColorLabel(label) === want);
+}
+
+/** Grid / bulk visibility: selected color uses live listing colors when present. */
+export function filterProductsByColor(items, color) {
+  const want = normalizeColorLabel(color);
+  if (!want) return [...(items || [])];
+  return (items || []).filter((item) => productHasColor(item, want));
 }
 
 export function collectColorFacets(items) {

@@ -60,11 +60,10 @@ import {
   mountProductsVariantsMode,
   productsHeaderToolsHtml,
   refreshVariantsColorBar,
-  setSelectedColor,
   teardownVariantsMode,
 } from "./products-variants-mode.js";
 import { applyProductsGridView, bindProductsGridMenu, teardownProductsGridMenu } from "./products-grid-view.js";
-import { productHasColor } from "./products-color-facets.js";
+import { filterProductsByColor, productHasColor } from "./products-color-facets.js";
 import {
   getBusyProductKeys,
   getBusyShopifyIds,
@@ -292,7 +291,7 @@ function productCardHtml(item) {
   </article>`;
 }
 
-function applyFilters() {
+function applySidebarAndBusyFilters() {
   let items = applyProductSidebarFilters(state.items);
   const busyKeys = getBusyProductKeys();
   const busyShopifyIds = getBusyShopifyIds();
@@ -304,6 +303,10 @@ function applyFilters() {
     });
   }
   return items;
+}
+
+function applyFilters() {
+  return filterProductsByColor(applySidebarAndBusyFilters(), getSelectedColor());
 }
 
 function emptyMessageForSource() {
@@ -354,6 +357,7 @@ function renderGrid() {
   const error = document.getElementById("cr-products-error");
   if (!grid) return;
 
+  refreshVariantsColorBar(applySidebarAndBusyFilters());
   const visible = applyFilters();
   grid.innerHTML = visible.map(productCardHtml).join("");
   const hasRows = visible.length > 0;
@@ -371,7 +375,6 @@ function renderGrid() {
   bindBulkCheckboxes(grid, { getItemByKey: (key) => byKey.get(key) });
   refreshResultsBar(document.getElementById("view-products"), visible.length);
   applyProductsGridView(grid);
-  refreshVariantsColorBar(visible);
   applySelectedColorToGrid({ renderCardMedia });
 }
 
@@ -677,7 +680,6 @@ function productsBulkHandlers() {
     onRemoveVariant: (items) =>
       openProductsRemoveVariantModal(items, {
         color: getSelectedColor(),
-        onStarted: () => setSelectedColor(""),
         onDone: refreshProductsAfterBulk,
       }),
     isRemoveVariantEnabled: (items) => !!getSelectedColor() && (items || []).some((item) => productHasColor(item, getSelectedColor())),
@@ -693,13 +695,16 @@ function mountProductsHeaderTools() {
   setTopbarExtra(productsHeaderToolsHtml());
   bindProductsGridMenu(document.getElementById("topbar-extra"));
   mountProductsVariantsMode({
-    getItems: () => visibleProductsForBulk(),
+    getItems: () => applySidebarAndBusyFilters(),
     renderCardMedia,
-    onMode: (on) => {
-      setProductsBulkDockMode(on ? "variants" : "default", productsBulkHandlers());
-      applySelectedColorToGrid({ renderCardMedia });
+    onMode: () => {
+      setProductsBulkDockMode(isVariantsMode() ? "variants" : "default", productsBulkHandlers());
+      renderGrid();
     },
-    onColor: () => refreshProductsBulkDock(),
+    onColor: () => {
+      renderGrid();
+      refreshProductsBulkDock();
+    },
   });
 }
 
@@ -1252,7 +1257,6 @@ function bindProductCards(el) {
         }
         await openProductsRemoveVariantModal([item], {
           color,
-          onStarted: () => setSelectedColor(""),
           onDone: refreshProductsAfterBulk,
         });
         return;

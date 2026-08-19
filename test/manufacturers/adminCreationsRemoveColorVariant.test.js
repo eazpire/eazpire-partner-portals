@@ -7,6 +7,7 @@ import {
 } from "../../src/features/manufacturers/adminCreationsRemoveColorVariant.js";
 import {
   collectColorFacets,
+  filterProductsByColor,
   productHasColor,
   summarizeRemoveVariantImpact,
 } from "../../admin-creations-portal/js/products-color-facets.js";
@@ -212,6 +213,28 @@ describe("products color facets", () => {
         },
       ]).map((f) => f.label)
     ).toEqual(["White"]);
+  });
+
+  it("treats an empty live_colors list as no remaining colors (not mockup leftovers)", () => {
+    const scruffy = {
+      title: "Scruffy Dog",
+      live_colors: [],
+      grid_views: [{ src: "x", variant_label: "Black" }],
+    };
+    expect(productHasColor(scruffy, "Black")).toBe(false);
+    expect(collectColorFacets([scruffy]).map((f) => f.label)).toEqual([]);
+    expect(filterProductsByColor([scruffy, items[0]], "Black")).toEqual([items[0]]);
+  });
+
+  it("filters the grid to products that still have the selected live color", () => {
+    const stillBlack = { title: "Keep", live_colors: ["Black", "White"] };
+    const removedBlack = {
+      title: "Scruffy Dog",
+      live_colors: ["White", "Navy"],
+      grid_views: [{ src: "old", variant_label: "Black" }],
+    };
+    expect(filterProductsByColor([stillBlack, removedBlack], "Black")).toEqual([stillBlack]);
+    expect(filterProductsByColor([stillBlack, removedBlack], "")).toEqual([stillBlack, removedBlack]);
   });
 
   it("summarizes remove-variant impact across channels", () => {

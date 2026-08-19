@@ -288,6 +288,12 @@ describe("adminCreationsProductListEnrich", () => {
       },
       publications: { edges: [] },
       resourcePublications: { edges: [] },
+      variants: {
+        nodes: [
+          { selectedOptions: [{ name: "Color", value: "White" }, { name: "Size", value: "S" }] },
+          { selectedOptions: [{ name: "Color", value: "Red" }, { name: "Size", value: "M" }] },
+        ],
+      },
     };
     const nodes = indexShopifyNodesById([node]);
     const [row] = await enrichCreationsProductListFacets(
@@ -320,6 +326,44 @@ describe("adminCreationsProductListEnrich", () => {
       "Red|front|preview-default",
     ]);
     expect(row.alt_image_groups.map((g) => g.variant_label).sort()).toEqual(["Red", "White"]);
+    expect(row.live_colors).toEqual(["White", "Red"]);
+  });
+
+  it("enrich live_colors ignore leftover mockup labels when Shopify no longer has that color", async () => {
+    const { enrichCreationsProductListFacets } = await import(
+      "../../src/features/manufacturers/adminCreationsProductListEnrich.js"
+    );
+    const node = {
+      id: "gid://shopify/Product/10366679154970",
+      status: "ACTIVE",
+      totalVariants: { count: 4 },
+      images: {
+        edges: [{ node: { url: "https://cdn.example/black.png", altText: "Black|front" } }],
+      },
+      metafields: { edges: [] },
+      publications: { edges: [] },
+      resourcePublications: { edges: [] },
+      variants: {
+        nodes: [
+          { selectedOptions: [{ name: "Color", value: "White" }, { name: "Size", value: "S" }] },
+          { selectedOptions: [{ name: "Color", value: "Navy" }, { name: "Size", value: "M" }] },
+        ],
+      },
+    };
+    const [row] = await enrichCreationsProductListFacets(
+      {},
+      [
+        {
+          id: "10366679154970",
+          shopify_product_id: "10366679154970",
+          title: "Scruffy Dog",
+          live_colors: ["Black"],
+          grid_views: [{ src: "https://cdn.example/black.png", variant_label: "Black" }],
+        },
+      ],
+      indexShopifyNodesById([node])
+    );
+    expect(row.live_colors).toEqual(["White", "Navy"]);
   });
 
   it("indexShopifyNodesById normalizes ids and skips unresolvable nodes", () => {

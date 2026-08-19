@@ -21,7 +21,11 @@ import {
   repairStalePrintifyListingStatusPublishing,
 } from "../publish/printifyListingStatus.js";
 import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
-import { normalizeShopifyProductId, indexShopifyNodesById } from "./adminCreationsShopifyList.js";
+import {
+  normalizeShopifyProductId,
+  indexShopifyNodesById,
+  liveColorsFromShopifyNode,
+} from "./adminCreationsShopifyList.js";
 import {
   inferMockupViewFromSrc,
   MOCKUP_VIEW_ORDER,
@@ -1088,6 +1092,7 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
       listing_visibility: filterVisibilityForProduct(product, node, link),
       printify_status: printifyStatus || null,
       printify_mock_urls: mockUrls,
+      live_colors: node ? liveColorsFromShopifyNode(node) : product.live_colors,
     };
   });
 }

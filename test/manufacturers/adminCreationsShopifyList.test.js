@@ -316,6 +316,24 @@ describe("adminCreationsShopifyList", () => {
     expect(mapShopifyNodeToProduct(node, "printify", new Map()).live_colors).toEqual(["White", "Navy"]);
   });
 
+  it("does not invent live colors from Size options or leftover image alts", async () => {
+    const { liveColorsFromShopifyNode, mapShopifyNodeToProduct } = await import(
+      "../../src/features/manufacturers/adminCreationsShopifyList.js"
+    );
+    const node = {
+      id: "gid://shopify/Product/92",
+      title: "Size only",
+      images: {
+        edges: [{ node: { url: "https://cdn.example/black.png", altText: "Black|front" } }],
+      },
+      variants: {
+        nodes: [{ selectedOptions: [{ name: "Size", value: "M" }] }],
+      },
+    };
+    expect(liveColorsFromShopifyNode(node)).toEqual([]);
+    expect(mapShopifyNodeToProduct(node, "printify", new Map()).live_colors).toEqual([]);
+  });
+
   it("exposes targeted Shopify search queries (no full-catalog bucket scans)", () => {
     expect(PRINTIFY_SHOPIFY_STORE_QUERY).toMatch(/printify_product_id|provider:printify|listing_origin:creator/);
     expect(TODIFY_SHOPIFY_STORE_QUERY).toMatch(/provider:todify/);
