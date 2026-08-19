@@ -11,6 +11,11 @@ import {
   summarizeRemoveVariantImpact,
 } from "../../admin-creations-portal/js/products-color-facets.js";
 import { resolveVariantEnabledForCatalogRow } from "../../src/features/product/resolveVariantEnabled.js";
+import {
+  colorsMatchLabel,
+  selectShopifyVariantsByColor,
+  shopifyColorOptionIndex,
+} from "../../src/features/manufacturers/removeShopifyColorVariants.js";
 
 function softstyleProduct() {
   return {
@@ -116,6 +121,31 @@ describe("resolveVariantEnabledForCatalogRow", () => {
         colorIdx: 0,
       })
     ).toBe(false);
+  });
+});
+
+describe("removeShopifyColorVariants", () => {
+  const shopifyProduct = {
+    options: [
+      { name: "Color", values: ["Black", "White"] },
+      { name: "Size", values: ["S", "M"] },
+    ],
+    variants: [
+      { id: 1, option1: "Black", option2: "S", title: "Black / S" },
+      { id: 2, option1: "Schwarz", option2: "M", title: "Schwarz / M" },
+      { id: 3, option1: "White", option2: "S", title: "White / S" },
+    ],
+  };
+
+  it("finds the Color option and matches Black/Schwarz", () => {
+    expect(shopifyColorOptionIndex(shopifyProduct)).toBe(0);
+    expect(colorsMatchLabel("Black", "schwarz")).toBe(true);
+    expect(selectShopifyVariantsByColor(shopifyProduct, "Black").map((v) => v.id)).toEqual([1, 2]);
+  });
+
+  it("leaves other colors untouched", () => {
+    expect(selectShopifyVariantsByColor(shopifyProduct, "White")).toHaveLength(1);
+    expect(selectShopifyVariantsByColor(shopifyProduct, "Navy")).toHaveLength(0);
   });
 });
 

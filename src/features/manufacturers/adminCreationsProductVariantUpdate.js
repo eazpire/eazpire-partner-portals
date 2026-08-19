@@ -116,6 +116,7 @@ async function processVariantUpdate(env, ctx, {
   existingConfig,
   shopifyProductId,
   publishedDesignId,
+  removeColor,
 }) {
   const config = buildConfigFromVariantsMap(variantsMap, existingConfig);
   const enabledCount = Object.values(config.variants).filter((v) => v.enabled !== false).length;
@@ -178,17 +179,28 @@ async function processVariantUpdate(env, ctx, {
             productKey,
           }
         );
-        const { ensureShopifyVariantSyncAfterPrintifyPublish } = await import(
-          "../publish/ensureShopifyVariantSync.js"
-        );
-        await ensureShopifyVariantSyncAfterPrintifyPublish(env, {
-          printifyProductId: String(printifyProductId),
-          shopifyProductId,
-          productKey,
-          enabledVariantCount: enabledCount,
-          pollAttempts: 4,
-          pollIntervalMs: 2500,
-        });
+        if (removeColor) {
+          await markChannelProgress(env, progressKey, i, "syncing", 80, `Removing ${removeColor} from Shopify…`);
+          const { deleteShopifyVariantsByColor } = await import("./removeShopifyColorVariants.js");
+          const removed = await deleteShopifyVariantsByColor(env, shopifyProductId, removeColor);
+          if (removed.remaining > 0) {
+            throw new Error(
+              `Shopify still has ${removed.remaining} ${removeColor} variant(s) after delete`
+            );
+          }
+        } else {
+          const { ensureShopifyVariantSyncAfterPrintifyPublish } = await import(
+            "../publish/ensureShopifyVariantSync.js"
+          );
+          await ensureShopifyVariantSyncAfterPrintifyPublish(env, {
+            printifyProductId: String(printifyProductId),
+            shopifyProductId,
+            productKey,
+            enabledVariantCount: enabledCount,
+            pollAttempts: 4,
+            pollIntervalMs: 2500,
+          });
+        }
         await markChannelProgress(env, progressKey, i, "completed", 100, "Shopify variants published");
       } else if (ch === "amazon_europa" || ch === "amazon_amerika") {
         const continent = ch === "amazon_amerika" ? "amerika" : "europa";
@@ -267,6 +279,7 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
     const productTitle = String(body.product_title || "").trim() || null;
     const mockSlides = Array.isArray(body.mock_slides) ? body.mock_slides : [];
     const ownerId = String(body.owner_id || "admin").trim() || "admin";
+    const removeColor = String(body.remove_color || body.color || "").trim() || null;
 
     if (!shopifyProductId) return json({ ok: false, error: "shopify_product_id_required" }, 400, cors);
     if (!productKey) return json({ ok: false, error: "product_key_required" }, 400, cors);
@@ -302,6 +315,7 @@ export async function handleAdminCreationsProductVariantUpdate(request, env, ctx
       existingConfig,
       shopifyProductId,
       publishedDesignId,
+      removeColor,
     });
 
     if (!waitForResult && ctx?.waitUntil) {

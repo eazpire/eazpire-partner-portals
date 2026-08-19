@@ -132,6 +132,7 @@ export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) 
       existing_config: body.existing_config || null,
       channels,
       mock_slides: Array.isArray(body.mock_slides) ? body.mock_slides : [],
+      remove_color: color,
       wait: true,
     });
 
