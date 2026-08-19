@@ -134,6 +134,15 @@ function facetLabel(section, key) {
   return PRODUCT_LABELS[section]?.[key] || key;
 }
 
+function mergeStaticFacets(staticList, facetList) {
+  const byKey = new Map((facetList || []).map((f) => [String(f.key), f]));
+  return staticList.map((opt) => ({
+    key: opt.key,
+    label: byKey.get(opt.key)?.label || opt.label,
+    count: Number(byKey.get(opt.key)?.count) || 0,
+  }));
+}
+
 function triSwitchHtml(sectionKey, value, state) {
   const st = Number(state) === 1 || Number(state) === -1 ? Number(state) : 0;
   return `<div class="cr-pf-triswitch" data-state="${st}" data-jl-section="${escapeHtml(sectionKey)}" data-jl-key="${escapeHtml(String(value))}" role="group">
@@ -189,8 +198,8 @@ export function logsFilterHtml(state, facets) {
     status: facets?.status || [],
     type: facets?.type || [],
     source: facets?.source || [],
-    time_range: LOG_STATIC_FACETS.time_range,
-    error: LOG_STATIC_FACETS.error,
+    time_range: mergeStaticFacets(LOG_STATIC_FACETS.time_range, facets?.time_range),
+    error: mergeStaticFacets(LOG_STATIC_FACETS.error, facets?.error),
   };
   return `
     <div class="cr-pf-search">
