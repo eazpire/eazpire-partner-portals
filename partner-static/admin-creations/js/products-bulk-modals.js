@@ -388,6 +388,23 @@ function formatRemoveVariantError(err) {
   return code || "Remove variant failed";
 }
 
+async function waitForRemoveVariantSession(sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const started = Date.now();
+  while (Date.now() - started < 180000) {
+    const prog = await partnerFetch("get-publish-progress", { query: { session_id: sid } });
+    const products = prog?.products || [];
+    const failed = products.find((p) => p.status === "error");
+    if (failed) throw new Error(failed.message || "Remove variant failed");
+    if (prog?.done || (products.length && products.every((p) => p.status === "completed"))) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error("Remove variant timed out");
+}
+
 /** Disable one color on selected Printify listings and sync Shopify / Amazon. */
 export async function openProductsRemoveVariantModal(items, { color, onDone, onStarted } = {}) {
   const picked = String(color || "").trim();
@@ -459,7 +476,7 @@ export async function openProductsRemoveVariantModal(items, { color, onDone, onS
             return { ok: false, error: "No Printify listing is linked" };
           }
           try {
-            await partnerFetch("admin-creations-remove-color-variant", {
+            const data = await partnerFetch("admin-creations-remove-color-variant", {
               method: "POST",
               body: {
                 color: picked,
@@ -474,6 +491,7 @@ export async function openProductsRemoveVariantModal(items, { color, onDone, onS
                 channels: channelsForRemoveColorVariant(item),
               },
             });
+            if (data?.session_id) await waitForRemoveVariantSession(data.session_id);
             return { ok: true };
           } catch (err) {
             throw new Error(formatRemoveVariantError(err.data || err));

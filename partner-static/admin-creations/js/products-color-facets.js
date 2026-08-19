@@ -109,6 +109,11 @@ export function colorLabelsOf(item) {
     seen.add(norm);
     labels.push(label);
   };
+  const live = Array.isArray(item?.live_colors) ? item.live_colors : [];
+  if (live.length) {
+    for (const label of live) push(label);
+    return labels;
+  }
   for (const view of Array.isArray(item?.grid_views) ? item.grid_views : []) {
     push(view?.variant_label || view?.variant);
   }

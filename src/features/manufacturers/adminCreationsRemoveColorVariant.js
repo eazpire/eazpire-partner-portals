@@ -5,7 +5,6 @@
 
 import { json, getCorsHeaders } from "../../utils/response.js";
 import { getPrintifyProduct } from "../../utils/printify.js";
-import { handleAdminCreationsProductVariantUpdate } from "./adminCreationsProductVariantUpdate.js";
 
 export function normalizeColorLabel(value) {
   return String(value || "")
@@ -45,6 +44,7 @@ export function buildVariantsMapDisablingColor(product, colorLabel) {
   const map = {};
   let disabled = 0;
   let remaining = 0;
+  let enabledOfColor = 0;
   const disabledIds = [];
   for (const v of variants) {
     const id = Number(v?.id);
@@ -56,11 +56,12 @@ export function buildVariantsMapDisablingColor(product, colorLabel) {
     if (disable) {
       disabled += 1;
       disabledIds.push(id);
+      if (v?.is_enabled !== false) enabledOfColor += 1;
     } else if (keepEnabled) {
       remaining += 1;
     }
   }
-  return { variantsMap: map, disabled, remaining, disabledIds, matched: disabled > 0 };
+  return { variantsMap: map, disabled, remaining, disabledIds, matched: disabled > 0, enabledOfColor };
 }
 
 export function channelsForRemoveColorVariant(item) {
@@ -76,13 +77,37 @@ export function channelsForRemoveColorVariant(item) {
   return [...new Set(channels)];
 }
 
-function mockRequest(body) {
-  return {
-    method: "POST",
-    url: "https://local/apps/creator-dispatch?op=admin-creations-product-variant-update",
-    headers: new Headers({ "Content-Type": "application/json", origin: "https://admin.eazpire.com" }),
-    json: async () => body,
-  };
+function buildPrintifyEnabledPayload(product, variantsMap) {
+  return (product?.variants || []).map((v) => {
+    const row = variantsMap[String(v.id)];
+    const price = typeof v.price === "string" ? parseInt(v.price, 10) : v.price;
+    return {
+      id: v.id,
+      price,
+      is_enabled: row ? row.enabled !== false : v.is_enabled !== false,
+    };
+  });
+}
+
+async function putPrintifyEnabledFlags(env, printifyProductId, product, variantsMap) {
+  const shopId = String(env.PRINTIFY_SHOP_ID || "").trim();
+  if (!env.PRINTIFY_API_KEY || !shopId) throw new Error("Printify is not configured");
+  const res = await fetch(
+    `https://api.printify.com/v1/shops/${shopId}/products/${encodeURIComponent(printifyProductId)}.json`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${env.PRINTIFY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ variants: buildPrintifyEnabledPayload(product, variantsMap) }),
+      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined,
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Printify update failed: ${res.status} ${String(text).slice(0, 180)}`);
+  }
 }
 
 export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) {
@@ -104,39 +129,135 @@ export async function handleAdminCreationsRemoveColorVariant(request, env, ctx) 
     if (!product) return json({ ok: false, error: "printify_product_missing" }, 404, cors);
 
     const plan = buildVariantsMapDisablingColor(product, color);
-    if (!plan.matched) {
-      return json({ ok: false, error: "color_not_on_product", color }, 400, cors);
-    }
-    if (plan.remaining < 1) {
+    if (plan.matched && plan.remaining < 1 && plan.enabledOfColor > 0) {
       return json({ ok: false, error: "last_color_blocked", color }, 400, cors);
     }
 
-    const channels = Array.isArray(body.channels) && body.channels.length
-      ? body.channels.map((c) => String(c || "").trim()).filter(Boolean)
-      : channelsForRemoveColorVariant({
-          ...body,
-          printify_product_id: printifyProductId,
-          shopify_product_id: shopifyProductId,
-        });
+    const { deleteShopifyVariantsByColor } = await import("./removeShopifyColorVariants.js");
+    const shopifyAlreadyGone = async () => {
+      const removed = await deleteShopifyVariantsByColor(env, shopifyProductId, color);
+      return removed;
+    };
 
-    const updateReq = mockRequest({
+    // Color already off in Printify: only clean leftover Shopify SKUs. Never re-PUT 400+ variants.
+    if (!plan.matched || plan.enabledOfColor === 0) {
+      const removed = await shopifyAlreadyGone();
+      if (removed.remaining > 0) {
+        return json(
+          {
+            ok: false,
+            error: "shopify_delete_incomplete",
+            message: `Shopify still has ${removed.remaining} ${color} variant(s)`,
+          },
+          500,
+          cors
+        );
+      }
+      return json(
+        {
+          ok: true,
+          already_removed: true,
+          color,
+          shopify_deleted: removed.deleted || 0,
+        },
+        200,
+        cors
+      );
+    }
+
+    const sessionId = `remove-color-${shopifyProductId}-${Date.now()}`;
+    const progressKey = `publish:${sessionId}`;
+    const channels = ["printify", "shopify"];
+    const initialProgress = {
+      session_id: sessionId,
+      done: false,
+      has_error: false,
+      publish_source: "admin-variant-update",
       shopify_product_id: shopifyProductId,
       product_key: productKey,
-      print_provider_id: Number(body.print_provider_id || product.print_provider_id || 0) || product.print_provider_id,
-      printify_product_id: printifyProductId,
-      design_id: body.design_id ?? null,
-      published_design_id: body.published_design_id ?? null,
-      product_title: body.product_title || product.title || null,
-      owner_id: body.owner_id || "admin",
-      variants: plan.variantsMap,
-      existing_config: body.existing_config || null,
-      channels,
-      mock_slides: Array.isArray(body.mock_slides) ? body.mock_slides : [],
-      remove_color: color,
-      wait: true,
-    });
+      started_at: Date.now(),
+      updated_at: Date.now(),
+      products: channels.map((ch) => ({
+        product_key: productKey,
+        channel: ch,
+        channel_label: ch === "printify" ? "Printify" : "Shopify",
+        status: "pending",
+        progress: 0,
+        message: "Waiting…",
+      })),
+    };
+    if (env.JOBS) await env.JOBS.put(progressKey, JSON.stringify(initialProgress));
 
-    return handleAdminCreationsProductVariantUpdate(updateReq, env, ctx);
+    const work = (async () => {
+      const patch = async (index, status, progress, message) => {
+        if (!env.JOBS) return;
+        const cur = JSON.parse((await env.JOBS.get(progressKey)) || "{}");
+        if (!cur.products?.[index]) return;
+        cur.products[index] = { ...cur.products[index], status, progress, message };
+        cur.updated_at = Date.now();
+        await env.JOBS.put(progressKey, JSON.stringify(cur));
+      };
+      try {
+        await patch(0, "running", 20, `Disabling ${color} on Printify…`);
+        await putPrintifyEnabledFlags(env, printifyProductId, product, plan.variantsMap);
+        await patch(0, "completed", 100, `${plan.enabledOfColor} variant(s) disabled`);
+        await patch(1, "running", 60, `Removing ${color} from Shopify…`);
+        const removed = await shopifyAlreadyGone();
+        if (removed.remaining > 0) {
+          throw new Error(`Shopify still has ${removed.remaining} ${color} variant(s)`);
+        }
+        await patch(1, "completed", 100, removed.deleted ? `Removed ${removed.deleted} Shopify variant(s)` : "Shopify already in sync");
+        if (env.JOBS) {
+          const cur = JSON.parse((await env.JOBS.get(progressKey)) || "{}");
+          cur.done = true;
+          cur.has_error = false;
+          cur.updated_at = Date.now();
+          await env.JOBS.put(progressKey, JSON.stringify(cur));
+        }
+      } catch (err) {
+        const message = err?.message || String(err);
+        console.error("[admin-creations-remove-color-variant] background", message);
+        if (env.JOBS) {
+          const cur = JSON.parse((await env.JOBS.get(progressKey)) || "{}");
+          const running = (cur.products || []).findIndex((p) => p.status === "running" || p.status === "pending");
+          const idx = running >= 0 ? running : 0;
+          if (cur.products?.[idx]) {
+            cur.products[idx] = { ...cur.products[idx], status: "error", progress: 0, message };
+          }
+          cur.done = true;
+          cur.has_error = true;
+          cur.updated_at = Date.now();
+          await env.JOBS.put(progressKey, JSON.stringify(cur));
+        }
+      }
+    })();
+
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(work);
+      return json(
+        {
+          ok: true,
+          session_id: sessionId,
+          started: true,
+          color,
+          printify_disabled: plan.enabledOfColor,
+        },
+        202,
+        cors
+      );
+    }
+
+    await work;
+    const progress = env.JOBS ? JSON.parse((await env.JOBS.get(progressKey)) || "{}") : {};
+    if (progress.has_error) {
+      const failed = (progress.products || []).find((p) => p.status === "error");
+      return json(
+        { ok: false, error: "variant_update_failed", message: failed?.message || "Remove variant failed", session_id: sessionId },
+        500,
+        cors
+      );
+    }
+    return json({ ok: true, session_id: sessionId, color }, 200, cors);
   } catch (err) {
     console.error("[admin-creations-remove-color-variant]", err);
     return json({ ok: false, error: err?.message || "internal_error" }, 500, cors);

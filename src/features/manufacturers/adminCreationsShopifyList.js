@@ -102,6 +102,11 @@ const PRODUCT_NODE_FIELDS = `
       }
     }
   }
+  variants(first: 100) {
+    nodes {
+      selectedOptions { name value }
+    }
+  }
   metafields(first: 100) {
     edges {
       node {
@@ -281,6 +286,28 @@ function shopifyStatusToIsActive(status) {
 
 function imageUrlFromNode(node) {
   return node?.featuredMedia?.image?.url || null;
+}
+
+const COLOR_OPTION_NAMES = new Set(["color", "colors", "colour", "colours", "farbe", "farben"]);
+
+/** Live sellable colors from Shopify variants — not leftover mockup alt labels. */
+export function liveColorsFromShopifyNode(node) {
+  const labels = [];
+  const seen = new Set();
+  const nodes = node?.variants?.nodes
+    || (Array.isArray(node?.variants?.edges) ? node.variants.edges.map((e) => e.node) : []);
+  for (const v of nodes) {
+    const opts = Array.isArray(v?.selectedOptions) ? v.selectedOptions : [];
+    const colorOpt = opts.find((o) => COLOR_OPTION_NAMES.has(String(o?.name || "").toLowerCase()));
+    const raw = String(colorOpt?.value || opts[0]?.value || "").trim();
+    if (!raw) continue;
+    const norm = raw.toLowerCase();
+    if (norm === "default" || norm === "unassigned") continue;
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    labels.push(raw);
+  }
+  return labels;
 }
 
 function imageListFromNode(node) {
@@ -527,6 +554,7 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
     preview_url: imageUrl,
     images: gridViews.length ? gridViews.map((v) => v.src) : imageUrl ? [imageUrl] : [],
     grid_views: gridViews,
+    live_colors: liveColorsFromShopifyNode(node),
     category: shopifyProductType || categoryDefault,
     shopify_product_type: shopifyProductType || null,
     filter_category: shopifyProductType || "_empty",

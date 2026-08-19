@@ -65,6 +65,18 @@ describe("adminCreationsRemoveColorVariant", () => {
     expect(plan.variantsMap["102"].enabled).toBe(false);
     expect(plan.variantsMap["201"].enabled).toBe(true);
     expect(plan.variantsMap["202"].enabled).toBe(false);
+    expect(plan.enabledOfColor).toBe(2);
+  });
+
+  it("treats an already-disabled color as nothing left to change on Printify", () => {
+    const product = softstyleProduct();
+    product.variants = product.variants.map((v) =>
+      String(v.title).startsWith("Black") ? { ...v, is_enabled: false } : v
+    );
+    const plan = buildVariantsMapDisablingColor(product, "Black");
+    expect(plan.matched).toBe(true);
+    expect(plan.enabledOfColor).toBe(0);
+    expect(plan.remaining).toBe(1);
   });
 
   it("blocks removing the last remaining color", () => {
@@ -73,6 +85,7 @@ describe("adminCreationsRemoveColorVariant", () => {
     const plan = buildVariantsMapDisablingColor(product, "Black");
     expect(plan.remaining).toBe(0);
     expect(plan.matched).toBe(true);
+    expect(plan.enabledOfColor).toBe(2);
   });
 
   it("collects live channels from list flags", () => {
@@ -179,6 +192,26 @@ describe("products color facets", () => {
       ["Black", 2],
       ["White", 1],
     ]);
+  });
+
+  it("prefers live Shopify colors over leftover mockup labels", () => {
+    expect(
+      productHasColor(
+        {
+          live_colors: ["White", "Navy"],
+          grid_views: [{ src: "x", variant_label: "Black" }],
+        },
+        "Black"
+      )
+    ).toBe(false);
+    expect(
+      collectColorFacets([
+        {
+          live_colors: ["White"],
+          grid_views: [{ src: "x", variant_label: "Black" }],
+        },
+      ]).map((f) => f.label)
+    ).toEqual(["White"]);
   });
 
   it("summarizes remove-variant impact across channels", () => {
