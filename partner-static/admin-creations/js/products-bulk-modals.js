@@ -382,6 +382,9 @@ function formatRemoveVariantError(err) {
   if (code === "printify_product_id_required" || code === "printify_product_missing") {
     return "No Printify listing is linked";
   }
+  if (/http_504|http_524|http_503|timed?\s*out|Worker exceeded|network/i.test(code)) {
+    return "The request took too long. Try again — Printify and Shopify are now updated separately so this should finish.";
+  }
   return code || "Remove variant failed";
 }
 
@@ -446,12 +449,10 @@ export async function openProductsRemoveVariantModal(items, { color, onDone, onS
       const keys = selectedRowsFromRoot("cr-products-remove-variant-body");
       const selected = eligible.filter((item) => keys.has(listingKey(item)));
       if (!selected.length) throw new Error("Select at least one product");
-      setModalBusy(true, "Starting…");
       clearSelection();
       if (typeof onStarted === "function") onStarted();
-      setModalBusy(false);
-
-      const { ok, errors } = await startProductsActionDock(selected, {
+      // Return immediately so partner-shell closeModal() runs; dock shows progress / errors.
+      void startProductsActionDock(selected, {
         action: "remove-variant",
         runItem: async (item) => {
           if (!item.printify_product_id) {
@@ -478,8 +479,11 @@ export async function openProductsRemoveVariantModal(items, { color, onDone, onS
             throw new Error(formatRemoveVariantError(err.data || err));
           }
         },
+        onDone,
+      }).catch((e) => {
+        console.error("[products-bulk] remove-variant dock failed:", e);
+        showToast("Error", e?.message || "Remove variant failed");
       });
-      if (typeof onDone === "function") await onDone({ ok, errors });
     },
   });
   configurePrimaryConfirm("Remove variant");

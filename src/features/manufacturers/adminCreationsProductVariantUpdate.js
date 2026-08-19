@@ -156,6 +156,7 @@ async function processVariantUpdate(env, ctx, {
               printify_product_id: printifyProductId,
               variants: variantsPayload,
               create_job: false,
+              skip_catalog_merge: !!removeColor,
               product_key: productKey,
               design_id: designId || null,
             }),
@@ -167,18 +168,6 @@ async function processVariantUpdate(env, ctx, {
         await markChannelProgress(env, progressKey, i, "completed", 100, `${enabledCount} variant(s) updated`);
       } else if (ch === "shopify") {
         await markChannelProgress(env, progressKey, i, "syncing", 60, "Syncing Shopify listing…");
-        if (!printifyProductId) throw new Error("Printify product not linked");
-        const { publishPrintifyProduct } = await import("../../utils/printify.js");
-        await publishPrintifyProduct(
-          env,
-          printifyProductId,
-          { title: false, description: false, images: false, variants: true, tags: false },
-          {
-            skipMockupGate: true,
-            skipPrintifyPrimaryImage: true,
-            productKey,
-          }
-        );
         if (removeColor) {
           await markChannelProgress(env, progressKey, i, "syncing", 80, `Removing ${removeColor} from Shopify…`);
           const { deleteShopifyVariantsByColor } = await import("./removeShopifyColorVariants.js");
@@ -189,6 +178,18 @@ async function processVariantUpdate(env, ctx, {
             );
           }
         } else {
+          if (!printifyProductId) throw new Error("Printify product not linked");
+          const { publishPrintifyProduct } = await import("../../utils/printify.js");
+          await publishPrintifyProduct(
+            env,
+            printifyProductId,
+            { title: false, description: false, images: false, variants: true, tags: false },
+            {
+              skipMockupGate: true,
+              skipPrintifyPrimaryImage: true,
+              productKey,
+            }
+          );
           const { ensureShopifyVariantSyncAfterPrintifyPublish } = await import(
             "../publish/ensureShopifyVariantSync.js"
           );
