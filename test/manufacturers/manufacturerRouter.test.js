@@ -26,6 +26,7 @@ describe("manufacturerRouter ops", () => {
     expect(isManufacturerOp("admin-blueprint-approve")).toBe(true);
     expect(isManufacturerOp("admin-creations-list")).toBe(true);
     expect(isManufacturerOp("admin-creations-printify-products")).toBe(true);
+    expect(isManufacturerOp("admin-creations-remove-color-variant")).toBe(true);
     expect(isManufacturerOp("admin-creations-customer-products")).toBe(true);
     expect(isManufacturerOp("admin-creations-shopify-products")).toBe(true);
     expect(isManufacturerOp("admin-manufacturer-product-editor-bundle")).toBe(true);

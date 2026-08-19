@@ -325,6 +325,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-shopify-product-detail",
   "admin-creations-shopify-product-unpublish",
   "admin-creations-product-variant-update",
+  "admin-creations-remove-color-variant",
   "admin-creations-product-action-lock",
   "admin-creations-product-action-unlock",
   "admin-creations-fix-alt-texts",
@@ -1601,6 +1602,12 @@ export async function handleManufacturerRouter(request, env, ctx) {
         "./adminCreationsProductVariantUpdate.js"
       );
       return handleAdminCreationsProductVariantUpdate(request, env, ctx);
+    }
+    if (op === "admin-creations-remove-color-variant" && request.method === "POST") {
+      const { handleAdminCreationsRemoveColorVariant } = await import(
+        "./adminCreationsRemoveColorVariant.js"
+      );
+      return handleAdminCreationsRemoveColorVariant(request, env, ctx);
     }
     if (op === "admin-creations-product-action-lock" && request.method === "POST") {
       const { handleAdminCreationsProductActionLock } = await import("./adminCreationsProductActionLock.js");

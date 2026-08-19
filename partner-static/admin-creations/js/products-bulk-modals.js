@@ -367,3 +367,120 @@ export async function openProductsBulkFixAltTextsModal(items, { onDone } = {}) {
   });
   configurePrimaryConfirm("Queue and repair");
 }
+
+function shopifyIdOf(item) {
+  return String(item?.shopify_product_id || item?.id || "")
+    .replace("gid://shopify/Product/", "")
+    .replace(/\.0$/, "")
+    .trim();
+}
+
+function formatRemoveVariantError(err) {
+  const code = String(err?.error || err?.message || err || "");
+  if (code === "last_color_blocked") return "This is the last remaining color on the listing";
+  if (code === "color_not_on_product") return "This color is not on the Printify listing";
+  if (code === "printify_product_id_required" || code === "printify_product_missing") {
+    return "No Printify listing is linked";
+  }
+  return code || "Remove variant failed";
+}
+
+/** Disable one color on selected Printify listings and sync Shopify / Amazon. */
+export async function openProductsRemoveVariantModal(items, { color, onDone, onStarted } = {}) {
+  const picked = String(color || "").trim();
+  if (!picked) {
+    releaseBulkDock();
+    showToast("Remove Variant", "Select a color in the Variants bar first");
+    return;
+  }
+
+  const { summarizeRemoveVariantImpact, productHasColor, channelsForRemoveColorVariant, colorHexForName } =
+    await import("./products-color-facets.js");
+  const impact = summarizeRemoveVariantImpact(items, picked);
+  const eligible = impact.products
+    .map((row) => row.item)
+    .filter((item) => item.printify_product_id && shopifyIdOf(item) && item.product_key);
+
+  if (!eligible.length) {
+    releaseBulkDock();
+    showToast("Remove Variant", "No selected products have that color on a Printify listing");
+    return;
+  }
+
+  suppressBulkDock();
+  const channelLine = impact.channels.length
+    ? impact.channels.map((ch) => `${escapeHtml(ch.label)} (${ch.count})`).join(", ")
+    : "Printify / Shopify (resolved per product)";
+  const hex = colorHexForName(picked);
+
+  openModal({
+    title: eligible.length === 1 ? "Remove variant" : `Remove variant from ${eligible.length} products`,
+    bodyHtml: `
+      <p class="confirm-modal-message">
+        Disable <strong>${escapeHtml(picked)}</strong> on the selected listings. Printify is updated first, then Shopify and any live Amazon channels stay in sync.
+      </p>
+      <div class="cr-remove-variant-summary">
+        <div class="cr-remove-variant-summary__color" style="--cr-dot:${escapeHtml(hex)}">
+          <span class="cr-remove-variant-summary__dot" aria-hidden="true"></span>
+          <span>${escapeHtml(picked)}</span>
+        </div>
+        <p><strong>${eligible.length}</strong> product${eligible.length === 1 ? "" : "s"} · Channels: ${channelLine}</p>
+      </div>
+      <div class="cr-bulk-scroll" id="cr-products-remove-variant-body">
+        ${eligible
+          .map((item) => {
+            const channels = channelsForRemoveColorVariant(item)
+              .map((id) => {
+                const found = impact.channels.find((c) => c.id === id);
+                return found?.label || id;
+              })
+              .join(", ");
+            return `${productRowHtml(item, { checked: true })}${
+              channels ? `<p class="cr-remove-variant-channels">${escapeHtml(channels)}</p>` : ""
+            }`;
+          })
+          .join("")}
+      </div>`,
+    onCancel: () => releaseBulkDock(),
+    onSave: async () => {
+      const keys = selectedRowsFromRoot("cr-products-remove-variant-body");
+      const selected = eligible.filter((item) => keys.has(listingKey(item)));
+      if (!selected.length) throw new Error("Select at least one product");
+      setModalBusy(true, "Starting…");
+      clearSelection();
+      if (typeof onStarted === "function") onStarted();
+      setModalBusy(false);
+
+      const { ok, errors } = await startProductsActionDock(selected, {
+        action: "remove-variant",
+        runItem: async (item) => {
+          if (!item.printify_product_id) {
+            return { ok: false, error: "No Printify listing is linked" };
+          }
+          try {
+            await partnerFetch("admin-creations-remove-color-variant", {
+              method: "POST",
+              body: {
+                color: picked,
+                printify_product_id: item.printify_product_id,
+                shopify_product_id: shopifyIdOf(item),
+                product_key: item.product_key,
+                design_id: item.design_id || null,
+                published_design_id: item.published_design_id || null,
+                product_title: productTitle(item),
+                owner_id: item.owner_id || "admin",
+                print_provider_id: item.print_provider_id || 0,
+                channels: channelsForRemoveColorVariant(item),
+              },
+            });
+            return { ok: true };
+          } catch (err) {
+            throw new Error(formatRemoveVariantError(err.data || err));
+          }
+        },
+      });
+      if (typeof onDone === "function") await onDone({ ok, errors });
+    },
+  });
+  configurePrimaryConfirm("Remove variant");
+}

@@ -114,6 +114,7 @@ function actionLabel(action) {
   if (action === "unpublish") return "Unpublishing";
   if (action === "update") return "Updating";
   if (action === "alt-texts") return "Fixing alt texts";
+  if (action === "remove-variant") return "Removing variant";
   return "Working";
 }
 
@@ -122,6 +123,7 @@ function actionDonePast(action) {
   if (action === "unpublish") return "unpublished";
   if (action === "update") return "updated";
   if (action === "alt-texts") return "checked and repaired";
+  if (action === "remove-variant") return "updated (variant removed)";
   return "processed";
 }
 

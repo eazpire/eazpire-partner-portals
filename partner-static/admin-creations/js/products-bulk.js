@@ -11,6 +11,9 @@ export { selectionKey };
 const selected = new Map(); // unique listing key -> product item
 /** When true, dock stays hidden even if selection is non-empty (e.g. while a bulk modal is open). */
 let dockSuppressed = false;
+/** `default` = Publish/Unpublish/Update; `variants` = Remove Variant only. */
+let dockMode = "default";
+let lastHandlers = {};
 
 export function isSelected(itemOrKey) {
   const key = typeof itemOrKey === "string" ? itemOrKey : selectionKey(itemOrKey);
@@ -84,10 +87,21 @@ function syncActionAvailability() {
   const publishBtn = document.querySelector('[data-cr-products-bulk="publish"]');
   const updateBtn = document.querySelector('[data-cr-products-bulk="update"]');
   const altBtn = document.querySelector('[data-cr-products-bulk="alt-texts"]');
+  const removeBtn = document.querySelector('[data-cr-products-bulk="remove-variant"]');
   const items = getSelectedItems();
   if (publishBtn) publishBtn.disabled = !items.some((p) => p.publish_eligible_amazon_eu);
   if (updateBtn) updateBtn.disabled = !items.some((p) => p.needs_update);
   if (altBtn) altBtn.disabled = !items.some(hasShopifyId);
+  if (removeBtn) {
+    const enabled = typeof lastHandlers.isRemoveVariantEnabled === "function"
+      ? lastHandlers.isRemoveVariantEnabled(items)
+      : items.length > 0;
+    removeBtn.disabled = !enabled;
+  }
+}
+
+export function refreshProductsBulkDock() {
+  refreshSelectionUi();
 }
 
 function refreshSelectionUi() {
@@ -106,19 +120,8 @@ function refreshSelectionUi() {
   });
 }
 
-export function ensureProductsBulkDock(_rootEl, handlers = {}) {
-  let dock = document.getElementById("cr-products-bulk-dock");
-  if (dock && !dock.querySelector('[data-cr-products-bulk="alt-texts"]')) {
-    dock.remove();
-    dock = null;
-  }
-  if (!dock) {
-    dock = document.createElement("div");
-    dock.id = "cr-products-bulk-dock";
-    dock.className = "cr-bulk-dock cr-bulk-dock--products";
-    dock.hidden = true;
-    dock.setAttribute("aria-hidden", "true");
-    dock.innerHTML = `
+function defaultDockHtml() {
+  return `
       <div class="cr-bulk-dock__panel" role="toolbar" aria-label="Product bulk actions">
         <span class="cr-bulk-dock__count" id="cr-products-bulk-count">0 selected</span>
         <div class="cr-bulk-dock__actions">
@@ -130,6 +133,51 @@ export function ensureProductsBulkDock(_rootEl, handlers = {}) {
           <button type="button" class="btn btn-primary cr-bulk-dock__btn" data-cr-products-bulk="publish">Publish</button>
         </div>
       </div>`;
+}
+
+function variantsDockHtml() {
+  return `
+      <div class="cr-bulk-dock__panel" role="toolbar" aria-label="Remove color variant">
+        <span class="cr-bulk-dock__count" id="cr-products-bulk-count">0 selected</span>
+        <div class="cr-bulk-dock__actions">
+          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="all">Select all</button>
+          <button type="button" class="btn btn-secondary cr-bulk-dock__btn" data-cr-products-bulk="none">Select none</button>
+          <button type="button" class="btn btn-primary cr-bulk-dock__btn cr-bulk-dock__btn--danger" data-cr-products-bulk="remove-variant">Remove Variant</button>
+        </div>
+      </div>`;
+}
+
+export function setProductsBulkDockMode(mode, handlers) {
+  dockMode = mode === "variants" ? "variants" : "default";
+  const dock = document.getElementById("cr-products-bulk-dock");
+  if (dock) dock.remove();
+  return ensureProductsBulkDock(null, handlers || lastHandlers);
+}
+
+export function getProductsBulkDockMode() {
+  return dockMode;
+}
+
+export function ensureProductsBulkDock(_rootEl, handlers = {}) {
+  lastHandlers = handlers || {};
+  let dock = document.getElementById("cr-products-bulk-dock");
+  const wantVariants = dockMode === "variants";
+  if (dock && dock.dataset.crDockMode !== (wantVariants ? "variants" : "default")) {
+    dock.remove();
+    dock = null;
+  }
+  if (dock && !wantVariants && !dock.querySelector('[data-cr-products-bulk="alt-texts"]')) {
+    dock.remove();
+    dock = null;
+  }
+  if (!dock) {
+    dock = document.createElement("div");
+    dock.id = "cr-products-bulk-dock";
+    dock.className = `cr-bulk-dock cr-bulk-dock--products${wantVariants ? " cr-bulk-dock--variants" : ""}`;
+    dock.dataset.crDockMode = wantVariants ? "variants" : "default";
+    dock.hidden = true;
+    dock.setAttribute("aria-hidden", "true");
+    dock.innerHTML = wantVariants ? variantsDockHtml() : defaultDockHtml();
   }
   // Must live on document.body — inside .main/.app-root overflow clips position:fixed.
   if (dock.parentElement !== document.body) {
@@ -145,13 +193,14 @@ export function ensureProductsBulkDock(_rootEl, handlers = {}) {
         releaseBulkDock();
         clearSelection();
       }
-      if (act === "publish" || act === "unpublish" || act === "update" || act === "alt-texts") {
+      if (act === "publish" || act === "unpublish" || act === "update" || act === "alt-texts" || act === "remove-variant") {
         suppressBulkDock();
       }
       if (act === "publish" && typeof handlers.onPublish === "function") handlers.onPublish(getSelectedItems());
       if (act === "unpublish" && typeof handlers.onUnpublish === "function") handlers.onUnpublish(getSelectedItems());
       if (act === "update" && typeof handlers.onUpdate === "function") handlers.onUpdate(getSelectedItems());
       if (act === "alt-texts" && typeof handlers.onFixAltTexts === "function") handlers.onFixAltTexts(getSelectedItems());
+      if (act === "remove-variant" && typeof handlers.onRemoveVariant === "function") handlers.onRemoveVariant(getSelectedItems());
     };
   });
 
@@ -162,8 +211,11 @@ export function ensureProductsBulkDock(_rootEl, handlers = {}) {
 /** Hide dock when leaving Products page (dock stays on body). */
 export function teardownProductsBulkDock() {
   dockSuppressed = false;
+  dockMode = "default";
+  lastHandlers = {};
   clearSelection();
-  applyDockVisibility();
+  const dock = document.getElementById("cr-products-bulk-dock");
+  if (dock) dock.remove();
 }
 
 function escapeAttr(s) {
