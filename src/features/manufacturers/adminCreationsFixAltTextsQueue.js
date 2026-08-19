@@ -105,7 +105,17 @@ export async function handleAdminCreationsEnqueueFixAltTexts(request, env) {
     );
   }
   if (!env.JOB_QUEUE_ADMIN_PUBLISH_REPAIR?.send) {
-    return json({ ok: false, error: "queue_unavailable", queue_enabled: false }, 500, cors);
+    return json(
+      {
+        ok: false,
+        error: "queue_unavailable",
+        message:
+          "The alt-text job queue is not connected on the admin portal. Bind JOB_QUEUE_ADMIN_PUBLISH_REPAIR (admin-jobs-publish-repair) on eazpire-partner-portals.",
+        queue_enabled: false,
+      },
+      500,
+      cors
+    );
   }
 
   const body = await request.json().catch(() => ({}));

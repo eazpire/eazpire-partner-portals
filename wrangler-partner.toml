@@ -126,3 +126,8 @@ binding = "JOB_QUEUE_UNPUBLISH"
 [[queues.producers]]
 queue = "creator-jobs-amazon-publish"
 binding = "JOB_QUEUE_AMAZON_PUBLISH"
+
+# Producer-only: Creations Portal Fix alt texts (+ publish repair retries); creator-engine consumes.
+[[queues.producers]]
+queue = "admin-jobs-publish-repair"
+binding = "JOB_QUEUE_ADMIN_PUBLISH_REPAIR"
