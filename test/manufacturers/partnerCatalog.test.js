@@ -1134,6 +1134,94 @@ describe("catalog studio service", () => {
     expect(result.items.map((i) => i.product_key)).toEqual(["todify-todify-hooded-tank"]);
     expect(catalogQueries.some((q) => q.sql.includes("product_active_print_providers"))).toBe(false);
   });
+
+  it("attaches aggregated automations from PAT rows without per-product queries", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const patSqls = [];
+    const catalogDb = {
+      prepare: (sql) => ({
+        bind: (...args) => ({
+          all: async () => {
+            if (sql.includes("FROM print_area_printify_templates")) {
+              patSqls.push({ sql, args });
+              return {
+                results: [
+                  {
+                    product_key: "tee-1",
+                    is_active: 1,
+                    auto_publish_enabled: 1,
+                    automation_shopify_sync_enabled: 1,
+                    automation_amazon_publish_enabled: 1,
+                    automation_amazon_markets_json: '{"DE":true,"FR":true}',
+                  },
+                  {
+                    product_key: "tee-1",
+                    is_active: 1,
+                    auto_publish_enabled: 0,
+                    automation_shopify_sync_enabled: 1,
+                    automation_amazon_publish_enabled: 1,
+                    automation_amazon_markets_json: '{"IT":true}',
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          first: async () => null,
+        }),
+        all: async () => ({ results: [] }),
+      }),
+    };
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: () => handler,
+          first: async () => null,
+          all: async () => {
+            if (sql.includes("FROM eazpire_products")) {
+              return {
+                results: [
+                  {
+                    product_key: "tee-1",
+                    title: "Classic Tee",
+                    catalog_status: "online",
+                    catalog_category_leaf: "T-Shirt",
+                    catalog_category_group: "Kleidung",
+                    version_count: 2,
+                    manufacturer_name: "Printify",
+                    blueprint_title: "Tee",
+                    blueprint_category: null,
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(mfgDb, { CATALOG_DB: catalogDb }, {
+      manufacturerId: "m1",
+      filter: "online",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(patSqls).toHaveLength(1);
+    expect(patSqls[0].sql).toContain("IN (?");
+    expect(result.items[0].automations).toMatchObject({
+      printify: true,
+      shopify: true,
+      amazon: true,
+      amazon_countries: ["FR", "DE", "IT"],
+      amazon_count: 3,
+      mixed: true,
+    });
+  });
 });
 
 describe("mirror drift status shape", () => {

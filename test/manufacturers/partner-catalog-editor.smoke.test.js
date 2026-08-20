@@ -233,6 +233,10 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain('initialTab: "review"');
     expect(studioSrc).toContain("renderCategorySidebar");
     expect(studioSrc).toContain("catalog-studio-filter-sidebar");
+    expect(studioSrc).toContain('"Automations"');
+    expect(studioSrc).toContain("cs-auto-pill--amazon");
+    expect(studioSrc).toContain("data-cs-amz-countries");
+    expect(studioSrc).toContain("wireAmazonAutomationPopovers");
   });
 
   it("provider-print-technical exports PAT merge helpers", () => {

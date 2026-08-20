@@ -5,7 +5,57 @@ import { openProductEditor } from "./catalog-editor/shell.js";
 import {
   groupProvidersByShipCountry,
   buildCountryFlagHtml,
+  countryDisplayName,
 } from "./catalog-editor/provider-country-groups.js";
+
+const PRINTIFY_AUTO_ICON = "https://printify.com/pfh/assets/png/favicon-300x300.png";
+const SHOPIFY_AUTO_ICON = `<svg class="cs-auto-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#95BF47" d="M16.6 5.1s-1.6-1.2-1.8-1.3c-.2-.1-.6-.1-.6-.1l-.3-1.1c0-.3-.2-.6-.5-.7-.1 0-.8-.2-1.5.4-.6.5-1.1 1.6-1.2 2.2-1.2.4-2 .6-2 .6S6.8 3.6 6.2 3.6c-.5 0-.6.4-.6.4L3 20.3l11.2 2.1 5.6-1.2s-1.7-15.6-1.8-16.1c0-.3-.3-.5-.4-.5-.3 0-1.7.4-1.7.4h.3c.4 0 .7.3.8.7l.4 2.2s-2.2-.7-4.1-.7c-2.1 0-2.2 1.4-2.2 1.7 0 1.2 3.3 1.6 3.3 4 0 2-1.6 3.2-3.6 3.2-2.3 0-3.5-1.1-3.5-1.1l.6-2s1.2.8 2.2.8c.6 0 1.1-.4 1.1-1 0-1.6-2.8-1.7-2.8-3.9 0-2 1.5-4 4.6-4 1.3 0 2.4.3 2.4.3l.6-2.2z"/></svg>`;
+const AMAZON_AUTO_ICON = `<svg class="cs-auto-icon cs-auto-icon--amazon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#FF9900" d="M14.4 12.2c-1.6.8-3.9 1.1-5.6.6-1-.3-1.8-.8-2.1-1.1-.1-.1-.3 0-.2.2.4 1.2 2.1 2.1 3.8 2.4 2.1.4 5-.2 6.7-1.3.3-.2.1-.4-.2-.3l-2.4-.5zm2.3-1.4c.2-.3.1-.6-.2-.7-.3-.1-.7-.1-1.2 0-.4.1-.8.3-1.1.5-.1.1-.1.2 0 .2.4.3.8.6 1.4.8.3.1.8.2 1.1.1.1 0 .2-.1 0-.2-.1-.2 0-.5 0-.7z"/><path fill="#232F3E" d="M16.7 15.1c-2.3 1.7-5.6 2.6-8.4 2.6-2.5 0-5.3-.7-7.4-2-.3-.2-.1-.5.2-.3 2.5 1.5 5.6 2.3 8.6 2.3 2.4 0 5-.5 7.3-1.6.4-.2.7.2.4.5-.2.3-.5.5-.7.5z"/></svg>`;
+
+function automationsFromRow(row) {
+  const a = row?.automations;
+  if (!a || typeof a !== "object") {
+    return { printify: false, shopify: false, amazon: false, amazon_countries: [], amazon_count: 0, mixed: false };
+  }
+  const countries = Array.isArray(a.amazon_countries)
+    ? a.amazon_countries.map((c) => String(c || "").toUpperCase()).filter(Boolean)
+    : [];
+  return {
+    printify: !!a.printify,
+    shopify: !!a.shopify,
+    amazon: !!a.amazon,
+    amazon_countries: countries,
+    amazon_count: Number(a.amazon_count) || countries.length,
+    mixed: !!a.mixed,
+  };
+}
+
+function renderAutomationsCell(row) {
+  const auto = automationsFromRow(row);
+  if (!auto.printify && !auto.shopify && !auto.amazon) {
+    return `<span class="cs-auto-empty text-muted" title="No auto-publish channels">—</span>`;
+  }
+  const pills = [];
+  if (auto.printify) {
+    pills.push(
+      `<span class="cs-auto-pill" title="Printify auto-publish on"><img class="cs-auto-icon" src="${PRINTIFY_AUTO_ICON}" alt="" width="14" height="14" loading="lazy" /><span>Printify</span></span>`
+    );
+  }
+  if (auto.shopify) {
+    pills.push(`<span class="cs-auto-pill" title="Shopify auto-publish on">${SHOPIFY_AUTO_ICON}<span>Shopify</span></span>`);
+  }
+  if (auto.amazon) {
+    const countriesJson = escapeHtml(JSON.stringify(auto.amazon_countries));
+    const count = auto.amazon_count || auto.amazon_countries.length;
+    pills.push(
+      `<button type="button" class="cs-auto-pill cs-auto-pill--amazon" data-cs-amz-countries="${countriesJson}" aria-expanded="false" title="Amazon auto-publish — click for countries">${AMAZON_AUTO_ICON}<span>Amazon</span><span class="cs-auto-count">${escapeHtml(String(count))}</span></button>`
+    );
+  }
+  const mixed = auto.mixed
+    ? `<span class="cs-auto-mixed" title="Some versions differ">~</span>`
+    : "";
+  return `<div class="cs-auto-pills">${pills.join("")}${mixed}</div>`;
+}
 
 const STATUS_FILTERS = [
   { key: "available", label: "Available" },
@@ -724,7 +774,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
   }
 
   return renderTable(
-    ["", "Title", "Country", "Print areas", "Status", "Versions", ""],
+    ["", "Title", "Country", "Print areas", "Status", "Versions", "Automations", ""],
     items
       .map((row, i) => {
         const isPending = row.kind === "pending_partner_product" || row.review_status === "pending_review";
@@ -745,6 +795,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
         reviewStatus: row.review_status || null,
       })}</td>
       <td>${escapeHtml(isPending ? "—" : (row.version_count ?? 0))}</td>
+      <td class="cs-auto-cell">${isPending ? `<span class="cs-auto-empty text-muted">—</span>` : renderAutomationsCell(row)}</td>
       <td>${action}</td>
     </tr>`;
       })
@@ -808,6 +859,96 @@ function wireProductsTable(container, reload) {
       e.stopPropagation();
       openPrintifyChoicePicker(btn.dataset.printifyBlueprintId, btn.dataset.printifyChoice, reload);
     };
+  });
+
+  wireAmazonAutomationPopovers(productsEl);
+}
+
+function closeAmazonAutomationPopover() {
+  document.querySelectorAll(".cs-auto-amz-pop").forEach((el) => el.remove());
+  document.querySelectorAll(".cs-auto-pill--amazon[aria-expanded='true']").forEach((btn) => {
+    btn.setAttribute("aria-expanded", "false");
+  });
+  if (closeAmazonAutomationPopover._onDoc) {
+    document.removeEventListener("pointerdown", closeAmazonAutomationPopover._onDoc, true);
+    closeAmazonAutomationPopover._onDoc = null;
+  }
+  if (closeAmazonAutomationPopover._onKey) {
+    document.removeEventListener("keydown", closeAmazonAutomationPopover._onKey, true);
+    closeAmazonAutomationPopover._onKey = null;
+  }
+}
+
+function amazonCountryLabel(code) {
+  const raw = String(code || "").toUpperCase();
+  if (raw === "UK" || raw === "GB") return countryDisplayName("UK") || "United Kingdom";
+  return countryDisplayName(raw) || getCountryDisplayName(raw) || raw;
+}
+
+function openAmazonAutomationPopover(anchor) {
+  const alreadyOpen = anchor.getAttribute("aria-expanded") === "true";
+  closeAmazonAutomationPopover();
+  if (alreadyOpen) return;
+
+  let countries = [];
+  try {
+    countries = JSON.parse(anchor.dataset.csAmzCountries || "[]");
+  } catch {
+    countries = [];
+  }
+  if (!Array.isArray(countries) || !countries.length) countries = [];
+
+  const pop = document.createElement("div");
+  pop.className = "cs-auto-amz-pop";
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Amazon countries");
+  pop.innerHTML = countries.length
+    ? `<ul class="cs-auto-amz-pop__list">${countries
+        .map((code) => {
+          const cc = String(code || "").toUpperCase();
+          const name = amazonCountryLabel(cc);
+          return `<li class="cs-auto-amz-pop__item">${buildCountryFlagHtml(cc, {
+            className: "cs-country-flag",
+            title: name,
+            ariaLabel: name,
+          })}<span class="cs-auto-amz-pop__code">${escapeHtml(cc)}</span></li>`;
+        })
+        .join("")}</ul>`
+    : `<p class="cs-auto-amz-pop__empty">No countries selected</p>`;
+
+  document.body.appendChild(pop);
+  const rect = anchor.getBoundingClientRect();
+  const popW = Math.min(280, Math.max(180, pop.offsetWidth || 180));
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - popW - 8);
+  const below = rect.bottom + 6;
+  const above = rect.top - 6;
+  pop.style.left = `${left}px`;
+  if (below + 180 > window.innerHeight && above > 180) {
+    pop.style.bottom = `${window.innerHeight - above}px`;
+    pop.style.top = "auto";
+  } else {
+    pop.style.top = `${below}px`;
+  }
+  anchor.setAttribute("aria-expanded", "true");
+
+  closeAmazonAutomationPopover._onDoc = (e) => {
+    if (pop.contains(e.target) || anchor.contains(e.target)) return;
+    closeAmazonAutomationPopover();
+  };
+  closeAmazonAutomationPopover._onKey = (e) => {
+    if (e.key === "Escape") closeAmazonAutomationPopover();
+  };
+  document.addEventListener("pointerdown", closeAmazonAutomationPopover._onDoc, true);
+  document.addEventListener("keydown", closeAmazonAutomationPopover._onKey, true);
+}
+
+function wireAmazonAutomationPopovers(productsEl) {
+  productsEl.querySelectorAll(".cs-auto-pill--amazon").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openAmazonAutomationPopover(btn);
+    });
   });
 }
 

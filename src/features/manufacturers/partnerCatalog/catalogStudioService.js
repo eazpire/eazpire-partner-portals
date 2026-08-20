@@ -28,6 +28,7 @@ import {
 } from "../adapters/printify/printifyCatalogClient.js";
 import { normalizeCountryCode } from "../../catalog/resolveProviderOriginCountries.js";
 import { publicFileUrl } from "../partnerProductEditorService.js";
+import { aggregateProductAutomations, emptyAutomationsSummary } from "./aggregateProductAutomations.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -99,6 +100,78 @@ async function queryAll(db, sql, ...binds) {
   const stmt = db.prepare(sql);
   const res = binds.length ? await stmt.bind(...binds).all() : await stmt.all();
   return res?.results || [];
+}
+
+async function queryAllSafe(db, sql, ...binds) {
+  if (!db) return [];
+  try {
+    return await queryAll(db, sql, ...binds);
+  } catch {
+    return [];
+  }
+}
+
+function pushAutomationRow(grouped, productKey, row) {
+  if (!productKey) return;
+  if (!grouped.has(productKey)) grouped.set(productKey, []);
+  grouped.get(productKey).push(row);
+}
+
+/** Batch-load PAT / version auto-publish flags — one query per chunk, no per-row fan-out. */
+async function loadAutomationsByProductKey(db, env, productKeys) {
+  const out = new Map();
+  for (const key of productKeys) out.set(key, emptyAutomationsSummary());
+  if (!productKeys.length) return out;
+
+  const grouped = new Map();
+  const keysWithPat = new Set();
+
+  for (let i = 0; i < productKeys.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = productKeys.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const patRows = await queryAllSafe(
+      env?.CATALOG_DB,
+      `SELECT product_key, is_active, auto_publish_enabled, automation_shopify_sync_enabled,
+              automation_amazon_publish_enabled, automation_amazon_markets_json
+       FROM print_area_printify_templates
+       WHERE product_key IN (${placeholders})`,
+      ...chunk
+    );
+    for (const row of patRows) {
+      keysWithPat.add(row.product_key);
+      pushAutomationRow(grouped, row.product_key, {
+        is_active: row.is_active,
+        auto_publish_enabled: row.auto_publish_enabled,
+        automation_shopify_sync_enabled: row.automation_shopify_sync_enabled,
+        automation_amazon_publish_enabled: row.automation_amazon_publish_enabled,
+        amazon_markets: parseJson(row.automation_amazon_markets_json, {}),
+      });
+    }
+  }
+
+  const missing = productKeys.filter((key) => !keysWithPat.has(key));
+  for (let i = 0; i < missing.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = missing.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const versionRows = await queryAllSafe(
+      db,
+      `SELECT product_key, is_active, auto_publish_config_json
+       FROM eazpire_product_versions
+       WHERE product_key IN (${placeholders})`,
+      ...chunk
+    );
+    for (const row of versionRows) {
+      pushAutomationRow(grouped, row.product_key, {
+        is_active: row.is_active,
+        auto_publish_config: parseJson(row.auto_publish_config_json, {}),
+      });
+    }
+  }
+
+  for (const [key, rows] of grouped) {
+    out.set(key, aggregateProductAutomations(rows));
+  }
+  return out;
 }
 
 function countryFromLocationJson(locationJson) {
@@ -1137,6 +1210,7 @@ async function listPendingPartnerProductsAsOffline(db, env, manufacturerId, prov
       catalog_category_group: row.category || null,
       blueprint_category: row.category || null,
       version_count: 0,
+      automations: emptyAutomationsSummary(),
       updated_at: row.updated_at,
       mock_images: slimMockImagesForList(imageMap.get(row.id) || []),
       shipping_country_codes: [],
@@ -1230,6 +1304,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   const blueprintEnrichmentMap = await loadBlueprintEnrichmentForEazpireProducts(db, products);
   const blueprintExternalIds = await loadPrintifyBlueprintExternalIdsForProducts(db, env, products);
   const choiceMap = await loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds);
+  const automationsMap = await loadAutomationsByProductKey(db, env, productKeys);
   const printifyUrlMap =
     env?.CATALOG_DB && blueprintExternalIds.size
       ? await loadPrintifyCatalogUrlsByExternalIds(env.CATALOG_DB, [...blueprintExternalIds.values()])
@@ -1286,6 +1361,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       catalog_category_group: p.catalog_category_group,
       blueprint_category: p.blueprint_category,
       version_count: p.version_count ?? 0,
+      automations: automationsMap.get(p.product_key) || emptyAutomationsSummary(),
       blueprint_title: p.blueprint_title,
       updated_at: p.updated_at,
       mock_images: merged.mock_images,
