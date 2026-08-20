@@ -305,9 +305,9 @@ html[data-portal="admin"] .page-title { font-size: 24px; letter-spacing: -.04em;
   color: var(--text);
 }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.54); backdrop-filter: blur(8px); display: none; place-items: center; z-index: 1000; }
-/* Confirm dialogs must stack above high-z overlays (e.g. Test Products modal at 12000). */
-#modal-backdrop.show:has(.confirm-modal) { z-index: 13000; }
-.modal-backdrop.show { display: grid; }
+/* Shared shell modal must sit above high-z overlays (Test Products 12000, design detail 12000). */
+.modal-backdrop.show,
+#modal-backdrop.show { display: grid; z-index: 14000; }
 .modal { width: 640px; max-width: calc(100vw - 32px); border-radius: 24px; background: #fff; box-shadow: 0 30px 90px rgba(0,0,0,.28); overflow: hidden; }
 .modal-head, .modal-foot { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
 .modal-foot { border-bottom: 0; border-top: 1px solid var(--line); background: var(--surface-2); justify-content: flex-end; gap: 10px; }
@@ -11198,10 +11198,13 @@ html[data-portal="admin"] .cr-dd-diff-list code {
 body.cr-dd-open {
   overflow: hidden;
 }
+body.cr-dd-open .toast {
+  z-index: 15000;
+}
 html[data-portal="admin"] .cr-dd {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 12000;
 }
 html[data-portal="admin"] .cr-dd__backdrop {
   position: absolute;

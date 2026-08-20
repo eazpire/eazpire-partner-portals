@@ -28,6 +28,7 @@ let draftMeta = null;
 let metaBaseline = "";
 let metaDirty = false;
 let metaSaving = false;
+let metaRegenBusy = false;
 let editTool = "crop";
 let editBgMode = "complete";
 let editColorTolerance = 30;
@@ -146,9 +147,11 @@ function renderFooter() {
   }
   if (tab === "metadata") {
     footer.innerHTML = `
-      <button type="button" class="btn btn-secondary" data-cr-dd-act="meta-regen">Regenerate</button>
+      <button type="button" class="btn btn-secondary" data-cr-dd-act="meta-regen" ${
+        metaRegenBusy ? "disabled" : ""
+      }>${metaRegenBusy ? "Analyzing…" : "Regenerate"}</button>
       <button type="button" class="btn btn-primary" data-cr-dd-act="meta-save" ${
-        metaDirty && !metaSaving ? "" : "disabled"
+        metaDirty && !metaSaving && !metaRegenBusy ? "" : "disabled"
       }>Save</button>`;
     return;
   }
@@ -213,7 +216,7 @@ async function handleFooterAction(act) {
     return;
   }
   if (act === "meta-regen") {
-    await regenerateMetadata();
+    confirmRegenerateMetadata();
     return;
   }
   if (act === "edit-save") {
@@ -1134,8 +1137,23 @@ async function saveMetadata() {
   }
 }
 
-async function regenerateMetadata() {
-  if (!activeItem?.id) return;
+function confirmRegenerateMetadata() {
+  if (!activeItem?.id || metaRegenBusy) return;
+  confirmAction({
+    title: "Regenerate metadata?",
+    message:
+      "This analyzes the design image and replaces title, description, tags, and topics. You still need to Save to keep the new draft.",
+    confirmLabel: "Regenerate",
+    onConfirm: () => {
+      runRegenerateMetadata();
+    },
+  });
+}
+
+async function runRegenerateMetadata() {
+  if (!activeItem?.id || metaRegenBusy) return;
+  metaRegenBusy = true;
+  renderFooter();
   try {
     const data = await partnerFetch("admin-design-metadata-full-regenerate", {
       method: "POST",
@@ -1149,6 +1167,9 @@ async function regenerateMetadata() {
     showToast("Metadata", "Regenerated draft — save to persist");
   } catch (e) {
     showToast("Error", e.message || "Regenerate failed");
+  } finally {
+    metaRegenBusy = false;
+    renderFooter();
   }
 }
 
@@ -1975,6 +1996,7 @@ export async function openDesignDetailModal(item, { onClose } = {}) {
   draftMeta = cloneMeta(item.metadata);
   captureMetaBaseline(draftMeta);
   metaSaving = false;
+  metaRegenBusy = false;
   editTool = "crop";
   editDirty = false;
   pendingEdit = null;

@@ -44,6 +44,8 @@ export function openModal({ title, bodyHtml, onSave, onCancel }) {
   document.getElementById("modal-body").innerHTML = bodyHtml;
   modalSaveHandler = onSave || null;
   modalCancelHandler = typeof onCancel === "function" ? onCancel : null;
+  // Last on body so this stacks above dynamically appended overlays (e.g. .cr-dd).
+  document.body.appendChild(backdrop);
   backdrop.hidden = false;
   backdrop.classList.add("show");
 }
