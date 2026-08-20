@@ -58,7 +58,10 @@ function uniformContainPrintifyCenterY(ctx, scale, { verticalAlign = "top" } = {
   const widthLimited = isWidthLimitedUniformContain(dW, dH, paw, pah);
   if (widthLimited && verticalAlign === "top") {
     const printedH = (s * paw * dH) / dW;
-    return clamp01(printedH / 2 / pah);
+    const half = printedH / 2 / pah;
+    if (!(Number.isFinite(half) && half > 0)) return 0.5;
+    if (half >= 0.5 - 1e-10) return 0.5;
+    return clamp01(Math.max(half, Math.min(1 - half, half)));
   }
   return 0.5;
 }
