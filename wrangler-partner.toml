@@ -100,6 +100,10 @@ binding = "PARTNER_ASSETS"
 directory = "partner-static"
 run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*"]
 
+# Same Workers AI binding as creator-engine (admin metadata regenerate, etc.)
+[ai]
+binding = "AI"
+
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "creator-uploads"
