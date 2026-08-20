@@ -1489,6 +1489,7 @@ export async function saveCatalogAutomations(env, versionId, body) {
   const versions = await listCatalogOpsProductVersions(env, existing.product_key);
   const version = versions.find((v) => Number(v.catalog_pat_id) === patId) || null;
   let backfill = null;
+  let amazon_sweep = null;
   if (anyAutoPublishChannelOn(auto) && body.skip_backfill !== true) {
     try {
       const { enqueueProductAutomationBackfill } = await import("../../publish/productAutomationBackfill.js");
@@ -1498,7 +1499,19 @@ export async function saveCatalogAutomations(env, versionId, body) {
       backfill = { enqueued: false, reason: String(bfErr?.message || bfErr) };
     }
   }
-  return { ok: true, version, backfill, _ops_source: "catalog-db" };
+  if (auto.automation_amazon_publish_enabled && body.skip_backfill !== true) {
+    try {
+      const { runAmazonAutomationSweep } = await import("../../publish/amazonAutomationSweep.js");
+      amazon_sweep = await runAmazonAutomationSweep(env, {
+        maxJobs: 4,
+        productKey: existing.product_key,
+      });
+    } catch (amzErr) {
+      console.warn("[saveCatalogAutomations] amazon sweep:", amzErr?.message || amzErr);
+      amazon_sweep = { enqueued: false, reason: String(amzErr?.message || amzErr) };
+    }
+  }
+  return { ok: true, version, backfill, amazon_sweep, _ops_source: "catalog-db" };
 }
 
 /** D1 rejects NaN/undefined binds — coerce optional numbers for COALESCE updates. */
