@@ -35,28 +35,60 @@ function providersFromRow(row) {
   return list
     .map((p) => ({
       id: String(p?.id || p?.print_provider_id || "").trim(),
-      name: String(p?.name || "").trim() || (p?.id ? `Provider ${p.id}` : "Provider"),
-      logo_url: typeof p?.logo_url === "string" && p.logo_url.trim() ? p.logo_url.trim() : null,
+      name: String(p?.name || "").trim(),
     }))
     .filter((p) => p.id);
 }
 
+/** Compact chips — never the word "Provider" or a long company name. */
+function providerChipLabel(provider, row) {
+  const id = String(provider?.id || "").trim();
+  const name = String(provider?.name || "").trim();
+  if (id === "99" || /printify\s*choice/i.test(name)) {
+    const choice = String(row?.printify_choice || "").toLowerCase();
+    if (choice === "world" || choice === "printify_choice_world") {
+      return { label: "World", kind: "world" };
+    }
+    return { label: "US Only", kind: "us" };
+  }
+  const known = {
+    26: "TDE",
+    30: "OPT",
+  };
+  if (known[id]) return { label: known[id], kind: "other" };
+  if (name && name.length <= 8 && !/\s/.test(name) && !/^provider\b/i.test(name)) {
+    return { label: name, kind: "other" };
+  }
+  const initials = name
+    .split(/\s+/)
+    .map((w) => w[0] || "")
+    .join("")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 4)
+    .toUpperCase();
+  if (initials) return { label: initials, kind: "other" };
+  return { label: id.slice(0, 4), kind: "other" };
+}
+
 function renderProviderCell(row) {
   const providers = providersFromRow(row);
-  const count = Number(row?.provider_count) || providers.length;
-  if (!count) {
-    return `<span class="cs-prov-empty text-muted" title="No activated providers">—</span>`;
+  if (!providers.length) {
+    return `<span class="cs-prov-empty text-muted">—</span>`;
   }
-  const shown = providers.slice(0, 3);
-  const extra = Math.max(0, providers.length - shown.length);
-  const avatars = shown
+  const chips = providers
     .map((p) => {
-      const tip = escapeHtml(p.name);
-      return `<span class="cs-prov-chip" title="${tip}">${renderAvatar(p.name, p.logo_url, "cs-avatar--xs")}<span class="cs-prov-chip__name">${escapeHtml(p.name)}</span></span>`;
+      const { label, kind } = providerChipLabel(p, row);
+      const cls =
+        kind === "world"
+          ? "badge cs-pc-badge cs-pc-badge--world"
+          : kind === "us"
+            ? "badge cs-pc-badge cs-pc-badge--us"
+            : "badge cs-prov-badge";
+      const tip = p.name && !/^provider\b/i.test(p.name) ? p.name : label;
+      return `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(label)}</span>`;
     })
     .join("");
-  const more = extra ? `<span class="cs-prov-more" title="${escapeHtml(providers.map((p) => p.name).join(", "))}">+${extra}</span>` : "";
-  return `<div class="cs-prov-cell-inner" title="${escapeHtml(providers.map((p) => p.name).join(", ") || `${count} provider(s)`)}"><span class="cs-prov-count">${escapeHtml(String(count))}</span><div class="cs-prov-chips">${avatars}${more}</div></div>`;
+  return `<div class="cs-prov-chips">${chips}</div>`;
 }
 
 function renderAutomationsCell(row) {
@@ -824,7 +856,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
         reviewStatus: row.review_status || null,
       })}</td>
       <td class="cs-prov-cell">${isPending ? `<span class="cs-prov-empty text-muted">—</span>` : renderProviderCell(row)}</td>
-      <td>${escapeHtml(isPending ? "—" : (row.version_count ?? 0))}</td>
+      <td class="cs-ver-cell">${escapeHtml(isPending ? "—" : String(row.version_count ?? 0))}</td>
       <td class="cs-auto-cell">${isPending ? `<span class="cs-auto-empty text-muted">—</span>` : renderAutomationsCell(row)}</td>
       <td>${action}</td>
     </tr>`;

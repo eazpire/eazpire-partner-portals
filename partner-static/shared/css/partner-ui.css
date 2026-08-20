@@ -1701,48 +1701,41 @@ html[data-portal="admin"] .job-logs .cr-pf-triswitch[data-state='1'] .cr-pf-tris
   line-height: 1;
   background: var(--surface-3);
 }
-.cs-prov-cell {
-  min-width: 7.5rem;
+#catalog-studio-products .table th:nth-child(6),
+#catalog-studio-products .cs-prov-cell {
+  width: 5.75rem;
+  max-width: 6rem;
+  overflow: hidden;
+  word-break: normal;
+  overflow-wrap: normal;
   vertical-align: middle;
 }
-.cs-prov-cell-inner {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.cs-prov-count {
-  min-width: 1.25rem;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--surface-3, #e2e8f0);
-  font-size: 12px;
-  font-weight: 750;
-  text-align: center;
+#catalog-studio-products .table th:nth-child(7),
+#catalog-studio-products .cs-ver-cell {
+  width: 4.5rem;
+  min-width: 4.25rem;
+  max-width: 5rem;
+  overflow: hidden;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  vertical-align: middle;
 }
 .cs-prov-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
 }
-.cs-prov-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 8.5rem;
-}
-.cs-prov-chip__name {
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cs-prov-more {
-  font-size: 11px;
+.cs-prov-badge {
+  font-size: 10px;
   font-weight: 700;
-  color: var(--muted, #64748b);
+  white-space: nowrap;
+  padding: 2px 7px;
+  background: var(--surface-3, #e2e8f0);
+  color: inherit;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 .cs-prov-empty {
   font-size: 13px;
