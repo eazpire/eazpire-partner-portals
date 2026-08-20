@@ -368,14 +368,26 @@ export async function listCatalogOpsProductVersions(env, productKey) {
     productKey
   );
 
+  const activeProviders = await queryAll(
+    catalogDb,
+    `SELECT print_provider_id FROM product_active_print_providers WHERE product_key = ?`,
+    productKey
+  );
+  const allowedProviders = new Set(
+    (activeProviders || []).map((r) => String(r.print_provider_id ?? "").trim()).filter(Boolean)
+  );
+  const visiblePatRows = allowedProviders.size
+    ? patRows.filter((pat) => allowedProviders.has(String(pat.print_provider_id ?? "").trim()))
+    : patRows;
+
   let eazVersions = [];
   if (env.MANUFACTURER_DB) {
     eazVersions = await listProductVersions(env.MANUFACTURER_DB, productKey);
   }
 
-  if (patRows.length) {
+  if (visiblePatRows.length) {
     const used = new Set();
-    return patRows.map((pat) => {
+    return visiblePatRows.map((pat) => {
       const linked = matchEazVersionForPat(pat, eazVersions, used);
       if (linked?.id) used.add(linked.id);
       return patRowToVersion(pat, linked);
@@ -383,6 +395,9 @@ export async function listCatalogOpsProductVersions(env, productKey) {
   }
 
   // Todify / partner products may have manufacturer versions before any PAT row exists.
+  if (allowedProviders.size) {
+    return eazVersions.filter((v) => allowedProviders.has(String(v.external_provider_id || "").trim()));
+  }
   return eazVersions;
 }
 
@@ -788,11 +803,8 @@ export async function listCatalogOpsStudioProductsAsEazpire(env, { manufacturerI
   for (const row of filtered) {
     const link = await resolveProductLink(env, row.product_key);
     const product = catalogRowToProduct(row, link);
-    product.version_count = await queryAll(
-      catalogDb,
-      `SELECT id FROM print_area_printify_templates WHERE product_key = ? AND COALESCE(is_active, 1) = 1`,
-      row.product_key
-    ).then((r) => r.length);
+    // Studio list recomputes Provider vs Versions in getCatalogStudioProducts.
+    product.version_count = 0;
     out.push(product);
   }
   return out;

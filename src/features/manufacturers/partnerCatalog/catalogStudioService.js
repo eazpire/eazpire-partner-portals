@@ -29,6 +29,10 @@ import {
 import { normalizeCountryCode } from "../../catalog/resolveProviderOriginCountries.js";
 import { publicFileUrl } from "../partnerProductEditorService.js";
 import { aggregateProductAutomations, emptyAutomationsSummary } from "./aggregateProductAutomations.js";
+import {
+  aggregateProviderVersions,
+  emptyProviderVersionSummary,
+} from "./aggregateProviderVersions.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
 const BLUEPRINT_ID_CHUNK = 100;
@@ -170,6 +174,142 @@ async function loadAutomationsByProductKey(db, env, productKeys) {
 
   for (const [key, rows] of grouped) {
     out.set(key, aggregateProductAutomations(rows));
+  }
+  return out;
+}
+
+function parseLocationLogo(locationJson) {
+  const loc = parseJson(locationJson, {});
+  const url = loc?.logo_url || loc?.logoUrl || null;
+  return typeof url === "string" && url.trim() ? url.trim() : null;
+}
+
+/** Batch-load activated providers + true version counts (not PAT/provider-row counts). */
+async function loadProviderVersionStatsByProductKey(db, env, productKeys) {
+  const out = new Map();
+  for (const key of productKeys) out.set(key, emptyProviderVersionSummary());
+  if (!productKeys.length) return out;
+
+  const activeByKey = new Map();
+  const patByKey = new Map();
+  const verByKey = new Map();
+  const nameById = new Map();
+
+  for (let i = 0; i < productKeys.length; i += BLUEPRINT_ID_CHUNK) {
+    const chunk = productKeys.slice(i, i + BLUEPRINT_ID_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const activeRows = await queryAllSafe(
+      env?.CATALOG_DB,
+      `SELECT product_key, print_provider_id FROM product_active_print_providers
+       WHERE product_key IN (${placeholders})`,
+      ...chunk
+    );
+    for (const row of activeRows) {
+      const key = row.product_key;
+      if (!activeByKey.has(key)) activeByKey.set(key, []);
+      activeByKey.get(key).push({ print_provider_id: row.print_provider_id });
+    }
+
+    const patRows = await queryAllSafe(
+      env?.CATALOG_DB,
+      `SELECT product_key, print_provider_id, is_active, display_name, sort_order
+       FROM print_area_printify_templates
+       WHERE product_key IN (${placeholders})`,
+      ...chunk
+    );
+    for (const row of patRows) {
+      const key = row.product_key;
+      if (!patByKey.has(key)) patByKey.set(key, []);
+      patByKey.get(key).push(row);
+    }
+  }
+
+  const missingActive = productKeys.filter((key) => !activeByKey.has(key));
+  if (missingActive.length && db) {
+    for (let i = 0; i < missingActive.length; i += BLUEPRINT_ID_CHUNK) {
+      const chunk = missingActive.slice(i, i + BLUEPRINT_ID_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const mfgActive = await queryAllSafe(
+        db,
+        `SELECT product_key, print_provider_id FROM eazpire_product_active_providers
+         WHERE product_key IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of mfgActive) {
+        const key = row.product_key;
+        if (!activeByKey.has(key)) activeByKey.set(key, []);
+        activeByKey.get(key).push({ print_provider_id: row.print_provider_id });
+      }
+    }
+  }
+
+  const missingPat = productKeys.filter((key) => !patByKey.has(key));
+  if (missingPat.length && db) {
+    for (let i = 0; i < missingPat.length; i += BLUEPRINT_ID_CHUNK) {
+      const chunk = missingPat.slice(i, i + BLUEPRINT_ID_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const versionRows = await queryAllSafe(
+        db,
+        `SELECT v.product_key, v.is_active, fp.external_provider_id
+         FROM eazpire_product_versions v
+         LEFT JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
+         WHERE v.product_key IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of versionRows) {
+        const key = row.product_key;
+        if (!verByKey.has(key)) verByKey.set(key, []);
+        verByKey.get(key).push(row);
+      }
+    }
+  }
+
+  const providerIds = new Set();
+  for (const rows of activeByKey.values()) {
+    for (const row of rows) {
+      const id = row.print_provider_id;
+      if (id != null && String(id).trim()) providerIds.add(String(id).trim());
+    }
+  }
+  if (providerIds.size && db) {
+    const ids = [...providerIds];
+    for (let i = 0; i < ids.length; i += BLUEPRINT_ID_CHUNK) {
+      const chunk = ids.slice(i, i + BLUEPRINT_ID_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const named = await queryAllSafe(
+        db,
+        `SELECT external_provider_id, name, location_json
+         FROM manufacturer_fulfillment_providers
+         WHERE external_provider_id IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of named) {
+        nameById.set(String(row.external_provider_id), {
+          name: row.name,
+          logo_url: parseLocationLogo(row.location_json),
+        });
+      }
+    }
+  }
+
+  for (const key of productKeys) {
+    const activeProviders = (activeByKey.get(key) || []).map((row) => {
+      const id = String(row.print_provider_id ?? "").trim();
+      const named = nameById.get(id) || {};
+      return {
+        print_provider_id: id,
+        name: named.name || null,
+        logo_url: named.logo_url || null,
+      };
+    });
+    out.set(
+      key,
+      aggregateProviderVersions({
+        activeProviders,
+        patRows: patByKey.get(key) || [],
+        versionRows: verByKey.get(key) || [],
+      })
+    );
   }
   return out;
 }
@@ -1210,6 +1350,8 @@ async function listPendingPartnerProductsAsOffline(db, env, manufacturerId, prov
       catalog_category_group: row.category || null,
       blueprint_category: row.category || null,
       version_count: 0,
+      provider_count: 0,
+      providers: [],
       automations: emptyAutomationsSummary(),
       updated_at: row.updated_at,
       mock_images: slimMockImagesForList(imageMap.get(row.id) || []),
@@ -1305,6 +1447,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   const blueprintExternalIds = await loadPrintifyBlueprintExternalIdsForProducts(db, env, products);
   const choiceMap = await loadPrintifyChoiceByProductKeys(db, env, productKeys, blueprintExternalIds);
   const automationsMap = await loadAutomationsByProductKey(db, env, productKeys);
+  const providerVersionMap = await loadProviderVersionStatsByProductKey(db, env, productKeys);
   const printifyUrlMap =
     env?.CATALOG_DB && blueprintExternalIds.size
       ? await loadPrintifyCatalogUrlsByExternalIds(env.CATALOG_DB, [...blueprintExternalIds.values()])
@@ -1352,6 +1495,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       }
     );
     const codes = shippingCountryCodesMap.get(p.product_key) || [];
+    const providerStats = providerVersionMap.get(p.product_key) || emptyProviderVersionSummary();
     return {
       kind: "eazpire_product",
       product_key: p.product_key,
@@ -1360,7 +1504,9 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       catalog_category_leaf: p.catalog_category_leaf,
       catalog_category_group: p.catalog_category_group,
       blueprint_category: p.blueprint_category,
-      version_count: p.version_count ?? 0,
+      version_count: providerStats.version_count,
+      provider_count: providerStats.provider_count,
+      providers: providerStats.providers,
       automations: automationsMap.get(p.product_key) || emptyAutomationsSummary(),
       blueprint_title: p.blueprint_title,
       updated_at: p.updated_at,

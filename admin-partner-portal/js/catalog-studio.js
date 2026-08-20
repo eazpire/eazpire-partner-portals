@@ -30,6 +30,35 @@ function automationsFromRow(row) {
   };
 }
 
+function providersFromRow(row) {
+  const list = Array.isArray(row?.providers) ? row.providers : [];
+  return list
+    .map((p) => ({
+      id: String(p?.id || p?.print_provider_id || "").trim(),
+      name: String(p?.name || "").trim() || (p?.id ? `Provider ${p.id}` : "Provider"),
+      logo_url: typeof p?.logo_url === "string" && p.logo_url.trim() ? p.logo_url.trim() : null,
+    }))
+    .filter((p) => p.id);
+}
+
+function renderProviderCell(row) {
+  const providers = providersFromRow(row);
+  const count = Number(row?.provider_count) || providers.length;
+  if (!count) {
+    return `<span class="cs-prov-empty text-muted" title="No activated providers">—</span>`;
+  }
+  const shown = providers.slice(0, 3);
+  const extra = Math.max(0, providers.length - shown.length);
+  const avatars = shown
+    .map((p) => {
+      const tip = escapeHtml(p.name);
+      return `<span class="cs-prov-chip" title="${tip}">${renderAvatar(p.name, p.logo_url, "cs-avatar--xs")}<span class="cs-prov-chip__name">${escapeHtml(p.name)}</span></span>`;
+    })
+    .join("");
+  const more = extra ? `<span class="cs-prov-more" title="${escapeHtml(providers.map((p) => p.name).join(", "))}">+${extra}</span>` : "";
+  return `<div class="cs-prov-cell-inner" title="${escapeHtml(providers.map((p) => p.name).join(", ") || `${count} provider(s)`)}"><span class="cs-prov-count">${escapeHtml(String(count))}</span><div class="cs-prov-chips">${avatars}${more}</div></div>`;
+}
+
 function renderAutomationsCell(row) {
   const auto = automationsFromRow(row);
   if (!auto.printify && !auto.shopify && !auto.amazon) {
@@ -774,7 +803,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
   }
 
   return renderTable(
-    ["", "Title", "Country", "Print areas", "Status", "Versions", "Automations", ""],
+    ["", "Title", "Country", "Print areas", "Status", "Provider", "Versions", "Automations", ""],
     items
       .map((row, i) => {
         const isPending = row.kind === "pending_partner_product" || row.review_status === "pending_review";
@@ -794,6 +823,7 @@ function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {})
         productKey: row.product_key || "",
         reviewStatus: row.review_status || null,
       })}</td>
+      <td class="cs-prov-cell">${isPending ? `<span class="cs-prov-empty text-muted">—</span>` : renderProviderCell(row)}</td>
       <td>${escapeHtml(isPending ? "—" : (row.version_count ?? 0))}</td>
       <td class="cs-auto-cell">${isPending ? `<span class="cs-auto-empty text-muted">—</span>` : renderAutomationsCell(row)}</td>
       <td>${action}</td>

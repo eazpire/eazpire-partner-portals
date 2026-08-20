@@ -206,6 +206,41 @@ describe("catalogOpsReadService", () => {
     expect(versions[0].external_provider_id).toBe("26");
   });
 
+  it("listCatalogOpsProductVersions hides PATs whose provider is not activated", async () => {
+    const env = {
+      CATALOG_DB: makeCatalogDb({
+        activeProviders: [{ print_provider_id: 99 }],
+        patRows: [
+          {
+            id: 18,
+            product_key: "test-tee",
+            print_provider_id: 99,
+            display_name: "Standard",
+            sort_order: 0,
+            is_active: 1,
+            publish_enabled: 1,
+            printify_product_id: "choice",
+          },
+          {
+            id: 11,
+            product_key: "test-tee",
+            print_provider_id: 26,
+            display_name: "Textildruck leftover",
+            sort_order: 0,
+            is_active: 1,
+            publish_enabled: 1,
+            printify_product_id: "textildruck",
+          },
+        ],
+      }),
+      MANUFACTURER_DB: makeManufacturerDb(),
+    };
+    const versions = await listCatalogOpsProductVersions(env, "test-tee");
+    expect(versions).toHaveLength(1);
+    expect(versions[0].catalog_pat_id).toBe(18);
+    expect(versions[0].external_provider_id).toBe("99");
+  });
+
   it("getCatalogOpsTemplateRow reads template_products", async () => {
     const env = { CATALOG_DB: makeCatalogDb() };
     const row = await getCatalogOpsTemplateRow(env, "test-tee", 26);

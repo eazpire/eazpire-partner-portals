@@ -1132,7 +1132,11 @@ describe("catalog studio service", () => {
 
     expect(result.ok).toBe(true);
     expect(result.items.map((i) => i.product_key)).toEqual(["todify-todify-hooded-tank"]);
-    expect(catalogQueries.some((q) => q.sql.includes("product_active_print_providers"))).toBe(false);
+    expect(
+      catalogQueries.some(
+        (q) => q.sql.includes("product_active_print_providers") && q.sql.includes("print_provider_id =")
+      )
+    ).toBe(false);
   });
 
   it("attaches aggregated automations from PAT rows without per-product queries", async () => {
@@ -1150,6 +1154,7 @@ describe("catalog studio service", () => {
                 results: [
                   {
                     product_key: "tee-1",
+                    print_provider_id: 99,
                     is_active: 1,
                     auto_publish_enabled: 1,
                     automation_shopify_sync_enabled: 1,
@@ -1158,6 +1163,7 @@ describe("catalog studio service", () => {
                   },
                   {
                     product_key: "tee-1",
+                    print_provider_id: 26,
                     is_active: 1,
                     auto_publish_enabled: 0,
                     automation_shopify_sync_enabled: 1,
@@ -1211,8 +1217,8 @@ describe("catalog studio service", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(patSqls).toHaveLength(1);
-    expect(patSqls[0].sql).toContain("IN (?");
+    expect(patSqls.length).toBeGreaterThanOrEqual(1);
+    expect(patSqls.some((q) => q.sql.includes("IN (?") && q.sql.includes("auto_publish_enabled"))).toBe(true);
     expect(result.items[0].automations).toMatchObject({
       printify: true,
       shopify: true,
@@ -1221,6 +1227,93 @@ describe("catalog studio service", () => {
       amazon_count: 3,
       mixed: true,
     });
+  });
+
+  it("splits activated providers from true product versions", async () => {
+    const { getCatalogStudioProducts } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const catalogDb = {
+      prepare: (sql) => ({
+        bind: (...args) => ({
+          all: async () => {
+            if (sql.includes("FROM product_active_print_providers")) {
+              return { results: [{ product_key: "hoodie-1", print_provider_id: 99 }] };
+            }
+            if (sql.includes("FROM print_area_printify_templates")) {
+              return {
+                results: [
+                  {
+                    product_key: "hoodie-1",
+                    print_provider_id: 99,
+                    is_active: 1,
+                    auto_publish_enabled: 0,
+                    automation_shopify_sync_enabled: 0,
+                    automation_amazon_publish_enabled: 0,
+                  },
+                  {
+                    product_key: "hoodie-1",
+                    print_provider_id: 26,
+                    is_active: 1,
+                    auto_publish_enabled: 0,
+                    automation_shopify_sync_enabled: 0,
+                    automation_amazon_publish_enabled: 0,
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          first: async () => null,
+        }),
+        all: async () => ({ results: [] }),
+      }),
+    };
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: () => handler,
+          first: async () => null,
+          all: async () => {
+            if (sql.includes("FROM eazpire_products")) {
+              return {
+                results: [
+                  {
+                    product_key: "hoodie-1",
+                    title: "Backprint Hoodie",
+                    catalog_status: "online",
+                    catalog_category_leaf: "Hoodie",
+                    catalog_category_group: "Kleidung",
+                    version_count: 2,
+                    manufacturer_name: "Printify",
+                    blueprint_title: "Hoodie",
+                    blueprint_category: null,
+                    updated_at: 1,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("manufacturer_fulfillment_providers") && sql.includes("external_provider_id")) {
+              return { results: [{ external_provider_id: "99", name: "Printify Choice", location_json: null }] };
+            }
+            return { results: [] };
+          },
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(mfgDb, { CATALOG_DB: catalogDb }, {
+      manufacturerId: "m1",
+      filter: "online",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.items[0].provider_count).toBe(1);
+    expect(result.items[0].providers).toEqual([
+      { id: "99", name: "Printify Choice", logo_url: null },
+    ]);
+    expect(result.items[0].version_count).toBe(1);
   });
 });
 
