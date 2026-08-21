@@ -3,14 +3,12 @@ import { initShell, openModal, closeModal, confirmAction, openActionModeModal, s
 import { initAdminAppDrawer } from "/partner/shared/js/admin-app-drawer.js";
 import { openProductEditor } from "./catalog-editor/shell.js";
 import { mountCatalogStudio } from "./catalog-studio.js";
-import { mountJobLogs } from "./job-logs.js";
 import { renderPartnerProductReviews } from "./product-reviews.js";
 
 const NAV_CORE = [
   { route: "/partner", label: "Command Center", icon: "⌘" },
   { route: "/partner/manufacturers", label: "Manufacturers", icon: "🏭" },
   { route: "/partner/catalog", label: "Catalog Studio", icon: "▦" },
-  { route: "/partner/logs", label: "Logs", icon: "☰" },
   { route: "/partner/orders", label: "Order Ops", icon: "↗" },
   { route: "/partner/api", label: "API Console", icon: "{ }" },
   { route: "/partner/certification", label: "Certification HQ", icon: "✓" },
@@ -28,7 +26,6 @@ const CRUMB_LABELS = {
   "/partner": "Command Center",
   "/partner/manufacturers": "Manufacturers",
   "/partner/catalog": "Catalog Studio",
-  "/partner/logs": "Logs",
   "/partner/orders": "Order Ops",
   "/partner/api": "API Console",
   "/partner/certification": "Certification HQ",
@@ -39,7 +36,6 @@ const THEME_BY_ROUTE = {
   "/partner": "",
   "/partner/manufacturers": "",
   "/partner/catalog": "theme-studio",
-  "/partner/logs": "theme-studio",
   "/partner/orders": "theme-ops",
   "/partner/api": "theme-api",
   "/partner/certification": "theme-cert",
@@ -616,10 +612,7 @@ async function renderCatalog() {
 }
 
 async function renderLogs() {
-  setTopbarExtra("");
-  const el = document.getElementById("view-logs");
-  el.innerHTML = "";
-  await mountJobLogs(el);
+  location.replace("/creations/logs");
 }
 
 async function renderBlueprintReview(panel, blueprints) {

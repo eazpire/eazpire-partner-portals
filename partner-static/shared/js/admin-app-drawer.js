@@ -12,7 +12,7 @@ export const ADMIN_APPS = [
   {
     id: "creations",
     label: "Creations",
-    route: "/creations",
+    route: "/creations/designs",
     iconSvg:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3c-1.5 2.4-3.6 4.1-6 5.2V11c0 5 3.8 9.4 9 10.8 5.2-1.4 9-5.8 9-10.8V8.2C17.6 7.1 15.5 5.4 14 3c-1.2 1.9-3 3.3-5 4.1 2 .8 3.8 2.2 5 4.1 1.2-1.9 3-3.3 5-4.1-2-.8-3.8-2.2-5-4.1Z"/></svg>',
   },

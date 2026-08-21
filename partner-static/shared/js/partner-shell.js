@@ -1,4 +1,5 @@
 import { escapeHtml } from "./partner-api.js";
+import { resolveShellRoute } from "./route-alias.js";
 
 let modalSaveHandler = null;
 let modalCancelHandler = null;
@@ -330,7 +331,14 @@ function initMobileShell(shell) {
   });
 }
 
-export function initShell({ navItems, navSections, onRoute, brandSub = "Manufacturer Portal", crumbLabels = {} }) {
+export function initShell({
+  navItems,
+  navSections,
+  onRoute,
+  brandSub = "Manufacturer Portal",
+  crumbLabels = {},
+  routeAliases = {},
+}) {
   document.querySelector(".brand-sub").textContent = brandSub;
   const nav = document.getElementById("partner-nav");
   if (navSections?.length) {
@@ -344,6 +352,7 @@ export function initShell({ navItems, navSections, onRoute, brandSub = "Manufact
     nav.innerHTML = (navItems || []).map(navItemHtml).join("");
   }
   initShell._crumbLabels = crumbLabels;
+  initShell._routeAliases = routeAliases || {};
 
   nav.querySelectorAll("[data-route]").forEach((btn) => {
     btn.addEventListener("click", () => navigate(btn.dataset.route, onRoute));
@@ -376,14 +385,21 @@ export function initShell({ navItems, navSections, onRoute, brandSub = "Manufact
   initMobileShell(shell);
   initDesktopSidebarCollapse(shell);
 
-  const initial = location.pathname.replace(/\/$/, "") || "/";
-  navigate(initial === "" ? "/" : initial, onRoute, true);
+  const incoming = location.pathname.replace(/\/$/, "") || "/";
+  const initial = resolveShellRoute(incoming === "" ? "/" : incoming, initShell._routeAliases);
+  if (initial !== incoming) history.replaceState({}, "", initial);
+  navigate(initial, onRoute, true);
   window.addEventListener("popstate", () => navigate(location.pathname, onRoute, true));
 }
 
 export function navigate(route, onRoute, replace = false) {
-  const path = route || "/";
-  if (!replace) history.pushState({}, "", path);
+  const aliases = initShell._routeAliases || {};
+  const path = resolveShellRoute(route || "/", aliases);
+  if (path !== (route || "/") && !replace) replace = true;
+  if (path !== (location.pathname.replace(/\/$/, "") || "/") || !replace) {
+    if (replace) history.replaceState({}, "", path);
+    else history.pushState({}, "", path);
+  }
   closeDrawer();
   document.querySelectorAll(".nav-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.route === path);

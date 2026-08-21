@@ -3,17 +3,24 @@ import { initShell, showToast, setTopbarExtra } from "/creations/shared/js/partn
 import { initAdminAppDrawer } from "/creations/shared/js/admin-app-drawer.js";
 import { mountDesignsPage, teardownBulkDock } from "./designs.js";
 import { mountProductsPage, teardownProductDetailModal, teardownProductsExtras } from "./products.js";
+import { mountJobLogs } from "./job-logs.js";
 import { setActionQueuePage } from "./action-queue-rail.js";
 
 const NAV_CORE = [
   { route: "/creations/designs", label: "Designs", icon: "◆" },
   { route: "/creations/products", label: "Products", icon: "▣" },
+  { route: "/creations/logs", label: "Logs", icon: "☰" },
 ];
 
 const CRUMB_LABELS = {
   "/creations": "Designs",
   "/creations/designs": "Designs",
   "/creations/products": "Products",
+  "/creations/logs": "Logs",
+};
+
+const ROUTE_ALIASES = {
+  "/creations": "/creations/designs",
 };
 
 async function ensureAdminSession() {
@@ -48,13 +55,17 @@ function showShell() {
   if (loading) loading.hidden = true;
 }
 
+let teardownLogs = null;
+
+function stopLogs() {
+  if (typeof teardownLogs === "function") teardownLogs();
+  teardownLogs = null;
+}
+
 const ROUTES = {
-  "/creations": async () => {
-    history.replaceState({}, "", "/creations/designs");
-    await ROUTES["/creations/designs"]();
-  },
   "/creations/designs": async () => {
     setTopbarExtra("");
+    stopLogs();
     teardownProductDetailModal();
     teardownProductsExtras();
     setActionQueuePage("designs");
@@ -62,16 +73,29 @@ const ROUTES = {
   },
   "/creations/products": async () => {
     setTopbarExtra("");
+    stopLogs();
     teardownBulkDock();
     teardownProductsExtras();
     setActionQueuePage("products");
     await mountProductsPage();
   },
+  "/creations/logs": async () => {
+    setTopbarExtra("");
+    teardownBulkDock();
+    teardownProductDetailModal();
+    teardownProductsExtras();
+    setActionQueuePage("logs");
+    const el = document.getElementById("view-logs");
+    if (el) {
+      stopLogs();
+      el.innerHTML = "";
+      teardownLogs = await mountJobLogs(el);
+    }
+  },
 };
 
 async function onRoute(route) {
-  const raw = String(route || "/creations/designs").replace(/\/$/, "") || "/creations/designs";
-  const path = raw === "/creations" ? "/creations/designs" : raw;
+  const path = String(route || "/creations/designs").replace(/\/$/, "") || "/creations/designs";
   const fn = ROUTES[path] || ROUTES["/creations/designs"];
   try {
     await fn();
@@ -103,6 +127,7 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
       onRoute,
       brandSub: "Admin Ops",
       crumbLabels: CRUMB_LABELS,
+      routeAliases: ROUTE_ALIASES,
     });
   } else {
     const authError = new URLSearchParams(location.search).get("auth_error") || "";
