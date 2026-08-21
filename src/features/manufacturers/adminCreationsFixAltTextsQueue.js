@@ -176,6 +176,24 @@ export async function handleAdminCreationsEnqueueFixAltTexts(request, env) {
       product_key: item.product_key,
       design_id: item.design_id,
     });
+    try {
+      const { recordProductMaintenanceLog } = await import("../admin/adminJobLogs.js");
+      await recordProductMaintenanceLog(env, {
+        type: "shopify_alt_text",
+        status: "active",
+        source: "admin",
+        title: item.title,
+        product_key: item.product_key,
+        product_title: item.title,
+        design_id: item.design_id,
+        shopify_product_id: item.shopify_product_id,
+        printify_product_id: item.printify_product_id,
+        published_design_id: item.published_design_id,
+        preview_url: item.preview_url,
+        progress_message: "Queued Shopify alt text repair",
+        started_at: createdAt,
+      });
+    } catch (_) {}
     entries.push({
       id: jobId,
       shopify_product_id: item.shopify_product_id,
@@ -287,6 +305,23 @@ export async function processAdminFixAltTextsQueueBody(env, body) {
     .run();
 
   try {
+    const { recordProductMaintenanceLog } = await import("../admin/adminJobLogs.js");
+    await recordProductMaintenanceLog(env, {
+      type: "shopify_alt_text",
+      status: "active",
+      source: "admin",
+      title: body.product_key || sid,
+      product_key: body.product_key,
+      design_id: body.design_id,
+      shopify_product_id: sid,
+      printify_product_id: body.printify_product_id,
+      published_design_id: body.published_design_id,
+      progress_message: "Shopify alt text repair",
+      started_at: updatedAt,
+    });
+  } catch (_) {}
+
+  try {
     const shopify = await runFixAltTextsForShopifyProduct(env, {
       shopify_product_id: sid,
       printify_product_id: body.printify_product_id,
@@ -350,6 +385,23 @@ export async function processAdminFixAltTextsQueueBody(env, body) {
       )
       .run();
 
+    try {
+      const { recordProductMaintenanceLog } = await import("../admin/adminJobLogs.js");
+      await recordProductMaintenanceLog(env, {
+        type: "shopify_alt_text",
+        status: shopify.ok ? "completed" : "failed",
+        source: "admin",
+        title: shopify.product_key || sid,
+        product_key: shopify.product_key || body.product_key,
+        design_id: body.design_id,
+        shopify_product_id: sid,
+        printify_product_id: shopify.printify_product_id || body.printify_product_id,
+        published_design_id: shopify.published_design_id || body.published_design_id,
+        error: shopify.ok ? null : String(shopify.message || "Alt text repair failed"),
+        completed_at: nowMs(),
+      });
+    } catch (_) {}
+
     return { ok: true, shopify_ok: shopify.ok, amazon };
   } catch (e) {
     await env.CREATOR_DB.prepare(
@@ -359,6 +411,22 @@ export async function processAdminFixAltTextsQueueBody(env, body) {
     )
       .bind(String(e?.message || e).slice(0, 500), nowMs(), jobId)
       .run();
+    try {
+      const { recordProductMaintenanceLog } = await import("../admin/adminJobLogs.js");
+      await recordProductMaintenanceLog(env, {
+        type: "shopify_alt_text",
+        status: "failed",
+        source: "admin",
+        title: body.product_key || sid,
+        product_key: body.product_key,
+        design_id: body.design_id,
+        shopify_product_id: sid,
+        printify_product_id: body.printify_product_id,
+        published_design_id: body.published_design_id,
+        error: String(e?.message || e),
+        completed_at: nowMs(),
+      });
+    } catch (_) {}
     throw e;
   }
 }

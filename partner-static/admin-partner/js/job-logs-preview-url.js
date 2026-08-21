@@ -39,7 +39,9 @@ export function jobLogPreviewUrl(row) {
   const fallback = firstUrl(printify, shopify, amazon, row.preview_url, fromImages, row.mock_url);
   const type = String(row.type || "");
   if (type === "printify_publish") return firstUrl(printify, fallback);
-  if (type === "shopify_publish") return firstUrl(shopify, fallback);
+  if (type === "shopify_publish" || type === "shopify_alt_text" || type === "shopify_preview" || type === "shopify_verify") {
+    return firstUrl(shopify, fallback);
+  }
   if (type === "amazon_publish") return firstUrl(amazon, shopify, printify, fallback);
   return fallback;
 }

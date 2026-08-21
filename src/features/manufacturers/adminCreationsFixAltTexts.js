@@ -174,6 +174,24 @@ export async function handleAdminCreationsFixAltTexts(request, env) {
     }
   }
 
+  try {
+    const { recordProductMaintenanceLog } = await import("../admin/adminJobLogs.js");
+    await recordProductMaintenanceLog(env, {
+      type: "shopify_alt_text",
+      status: result.ok ? "completed" : "failed",
+      source: "admin",
+      title: result.product_key || result.shopify_product_id,
+      product_key: result.product_key,
+      design_id: body.design_id,
+      shopify_product_id: result.shopify_product_id,
+      printify_product_id: result.printify_product_id,
+      published_design_id: result.published_design_id,
+      error: result.ok ? null : String(result.message || "Alt text repair failed"),
+      started_at: Date.now(),
+      completed_at: Date.now(),
+    });
+  } catch (_) {}
+
   const { after_images: _omit, ...publicResult } = result;
   return json({ ...publicResult, amazon }, 200, cors);
 }

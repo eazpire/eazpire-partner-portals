@@ -68,6 +68,9 @@ export function liveStatusText(row) {
   if (msg) return msg;
   if (row?.type === "printify_publish") return "Printify publish — waiting for progress";
   if (row?.type === "shopify_publish") return "Shopify sync in progress";
+  if (row?.type === "shopify_alt_text") return "Shopify alt text repair";
+  if (row?.type === "shopify_preview") return "Shopify preview / front repair";
+  if (row?.type === "shopify_verify") return "Shopify verify / finalize";
   if (row?.type === "amazon_publish") {
     const cc = String(row.amazon_country || "").trim();
     return cc ? `Amazon ${cc} submit in progress` : "Amazon submit in progress";
