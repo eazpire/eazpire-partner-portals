@@ -1772,10 +1772,27 @@ export async function handleManufacturerRouter(request, env, ctx) {
         designOwner = String(row?.owner_id || "").trim();
       }
       const { handleRegenerateDesignMetadata } = await import("../design/regenerateMetadata.js");
-      return handleRegenerateDesignMetadata(
-        proxyRequestWithAdminOwner(request, designOwner || admin.owner_id),
-        env
-      );
+      try {
+        return await handleRegenerateDesignMetadata(
+          proxyRequestWithAdminOwner(request, designOwner || admin.owner_id),
+          env
+        );
+      } catch (e) {
+        const { classifyWorkersAiError, metadataFailureHttpStatus } = await import(
+          "../design/generateMetadataWorkersAi.js"
+        );
+        const classified = classifyWorkersAiError(e);
+        return json(
+          {
+            ok: false,
+            error: classified.error,
+            message: classified.message,
+            retry_after_minutes: classified.retry_after_minutes,
+          },
+          metadataFailureHttpStatus(classified.error),
+          getCorsHeaders(request)
+        );
+      }
     }
     if (
       (op === "admin-design-edit-remove-background" ||

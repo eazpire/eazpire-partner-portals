@@ -2,6 +2,18 @@ export function partnerApiBase() {
   return window.__PARTNER_API_BASE__ || window.location.origin;
 }
 
+export function formatPartnerApiError(res, data = {}) {
+  const apiMsg = String(data.message || data.detail || "").trim();
+  if (apiMsg) return apiMsg;
+  const code = String(data.error || "").trim();
+  if (code && !/^http_\d+$/i.test(code)) return code;
+  const status = Number(res?.status) || 0;
+  if (status === 429) return "Workers AI rate limit reached. Try again in 2 minutes.";
+  if (status === 503) return "Workers AI is temporarily overloaded. Try again in 2 minutes.";
+  if (status === 504 || status === 524) return "The request timed out. Try again in 2 minutes.";
+  return status ? `Request failed (HTTP ${status}).` : "Request failed.";
+}
+
 export async function partnerFetch(op, { method = "GET", body, query = {} } = {}) {
   const url = new URL(partnerApiBase());
   url.searchParams.set("op", op);
@@ -16,7 +28,7 @@ export async function partnerFetch(op, { method = "GET", body, query = {} } = {}
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    const err = new Error(data.message || data.detail || data.error || `http_${res.status}`);
+    const err = new Error(formatPartnerApiError(res, data));
     err.data = data;
     err.status = res.status;
     throw err;
@@ -43,7 +55,7 @@ export async function partnerUpload(op, file, { query = {}, formFields = {} } = 
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    const err = new Error(data.message || data.detail || data.error || `http_${res.status}`);
+    const err = new Error(formatPartnerApiError(res, data));
     err.data = data;
     err.status = res.status;
     throw err;
