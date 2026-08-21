@@ -10,6 +10,7 @@ import { escapeHtml } from "/creations/shared/js/partner-api.js";
 import { openModal, closeModal } from "/creations/shared/js/partner-shell.js";
 import { bindTriSwitches, facetSectionHtml as sharedFacetSectionHtml } from "./facet-tri-ui.js";
 import { bindProdCarousels, productCarouselHtml } from "./designs-product-media.js";
+import { TIME_RANGE_KEYS, TIME_RANGE_LABELS, timeRangeKeysForItem } from "./time-range-filter.js";
 
 const INFO_ICON_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="5" r="1" fill="currentColor"/><path d="M8 7.25v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
@@ -26,6 +27,7 @@ const STORAGE_KEY = "admin_creations_products_filter_collapsed";
 
 /** Facet sections in display order. */
 const SECTIONS = [
+  { key: "time_range", label: "Time range" },
   { key: "category", label: "Category" },
   { key: "visibility", label: "Visibility" },
   { key: "source", label: "Source" },
@@ -169,6 +171,7 @@ function labelForFacetValue(sectionKey, value, facets) {
   if (sectionKey === "amazon_status") return AMAZON_STATUS_LABELS[value] || value;
   if (sectionKey === "needs_update") return value === "yes" ? "Needs update" : "Up to date";
   if (sectionKey === "alt_image_texts") return value === "has" ? "Has alt text" : "Missing alt text";
+  if (sectionKey === "time_range") return TIME_RANGE_LABELS[value] || value;
   return String(value);
 }
 
@@ -309,6 +312,8 @@ function providerKeyOf(p) {
 
 function valuesForSection(sectionKey, p) {
   switch (sectionKey) {
+    case "time_range":
+      return timeRangeKeysForItem(p);
     case "category":
       return categoryKeyOf(p);
     case "visibility":
@@ -431,6 +436,7 @@ function fixedBaseKeys(sectionKey) {
   if (sectionKey === "amazon_status") return AMAZON_STATUS_KEYS.slice();
   if (sectionKey === "alt_image_texts") return ["has", "missing"];
   if (sectionKey === "needs_update") return ["yes", "no"];
+  if (sectionKey === "time_range") return TIME_RANGE_KEYS.slice();
   return null;
 }
 
@@ -450,6 +456,7 @@ export function computeFacetsFromItems(items, override = null) {
   const uni = universePool(list, q);
 
   const labelFns = {
+    time_range: (key) => TIME_RANGE_LABELS[key] || key,
     category: (key) => (key === CATEGORY_EMPTY_KEY ? CATEGORY_EMPTY_LABEL : key),
     visibility: (key) => VISIBILITY_LABELS[key] || key,
     source: (key) => SOURCE_LABELS[key] || key,
@@ -475,7 +482,10 @@ export function computeFacetsFromItems(items, override = null) {
     const universeKeys = fixed || [...uniCounts.keys()];
     const merged = mergeUniverseCounts(universeKeys, poolCounts, tri[key]);
     const numeric = NUMERIC_SECTIONS.has(key);
-    const ordered = key === "amazon_markets" || key === "channels" || key === "amazon_status" ? fixed : null;
+    const ordered =
+      key === "amazon_markets" || key === "channels" || key === "amazon_status" || key === "time_range"
+        ? fixed
+        : null;
     out[key] = toFacetList(merged, labelFns[key], {
       numeric,
       orderedKeys: ordered,

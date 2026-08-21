@@ -8,11 +8,13 @@
 
 import { escapeHtml } from "/creations/shared/js/partner-api.js";
 import { bindTriSwitches, facetSectionHtml as sharedFacetSectionHtml } from "./facet-tri-ui.js";
+import { TIME_RANGE_LABELS, emptyTimeRangeFacets } from "./time-range-filter.js";
 
 const STORAGE_KEY = "admin_creations_designs_filter_collapsed";
 
 /** Facet sections under search. */
 const SECTIONS = [
+  { key: "time_range", label: "Time range" },
   { key: "visibility", label: "Visibility" },
   { key: "status", label: "Status" },
   { key: "products", label: "Products" },
@@ -46,6 +48,7 @@ function labelForFacetValue(sectionKey, value, facets) {
     const hit = list.find((f) => String(f.key) === String(value));
     if (hit?.label) return String(hit.label);
   }
+  if (sectionKey === "time_range") return TIME_RANGE_LABELS[value] || value;
   return String(value);
 }
 
@@ -129,6 +132,7 @@ function facetSectionHtml(sectionKey, label, facetList) {
 
 export function emptyFacets() {
   return {
+    time_range: emptyTimeRangeFacets(),
     visibility: [
       { key: "public", label: "Public", count: 0 },
       { key: "private", label: "Private", count: 0 },

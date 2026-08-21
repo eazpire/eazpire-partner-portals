@@ -32,6 +32,7 @@ import {
   collectActiveFilterChips,
   removeTriFilter,
 } from "./designs-filters.js";
+import { localTodaySince } from "./time-range-filter.js";
 import { filterResultsBarHtml, bindFilterResultsBar } from "./filter-results-bar.js";
 
 export function teardownBulkDock() {
@@ -910,6 +911,8 @@ async function fetchList({ append = false } = {}) {
         include_facets: "1",
         offset: state.offset,
         limit: state.limit,
+        now: Date.now(),
+        today_since: localTodaySince(),
       },
     });
     const chunk = Array.isArray(data.items) ? data.items : [];
