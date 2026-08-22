@@ -115,10 +115,12 @@ function renderModelFields(model, settings) {
 
 function liveNote(provider) {
   if (!provider) return "";
-  const cls = provider.live ? "live-yes" : "live-no";
+  const badgeCls = provider.live ? "badge badge-success" : "badge badge-warning";
   const status = provider.live ? "Live in shop generate" : "Saved only — not live yet";
-  return `<p class="${cls}" style="margin:0 0 8px">${escapeHtml(status)}</p>
-    <p class="muted" style="margin:0">${escapeHtml(provider.note || "")}</p>`;
+  return `<div class="gen-live">
+    <span class="${badgeCls}">${escapeHtml(status)}</span>
+    <p class="muted" style="margin:8px 0 0">${escapeHtml(provider.note || "")}</p>
+  </div>`;
 }
 
 function renderGeneratorForm(catalog, config) {
@@ -154,7 +156,7 @@ function renderGeneratorForm(catalog, config) {
         </select>
       </div>
     </div>
-    <div id="gen-live" style="margin:14px 0">${liveNote(provider)}</div>
+    ${liveNote(provider)}
     <div id="gen-fields">${renderModelFields(model, config.settings)}</div>`;
 }
 
@@ -176,9 +178,16 @@ async function mountOverview() {
   setTopbarExtra("");
   const root = document.getElementById("view-overview");
   root.innerHTML = `
-    <div class="panel" style="margin-bottom:12px">
-      <h2 style="margin:0 0 8px">System</h2>
-      <p class="muted" style="margin:0">Shop and platform settings live here. More areas will follow. First page: Generator.</p>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">System</h2>
+          <p class="panel-subtitle">Shop and platform settings</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <p class="muted" style="margin:0">More areas will follow. First page: Generator.</p>
+      </div>
     </div>
     <div class="sys-grid">
       <a class="sys-card" href="/system/generator">
@@ -192,10 +201,10 @@ async function mountGenerator() {
   const root = document.getElementById("view-generator");
   setTopbarExtra(`<button type="button" class="btn btn-primary" id="gen-save">Save</button>
     <button type="button" class="btn btn-secondary" id="gen-refresh">Refresh</button>`);
-  root.innerHTML = `<div class="panel"><p class="muted">Loading Generator…</p></div>`;
+  root.innerHTML = `<div class="panel"><div class="panel-body"><p class="muted">Loading Generator…</p></div></div>`;
 
   const load = async () => {
-    root.innerHTML = `<div class="panel"><p class="muted">Loading Generator…</p></div>`;
+    root.innerHTML = `<div class="panel"><div class="panel-body"><p class="muted">Loading Generator…</p></div></div>`;
     try {
       const { catalog, configs } = await loadGeneratorData(true);
       if (!catalog.features.some((f) => f.id === selectedFeature && f.enabled)) {
@@ -204,23 +213,32 @@ async function mountGenerator() {
       const config = configs[selectedFeature] || { feature: selectedFeature, provider: "replicate", settings: {} };
 
       root.innerHTML = `
-        <div class="panel" style="margin-bottom:12px">
-          <h2 style="margin:0 0 8px">Generator</h2>
-          <p class="muted" style="margin:0 0 12px">Pick a feature, then choose provider and model from the allowed list. Fields change with the model. Replicate settings apply to live shop generate. OpenAI and Workers AI can be saved, but they are not live yet.</p>
-          <div class="feature-grid">
-            ${(catalog.features || [])
-              .map((f) => {
-                const pressed = f.id === selectedFeature;
-                return `<button type="button" class="feature-card" data-feature="${escapeHtml(f.id)}" ${
-                  f.enabled ? "" : "disabled"
-                } aria-pressed="${pressed ? "true" : "false"}">
-                  <div class="feature-card__label">${escapeHtml(f.label)}</div>
-                  <div class="feature-card__meta">${f.enabled ? escapeHtml(f.description || "") : "Coming soon"}</div>
-                </button>`;
-              })
-              .join("")}
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Generator</h2>
+              <p class="panel-subtitle">Provider, model, and defaults for AI generate</p>
+            </div>
           </div>
-          <div id="gen-form">${renderGeneratorForm(catalog, config)}</div>
+          <div class="panel-body">
+            <p class="muted" style="margin:0 0 16px">Pick a feature, then choose provider and model from the allowed list. Fields change with the model. Replicate settings apply to live shop generate. OpenAI and Workers AI can be saved, but they are not live yet.</p>
+            <div class="feature-grid">
+              ${(catalog.features || [])
+                .map((f) => {
+                  const pressed = f.id === selectedFeature;
+                  const soonBadge = f.enabled ? "" : `<span class="badge badge-neutral" style="margin-top:8px">Coming soon</span>`;
+                  return `<button type="button" class="feature-card" data-feature="${escapeHtml(f.id)}" ${
+                    f.enabled ? "" : "disabled"
+                  } aria-pressed="${pressed ? "true" : "false"}">
+                    <div class="feature-card__label">${escapeHtml(f.label)}</div>
+                    <div class="feature-card__meta">${f.enabled ? escapeHtml(f.description || "") : "Not available yet"}</div>
+                    ${soonBadge}
+                  </button>`;
+                })
+                .join("")}
+            </div>
+            <div id="gen-form">${renderGeneratorForm(catalog, config)}</div>
+          </div>
         </div>`;
 
       bindGeneratorForm(catalog);
@@ -232,7 +250,7 @@ async function mountGenerator() {
         });
       });
     } catch (e) {
-      root.innerHTML = `<div class="panel"><p class="muted">Failed: ${escapeHtml(e.message)}</p></div>`;
+      root.innerHTML = `<div class="panel"><div class="panel-body"><p class="muted">Failed: ${escapeHtml(e.message)}</p></div></div>`;
     }
   };
 
