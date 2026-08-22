@@ -375,6 +375,8 @@ const ADMIN_OPS = new Set([
   "audience-events-list",
   "audience-events-save",
   "audience-gap",
+  "admin-system-generator-config-get",
+  "admin-system-generator-config-save",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1890,6 +1892,14 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "audience-gap" && request.method === "GET") {
       const { handleAudienceGap } = await import("../audience/audienceAdminOps.js");
       return handleAudienceGap(request, env);
+    }
+    if (op === "admin-system-generator-config-get" && request.method === "GET") {
+      const { handleSystemGeneratorConfigGet } = await import("../admin/systemGeneratorConfig.js");
+      return handleSystemGeneratorConfigGet(request, env);
+    }
+    if (op === "admin-system-generator-config-save" && request.method === "POST") {
+      const { handleSystemGeneratorConfigSave } = await import("../admin/systemGeneratorConfig.js");
+      return handleSystemGeneratorConfigSave(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

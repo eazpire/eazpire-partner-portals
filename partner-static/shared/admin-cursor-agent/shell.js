@@ -255,6 +255,7 @@
       if (location.pathname.indexOf("/partner") === 0) return "admin-partner";
       if (location.pathname.indexOf("/brands") === 0) return "admin-brands";
       if (location.pathname.indexOf("/audience") === 0) return "admin-audience";
+      if (location.pathname.indexOf("/system") === 0) return "admin-system";
       return "admin";
     }
     if (h.indexOf("creator.") === 0) return "creator";

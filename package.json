@@ -50,6 +50,7 @@
     "build:freepd-catalog": "node scripts/test/build-freepd-catalog.mjs",
     "build:gl-transitions": "node scripts/test/build-gl-transitions-bundle.mjs",
     "dev:prize-cards-preview": "npx live-server . --port=3465 --open=/dev/eazy-prize-cards-preview.html",
+    "dev:live-image-lab": "node scripts/test/live-image-lab-server.cjs",
     "serve:local-test": "npx --yes live-server local-test --port=8765 --open=/product-carousel-video.html",
     "bootstrap:carousel-test": "node scripts/bootstrap-carousel-test-token.mjs",
     "secrets:carousel-upload": "node --env-file=.env scripts/set-carousel-worker-secret.cjs",

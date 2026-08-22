@@ -98,7 +98,7 @@ database_id = "0e1f5a29-8d34-45ae-a9eb-f98a6ba7f0fd"
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
-run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*"]
+run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*", "/system", "/system/*"]
 
 # Same Workers AI binding as creator-engine (admin metadata regenerate, etc.)
 [ai]

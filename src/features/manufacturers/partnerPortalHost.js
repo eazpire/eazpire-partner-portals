@@ -1,5 +1,5 @@
 /**
- * Serve partner / admin-partner / admin-creations / admin-brands / admin-audience SPAs from inline bundle (fast) or PARTNER_ASSETS.
+ * Serve partner / admin-partner / admin-creations / admin-brands / admin-audience / admin-system SPAs from inline bundle (fast) or PARTNER_ASSETS.
  */
 
 import { getPartnerStaticFallback } from "./partnerStaticFallback.js";
@@ -11,6 +11,7 @@ function cursorPortalForHost(hostname, pathname) {
   if (pathname.startsWith("/partner")) return "admin-partner";
   if (pathname.startsWith("/brands")) return "admin-brands";
   if (pathname.startsWith("/audience")) return "admin-audience";
+  if (pathname.startsWith("/system")) return "admin-system";
   return "admin";
 }
 
@@ -58,6 +59,13 @@ function isAdminAudienceHost(hostname, pathname) {
   return (
     (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
     (pathname === "/audience" || pathname.startsWith("/audience/"))
+  );
+}
+
+function isAdminSystemHost(hostname, pathname) {
+  return (
+    (hostname === "admin.eazpire.com" || hostname === "admin.local.eazpire.com") &&
+    (pathname === "/system" || pathname.startsWith("/system/"))
   );
 }
 
@@ -115,6 +123,13 @@ function resolveAssetKey(hostname, pathname) {
     if (sub === "/" || !sub.includes(".")) return "admin-audience/index.html";
     return `admin-audience${sub}`;
   }
+  if (isAdminSystemHost(hostname, pathname)) {
+    const sub = pathname.replace(/^\/system\/?/, "/") || "/";
+    if (sub.startsWith("/shared/")) return `shared${sub.slice("/shared".length)}`;
+    if (sub.startsWith("/js/")) return `admin-system${sub}`;
+    if (sub === "/" || !sub.includes(".")) return "admin-system/index.html";
+    return `admin-system${sub}`;
+  }
   return null;
 }
 
@@ -142,6 +157,7 @@ export function isPartnerPortalHost(hostname, pathname) {
     isAdminCreationsHost(hostname, pathname) ||
     isAdminBrandsHost(hostname, pathname) ||
     isAdminAudienceHost(hostname, pathname) ||
+    isAdminSystemHost(hostname, pathname) ||
     isAdminRootHost(hostname, pathname)
   );
 }
@@ -181,6 +197,11 @@ export async function handlePartnerPortalRequest(request, env) {
     return handleAdminAuthVerify(request, env);
   }
 
+  if (isAdminSystemHost(url.hostname, url.pathname) && url.pathname === "/system/auth/verify") {
+    const { handleAdminAuthVerify } = await import("./adminPartnerAuth.js");
+    return handleAdminAuthVerify(request, env);
+  }
+
   if (isAdminRootHost(url.hostname, url.pathname)) {
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -204,6 +225,7 @@ export async function handlePartnerPortalRequest(request, env) {
     <p><a href="/creations">Creations Admin →</a></p>
     <p><a href="/brands">Brands Admin →</a></p>
     <p><a href="/audience">Audience Admin →</a></p>
+    <p><a href="/system/generator">System →</a></p>
   </div>
 </body>
 </html>`;
