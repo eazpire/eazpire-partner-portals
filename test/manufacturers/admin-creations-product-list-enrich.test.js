@@ -44,10 +44,21 @@ function product(overrides = {}) {
 }
 
 describe("adminCreationsProductListEnrich", () => {
-  it("publicationChannelKeys returns Shopify Channels only (eazpire Web / Android)", () => {
-    expect(publicationChannelKeys()).toEqual(["onlineshop", "eazpire_headless"]);
+  it("publicationChannelKeys returns Shopify Channels (eazpire Web / Android + Shop / social)", () => {
+    expect(publicationChannelKeys()).toEqual([
+      "onlineshop",
+      "eazpire_headless",
+      "shop",
+      "facebook_instagram",
+      "google_youtube",
+      "pinterest",
+    ]);
     expect(channelLabelForKey("onlineshop")).toBe("eazpire Web");
     expect(channelLabelForKey("eazpire_headless")).toBe("eazpire Android");
+    expect(channelLabelForKey("shop")).toBe("Shop");
+    expect(channelLabelForKey("facebook_instagram")).toBe("Facebook & Instagram");
+    expect(channelLabelForKey("google_youtube")).toBe("Google & YouTube");
+    expect(channelLabelForKey("pinterest")).toBe("Pinterest");
   });
 
   it("Amazon success vs pending mapping uses Admin status criteria (ASIN / verified / in-flight)", () => {
@@ -430,6 +441,10 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.channels).toEqual([
       { key: "onlineshop", label: "eazpire Web", count: 1 },
       { key: "eazpire_headless", label: "eazpire Android", count: 0 },
+      { key: "shop", label: "Shop", count: 0 },
+      { key: "facebook_instagram", label: "Facebook & Instagram", count: 0 },
+      { key: "google_youtube", label: "Google & YouTube", count: 0 },
+      { key: "pinterest", label: "Pinterest", count: 0 },
     ]);
     expect(facets.amazon_markets.find((f) => f.key === "amazon_eu")).toMatchObject({
       label: "Amazon EU",
@@ -502,6 +517,10 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.channels).toEqual([
       { key: "onlineshop", label: "eazpire Web", count: 0 },
       { key: "eazpire_headless", label: "eazpire Android", count: 0 },
+      { key: "shop", label: "Shop", count: 0 },
+      { key: "facebook_instagram", label: "Facebook & Instagram", count: 0 },
+      { key: "google_youtube", label: "Google & YouTube", count: 0 },
+      { key: "pinterest", label: "Pinterest", count: 0 },
     ]);
     expect(facets.amazon_markets[0]).toMatchObject({ key: "amazon_eu", label: "Amazon EU", count: 0, depth: 0 });
     expect(facets.amazon_status).toEqual([
@@ -541,6 +560,10 @@ describe("adminCreationsProductListEnrich", () => {
     expect(facets.channels).toEqual([
       { key: "onlineshop", label: "eazpire Web", count: 1 },
       { key: "eazpire_headless", label: "eazpire Android", count: 1 },
+      { key: "shop", label: "Shop", count: 0 },
+      { key: "facebook_instagram", label: "Facebook & Instagram", count: 0 },
+      { key: "google_youtube", label: "Google & YouTube", count: 0 },
+      { key: "pinterest", label: "Pinterest", count: 0 },
     ]);
     expect(facets.amazon_markets.find((f) => f.key === "amazon_eu")?.count).toBe(2);
     expect(facets.amazon_markets.find((f) => f.key === "amazon_na")?.count).toBe(1);

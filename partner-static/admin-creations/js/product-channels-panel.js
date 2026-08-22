@@ -23,16 +23,42 @@ function flagHtml(code) {
   return `<img class="cr-ch-flag" src="${FLAG_CDN}${escapeHtml(cc)}.svg" alt="" loading="lazy" />`;
 }
 
+function defaultShopifySales() {
+  return {
+    eazpire_web: { enabled: true },
+    eazpire_android: { enabled: true },
+    shop: { enabled: false },
+    facebook_instagram: { enabled: false },
+    google_youtube: { enabled: false },
+    pinterest: { enabled: false },
+  };
+}
+
 function unlocksFromProduct(product) {
   const u = product?.channels?.unlocks;
-  if (u && typeof u === "object") return u;
+  if (u && typeof u === "object") {
+    return {
+      ...u,
+      shopify_sales: u.shopify_sales && typeof u.shopify_sales === "object" ? u.shopify_sales : defaultShopifySales(),
+    };
+  }
   return {
     eazpire: { enabled: true },
+    shopify_sales: defaultShopifySales(),
     amazon: { enabled: false, continents: { europa: false, amerika: false }, markets: {} },
     etsy: { enabled: false },
     ebay: { enabled: false },
   };
 }
+
+const SHOPIFY_SALES_TILES = [
+  { key: "eazpire_web", label: "eazpire Web", hint: "Shopify Online Store" },
+  { key: "eazpire_android", label: "eazpire Android", hint: "Eazpire Headless" },
+  { key: "shop", label: "Shop", hint: "Shopify Shop Channel" },
+  { key: "facebook_instagram", label: "Facebook & Instagram", hint: "Shopify sales channel" },
+  { key: "google_youtube", label: "Google & YouTube", hint: "Shopify sales channel" },
+  { key: "pinterest", label: "Pinterest", hint: "Shopify sales channel" },
+];
 
 /**
  * Continent publish targets — prefer API amazon_publish_targets (per-country codes).
@@ -199,7 +225,7 @@ export function renderChannelsPanelHtml(product, ui) {
   const showEtsy = !!unlocks.etsy?.enabled;
   const showEbay = !!unlocks.ebay?.enabled;
   const targets = amazonTargetsFromProduct(product);
-  const eaz = ui.channelState["eazpire"] || { status: "published", queue: false };
+  const sales = unlocks.shopify_sales || defaultShopifySales();
 
   let amzPublished = 0;
   let amzDryOk = 0;
@@ -212,11 +238,21 @@ export function renderChannelsPanelHtml(product, ui) {
   }
 
   const tiles = [];
-  tiles.push(`<article class="cr-ch-tile cr-ch-tile--eazpire" role="listitem">
+  for (const row of SHOPIFY_SALES_TILES) {
+    if (!sales[row.key]?.enabled) continue;
+    const st =
+      ui.channelState[row.key] ||
+      ui.channelState[row.key === "eazpire_web" ? "eazpire" : row.key] || {
+        status: "published",
+        queue: false,
+      };
+    tiles.push(`<article class="cr-ch-tile cr-ch-tile--eazpire" role="listitem">
     ${LOGOS.eazpire}
-    <div class="cr-ch-tile__top"><h4>eazpire</h4>${statusHtml(eaz)}</div>
+    <div class="cr-ch-tile__top"><h4>${escapeHtml(row.label)}</h4>${statusHtml(st)}</div>
+    <p class="cr-ch-tile__meta">${escapeHtml(row.hint)}</p>
     <div class="cr-ch-actions"></div>
   </article>`);
+  }
 
   if (showAmazon) {
     const amzSt =
@@ -254,7 +290,7 @@ export function renderChannelsPanelHtml(product, ui) {
 
   if (!showAmazon && !showEtsy && !showEbay) {
     tiles.push(
-      `<p class="cr-pd-hint" style="grid-column:1/-1">Only eazpire is unlocked. Enable Amazon / Etsy / eBay in Admin Catalog Editor → Channels.</p>`
+      `<p class="cr-pd-hint" style="grid-column:1/-1">Only Shopify channels are unlocked. Enable Amazon / Etsy / eBay in Admin Catalog Editor → Channels.</p>`
     );
   }
 
@@ -705,7 +741,8 @@ export function bindChannelsPanel(root, ui) {
 
 export function renderOverviewPanelHtml(product) {
   const unlocks = unlocksFromProduct(product);
-  const unlocked = ["eazpire"];
+  const sales = unlocks.shopify_sales || defaultShopifySales();
+  const unlocked = SHOPIFY_SALES_TILES.filter((row) => sales[row.key]?.enabled).map((row) => row.label);
   if (unlocks.amazon?.enabled) unlocked.push("Amazon");
   if (unlocks.etsy?.enabled) unlocked.push("Etsy");
   if (unlocks.ebay?.enabled) unlocked.push("eBay");

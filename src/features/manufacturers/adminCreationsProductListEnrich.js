@@ -22,6 +22,13 @@ import {
 } from "../publish/printifyListingStatus.js";
 import { parseMetafieldValue } from "../admin/shopifyCatalogMetafieldSpec.js";
 import {
+  matchShopifySalesChannelName,
+  parseShopifySalesPublicationIdsFromEnv,
+  SHOPIFY_SALES_CHANNEL_DEFS,
+  shopifySalesFilterKeys,
+  shopifySalesFilterLabel,
+} from "../catalog/shopifySalesChannels.js";
+import {
   normalizeShopifyProductId,
   indexShopifyNodesById,
   liveColorsFromShopifyNode,
@@ -61,10 +68,10 @@ export const AMAZON_FACET_COUNTRY_CODES = [...AMAZON_EU_COUNTRY_CODES, ...AMAZON
 
 /**
  * Shopify sales channels only (Creations Products → Channels filter).
- * Online Store → eazpire Web; Headless → eazpire Android.
+ * Online Store → eazpire Web; Headless → eazpire Android; plus Shop / social channels.
  */
 export function publicationChannelKeys() {
-  return ["onlineshop", "eazpire_headless"];
+  return shopifySalesFilterKeys();
 }
 
 /**
@@ -94,10 +101,9 @@ export function amazonStatusKeys() {
   return ["online", "pending"];
 }
 
-const CHANNEL_LABELS = {
-  onlineshop: "eazpire Web",
-  eazpire_headless: "eazpire Android",
-};
+const CHANNEL_LABELS = Object.fromEntries(
+  SHOPIFY_SALES_CHANNEL_DEFS.map((d) => [d.filterKey, d.label])
+);
 
 const AMAZON_MARKET_LABELS = {
   amazon_eu: "Amazon EU",
@@ -134,7 +140,7 @@ function countryCodeForMarketplaceId(marketplaceId) {
 }
 
 export function channelLabelForKey(key) {
-  return CHANNEL_LABELS[key] || String(key || "");
+  return CHANNEL_LABELS[key] || shopifySalesFilterLabel(key) || String(key || "");
 }
 
 export function amazonMarketLabelForKey(key) {
@@ -218,6 +224,22 @@ export function nodePublishedToHeadless(node, headlessPublicationGids) {
     if (!n?.isPublished) continue;
     const pid = normalizePublicationGid(n?.publication?.id);
     if (pid && allowed.has(pid)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when node is published to a Shopify sales channel by channel name and/or publication IDs.
+ */
+export function nodePublishedToSalesChannel(node, def, publicationGids) {
+  if (!def) return false;
+  if (nodePublishedToHeadless(node, publicationGids)) return true;
+  const edges = node?.publications?.edges;
+  if (!Array.isArray(edges) || !edges.length) return false;
+  for (const edge of edges) {
+    const n = edge?.node;
+    if (!n?.isPublished) continue;
+    if (matchShopifySalesChannelName(def, n?.channel?.name)) return true;
   }
   return false;
 }
@@ -914,7 +936,8 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     loadCreationsForDesignIds(env, designIds),
   ]);
 
-  const headlessPublicationGids = parseExtraPublicationIdsFromEnv(env);
+  const salesPublicationGids = parseShopifySalesPublicationIdsFromEnv(env);
+  const headlessPublicationGids = salesPublicationGids.eazpire_android || parseExtraPublicationIdsFromEnv(env);
 
   return list.map((product) => {
     const sid = normalizeShopifyProductId(product.shopify_product_id || product.id);
@@ -962,16 +985,28 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
     const amazonAnyOnline = amazonEuLive || amazonNaLive;
     const amazonAnyPending = amazonEuPending || amazonNaPending;
 
-    const onOnlineStore = node
-      ? nodePublishedToOnlineStore(node)
-      : Number(product.is_active) === 2;
-    const onHeadless = node
-      ? nodePublishedToHeadless(node, headlessPublicationGids)
-      : false;
-
+    const salesOn = {};
+    for (const def of SHOPIFY_SALES_CHANNEL_DEFS) {
+      if (!node) {
+        salesOn[def.key] = def.key === "eazpire_web" ? Number(product.is_active) === 2 : false;
+        continue;
+      }
+      if (def.key === "eazpire_web") {
+        salesOn[def.key] =
+          nodePublishedToOnlineStore(node) ||
+          nodePublishedToSalesChannel(node, def, salesPublicationGids[def.key]);
+        continue;
+      }
+      if (def.key === "eazpire_android") {
+        salesOn[def.key] = nodePublishedToHeadless(node, headlessPublicationGids);
+        continue;
+      }
+      salesOn[def.key] = nodePublishedToSalesChannel(node, def, salesPublicationGids[def.key]);
+    }
     const marketLabels = [];
-    if (onOnlineStore) marketLabels.push("eazpire Web");
-    if (onHeadless) marketLabels.push("eazpire Android");
+    for (const def of SHOPIFY_SALES_CHANNEL_DEFS) {
+      if (salesOn[def.key]) marketLabels.push(def.label);
+    }
     if (amazonEuChannel) marketLabels.push("Amazon EU");
     if (amazonNaLive || amazonNaPending) marketLabels.push("Amazon US");
 
@@ -982,9 +1017,8 @@ export async function enrichCreationsProductListFacets(env, products, nodesBySho
 
     // Shopify sales channels only.
     const channelKeys = publicationChannelKeys().filter((key) => {
-      if (key === "onlineshop") return onOnlineStore;
-      if (key === "eazpire_headless") return onHeadless;
-      return false;
+      const def = SHOPIFY_SALES_CHANNEL_DEFS.find((d) => d.filterKey === key);
+      return def ? !!salesOn[def.key] : false;
     });
 
     // Region/country presence (live OR pending) — status filtered separately.
@@ -1146,7 +1180,7 @@ export function buildProductFilterFacets(products) {
     (p) => (Array.isArray(p.channel_keys) && p.channel_keys.length ? p.channel_keys : null)
   );
   for (const [k, v] of channelCounts) baseChannels.set(k, v);
-  // Fixed order: eazpire Web → eazpire Android (do not sort by count/name).
+  // Fixed order: Shopify sales channels from shopifySalesChannels.js (do not sort by count/name).
   const channels = publicationChannelKeys().map((key) => ({
     key,
     label: channelLabelForKey(key),

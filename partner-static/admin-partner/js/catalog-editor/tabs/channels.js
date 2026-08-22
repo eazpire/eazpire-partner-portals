@@ -31,6 +31,59 @@ const DEFAULT_MARKET_LABELS = {
 };
 
 const DEFAULT_SOURCE = { europa: "DE", amerika: "US" };
+
+/** Keep in sync with src/features/catalog/shopifySalesChannels.js */
+const SHOPIFY_SALES_ROWS = [
+  { key: "eazpire_web", id: "ce-ch-eazpire-web", label: "eazpire Web", hint: "Shopify Online Store" },
+  { key: "eazpire_android", id: "ce-ch-eazpire-android", label: "eazpire Android", hint: "Eazpire Headless" },
+  { key: "shop", id: "ce-ch-shop", label: "Shop", hint: "Shopify Shop Channel" },
+  {
+    key: "facebook_instagram",
+    id: "ce-ch-facebook",
+    label: "Facebook & Instagram",
+    hint: "Shopify sales channel",
+  },
+  { key: "google_youtube", id: "ce-ch-google", label: "Google & YouTube", hint: "Shopify sales channel" },
+  { key: "pinterest", id: "ce-ch-pinterest", label: "Pinterest", hint: "Shopify sales channel" },
+];
+
+function defaultShopifySales() {
+  return {
+    eazpire_web: { enabled: true },
+    eazpire_android: { enabled: true },
+    shop: { enabled: false },
+    facebook_instagram: { enabled: false },
+    google_youtube: { enabled: false },
+    pinterest: { enabled: false },
+  };
+}
+
+function readShopifySalesFromDom() {
+  const sales = defaultShopifySales();
+  for (const row of SHOPIFY_SALES_ROWS) {
+    sales[row.key] = { enabled: !!document.getElementById(row.id)?.checked };
+  }
+  return sales;
+}
+
+function channelSwitchHtml(id, checked) {
+  return `<label class="ce-channel-switch">
+    <input type="checkbox" id="${escapeHtml(id)}" ${checked ? "checked" : ""} />
+    <span class="ce-channel-switch__track" aria-hidden="true"></span>
+    <span class="ce-channel-switch__text">${checked ? "On" : "Off"}</span>
+  </label>`;
+}
+
+function bindChannelSwitchLabels(root) {
+  root.querySelectorAll(".ce-channel-switch input").forEach((input) => {
+    const text = input.closest(".ce-channel-switch")?.querySelector(".ce-channel-switch__text");
+    const sync = () => {
+      if (text) text.textContent = input.checked ? "On" : "Off";
+    };
+    input.addEventListener("change", sync);
+    sync();
+  });
+}
 /** Keep in sync with src/amazon/amazonMarketplaceContentGate.js */
 const CONTENT_READY = new Set([
   "DE",
@@ -139,8 +192,10 @@ function readDomChannels() {
     psychRound: "nearest",
     ending: 0.99,
   };
+  const shopify_sales = readShopifySalesFromDom();
   return {
-    eazpire: { enabled: true },
+    eazpire: { enabled: !!shopify_sales.eazpire_web.enabled },
+    shopify_sales,
     amazon: {
       enabled: amazonEnabled,
       continents,
@@ -303,17 +358,21 @@ function renderPanel(st) {
 
   return `
     <div class="ce-tab-panel ce-channels-panel">
-      <p class="ce-hint">Unlock sales channels for this product. Creators still need Skill Tree unlocks; <strong>Admin Creations</strong> ignores Skill Tree limits and only uses these unlocks. eazpire is always on.</p>
+      <p class="ce-hint">Unlock sales channels for this product. Creators still need Skill Tree unlocks; <strong>Admin Creations</strong> ignores Skill Tree limits and only uses these unlocks. Shopify channels below are the same options as in Shopify Admin (Online Store, Headless, Shop, Facebook &amp; Instagram, Google &amp; YouTube, Pinterest).</p>
+      <p class="ce-hint"><strong>Save Tab</strong> queues an update that applies these Shopify channels to <strong>all existing products</strong> of this catalog item (on = publish, off = unpublish).</p>
       <p class="ce-hint">Amazon: enable <strong>Europa / USA</strong> as parents, then select <strong>countries</strong> to publish. Optional auth overrides per country (separate seller token). No BIL.</p>
 
       <div class="ce-channels-list">
-        <div class="ce-channels-row ce-channels-row--locked">
+        ${SHOPIFY_SALES_ROWS.map((row) => {
+          const on = ch.shopify_sales?.[row.key]?.enabled ?? (row.key === "eazpire_web" || row.key === "eazpire_android");
+          return `<div class="ce-channels-row">
           <div>
-            <strong>eazpire</strong>
-            <span class="ce-hint" style="display:block;margin:0">Always enabled — cannot be disabled</span>
+            <strong>${escapeHtml(row.label)}</strong>
+            <span class="ce-hint" style="display:block;margin:0">${escapeHtml(row.hint)}</span>
           </div>
-          <label class="ce-switch"><input type="checkbox" checked disabled /><span>On</span></label>
-        </div>
+          ${channelSwitchHtml(row.id, on)}
+        </div>`;
+        }).join("")}
 
         <div class="ce-channels-row">
           <button type="button" class="ce-channels-expand" id="ce-ch-amazon-expand" aria-expanded="${
@@ -322,10 +381,7 @@ function renderPanel(st) {
             <span aria-hidden="true">${st.amazonExpanded ? "▾" : "▸"}</span>
             <strong>Amazon</strong>
           </button>
-          <label class="ce-switch">
-            <input type="checkbox" id="ce-ch-amazon" ${amz.enabled ? "checked" : ""} />
-            <span>Enabled</span>
-          </label>
+          ${channelSwitchHtml("ce-ch-amazon", !!amz.enabled)}
         </div>
         <div class="ce-channels-amazon" id="ce-ch-amazon-body" ${st.amazonExpanded ? "" : "hidden"}>
           <h4 class="ce-section-title" style="font-size:0.95rem">Amazon regions &amp; countries</h4>
@@ -395,20 +451,14 @@ function renderPanel(st) {
             <strong>Etsy</strong>
             <span class="badge" style="margin-left:8px">Coming soon</span>
           </div>
-          <label class="ce-switch">
-            <input type="checkbox" id="ce-ch-etsy" ${ch.etsy?.enabled ? "checked" : ""} />
-            <span>Enabled</span>
-          </label>
+          ${channelSwitchHtml("ce-ch-etsy", !!ch.etsy?.enabled)}
         </div>
         <div class="ce-channels-row">
           <div>
             <strong>eBay</strong>
             <span class="badge" style="margin-left:8px">Coming soon</span>
           </div>
-          <label class="ce-switch">
-            <input type="checkbox" id="ce-ch-ebay" ${ch.ebay?.enabled ? "checked" : ""} />
-            <span>Enabled</span>
-          </label>
+          ${channelSwitchHtml("ce-ch-ebay", !!ch.ebay?.enabled)}
         </div>
       </div>
     </div>`;
@@ -476,6 +526,12 @@ export async function loadChannelsTab(ctx) {
   }
   if (!st.channels.amazon.markets) st.channels.amazon.markets = {};
   if (!st.channels.amazon.market_overrides) st.channels.amazon.market_overrides = {};
+  if (!st.channels.shopify_sales) {
+    st.channels.shopify_sales = defaultShopifySales();
+    if (st.channels.eazpire && st.channels.eazpire.enabled === false) {
+      st.channels.shopify_sales.eazpire_web.enabled = false;
+    }
+  }
   st.amazon_market_codes = data.amazon_market_codes || [];
   st.amazon_market_groups = data.amazon_market_groups || { ...DEFAULT_MARKET_GROUPS };
   st.amazon_market_labels = data.amazon_market_labels || { ...DEFAULT_MARKET_LABELS };
@@ -530,11 +586,21 @@ export function bindChannelsTab(ctx, root) {
     syncAmazonContinentDisabled(panel);
   });
   syncAmazonContinentDisabled(panel);
+  bindChannelSwitchLabels(panel);
 }
 
 export async function saveChannelsTab(ctx) {
   const channels = readDomChannels();
-  await saveChannels(ctx.productKey, { channels });
+  const res = await saveChannels(ctx.productKey, { channels });
   const st = ensureState(ctx);
   st.channels = channels;
+  const q = res?.apply_queue;
+  if (q?.enqueued) {
+    const n = Number(q.listing_count) || 0;
+    ctx.saveToastDetail = `Applying Shopify channels to ${n} existing product${n === 1 ? "" : "s"}`;
+  } else if (q?.reason === "no_listings") {
+    ctx.saveToastDetail = "Channels saved. No existing Shopify products to update yet";
+  } else if (q?.reason && q.reason !== "not_attempted") {
+    ctx.saveToastDetail = `Channels saved. Apply queue skipped (${q.reason})`;
+  }
 }

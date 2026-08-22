@@ -83,10 +83,14 @@ const PROVIDER_LABELS = {
   todify: "Todify",
 };
 
-/** Shopify Channels only (Online Store / Headless). */
+/** Shopify Channels (same options as Shopify Admin + eazpire Headless). */
 const CHANNEL_LABELS = {
   onlineshop: "eazpire Web",
   eazpire_headless: "eazpire Android",
+  shop: "Shop",
+  facebook_instagram: "Facebook & Instagram",
+  google_youtube: "Google & YouTube",
+  pinterest: "Pinterest",
 };
 
 const CHANNEL_KEYS = Object.keys(CHANNEL_LABELS);

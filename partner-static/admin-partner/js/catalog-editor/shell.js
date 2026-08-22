@@ -629,7 +629,9 @@ async function saveCurrentTab() {
     // (especially Todify/partner) and previously delayed or hid ✓ Saved.
     hideSaveLoading();
     showSaveFlash();
-    showToast("Saved", "Tab saved and mirrored to publish index");
+    const savedDetail = ctx.saveToastDetail || "Tab saved and mirrored to publish index";
+    ctx.saveToastDetail = null;
+    showToast("Saved", savedDetail);
     try {
       await runMirror(true);
       ctx.bundle = await fetchEditorBundle(ctx.productKey);

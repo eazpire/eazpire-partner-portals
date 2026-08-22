@@ -26,7 +26,14 @@ const PRODUCT_LABELS = {
     publishing: "Publishing",
     error: "Error",
   },
-  channels: { onlineshop: "eazpire Web", eazpire_headless: "eazpire Android" },
+  channels: {
+    onlineshop: "eazpire Web",
+    eazpire_headless: "eazpire Android",
+    shop: "Shop",
+    facebook_instagram: "Facebook & Instagram",
+    google_youtube: "Google & YouTube",
+    pinterest: "Pinterest",
+  },
   amazon_markets: {
     amazon_eu: "Amazon EU",
     amazon_na: "Amazon US",
