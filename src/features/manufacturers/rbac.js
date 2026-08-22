@@ -3,6 +3,7 @@
  */
 
 import { SignJWT, jwtVerify } from "jose";
+import { buildSessionCookieHeader } from "../../utils/sessionCookie.js";
 import { getManufacturerDb, newId } from "./db.js";
 
 const PARTNER_COOKIE = "partner_session";
@@ -189,11 +190,11 @@ export function readCookie(request, name) {
 }
 
 export function sessionCookieHeader(name, token, maxAgeSec = SESSION_TTL_SEC) {
-  return `${name}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSec}`;
+  return buildSessionCookieHeader({ name, value: token, maxAgeSec, secure: true });
 }
 
 export function clearSessionCookieHeader(name) {
-  return `${name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return buildSessionCookieHeader({ name, value: "", maxAgeSec: 0, secure: true });
 }
 
 export async function hashToken(token) {

@@ -2,7 +2,7 @@
  * Durable admin queue for bulk Fix alt texts (Shopify + Amazon if listed).
  * Uses admin-jobs-publish-repair so the browser can close; status lives in D1.
  */
-import { getAuthUser, isAdminOwner } from "../../utils/auth.js";
+import { requireAdmin } from "../../utils/auth.js";
 import { getCorsHeaders, json } from "../../utils/response.js";
 import { getJobControls, isQueueEnabled } from "../admin/jobControls.js";
 import { runFixAltTextsForShopifyProduct } from "./adminCreationsFixAltTexts.js";
@@ -73,12 +73,13 @@ function mapJobRow(row) {
   };
 }
 
-async function requireAdmin(request, env) {
+async function requireAdminGate(request, env) {
   const cors = getCorsHeaders(request);
-  const { owner_id } = await getAuthUser(request, env);
-  if (!isAdminOwner(owner_id, env)) {
-    return { ok: false, response: json({ ok: false, error: "forbidden" }, 403, cors), cors };
+  const gate = await requireAdmin(request, env);
+  if (!gate.ok) {
+    return { ok: false, response: json({ ok: false, error: gate.error || "forbidden", reason: gate.reason }, gate.status || 403, cors), cors };
   }
+  const owner_id = gate.owner_id;
   if (!env.CREATOR_DB) {
     return { ok: false, response: json({ ok: false, error: "database_unavailable" }, 500, cors), cors };
   }
@@ -86,7 +87,7 @@ async function requireAdmin(request, env) {
 }
 
 export async function handleAdminCreationsEnqueueFixAltTexts(request, env) {
-  const auth = await requireAdmin(request, env);
+  const auth = await requireAdminGate(request, env);
   if (!auth.ok) return auth.response;
   const { cors } = auth;
 
@@ -220,7 +221,7 @@ export async function handleAdminCreationsEnqueueFixAltTexts(request, env) {
 }
 
 export async function handleAdminCreationsFixAltTextsStatus(request, env) {
-  const auth = await requireAdmin(request, env);
+  const auth = await requireAdminGate(request, env);
   if (!auth.ok) return auth.response;
   const { cors } = auth;
   const url = new URL(request.url);
@@ -257,7 +258,7 @@ export async function handleAdminCreationsFixAltTextsStatus(request, env) {
 }
 
 export async function handleAdminCreationsFixAltTextsOpenBatches(request, env) {
-  const auth = await requireAdmin(request, env);
+  const auth = await requireAdminGate(request, env);
   if (!auth.ok) return auth.response;
   const { cors } = auth;
   await ensureAdminAltTextJobsTable(env);

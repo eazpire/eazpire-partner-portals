@@ -1,16 +1,19 @@
 // src/utils/response.js
 
-// CORS-Header für alle Responses (mit credentials support)
+import { buildCorsHeaders } from "./corsPolicy.js";
+
+// Statischer Fallback ohne Request: feste Origin, kein * + credentials.
 const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
+  "access-control-allow-origin": "https://www.eazpire.com",
   "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-allow-headers":
     "content-type, authorization, x-eaz-debug-activate, x-eaz-logged-in-customer-id, x-requested-with",
   "access-control-allow-credentials": "true",
+  "access-control-expose-headers": "x-eaz-crop-run-id",
   "access-control-max-age": "86400",
+  vary: "Origin",
 };
 
-// Dynamische CORS-Header mit Origin-Support für credentials
 /** CORS + explicit no-store so dynamic hero APIs are not cached by browser or Cloudflare edge. */
 export function noStoreCorsHeaders(request) {
   return {
@@ -22,62 +25,7 @@ export function noStoreCorsHeaders(request) {
 }
 
 export function getCorsHeaders(request) {
-  const origin = request.headers.get("origin");
-  const allowedOrigins = [
-    // Produktions-Domain (ohne und mit www)
-    "https://eazpire.com",
-    "https://www.eazpire.com",
-    // Manufacturer network portals
-    "https://partner.eazpire.com",
-    "https://admin.eazpire.com",
-    "https://wear.eazpire.com",
-    "https://play.eazpire.com",
-    "https://ads.eazpire.com",
-    "https://brand.eazpire.com",
-    "https://creator.eazpire.com",
-    "https://matrix.eazpire.com",
-    "https://map.eazpire.com",
-    "https://universe.eazpire.com",
-    "https://roadmap.eazpire.com",
-    // Shopify-Store
-    "https://allyoucanpink.myshopify.com",
-  ];
-  
-  // Check if origin matches allowed origins or Shopify preview pattern
-  let allowOrigin = null;
-  if (origin) {
-    const originLower = origin.toLowerCase();
-
-    // Exact match (case-insensitive)
-    if (allowedOrigins.some((o) => o.toLowerCase() === originLower)) {
-      allowOrigin = origin;
-    }
-    // Shopify preview pattern: *.myshopify.com
-    else if (originLower.includes(".myshopify.com")) {
-      allowOrigin = origin;
-    }
-    // Any eazpire.com subdomain (Admin Cursor Agent Shell + portals)
-    else if (originLower.endsWith(".eazpire.com") || originLower === "https://eazpire.com") {
-      allowOrigin = origin;
-    }
-  }
-
-  // Fallbacks:
-  // - Wenn eine Origin existiert, aber nicht whitelisted ist -> verwende sie trotzdem (für Development/Testing)
-  // - Wenn gar keine Origin existiert (Server-zu-Server) -> erste erlaubte Domain
-  if (!allowOrigin) {
-    allowOrigin = origin || allowedOrigins[0];
-  }
-  
-  return {
-    "access-control-allow-origin": allowOrigin,
-    "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "access-control-allow-headers":
-      "content-type, authorization, x-eaz-debug-activate, x-eaz-logged-in-customer-id, x-requested-with",
-    "access-control-expose-headers": "x-eaz-crop-run-id",
-    "access-control-allow-credentials": "true",
-    "access-control-max-age": "86400"
-  };
+  return buildCorsHeaders(request);
 }
 
 // kleines JSON-Hilfsding, wie früher
@@ -102,18 +50,7 @@ export function json(obj, status = 200, headers = {}, request = null) {
       const dynamicCorsHeaders = getCorsHeaders(request);
       Object.assign(finalHeaders, dynamicCorsHeaders);
     } else {
-      // Fallback: Keine CORS-Header übergeben und kein Request - verwende statische
-      // ABER verwende die gleichen Header wie getCorsHeaders für localhost/Entwicklung
-      const fallbackHeaders = {
-        "access-control-allow-origin": "https://www.eazpire.com",
-        "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-        "access-control-allow-headers":
-          "content-type, authorization, x-eaz-debug-activate, x-eaz-logged-in-customer-id, x-requested-with",
-        "access-control-expose-headers": "x-eaz-crop-run-id",
-        "access-control-allow-credentials": "true",
-        "access-control-max-age": "86400"
-      };
-      Object.assign(finalHeaders, fallbackHeaders);
+      Object.assign(finalHeaders, CORS_HEADERS);
     }
 
     // Zusätzliche Header (z. B. x-eaz-crop-run-id), wenn CORS aus Request kommt und `headers` nur Erweiterungen enthält
@@ -138,4 +75,4 @@ export function json(obj, status = 200, headers = {}, request = null) {
     });
   }
 
-export { CORS_HEADERS };  
+export { CORS_HEADERS };

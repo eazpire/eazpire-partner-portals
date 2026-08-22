@@ -3,7 +3,7 @@
  * POST ?op=admin-creations-fix-alt-texts
  * Body: { shopify_product_id, printify_product_id?, product_key?, design_id? }
  */
-import { getAuthUser, isAdminOwner } from "../../utils/auth.js";
+import { requireAdmin } from "../../utils/auth.js";
 import { getCorsHeaders, json } from "../../utils/response.js";
 import { shopifyAPI } from "../../utils/shopify.js";
 import {
@@ -145,8 +145,9 @@ export async function handleAdminCreationsFixAltTexts(request, env) {
   const cors = getCorsHeaders(request);
   if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
 
-  const { owner_id } = await getAuthUser(request, env);
-  if (!isAdminOwner(owner_id, env)) return json({ ok: false, error: "forbidden" }, 403, cors);
+  const gate = await requireAdmin(request, env);
+  if (!gate.ok) return json({ ok: false, error: gate.error || "forbidden", reason: gate.reason }, gate.status || 403, cors);
+  const owner_id = gate.owner_id;
 
   const body = await request.json().catch(() => ({}));
   const result = await runFixAltTextsForShopifyProduct(env, body);

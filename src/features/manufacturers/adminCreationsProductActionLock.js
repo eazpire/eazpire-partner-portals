@@ -10,19 +10,20 @@
  * as busy without any schema changes.
  */
 
-import { getAuthUser, isAdminOwner } from "../../utils/auth.js";
+import { requireAdmin } from "../../utils/auth.js";
 import { getCorsHeaders, json } from "../../utils/response.js";
 import { upsertPublishActiveSession, deletePublishActiveSession } from "../publish/publishActiveSessions.js";
 import { normalizeShopifyProductId } from "./adminCreationsShopifyList.js";
 
 const SESSION_PREFIX = "admin-prod-";
 
-async function requireAdmin(request, env) {
+async function requireAdminGate(request, env) {
   const cors = getCorsHeaders(request);
-  const { owner_id } = await getAuthUser(request, env);
-  if (!isAdminOwner(owner_id, env)) {
-    return { ok: false, response: json({ ok: false, error: "forbidden" }, 403, cors), cors };
+  const gate = await requireAdmin(request, env);
+  if (!gate.ok) {
+    return { ok: false, response: json({ ok: false, error: gate.error || "forbidden", reason: gate.reason }, gate.status || 403, cors), cors };
   }
+  const owner_id = gate.owner_id;
   if (!env.CREATOR_DB) {
     return { ok: false, response: json({ ok: false, error: "database_unavailable" }, 500, cors), cors };
   }
@@ -44,7 +45,7 @@ function pseudoNumericIdFromProductKey(productKey) {
 }
 
 export async function handleAdminCreationsProductActionLock(request, env) {
-  const auth = await requireAdmin(request, env);
+  const auth = await requireAdminGate(request, env);
   if (!auth.ok) return auth.response;
   const { ownerId, cors } = auth;
 
@@ -85,7 +86,7 @@ export async function handleAdminCreationsProductActionLock(request, env) {
 }
 
 export async function handleAdminCreationsProductActionUnlock(request, env) {
-  const auth = await requireAdmin(request, env);
+  const auth = await requireAdminGate(request, env);
   if (!auth.ok) return auth.response;
   const { cors } = auth;
 
