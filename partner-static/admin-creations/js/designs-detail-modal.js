@@ -20,7 +20,8 @@ const ICON = {
 };
 const BG_PRESETS = ["#37375A", "#0f172a", "#ffffff", "#111827", "#f59e0b", "checker"];
 const AMAZON_BULLETS_KEY = "amazon_bullet_points_de";
-const BULLET_SLOT_COUNT = 5;
+const BULLET_SLOT_COUNT = 2;
+const BULLET_SLOT_LABELS = ["Design", "Message"];
 
 let activeItem = null;
 let onClosed = null;
@@ -971,7 +972,7 @@ function bulletsHtml(meta) {
     .map(
       (b, i) => `
       <div class="cr-dd-meta-field cr-dd-meta-bullet">
-        <label for="cr-dd-meta-bullet-${i}">Bullet point ${i + 1}</label>
+        <label for="cr-dd-meta-bullet-${i}">${BULLET_SLOT_LABELS[i] || `Bullet point ${i + 1}`}</label>
         <input type="text" id="cr-dd-meta-bullet-${i}" data-cr-dd-bullet="${i}" value="${escapeHtml(
           b
         )}" autocomplete="off" maxlength="256" />
@@ -1017,8 +1018,8 @@ function renderMetadata(item) {
         </div>
       </div>
       <div class="cr-dd-meta-bullets">
-        <h3 class="cr-dd-meta-bullets__title">Amazon bullet points</h3>
-        <p class="cr-dd-muted">Generated on Save / Regenerate with other metadata (DE listing bullets).</p>
+        <h3 class="cr-dd-meta-bullets__title">Amazon Bullet Points</h3>
+        <p class="cr-dd-muted">Two design-only bullets (description and message). Fabric, print, and care come from the catalog product (Softstyle).</p>
         ${bulletsHtml(meta)}
       </div>
     </div>`;
