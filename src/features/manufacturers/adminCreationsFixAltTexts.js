@@ -111,8 +111,16 @@ export async function runFixAltTextsForShopifyProduct(env, opts = {}) {
     }
   }
 
+  const rateLimited =
+    (steps.some((s) => s?.rate_limited && (s?.remaining > 0 || s?.success === false)) ||
+      !!(remap.rate_limited && remap.ok === false));
   const repaired = !before.ok && (after.ok || after.frontMislabeled < before.frontMislabeled || after.featured_ok);
-  const ok = after.featured_ok && after.frontMislabeled === 0 && after.missingAlt === 0;
+  const ok =
+    after.featured_ok &&
+    after.frontMislabeled === 0 &&
+    after.missingAlt === 0 &&
+    after.unstructured === 0 &&
+    !rateLimited;
 
   let message = "Alt texts and preview image are already correct.";
   if (!before.ok && ok) {
@@ -124,6 +132,8 @@ export async function runFixAltTextsForShopifyProduct(env, opts = {}) {
   return {
     ok,
     repaired,
+    rate_limited: rateLimited,
+    error: rateLimited ? "Shopify API error: 429 rate limited — resume remaining images" : undefined,
     message,
     shopify_product_id: sid,
     printify_product_id: printifyId || null,
