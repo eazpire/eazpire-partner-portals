@@ -33,6 +33,7 @@ import {
   mockupDefaultsFromPartnerPrintAreas,
   mergePartnerMockupDefaultsIntoCatalog,
 } from "./partnerCatalogEditorEnrichment.js";
+import { resolveAmazonProductBulletsForCatalogRow } from "../../../amazon/amazonProductBulletSettings.js";
 
 const VALID_CATALOG_STATUSES = new Set(Object.keys(CATALOG_STATUS_TO_IS_ACTIVE));
 
@@ -98,6 +99,7 @@ function catalogRowToProduct(row, link = {}) {
     catalog_audience: parseJson(row.catalog_audience_json, null),
     catalog_production_type: row.catalog_production_type ?? null,
     print_area_edit_use_mocks: !!row.print_area_edit_use_mocks,
+    amazon_bullet_points: resolveAmazonProductBulletsForCatalogRow(row),
     created_at: row.created_at,
     updated_at: row.updated_at,
     manufacturer_name: link.manufacturer_name || null,

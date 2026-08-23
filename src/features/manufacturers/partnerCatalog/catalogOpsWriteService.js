@@ -25,6 +25,7 @@ import {
   ensureCatalogMockupImageSchema,
   dedupeMockupEntriesByViewColor,
 } from "./ensureCatalogMockupImageSchema.js";
+import { persistAmazonProductBulletsToCatalog } from "../../../amazon/amazonProductBulletSettings.js";
 
 async function queryAll(db, sql, ...binds) {
   if (!db) return [];
@@ -455,8 +456,22 @@ export async function updateCatalogProductMeta(env, productKey, body) {
     });
   }
 
+  let amazonBulletPoints = null;
+  if (body.amazon_bullet_points !== undefined) {
+    amazonBulletPoints = await persistAmazonProductBulletsToCatalog(
+      env,
+      productKey,
+      body.amazon_bullet_points
+    );
+  }
+
   const product = await getCatalogOpsProduct(env, productKey);
-  return { ok: true, product: product.ok ? product.product : null, _ops_source: "catalog-db" };
+  return {
+    ok: true,
+    product: product.ok ? product.product : null,
+    ...(amazonBulletPoints ? { amazon_bullet_points: amazonBulletPoints } : {}),
+    _ops_source: "catalog-db",
+  };
 }
 
 async function syncCatalogProductDerivedFromProviders(env, db, productKey, activeIds, body, now) {

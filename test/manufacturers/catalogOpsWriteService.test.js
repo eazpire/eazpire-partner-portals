@@ -65,7 +65,10 @@ function makeWritableCatalogDb() {
         run: async () => {
           if (sql.includes("UPDATE product_catalog")) {
             state.updates.push({ sql, args: handler._args });
-            if (sql.includes("print_area_edit_use_mocks")) {
+            if (sql.includes("amazon_bullet_points_json")) {
+              state.product.amazon_bullet_points_json = handler._args[0];
+              state.product.updated_at = handler._args[1];
+            } else if (sql.includes("print_area_edit_use_mocks")) {
               state.product.print_area_edit_use_mocks = handler._args[0];
               state.product.updated_at = handler._args[1];
             } else if (handler._args.length >= 3) {
@@ -223,16 +226,24 @@ describe("productEditorService write routing", () => {
     expect(result._ops_source).toBe("catalog-db");
   });
 
-  it("saveProductMeta succeeds without MANUFACTURER_DB when write flag on (no mirror)", async () => {
+  it("saveProductMeta persists Softstyle Amazon product bullets", async () => {
     const catalogDb = makeWritableCatalogDb();
+    catalogDb._state.product.product_key = "unisex-softstyle-cotton-tee";
     const env = {
       CATALOG_OPS_MASTER_WRITE: "1",
       CATALOG_DB: catalogDb,
       MANUFACTURER_DB: null,
     };
-    const result = await saveProductMeta(env, "test-tee", { title: "X", auto_mirror: true });
+    const result = await saveProductMeta(env, "unisex-softstyle-cotton-tee", {
+      amazon_bullet_points: {
+        fabric: "Custom fabric line for Softstyle",
+        print: "Custom print line for Softstyle",
+        care: "Custom care line for Softstyle",
+      },
+    });
     expect(result.ok).toBe(true);
-    expect(result._ops_source).toBe("catalog-db");
+    expect(result.amazon_bullet_points.fabric).toMatch(/Custom fabric/i);
+    expect(catalogDb._state.product.amazon_bullet_points_json).toMatch(/Custom fabric/i);
   });
 });
 

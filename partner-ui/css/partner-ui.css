@@ -3427,15 +3427,64 @@ html[data-portal="admin"] body.theme-cert { --brand: #059669; --brand-2: #6366f1
   margin-top: 0;
 }
 
-/* Meta tab — shop content */
+/* Meta tab — shop content, product metadata, Amazon bullets */
+.ce-meta-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 920px;
+}
 .ce-meta-panel .ce-meta-card {
-  padding: 18px 20px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--surface-2);
+  margin: 0;
 }
-.ce-meta-panel .ce-meta-card--shop {
-  max-width: 920px;
+.ce-meta-panel .ce-meta-card__summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.ce-meta-panel .ce-meta-card[open] > .ce-meta-card__summary {
+  padding-bottom: 8px;
+}
+.ce-meta-panel .ce-meta-card__summary::-webkit-details-marker {
+  display: none;
+}
+.ce-meta-panel .ce-meta-card__summary::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.45em;
+  height: 0.45em;
+  margin-top: -2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.55;
+  transition: transform 0.15s ease, margin-top 0.15s ease;
+}
+.ce-meta-panel .ce-meta-card[open] > .ce-meta-card__summary::after {
+  margin-top: 4px;
+  transform: rotate(225deg);
+}
+.ce-meta-panel .ce-meta-card__title {
+  min-width: 0;
+}
+.ce-meta-panel .ce-meta-card__body {
+  padding: 0 20px 18px;
+}
+.ce-meta-panel .ce-meta-card__body > .ce-hint:first-child {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 /* Creator Settings tab — Skill Tree placement, preview images, EAZV costs */

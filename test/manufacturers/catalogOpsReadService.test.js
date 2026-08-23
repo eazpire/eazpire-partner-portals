@@ -161,6 +161,35 @@ describe("catalogOpsReadService", () => {
     expect(result.ok).toBe(true);
     expect(result.product._ops_source).toBe("catalog-db");
     expect(result.product.catalog_status).toBe("online");
+    expect(result.product.amazon_bullet_points).toBeNull();
+  });
+
+  it("attaches Softstyle Amazon product bullets from catalog overrides", async () => {
+    const env = {
+      CATALOG_DB: makeCatalogDb({
+        product: {
+          product_key: "unisex-softstyle-cotton-tee",
+          title: "Unisex Softstyle Cotton Tee",
+          is_active: 2,
+          regions_json: "[]",
+          created_at: 1,
+          updated_at: 2,
+          amazon_bullet_points_json: JSON.stringify({
+            fabric: "Override fabric",
+            print: "Override print",
+            care: "Override care",
+          }),
+        },
+      }),
+      MANUFACTURER_DB: makeManufacturerDb(),
+    };
+    const result = await getCatalogOpsProduct(env, "unisex-softstyle-cotton-tee");
+    expect(result.ok).toBe(true);
+    expect(result.product.amazon_bullet_points).toEqual({
+      fabric: "Override fabric",
+      print: "Override print",
+      care: "Override care",
+    });
   });
 
   it("reads visibility only from product_catalog.is_active (ignores eazpire online)", async () => {

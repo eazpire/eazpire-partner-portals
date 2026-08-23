@@ -144,9 +144,13 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(helpersSrc).toContain("export function resolvePrintAreaUseMockups");
   });
 
-  it("meta tab is slim shop content only", () => {
+  it("meta tab has collapsible cards and Amazon product bullets", () => {
     const src = readFileSync(join(portal, "tabs/meta.js"), "utf8");
     expect(src).toContain("ce-meta-shopify-cat");
+    expect(src).toContain("ce-meta-card__summary");
+    expect(src).toContain("Amazon Bullet Points");
+    expect(src).toContain("ce-meta-amazon-fabric");
+    expect(src).toContain("unisex-softstyle-cotton-tee");
     expect(src).not.toContain("ce-meta-status");
     expect(src).not.toContain("ce-meta-title");
     expect(src).not.toContain("ce-meta-provider-pill");

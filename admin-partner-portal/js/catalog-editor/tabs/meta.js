@@ -10,6 +10,8 @@ import {
 import { bindTabDirtyInputs, notifyActiveTabDirty } from "../editor-tab-dirty.js";
 import { publishProfileForProvider } from "../editor-product-title.js";
 
+const AMAZON_SOFTSTYLE_PRODUCT_KEY = "unisex-softstyle-cotton-tee";
+
 function resolveMetaProviderId(ctx) {
   return (
     Number(
@@ -20,12 +22,43 @@ function resolveMetaProviderId(ctx) {
   );
 }
 
+function isAmazonProductBulletPilot(productKey) {
+  return String(productKey || "").trim().toLowerCase() === AMAZON_SOFTSTYLE_PRODUCT_KEY;
+}
+
+function resolveAmazonProductBullets(ctx) {
+  const fromBundle = ctx?.bundle?.product?.amazon_bullet_points;
+  if (fromBundle && typeof fromBundle === "object") {
+    return {
+      fabric: String(fromBundle.fabric || "").trim(),
+      print: String(fromBundle.print || "").trim(),
+      care: String(fromBundle.care || "").trim(),
+    };
+  }
+  if (!isAmazonProductBulletPilot(ctx?.productKey)) return null;
+  return { fabric: "", print: "", care: "" };
+}
+
+function collapsibleMetaCard({ title, hint, body, extraClass = "", open = true }) {
+  return `
+    <details class="ce-meta-card ${extraClass}" ${open ? "open" : ""}>
+      <summary class="ce-meta-card__summary">
+        <span class="ce-meta-card__title">${escapeHtml(title)}</span>
+      </summary>
+      <div class="ce-meta-card__body">
+        ${hint ? `<p class="ce-hint">${hint}</p>` : ""}
+        ${body}
+      </div>
+    </details>`;
+}
+
 function skillMetaSectionHtml(meta) {
   const audienceStr = Array.isArray(meta?.audience) ? meta.audience.join(", ") : String(meta?.audience || "");
-  return `
-    <section class="ce-meta-card ce-meta-card--product-meta">
-      <h3 class="ce-section-title">Product metadata</h3>
-      <p class="ce-hint">General product metadata (skill info, shop facets, listing). Leave blank to use catalog/blueprint defaults.</p>
+  return collapsibleMetaCard({
+    title: "Product metadata",
+    extraClass: "ce-meta-card--product-meta",
+    hint: "General product metadata (skill info, shop facets, listing). Leave blank to use catalog/blueprint defaults.",
+    body: `
       <div class="field">
         <label for="ce-meta-brand">Base product brand</label>
         <input class="input" id="ce-meta-brand" value="${escapeHtml(meta?.provider_brand || "")}" placeholder="e.g. Gildan" />
@@ -37,8 +70,30 @@ function skillMetaSectionHtml(meta) {
       <div class="field">
         <label for="ce-meta-audience">Audience (comma-separated)</label>
         <input class="input" id="ce-meta-audience" value="${escapeHtml(audienceStr)}" placeholder="e.g. Men, Women, Unisex" />
+      </div>`,
+  });
+}
+
+function amazonBulletsSectionHtml(bullets) {
+  if (!bullets) return "";
+  return collapsibleMetaCard({
+    title: "Amazon Bullet Points",
+    extraClass: "ce-meta-card--amazon-bullets",
+    hint: "Product-level bullets for every listing of this product. Design description and message stay on the design. German text is used for Amazon.de; other Amazon languages keep catalog defaults.",
+    body: `
+      <div class="field">
+        <label for="ce-meta-amazon-fabric">Fabric</label>
+        <textarea class="textarea" id="ce-meta-amazon-fabric" rows="3" maxlength="220">${escapeHtml(bullets.fabric || "")}</textarea>
       </div>
-    </section>`;
+      <div class="field">
+        <label for="ce-meta-amazon-print">Print</label>
+        <textarea class="textarea" id="ce-meta-amazon-print" rows="3" maxlength="220">${escapeHtml(bullets.print || "")}</textarea>
+      </div>
+      <div class="field">
+        <label for="ce-meta-amazon-care">Care</label>
+        <textarea class="textarea" id="ce-meta-amazon-care" rows="3" maxlength="220">${escapeHtml(bullets.care || "")}</textarea>
+      </div>`,
+  });
 }
 
 function categoryFieldHtml(profile) {
@@ -94,11 +149,15 @@ export async function loadMetaTab(ctx) {
     }
   }
 
+  const amazonBullets = resolveAmazonProductBullets(ctx);
+
   return `
     <div class="ce-tab-panel ce-meta-panel">
-      <section class="ce-meta-card ce-meta-card--shop">
-        <h3 class="ce-section-title">Shop listing content</h3>
-        <p class="ce-hint">Texts and Shopify category for the selected print provider. Product title and visibility are set per version on the Provider tab and in the footer.</p>
+      ${collapsibleMetaCard({
+        title: "Shop listing content",
+        extraClass: "ce-meta-card--shop",
+        hint: "Texts and Shopify category for the selected print provider. Product title and visibility are set per version on the Provider tab and in the footer.",
+        body: `
         ${categoryFieldHtml(enriched)}
         <div class="field">
           <label for="ce-meta-features">Product features</label>
@@ -116,9 +175,10 @@ export async function loadMetaTab(ctx) {
           <label for="ce-meta-gpsr">GPSR HTML</label>
           <textarea class="textarea" id="ce-meta-gpsr" rows="2">${escapeHtml(profile?.gpsr_html || "")}</textarea>
         </div>
-        <input type="hidden" id="ce-meta-provider-id" value="${escapeHtml(String(providerId || ""))}" />
-      </section>
+        <input type="hidden" id="ce-meta-provider-id" value="${escapeHtml(String(providerId || ""))}" />`,
+      })}
       ${skillMetaSectionHtml(skillMeta)}
+      ${amazonBulletsSectionHtml(amazonBullets)}
     </div>`;
 }
 
@@ -156,6 +216,13 @@ export function snapshotMetaTab() {
       base_product_model: el("ce-meta-model")?.value || "",
       audience,
     },
+    amazon_bullet_points: el("ce-meta-amazon-fabric")
+      ? {
+          fabric: el("ce-meta-amazon-fabric")?.value || "",
+          print: el("ce-meta-amazon-print")?.value || "",
+          care: el("ce-meta-amazon-care")?.value || "",
+        }
+      : null,
   };
 }
 
@@ -368,7 +435,7 @@ export async function saveMetaTab(ctx) {
     ctx.selectedPrintProviderId ||
     ctx.bundle.active_providers?.[0]?.print_provider_id;
 
-  await saveMeta(ctx.productKey, {
+  const metaBody = {
     print_provider_id: printProviderId,
     shopify_category_id: snap.shopify_category_id,
     shopify_category_name: snap.shopify_category_name,
@@ -377,7 +444,12 @@ export async function saveMetaTab(ctx) {
     size_table_html: snap.size_table_html,
     gpsr_html: snap.gpsr_html,
     auto_mirror: false,
-  });
+  };
+  if (snap.amazon_bullet_points) metaBody.amazon_bullet_points = snap.amazon_bullet_points;
+  const saved = await saveMeta(ctx.productKey, metaBody);
+  if (saved?.amazon_bullet_points && ctx.bundle?.product) {
+    ctx.bundle.product.amazon_bullet_points = saved.amazon_bullet_points;
+  }
 
   // Persist product metadata via creator-settings API (skill_meta_json) without wiping other fields.
   await saveCreatorSettings(ctx.productKey, {
