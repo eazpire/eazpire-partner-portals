@@ -232,6 +232,7 @@ const ADMIN_OPS = new Set([
   "admin-partner-catalog-blueprints",
   "admin-partner-sync-printify",
   "admin-todify-dogfood-setup",
+  "admin-spreadconnect-eu-catalog-sync",
   "admin-todify-reconcile-markets",
   "admin-catalog-studio-tree",
   "admin-catalog-studio-products",
@@ -323,6 +324,7 @@ const ADMIN_OPS = new Set([
   "admin-creations-customer-products",
   "admin-creations-shopify-products",
   "admin-creations-todify-products",
+  "admin-creations-spreadconnect-products",
   "admin-creations-samples-products",
   "admin-creations-shopify-product-detail",
   "admin-creations-shopify-product-unpublish",
@@ -810,6 +812,24 @@ export async function handleManufacturerRouter(request, env, ctx) {
         console.error("[admin-todify-dogfood-setup]", err);
         return json(
           { ok: false, error: "todify_dogfood_setup_failed", detail: String(err?.message || err) },
+          500,
+          cors
+        );
+      }
+    }
+    if (op === "admin-spreadconnect-eu-catalog-sync" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const { ensureSpreadEuCatalogSynced } = await import(
+          "./adapters/spreadconnect/spreadEuCatalogSync.js"
+        );
+        const result = await ensureSpreadEuCatalogSynced(env, { force: body?.force !== false });
+        if (!result.ok) return json(result, 400, cors);
+        return json(result, 200, cors);
+      } catch (err) {
+        console.error("[admin-spreadconnect-eu-catalog-sync]", err);
+        return json(
+          { ok: false, error: "spread_eu_catalog_sync_failed", detail: String(err?.message || err) },
           500,
           cors
         );
@@ -1592,6 +1612,10 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-creations-todify-products" && request.method === "GET") {
       const { handleAdminCreationsTodifyProducts } = await import("./adminCreationsPortalApi.js");
       return handleAdminCreationsTodifyProducts(request, env);
+    }
+    if (op === "admin-creations-spreadconnect-products" && request.method === "GET") {
+      const { handleAdminCreationsSpreadconnectProducts } = await import("./adminCreationsPortalApi.js");
+      return handleAdminCreationsSpreadconnectProducts(request, env);
     }
     if (op === "admin-creations-samples-products" && request.method === "GET") {
       const { handleAdminCreationsSamplesProducts } = await import("./adminCreationsPortalApi.js");

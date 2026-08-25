@@ -31,12 +31,22 @@ export const MOCKUP_VIEW_ORDER = {
 export function parseMockupAlt(alt) {
   if (!alt || typeof alt !== "string") return null;
   const parts = alt.split("|");
-  if (parts.length < 2) return null;
-  return {
-    color: parts[0].trim(),
-    view: parts[1].trim().toLowerCase(),
-    isPreview: parts.length >= 3 && String(parts[2] || "").trim().toLowerCase() === "preview-default",
-  };
+  if (parts.length >= 2) {
+    return {
+      color: parts[0].trim(),
+      view: parts[1].trim().toLowerCase(),
+      isPreview: parts.length >= 3 && String(parts[2] || "").trim().toLowerCase() === "preview-default",
+    };
+  }
+  const lower = alt.toLowerCase();
+  const views = ["folded_2", "folded", "lifestyle", "front", "back", "left", "right", "sleeve"];
+  for (const view of views) {
+    const re = new RegExp(`(?:^|[\\s_-])${view}(?:$|[\\s_-])`, "i");
+    if (re.test(lower) || lower.endsWith(view)) {
+      return { color: "", view, isPreview: view === "front" };
+    }
+  }
+  return null;
 }
 
 /**
@@ -470,6 +480,17 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       String(providerMf?.value || "")
         .trim()
         .toLowerCase() === "todify" || String(productKey || "").toLowerCase().includes("todify");
+    const providerVal = String(providerMf?.value || "")
+      .trim()
+      .toLowerCase();
+    const isSpreadconnectListing =
+      providerVal === "spreadconnect_eu" ||
+      providerVal === "spreadconnect" ||
+      String(p.vendor || "").trim().toLowerCase() === "spreadconnect" ||
+      String(p.handle || "")
+        .trim()
+        .toLowerCase()
+        .startsWith("spreadconnect-");
     const hasViewAlts = mockups.some((m) => m.view && m.view !== "other" && m.alt && String(m.alt).includes("|"));
     if (isTodifyListing && (!mockups.length || !hasViewAlts) && productKey) {
       try {
@@ -687,6 +708,10 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
       }
     }
 
+    if (isSpreadconnectListing) {
+      printifyProductId = null;
+    }
+
     const shopifyVariants = (p.variants || []).map((v) => mapVariant(v, currency));
     const shopifyOptions = (p.options || []).map((o) => ({
       id: o.id,
@@ -705,13 +730,13 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
         shopifyVariants,
         shopifyOptions,
         mockups,
-        variantConfig,
-        printifyProductData,
-        livePrintifyProductData,
+        variantConfig: isSpreadconnectListing ? null : variantConfig,
+        printifyProductData: isSpreadconnectListing ? null : printifyProductData,
+        livePrintifyProductData: isSpreadconnectListing ? null : livePrintifyProductData,
       });
       live_channels = buildLiveChannelsForVariantUpdate({
-        printifyProductId,
-        isTodify: isTodifyListingResolved,
+        printifyProductId: isSpreadconnectListing ? null : printifyProductId,
+        isTodify: isTodifyListingResolved || isSpreadconnectListing,
         amazonPublish: amazon_publish,
         shopifyProductId: String(p.id),
       });
@@ -746,6 +771,7 @@ export async function handleAdminCreationsShopifyProductDetail(request, env) {
           variant_groups,
           live_channels,
           is_todify: isTodifyListingResolved,
+          is_spreadconnect: isSpreadconnectListing,
           is_gift_card: Boolean(p.gift_card),
           currency,
           options: shopifyOptions,

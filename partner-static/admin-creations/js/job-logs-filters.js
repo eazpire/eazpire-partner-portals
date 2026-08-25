@@ -17,7 +17,7 @@ export const PRODUCT_SECTIONS = [
 const PRODUCT_LABELS = {
   visibility: { public: "Public", private: "Private" },
   source: { product: "Product", customer: "Customer", samples: "Samples", other: "Other" },
-  provider: { printify: "Printify", todify: "Todify" },
+  provider: { printify: "Printify", todify: "Todify", spreadconnect: "Spread EU" },
   printify_status: {
     published: "Published",
     unpublished: "Unpublished",

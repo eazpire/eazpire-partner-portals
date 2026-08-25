@@ -23,7 +23,7 @@ import {
   catalogPlaceholdersFromPartnerPrintAreas,
 } from "./partnerCatalogPlaceholders.js";
 
-const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
+const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify", "spreadconnect_eu"]);
 
 /** Auto-seeded Printify PAT label — not the partner Details title. */
 export function isPlaceholderVersionDisplayName(name) {

@@ -3,10 +3,24 @@ import {
   buildSortedMockups,
   categorizeMetafields,
   normalizeShopifyMetafields,
+  parseMockupAlt,
   DB_TO_SHOPIFY_METAFIELD_MAP,
 } from "../../src/features/manufacturers/adminCreationsShopifyProductDetail.js";
 
 describe("adminCreationsShopifyProductDetail helpers", () => {
+  it("parseMockupAlt reads Color|view and Spread-style perspective in alt", () => {
+    expect(parseMockupAlt("Black|front|preview-default")).toEqual({
+      color: "Black",
+      view: "front",
+      isPreview: true,
+    });
+    expect(parseMockupAlt("Eazpire API Test Tee Schwarz front")).toMatchObject({
+      color: "",
+      view: "front",
+    });
+    expect(parseMockupAlt("lifestyle mock")).toMatchObject({ view: "lifestyle" });
+  });
+
   it("buildSortedMockups sorts by variant then view", () => {
     const sorted = buildSortedMockups([
       { id: 1, src: "a", alt: "Black|back|preview-default", position: 3 },

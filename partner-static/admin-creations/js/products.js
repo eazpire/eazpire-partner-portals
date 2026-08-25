@@ -87,7 +87,7 @@ export function teardownProductsExtras() {
  * Buckets whose list `id` is a Shopify product id (safe fallback when shopify_product_id is missing).
  * Customer / studio pseudo-ids (`studio:26`) must never be treated as Shopify ids.
  */
-const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "samples", "other"]);
+const SHOPIFY_ROW_ID_SOURCES = new Set(["printify", "shopify", "todify", "spreadconnect", "samples", "other"]);
 
 function isNumericShopifyId(raw) {
   const s = String(raw || "").trim();
@@ -432,12 +432,13 @@ async function fetchBucket(op, { retries = 2 } = {}) {
   return { ok: false, op, products: [], error: lastError };
 }
 
-/** Load Printify + Todify + Customer + Samples + Other (residual) in parallel. */
+/** Load Printify + Todify + Spread EU + Customer + Samples + Other (residual) in parallel. */
 async function loadAllProductBuckets() {
   // Stagger Shopify-heavy buckets slightly so five workers don't throttle each other.
-  const [printify, todify, customer, samples, other] = await Promise.all([
+  const [printify, todify, spreadconnect, customer, samples, other] = await Promise.all([
     fetchBucket("admin-creations-printify-products"),
     sleep(120).then(() => fetchBucket("admin-creations-todify-products")),
+    sleep(180).then(() => fetchBucket("admin-creations-spreadconnect-products")),
     fetchBucket("admin-creations-customer-products"),
     sleep(240).then(() => fetchBucket("admin-creations-samples-products")),
     sleep(360).then(() => fetchBucket("admin-creations-shopify-products")),
@@ -446,6 +447,7 @@ async function loadAllProductBuckets() {
   if (
     printify.shopifyMissing &&
     todify.shopifyMissing &&
+    spreadconnect.shopifyMissing &&
     samples.shopifyMissing &&
     other.shopifyMissing &&
     !customer.ok
@@ -485,6 +487,15 @@ async function loadAllProductBuckets() {
     })
   );
   pushAll(
+    tagBucket(spreadconnect.products, {
+      listingBucket: "spreadconnect",
+      filterSource: "product",
+      filterProvider: "spreadconnect",
+      sourceLabel: "Spread EU",
+      defaultCategory: "Spread EU",
+    })
+  );
+  pushAll(
     tagBucket(customer.products, {
       listingBucket: "customer",
       filterSource: "customer",
@@ -512,7 +523,7 @@ async function loadAllProductBuckets() {
     })
   );
 
-  const hardErrors = [printify, todify, customer, samples, other].filter(
+  const hardErrors = [printify, todify, spreadconnect, customer, samples, other].filter(
     (r) => !r.ok && !r.shopifyMissing && r.error
   );
   if (!merged.length && hardErrors.length) {

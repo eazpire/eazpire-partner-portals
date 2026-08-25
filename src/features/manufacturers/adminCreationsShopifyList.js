@@ -355,6 +355,7 @@ function originLabelFromListingOrigin(origin) {
   const o = String(origin || "").trim().toLowerCase();
   if (o === "shop" || o === "customer") return "Customer";
   if (o === "creator") return "Creator";
+  if (o === "spreadconnect" || o === "spreadconnect_eu") return "Spread EU";
   return null;
 }
 
@@ -431,6 +432,10 @@ export const SAMPLES_SHOPIFY_STORE_QUERY = "metafields.custom.sample:yes";
 /** Shopify Admin search hint for Todify/partner-direct listings. */
 export const TODIFY_SHOPIFY_STORE_QUERY = "metafields.custom.provider:todify";
 
+/** Shopify Admin search hint for Spread Connect EU listings. */
+export const SPREADCONNECT_SHOPIFY_STORE_QUERY =
+  '(vendor:Spreadconnect OR tag:spreadconnect OR metafields.custom.provider:spreadconnect_eu OR metafields.custom.provider:spreadconnect)';
+
 /**
  * Shopify Admin search hint for Printify / creator listings not already loaded from D1.
  * Keeps orphan metafield listings discoverable without a full-catalog scan.
@@ -446,6 +451,7 @@ export const PRINTIFY_SHOPIFY_STORE_QUERY =
  * @param {Set<string>|null|undefined} [creatorPublishedIds] all published_designs shopify_product_id values
  */
 export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedIds) {
+  if (isSpreadconnectEuShopifyProduct(node)) return false;
   if (isTodifyPartnerShopifyProduct(node)) return false;
   if (isSampleShopifyProduct(node)) return false;
   if (isGiftCardShopifyProduct(node)) return false;
@@ -472,7 +478,29 @@ export function isPrintifySourcedProduct(node, printifyLinks, creatorPublishedId
  */
 export function isTodifyPartnerShopifyProduct(node) {
   if (isSampleShopifyProduct(node) || isGiftCardShopifyProduct(node)) return false;
+  if (isSpreadconnectEuShopifyProduct(node)) return false;
   return providerFromNode(node) === "todify";
+}
+
+/**
+ * Spread Connect EU listings: metafield, vendor, handle, or tag.
+ */
+export function isSpreadconnectEuShopifyProduct(node) {
+  if (isSampleShopifyProduct(node) || isGiftCardShopifyProduct(node)) return false;
+  const provider = providerFromNode(node);
+  if (provider === "spreadconnect_eu" || provider === "spreadconnect") return true;
+  const vendor = String(node?.vendor || "")
+    .trim()
+    .toLowerCase();
+  if (vendor === "spreadconnect") return true;
+  const handle = String(node?.handle || "")
+    .trim()
+    .toLowerCase();
+  if (handle.startsWith("spreadconnect-")) return true;
+  const tags = tagsFromNode(node);
+  if (tags.includes("spreadconnect") || tags.some((t) => t.startsWith("spreadconnect-article-"))) return true;
+  const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value).toLowerCase();
+  return listingOrigin === "spreadconnect" || listingOrigin === "spreadconnect_eu";
 }
 
 /**
@@ -481,6 +509,7 @@ export function isTodifyPartnerShopifyProduct(node) {
  */
 export function isShopifyResidualProduct(node) {
   if (isTodifyPartnerShopifyProduct(node)) return false;
+  if (isSpreadconnectEuShopifyProduct(node)) return false;
   if (isSampleShopifyProduct(node)) return false;
   return isGiftCardShopifyProduct(node);
 }
@@ -527,6 +556,8 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   const listingOrigin = parseMetafieldValue(node?.mfListingOrigin?.value) || null;
   let sourceLabel = source;
   if (source === "todify" || provider === "todify") sourceLabel = "Todify";
+  else if (source === "spreadconnect" || provider === "spreadconnect_eu" || provider === "spreadconnect")
+    sourceLabel = "Spread EU";
   else if (source === "samples" || isSampleShopifyProduct(node)) sourceLabel = "Personalizable samples";
   else if (source === "printify") sourceLabel = "Printify";
   else if (source === "shopify") sourceLabel = "Shopify";
@@ -535,6 +566,7 @@ export function mapShopifyNodeToProduct(node, source, printifyLinks) {
   let categoryDefault = "Shopify";
   if (source === "printify") categoryDefault = "Printify";
   else if (source === "todify") categoryDefault = "Todify";
+  else if (source === "spreadconnect") categoryDefault = "Spread EU";
   else if (source === "samples") categoryDefault = "Personalizable samples";
   else if (isGiftCardShopifyProduct(node)) categoryDefault = "Gift card";
 

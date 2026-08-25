@@ -23,12 +23,26 @@ export const TODIFY_PRINT_PROVIDER_DISPLAY_NAME = "KNL print";
 /** Stable company-location id for Todify MA (source of truth for the print-provider label). */
 export const TODIFY_LOCATION_ID = "mloc_todify_ma_1";
 
+/** Spread Connect EU (SPOD rest.spod.com) — Catalog Studio partner, Phase 1 of IDEA-085. */
+export const SPREAD_EU_PARTNER_ID = "mfg_spread_eu";
+export const SPREAD_EU_PARTNER_SLUG = "spread-eu";
+export const SPREAD_EU_FULFILLMENT_EXTERNAL_ID = "spread-eu-1";
+export const SPREAD_EU_LOCATION_ID = "mloc_spread_eu_1";
+export const SPREAD_EU_PROVIDER_DISPLAY_NAME = "Spread EU";
+export const SPREAD_EU_SOURCE_SYSTEM = "spreadconnect_eu";
+export const SPREAD_EU_SHOPIFY_PROVIDER = "spreadconnect_eu";
+/** Catalog Studio avatar — local partner-static asset. */
+export const SPREAD_EU_ICON_URL = "/admin-partner/img/spread-eu-icon.svg";
+export const SPREAD_EU_LOGO_URL = SPREAD_EU_ICON_URL;
+export const SPREAD_EU_WEBSITE = "https://www.spreadconnect.com";
+
 /**
  * INTEGER print_provider_id columns (CREATOR_DB.product_variant_config, etc.) cannot store
  * opaque partner ids. Map known opaque ids to reserved numeric sentinels outside Printify ranges.
  */
 export const OPAQUE_VARIANT_PROVIDER_IDS = Object.freeze({
   [TODIFY_FULFILLMENT_EXTERNAL_ID]: 910001,
+  [SPREAD_EU_FULFILLMENT_EXTERNAL_ID]: 910002,
 });
 
 /** Coerce Printify numeric ids or known opaque partner ids for INTEGER storage. */
@@ -47,7 +61,11 @@ export const TODIFY_LOGO_URL = "https://d2vw8tvocudf9g.cloudfront.net/images/log
 export const TODIFY_ICON_URL = "https://d2vw8tvocudf9g.cloudfront.net/apple-touch-icon.png";
 
 /** Publish profiles with these source_system values skip Printify and create Shopify directly. */
-export const DIRECT_SHOPIFY_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify"]);
+export const DIRECT_SHOPIFY_SOURCE_SYSTEMS = new Set([
+  "todify",
+  "direct_shopify",
+  "spreadconnect_eu",
+]);
 
 export function isDirectShopifySourceSystem(sourceSystem) {
   return DIRECT_SHOPIFY_SOURCE_SYSTEMS.has(String(sourceSystem || "").trim().toLowerCase());

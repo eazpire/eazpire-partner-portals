@@ -81,6 +81,7 @@ const SOURCE_LABELS = {
 const PROVIDER_LABELS = {
   printify: "Printify",
   todify: "Todify",
+  spreadconnect: "Spread EU",
 };
 
 /** Shopify Channels (same options as Shopify Admin + eazpire Headless). */
@@ -310,7 +311,7 @@ function sourceKeyOf(p) {
 
 function providerKeyOf(p) {
   const s = String(p.filter_provider || "").trim().toLowerCase();
-  if (s === "printify" || s === "todify") return s;
+  if (s === "printify" || s === "todify" || s === "spreadconnect") return s;
   return null;
 }
 
@@ -431,7 +432,7 @@ function fixedBaseKeys(sectionKey) {
   if (sectionKey === "category") return [CATEGORY_EMPTY_KEY];
   if (sectionKey === "visibility") return ["public", "private"];
   if (sectionKey === "source") return ["product", "customer", "samples", "other"];
-  if (sectionKey === "provider") return ["printify", "todify"];
+  if (sectionKey === "provider") return ["printify", "todify", "spreadconnect"];
   if (sectionKey === "printify_status") {
     return ["published", "unpublished", "unpublished_changes", "publishing", "error"];
   }

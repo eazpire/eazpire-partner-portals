@@ -7,6 +7,8 @@
 #   RESEND_API_KEY, PARTNER_JWT_SECRET (optional if using JWT_APP_SECRET)
 #   PRINTIFY_API_KEY (required for Catalog Studio → Sync Printify; copy from creator-engine:
 #     node scripts/deployment/sync-partner-printify-secret.cjs)
+#   SPREADCONNECT_API_KEY (Catalog Studio → Spread EU product types; copy from creator-engine
+#     wrangler secret / dashboard — same value as creator-engine)
 #   SHOPIFY_ACCESS_TOKEN (Creations admin Products → Shopify source; copy from creator-engine:
 #     node scripts/deployment/sync-shopify-access-token-to-workers.cjs --partner-only)
 #   REPLICATE_API_TOKEN (Catalog Editor → Generate Preview Image; copy from creator-engine:

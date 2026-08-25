@@ -8,6 +8,8 @@ import {
   isGiftCardShopifyProduct,
   isSampleShopifyProduct,
   isNativeShopifyStoreProduct,
+  isSpreadconnectEuShopifyProduct,
+  isShopifyResidualProduct,
   mapShopifyNodeToProduct,
   fetchPrintifyShopifyNodesFromD1,
   toEpochMs,
@@ -83,6 +85,36 @@ describe("adminCreationsShopifyList", () => {
         publishedIds
       )
     ).toBe(false);
+
+    expect(
+      isPrintifySourcedProduct(
+        {
+          id: "gid://shopify/Product/3502371",
+          vendor: "Spreadconnect",
+          handle: "spreadconnect-3502371",
+          tags: ["spreadconnect"],
+        },
+        links,
+        publishedIds
+      )
+    ).toBe(false);
+  });
+
+  it("isSpreadconnectEuShopifyProduct detects vendor, handle, tag, and provider", () => {
+    expect(
+      isSpreadconnectEuShopifyProduct({
+        vendor: "Spreadconnect",
+        handle: "spreadconnect-1",
+        tags: ["spreadconnect"],
+      })
+    ).toBe(true);
+    expect(
+      isSpreadconnectEuShopifyProduct({
+        mfProvider: { value: "spreadconnect_eu" },
+      })
+    ).toBe(true);
+    expect(isShopifyResidualProduct({ vendor: "Spreadconnect", handle: "spreadconnect-1" })).toBe(false);
+    expect(isSpreadconnectEuShopifyProduct({ vendor: "Printify", handle: "softstyle-tee" })).toBe(false);
   });
 
   it("isTodifyPartnerShopifyProduct and source buckets split Shopify residual", async () => {

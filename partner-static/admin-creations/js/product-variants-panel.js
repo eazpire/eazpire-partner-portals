@@ -61,9 +61,9 @@ function collectVariantsMap(groups, enabledMap) {
   const out = {};
   for (const g of groups || []) {
     for (const s of g.sizes || []) {
-      const pid = s.printify_variant_id;
+      const pid = s.printify_variant_id || s.shopify_variant_id;
       if (!pid) continue;
-      out[String(pid)] = { enabled: enabledMap.get(String(pid)) !== false };
+      out[String(pid)] = { enabled: enabledMap.get(String(s.printify_variant_id || s.shopify_variant_id)) !== false };
     }
   }
   return out;

@@ -177,8 +177,16 @@ async function processVariantUpdate(env, ctx, {
               `Shopify still has ${removed.remaining} ${removeColor} variant(s) after delete`
             );
           }
+        } else if (
+          !printifyProductId ||
+          String(printifyProductId).startsWith("spread-eu-") ||
+          String(productKey || "").startsWith("spread-eu-")
+        ) {
+          const { updateShopifyVariantsEnabled } = await import(
+            "../spreadconnect/updateShopifyVariantsEnabled.js"
+          );
+          await updateShopifyVariantsEnabled(env, shopifyProductId, variantsMap);
         } else {
-          if (!printifyProductId) throw new Error("Printify product not linked");
           const { publishPrintifyProduct } = await import("../../utils/printify.js");
           await publishPrintifyProduct(
             env,

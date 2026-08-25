@@ -16,6 +16,7 @@ import {
   isPrintifySourcedProduct,
   isShopifyResidualProduct,
   isTodifyPartnerShopifyProduct,
+  isSpreadconnectEuShopifyProduct,
   isSampleShopifyProduct,
   normalizeShopifyProductId,
   indexShopifyNodesById,
@@ -25,6 +26,7 @@ import {
   NATIVE_SHOPIFY_STORE_QUERY,
   PRINTIFY_SHOPIFY_STORE_QUERY,
   TODIFY_SHOPIFY_STORE_QUERY,
+  SPREADCONNECT_SHOPIFY_STORE_QUERY,
   SAMPLES_SHOPIFY_STORE_QUERY,
 } from "./adminCreationsShopifyList.js";
 import {
@@ -884,6 +886,63 @@ export async function handleAdminCreationsTodifyProducts(request, env) {
     );
   } catch (err) {
     console.error("[admin-creations-todify-products]", err);
+    return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
+  }
+}
+
+/** Spread Connect EU listings (vendor / tag / custom.provider). */
+export async function handleAdminCreationsSpreadconnectProducts(request, env) {
+  const cors = getCorsHeaders(request);
+  if (!env.SHOPIFY_ACCESS_TOKEN) {
+    return json({ ok: false, error: "shopify_not_configured" }, 503, cors);
+  }
+
+  const url = new URL(request.url);
+  const limit = parseProductListLimit(url);
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
+
+  try {
+    const { printifyLinks, updatedAtBySid } = await loadPublishedDesignsShopifyIndex(env);
+
+    const nodes = await fetchShopifyProductNodesMatching(env, {
+      limit,
+      maxScan: 5000,
+      queryStr: SPREADCONNECT_SHOPIFY_STORE_QUERY,
+      matchFn: (node) => isSpreadconnectEuShopifyProduct(node),
+    });
+
+    let products = nodes.map((node) => {
+      const row = mapShopifyNodeToProduct(node, "spreadconnect", printifyLinks);
+      row.source_label = "Spread EU";
+      row.filter_provider = "spreadconnect";
+      if (!row.origin_label) {
+        row.origin_label = "Spread EU";
+        row.listing_origin = row.listing_origin || "spreadconnect";
+      }
+      return row;
+    });
+
+    if (q) {
+      products = products.filter((p) =>
+        [p.title, p.product_key, p.category, p.vendor, p.provider, p.source_label, p.handle]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    const { products: finalProducts, facets } = await finalizeProductList(env, products, {
+      nodesByShopifyId: indexShopifyNodesById(nodes),
+      updatedAtBySid,
+    });
+    return json(
+      { ok: true, products: finalProducts, total: finalProducts.length, source: "spreadconnect", facets },
+      200,
+      cors
+    );
+  } catch (err) {
+    console.error("[admin-creations-spreadconnect-products]", err);
     return json({ ok: false, error: err?.message || "shopify_fetch_failed" }, 500, cors);
   }
 }

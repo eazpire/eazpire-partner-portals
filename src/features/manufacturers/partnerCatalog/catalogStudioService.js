@@ -20,6 +20,9 @@ import {
   TODIFY_PARTNER_SLUG,
   TODIFY_ICON_URL,
   TODIFY_LOGO_URL,
+  SPREAD_EU_PARTNER_SLUG,
+  SPREAD_EU_ICON_URL,
+  SPREAD_EU_LOGO_URL,
 } from "./constants.js";
 import {
   fetchBlueprint,
@@ -50,10 +53,12 @@ const PARTNER_LOGO_BY_SLUG = {
   [PRINTIFY_PARTNER_SLUG]: PRINTIFY_ICON_URL || PRINTIFY_LOGO_URL,
   // Todify.ma official CloudFront logo/icon (apple-touch for square tree avatars)
   [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
+  [SPREAD_EU_PARTNER_SLUG]: SPREAD_EU_ICON_URL || SPREAD_EU_LOGO_URL,
 };
 
 const PROVIDER_LOGO_BY_PARTNER_SLUG = {
   [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
+  [SPREAD_EU_PARTNER_SLUG]: SPREAD_EU_ICON_URL || SPREAD_EU_LOGO_URL,
 };
 
 const VALID_CATALOG_STATUSES = new Set(["online", "preview", "offline"]);
@@ -1377,6 +1382,16 @@ async function listPendingPartnerProductsAsOffline(db, env, manufacturerId, prov
  */
 export async function getCatalogStudioProducts(db, env, { manufacturerId, providerExternalId, filter }) {
   if (!manufacturerId) return { ok: false, error: "manufacturer_id_required" };
+
+  try {
+    const partner = await getPartnerByIdOrSlug(db, manufacturerId);
+    if (String(partner?.slug || "").toLowerCase() === SPREAD_EU_PARTNER_SLUG) {
+      const { ensureSpreadEuCatalogSynced } = await import("../adapters/spreadconnect/spreadEuCatalogSync.js");
+      await ensureSpreadEuCatalogSynced(env, { force: false });
+    }
+  } catch (e) {
+    console.warn("[catalog-studio] spread eu sync:", e?.message || e);
+  }
 
   const providerId = providerExternalId != null && providerExternalId !== "" ? String(providerExternalId) : null;
 
