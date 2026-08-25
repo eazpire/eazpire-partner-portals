@@ -4,7 +4,7 @@
 
 export { listPartnersForAdmin, getPartnerByIdOrSlug, ensurePrintifyPartner } from "./printifyPartnerSeed.js";
 export { ensureTodifyPartner, ensureTodifyPartnerSetup } from "./todifyPartnerSeed.js";
-export { ensureSpreadEuPartner, ensureSpreadEuPartnerSetup } from "./spreadEuPartnerSeed.js";
+export { ensureSpreadEuPartner, ensureSpreadEuPartnerSetup, ensureSpreadshirtPartner, ensureSpreadshirtPartnerSetup } from "./spreadEuPartnerSeed.js";
 export { listFulfillmentProviders, getFulfillmentProviderById } from "./fulfillmentProviderService.js";
 export { listEazpireProducts, getEazpireProduct, upsertEazpireProduct, updateEazpireProduct } from "./eazpireProductService.js";
 export {

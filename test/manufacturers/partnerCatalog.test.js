@@ -286,6 +286,81 @@ describe("getCatalogStudioTree", () => {
       globalThis.fetch = originalFetch;
     }
   }, 60000);
+
+  it("shows Spreadshirt with flat EU + US providers and hides Spread EU as a top-level partner", async () => {
+    const { getCatalogStudioTree } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const db = {
+      prepare: (sql) => {
+        const handler = {
+          bind: () => handler,
+          all: async () => {
+            if (sql.includes("FROM manufacturers m")) {
+              return {
+                results: [
+                  {
+                    id: "mfg_spreadshirt",
+                    name: "Spreadshirt",
+                    slug: "spreadshirt",
+                    integration_type: "api",
+                    fulfillment_provider_count: 2,
+                    live_blueprint_count: 0,
+                    eazpire_product_count: 2,
+                  },
+                  {
+                    id: "mfg_spread_eu",
+                    name: "Spread EU",
+                    slug: "spread-eu",
+                    integration_type: "api",
+                    fulfillment_provider_count: 1,
+                    live_blueprint_count: 0,
+                    eazpire_product_count: 2,
+                  },
+                ],
+              };
+            }
+            if (sql.includes("manufacturer_fulfillment_providers")) {
+              return {
+                results: [
+                  {
+                    id: "fp_eu",
+                    manufacturer_id: "mfg_spreadshirt",
+                    external_provider_id: "spread-eu-1",
+                    name: "Spread EU",
+                    location_json: '{"country":"DE","city":"Leipzig"}',
+                    ships_to_json: '["EU"]',
+                    status: "active",
+                  },
+                  {
+                    id: "fp_us",
+                    manufacturer_id: "mfg_spreadshirt",
+                    external_provider_id: "spread-us-1",
+                    name: "Spread US",
+                    location_json: '{"country":"US","city":"Greensburg"}',
+                    ships_to_json: '["US"]',
+                    status: "catalog",
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          first: async () => null,
+          run: async () => ({}),
+        };
+        return handler;
+      },
+    };
+    const result = await getCatalogStudioTree(db, {});
+    expect(result.ok).toBe(true);
+    expect(result.partners.map((p) => p.slug)).toEqual(["spreadshirt"]);
+    const spreadshirt = result.partners[0];
+    expect(spreadshirt.flat_providers).toBe(true);
+    expect(spreadshirt.providers.map((p) => p.external_provider_id)).toEqual(["spread-eu-1", "spread-us-1"]);
+    expect(spreadshirt.providers.every((p) => !p.ship_country_code)).toBe(true);
+    expect(spreadshirt.providers.every((p) => p.ship_country_name === "")).toBe(true);
+  }, 120000);
 });
 
 describe("runFullPrintifyPartnerSetup prechecks", () => {

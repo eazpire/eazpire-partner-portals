@@ -318,7 +318,7 @@ function renderCategorySidebar(sidebar, categoryTree, items, catFilter, openGrou
   });
 }
 
-function refreshProductsPanel(container, allItems, categoryTree, filter, reload) {
+function refreshProductsPanel(container, allItems, categoryTree, filter, reload, emptyHint = "") {
   let catFilter = getCatFilter();
   let filtered = filterByCategory(allItems, catFilter, categoryTree);
   if (catFilter && filtered.length === 0 && allItems.length > 0) {
@@ -328,12 +328,15 @@ function refreshProductsPanel(container, allItems, categoryTree, filter, reload)
   }
   const productsEl = container.querySelector("#catalog-studio-products");
   if (productsEl) {
-    productsEl.innerHTML = renderProductsTable(filtered, filter, { total: allItems.length });
+    productsEl.innerHTML = renderProductsTable(filtered, filter, {
+      total: allItems.length,
+      emptyHint: allItems.length === 0 ? emptyHint : "",
+    });
     wireProductsTable(container, reload);
   }
   const catTreeEl = container.querySelector("#catalog-studio-category-tree");
   renderCategorySidebar(catTreeEl, categoryTree, allItems, catFilter, getCatOpenGroup(), () =>
-    refreshProductsPanel(container, allItems, categoryTree, filter, reload)
+    refreshProductsPanel(container, allItems, categoryTree, filter, reload, emptyHint)
   );
 }
 
@@ -763,7 +766,11 @@ function renderExpandedTree(partners, selectedPartnerId, selectedProviderId) {
           <span class="cs-tree-count">${providerCount}</span>
         </div>
         <div class="cs-tree-providers" ${isOpen ? "" : "hidden"}>
-          ${renderPartnerCountryGroups(partner.id, providers, selectedProviderId)}
+          ${
+            partner.flat_providers
+              ? providers.map((fp) => renderTreeProviderBtn(partner.id, fp, selectedProviderId)).join("")
+              : renderPartnerCountryGroups(partner.id, providers, selectedProviderId)
+          }
         </div>
       </div>`;
     })
@@ -806,16 +813,18 @@ function renderTree(partners, selectedPartnerId, selectedProviderId) {
     <div class="cs-tree-collapsed-rail">${renderCollapsedRail(partners, selectedPartnerId, selectedProviderId)}</div>`;
 }
 
-function renderProductsTable(items, filter, { total = items?.length ?? 0 } = {}) {
+function renderProductsTable(items, filter, { total = items?.length ?? 0, emptyHint = "" } = {}) {
   if (!items?.length) {
-    const hint =
-      total > 0
+    const hint = emptyHint
+      ? `<p>${escapeHtml(emptyHint)}</p>`
+      : total > 0
         ? `<p>${total} product(s) loaded — adjust the category filter or click <strong>All</strong> in the filter sidebar.</p>`
         : `<p>Nothing matches this filter for the current selection.</p>`;
     return `<div class="empty-state"><h3>No products</h3>${hint}</div>`;
   }
 
-  if (filter === "available") {
+  const useProductTable = filter !== "available" || items.some((row) => row.product_key);
+  if (filter === "available" && !useProductTable) {
     return renderTable(
       ["", "Title", "Category", "Country", "Print areas", "Status"],
       items
@@ -1229,5 +1238,5 @@ export async function mountCatalogStudio(container) {
   const allItems = productData.items || [];
   const categoryTree = productData.category_tree || [];
   const reload = () => mountCatalogStudio(container);
-  refreshProductsPanel(container, allItems, categoryTree, filter, reload);
+  refreshProductsPanel(container, allItems, categoryTree, filter, reload, productData.empty_hint || "");
 }

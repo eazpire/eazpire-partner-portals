@@ -250,10 +250,10 @@ async function applyPartnerCatalogSchemaPatches(db) {
   }
 
   try {
-    const { ensureSpreadEuPartnerSetup } = await import("./partnerCatalog/spreadEuPartnerSeed.js");
-    await ensureSpreadEuPartnerSetup(db);
+    const { ensureSpreadshirtPartnerSetup } = await import("./partnerCatalog/spreadEuPartnerSeed.js");
+    await ensureSpreadshirtPartnerSetup(db);
   } catch (e) {
-    console.warn("[ensureManufacturerSchema] spread eu partner seed skipped:", e?.message || e);
+    console.warn("[ensureManufacturerSchema] spreadshirt partner seed skipped:", e?.message || e);
   }
 
   await applyEazpireShadowSchemaPatches(db);

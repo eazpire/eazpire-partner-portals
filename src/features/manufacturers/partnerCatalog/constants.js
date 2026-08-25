@@ -23,7 +23,13 @@ export const TODIFY_PRINT_PROVIDER_DISPLAY_NAME = "KNL print";
 /** Stable company-location id for Todify MA (source of truth for the print-provider label). */
 export const TODIFY_LOCATION_ID = "mloc_todify_ma_1";
 
-/** Spread Connect EU (SPOD rest.spod.com) — Catalog Studio partner, Phase 1 of IDEA-085. */
+/** Spreadshirt parent in Catalog Studio (IDEA-085) — EU + US are fulfillment providers, not top-level partners. */
+export const SPREADSHIRT_PARTNER_ID = "mfg_spreadshirt";
+export const SPREADSHIRT_PARTNER_SLUG = "spreadshirt";
+export const SPREADSHIRT_DISPLAY_NAME = "Spreadshirt";
+export const SPREADSHIRT_WEBSITE = "https://www.spreadconnect.com";
+
+/** Spread Connect EU (SPOD rest.spod.com) — Catalog Studio provider under Spreadshirt. */
 export const SPREAD_EU_PARTNER_ID = "mfg_spread_eu";
 export const SPREAD_EU_PARTNER_SLUG = "spread-eu";
 export const SPREAD_EU_FULFILLMENT_EXTERNAL_ID = "spread-eu-1";
@@ -34,7 +40,40 @@ export const SPREAD_EU_SHOPIFY_PROVIDER = "spreadconnect_eu";
 /** Catalog Studio avatar — local partner-static asset. */
 export const SPREAD_EU_ICON_URL = "/admin-partner/img/spread-eu-icon.svg";
 export const SPREAD_EU_LOGO_URL = SPREAD_EU_ICON_URL;
-export const SPREAD_EU_WEBSITE = "https://www.spreadconnect.com";
+export const SPREAD_EU_WEBSITE = SPREADSHIRT_WEBSITE;
+export const SPREADSHIRT_ICON_URL = SPREAD_EU_ICON_URL;
+export const SPREADSHIRT_LOGO_URL = SPREAD_EU_ICON_URL;
+
+/** Spread Connect US — Catalog Studio placeholder provider (no API yet). */
+export const SPREAD_US_PARTNER_ID = "mfg_spread_us";
+export const SPREAD_US_PARTNER_SLUG = "spread-us";
+export const SPREAD_US_FULFILLMENT_EXTERNAL_ID = "spread-us-1";
+export const SPREAD_US_LOCATION_ID = "mloc_spread_us_1";
+export const SPREAD_US_PROVIDER_DISPLAY_NAME = "Spread US";
+export const SPREAD_US_SOURCE_SYSTEM = "spreadconnect_us";
+export const SPREAD_US_ICON_URL = "/admin-partner/img/spread-us-icon.svg";
+export const SPREAD_US_LOGO_URL = SPREAD_US_ICON_URL;
+
+/** Hidden as top-level Catalog Studio rows — shown as providers under Spreadshirt instead. */
+export const HIDDEN_CATALOG_STUDIO_SLUGS = new Set([SPREAD_EU_PARTNER_SLUG, SPREAD_US_PARTNER_SLUG]);
+
+export function isSpreadshirtStudioSlug(slug) {
+  return String(slug || "").toLowerCase() === SPREADSHIRT_PARTNER_SLUG;
+}
+
+export function partnerUsesFlatProviders(slug) {
+  return isSpreadshirtStudioSlug(slug);
+}
+
+export function isSpreadEuFulfillmentId(id) {
+  const s = String(id || "").trim();
+  return s === SPREAD_EU_FULFILLMENT_EXTERNAL_ID || s === "910002";
+}
+
+export function isSpreadUsFulfillmentId(id) {
+  const s = String(id || "").trim();
+  return s === SPREAD_US_FULFILLMENT_EXTERNAL_ID || s === "910003";
+}
 
 /**
  * INTEGER print_provider_id columns (CREATOR_DB.product_variant_config, etc.) cannot store
@@ -43,6 +82,7 @@ export const SPREAD_EU_WEBSITE = "https://www.spreadconnect.com";
 export const OPAQUE_VARIANT_PROVIDER_IDS = Object.freeze({
   [TODIFY_FULFILLMENT_EXTERNAL_ID]: 910001,
   [SPREAD_EU_FULFILLMENT_EXTERNAL_ID]: 910002,
+  [SPREAD_US_FULFILLMENT_EXTERNAL_ID]: 910003,
 });
 
 /** Coerce Printify numeric ids or known opaque partner ids for INTEGER storage. */

@@ -50,5 +50,21 @@ describe("spreadEuCatalogMap", () => {
     expect(mapped.variants_json[0].id).toBe(spreadconnectSyntheticVariantId(813, 1, 10));
     expect(mapped.d2c_price).toBe(spreadconnectDefaultD2cPrice(teeType()));
     expect(mapped.variant_config.variants[String(mapped.variants_json[0].id)].enabled).toBe(true);
+    expect(mapped.print_area_keys).toEqual(["front"]);
+    expect(mapped.product_data.print_areas[0].name).toBe("front");
+    expect(mapped.print_areas_config.front.width_mm).toBe(300);
+  });
+
+  it("collects appearance preview images", () => {
+    const mapped = buildSpreadEuCatalogProductData(
+      teeType({
+        appearances: [
+          { id: 1, name: "Schwarz", imageUrl: "https://cdn.example.com/black.png" },
+          { id: 2, name: "Weiß", previewImage: "https://cdn.example.com/white.png" },
+        ],
+      })
+    );
+    expect(mapped.mock_images).toContain("https://cdn.example.com/black.png");
+    expect(mapped.mock_images).toContain("https://cdn.example.com/white.png");
   });
 });

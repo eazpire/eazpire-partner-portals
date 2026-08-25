@@ -13,6 +13,7 @@ import {
   productKeysForProviderFromCatalog,
 } from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
+import { SPREAD_EU_COUNTRY_CODES } from "../adapters/spreadconnect/spreadEuCatalogMap.js";
 import {
   PRINTIFY_PARTNER_SLUG,
   PRINTIFY_ICON_URL,
@@ -20,9 +21,21 @@ import {
   TODIFY_PARTNER_SLUG,
   TODIFY_ICON_URL,
   TODIFY_LOGO_URL,
+  SPREAD_EU_PARTNER_ID,
   SPREAD_EU_PARTNER_SLUG,
   SPREAD_EU_ICON_URL,
   SPREAD_EU_LOGO_URL,
+  SPREAD_EU_FULFILLMENT_EXTERNAL_ID,
+  SPREADSHIRT_PARTNER_ID,
+  SPREADSHIRT_PARTNER_SLUG,
+  SPREADSHIRT_ICON_URL,
+  SPREADSHIRT_LOGO_URL,
+  SPREAD_US_PARTNER_SLUG,
+  SPREAD_US_ICON_URL,
+  SPREAD_US_LOGO_URL,
+  HIDDEN_CATALOG_STUDIO_SLUGS,
+  partnerUsesFlatProviders,
+  isSpreadUsFulfillmentId,
 } from "./constants.js";
 import {
   fetchBlueprint,
@@ -54,12 +67,19 @@ const PARTNER_LOGO_BY_SLUG = {
   // Todify.ma official CloudFront logo/icon (apple-touch for square tree avatars)
   [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
   [SPREAD_EU_PARTNER_SLUG]: SPREAD_EU_ICON_URL || SPREAD_EU_LOGO_URL,
+  [SPREADSHIRT_PARTNER_SLUG]: SPREADSHIRT_ICON_URL || SPREADSHIRT_LOGO_URL,
+  [SPREAD_US_PARTNER_SLUG]: SPREAD_US_ICON_URL || SPREAD_US_LOGO_URL,
 };
 
 const PROVIDER_LOGO_BY_PARTNER_SLUG = {
   [TODIFY_PARTNER_SLUG]: TODIFY_ICON_URL || TODIFY_LOGO_URL,
   [SPREAD_EU_PARTNER_SLUG]: SPREAD_EU_ICON_URL || SPREAD_EU_LOGO_URL,
+  [SPREADSHIRT_PARTNER_SLUG]: SPREADSHIRT_ICON_URL || SPREADSHIRT_LOGO_URL,
+  [SPREAD_US_PARTNER_SLUG]: SPREAD_US_ICON_URL || SPREAD_US_LOGO_URL,
 };
+
+const SPREAD_US_EMPTY_HINT =
+  "Spread US is a placeholder. Add the API token later to import the US catalog.";
 
 const VALID_CATALOG_STATUSES = new Set(["online", "preview", "offline"]);
 
@@ -613,7 +633,7 @@ function slimMockImagesForList(urls, max = 3) {
   return (urls || []).slice(0, max);
 }
 
-function buildProductsResponse(filter, items) {
+function buildProductsResponse(filter, items, extra = {}) {
   const enriched = enrichItemsWithCategory(items);
   return {
     ok: true,
@@ -621,7 +641,14 @@ function buildProductsResponse(filter, items) {
     items: enriched,
     total: enriched.length,
     category_tree: buildCategoryTree(enriched),
+    ...extra,
   };
+}
+
+function isHiddenCatalogStudioPartner(partner) {
+  const slug = String(partner?.slug || "").toLowerCase();
+  const id = String(partner?.id || "");
+  return HIDDEN_CATALOG_STUDIO_SLUGS.has(slug) || id === SPREAD_EU_PARTNER_ID;
 }
 
 async function resolveManufacturerCountry(db, manufacturerId, providerExternalId) {
@@ -1192,7 +1219,8 @@ function studioCountryDisplayName(code, fallbackLabel = "") {
 function mapDbProviderToTreeNode(fp, partnerSlug = null) {
   const location = fp.location && typeof fp.location === "object" ? fp.location : {};
   const countryRaw = location.country || null;
-  const shipCountryCode = normalizeCountryCode(countryRaw) || "OTHER";
+  const flat = partnerUsesFlatProviders(partnerSlug);
+  const shipCountryCode = flat ? "" : normalizeCountryCode(countryRaw) || "OTHER";
   return {
     id: fp.id,
     name: fp.name,
@@ -1200,7 +1228,7 @@ function mapDbProviderToTreeNode(fp, partnerSlug = null) {
     status: fp.status,
     logo_url: resolveProviderLogo(fp, partnerSlug),
     ship_country_code: shipCountryCode,
-    ship_country_name: studioCountryDisplayName(shipCountryCode, countryRaw),
+    ship_country_name: flat ? "" : studioCountryDisplayName(shipCountryCode, countryRaw),
     location: Object.keys(location).length ? location : null,
   };
 }
@@ -1238,13 +1266,24 @@ async function buildPrintifyTreeProviders(db, partnerId, env) {
 }
 
 export async function getCatalogStudioTree(db, env) {
+  try {
+    const { ensureSpreadshirtPartnerSetup } = await import("./spreadEuPartnerSeed.js");
+    await ensureSpreadshirtPartnerSetup(db);
+  } catch (e) {
+    console.warn("[catalog-studio] spreadshirt seed:", e?.message || e);
+  }
+
   const partners = await listPartnersForAdmin(db);
   const out = [];
   for (const partner of partners) {
-    const isPrintify = String(partner.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
-    const providers = isPrintify && env
-      ? await buildPrintifyTreeProviders(db, partner.id, env)
-      : (await listFulfillmentProviders(db, partner.id)).map((fp) => mapDbProviderToTreeNode(fp, partner.slug));
+    if (isHiddenCatalogStudioPartner(partner)) continue;
+    const slug = String(partner.slug || "").toLowerCase();
+    const isPrintify = slug === PRINTIFY_PARTNER_SLUG;
+    const flatProviders = partnerUsesFlatProviders(slug);
+    const providers =
+      isPrintify && env
+        ? await buildPrintifyTreeProviders(db, partner.id, env)
+        : (await listFulfillmentProviders(db, partner.id)).map((fp) => mapDbProviderToTreeNode(fp, partner.slug));
 
     out.push({
       id: partner.id,
@@ -1255,6 +1294,7 @@ export async function getCatalogStudioTree(db, env) {
       provider_count: providers.length,
       live_blueprint_count: partner.live_blueprint_count,
       eazpire_product_count: partner.eazpire_product_count,
+      flat_providers: flatProviders,
       providers,
     });
   }
@@ -1372,86 +1412,7 @@ async function listPendingPartnerProductsAsOffline(db, env, manufacturerId, prov
   });
 }
 
-/**
- * @param {object} db — MANUFACTURER_DB
- * @param {object} env — worker env (CATALOG_DB for Printify available list)
- * @param {object} opts
- * @param {string} opts.manufacturerId
- * @param {string} [opts.providerExternalId] — Printify print_provider_id
- * @param {'available'|'online'|'preview'|'offline'} opts.filter
- */
-export async function getCatalogStudioProducts(db, env, { manufacturerId, providerExternalId, filter }) {
-  if (!manufacturerId) return { ok: false, error: "manufacturer_id_required" };
-
-  try {
-    const partner = await getPartnerByIdOrSlug(db, manufacturerId);
-    if (String(partner?.slug || "").toLowerCase() === SPREAD_EU_PARTNER_SLUG) {
-      const { ensureSpreadEuCatalogSynced } = await import("../adapters/spreadconnect/spreadEuCatalogSync.js");
-      await ensureSpreadEuCatalogSynced(env, { force: false });
-    }
-  } catch (e) {
-    console.warn("[catalog-studio] spread eu sync:", e?.message || e);
-  }
-
-  const providerId = providerExternalId != null && providerExternalId !== "" ? String(providerExternalId) : null;
-
-  if (filter === "available") {
-    const partner = await getPartnerByIdOrSlug(db, manufacturerId);
-    const isPrintify = String(partner?.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
-    const rows =
-      isPrintify && env?.CATALOG_DB
-        ? await listAvailablePrintifyBlueprints(env, db, manufacturerId, providerId)
-        : await listAvailableBlueprints(db, manufacturerId);
-    const items = rows.map((row) => slimAvailableListItem(row));
-    return buildProductsResponse(filter, items);
-  }
-
-  const status = filter === "online" || filter === "preview" || filter === "offline" ? filter : "online";
-  let products =
-    shouldUseCatalogOps(env) && env?.CATALOG_DB
-      ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
-      : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
-
-  // Partner-direct products (Todify / KNL): union manufacturer rows ONLY when they have no
-  // product_catalog row yet. Never read eazpire.catalog_status for listing — sole SoT is
-  // product_catalog.is_active (Admin, Catalog Studio, shop-create).
-  if (shouldUseCatalogOps(env) && env?.CATALOG_DB && db) {
-    const mfgProducts = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
-    if (mfgProducts.length) {
-      const seen = new Set(products.map((p) => p.product_key));
-      const missingKeys = mfgProducts.map((p) => p.product_key).filter((k) => !seen.has(k));
-      if (missingKeys.length) {
-        const placeholders = missingKeys.map(() => "?").join(",");
-        const existingCatalog = await env.CATALOG_DB.prepare(
-          `SELECT product_key FROM product_catalog WHERE product_key IN (${placeholders})`
-        )
-          .bind(...missingKeys)
-          .all();
-        const inCatalog = new Set((existingCatalog?.results || []).map((r) => r.product_key));
-        for (const p of mfgProducts) {
-          if (seen.has(p.product_key) || inCatalog.has(p.product_key)) continue;
-          products.push(p);
-          seen.add(p.product_key);
-        }
-      }
-    }
-  }
-
-  // Partner opaque ids (e.g. Todify "ma-1") are not numeric Printify provider ids.
-  // product_active_print_providers only stores integers — always include manufacturer version keys.
-  if (providerId) {
-    const numericPid = Number(providerId);
-    const isNumericProvider =
-      Number.isFinite(numericPid) && String(numericPid) === String(providerId).trim();
-    const catalogKeys =
-      isNumericProvider && shouldUseCatalogOps(env) && env?.CATALOG_DB
-        ? await productKeysForProviderFromCatalog(env.CATALOG_DB, providerId)
-        : [];
-    const mfgKeys = await productKeysForProvider(db, manufacturerId, providerId);
-    const keySet = new Set([...catalogKeys, ...mfgKeys]);
-    products = products.filter((p) => keySet.has(p.product_key));
-  }
-
+async function mapEazpireProductsToStudioItems(db, env, products) {
   const productKeys = products.map((p) => p.product_key);
   const mockImagesMap = await loadMockImagesByProductKey(db, productKeys);
   const partnerPreviewMap = await loadPartnerPreviewImagesByProductKey(db, env, productKeys);
@@ -1488,14 +1449,12 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   }
   const apiPrintAreasMap = await fetchPrintAreasByExternalIds(env, needApiBlueprintIds);
 
-  const items = products.map((p) => {
+  return products.map((p) => {
     const blueprintEnrichment = blueprintEnrichmentMap.get(p.product_key) || {};
     const partnerPreviews = partnerPreviewMap.get(p.product_key) || [];
     const mockFromDb = mockImagesMap.get(p.product_key) || [];
     const areasFromDb = printAreasMap.get(p.product_key) || [];
-    const templateAreas = templateAreasMap.get(p.product_key) || [];
     const extId = blueprintExternalIds.get(p.product_key);
-    // Prefer partner Preview Images (lifestyle gallery) first, then catalog/blueprint mockups.
     const merged = mergeEnrichment(
       mergeEnrichment(
         mergeEnrichment({ mock_images: partnerPreviews, print_areas: areasFromDb }, { mock_images: mockFromDb }),
@@ -1509,7 +1468,11 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
         ],
       }
     );
-    const codes = shippingCountryCodesMap.get(p.product_key) || [];
+    const codesRaw = shippingCountryCodesMap.get(p.product_key) || [];
+    const codes =
+      codesRaw.length || !String(p.product_key || "").startsWith("spread-eu-")
+        ? codesRaw
+        : SPREAD_EU_COUNTRY_CODES.slice();
     const providerStats = providerVersionMap.get(p.product_key) || emptyProviderVersionSummary();
     return {
       kind: "eazpire_product",
@@ -1535,6 +1498,137 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       is_aop: isAllOverPrintFromTitle(p.title),
     };
   });
+}
+
+async function listSpreadshirtEazpireProducts(db, manufacturerId, catalogStatus = null) {
+  const ids = [...new Set([manufacturerId, SPREADSHIRT_PARTNER_ID, SPREAD_EU_PARTNER_ID].filter(Boolean))];
+  const seen = new Set();
+  const out = [];
+  for (const id of ids) {
+    const rows = await listEazpireProducts(db, catalogStatus ? { manufacturerId: id, catalogStatus } : { manufacturerId: id });
+    for (const row of rows) {
+      const key = String(row.product_key || "").trim();
+      if (!key || seen.has(key)) continue;
+      if (!key.startsWith("spread-eu-")) continue;
+      seen.add(key);
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+function applySpreadshirtProviderFilter(products, providerId) {
+  if (isSpreadUsFulfillmentId(providerId)) return [];
+  return products.filter((p) => String(p.product_key || "").startsWith("spread-eu-"));
+}
+
+/**
+ * @param {object} db — MANUFACTURER_DB
+ * @param {object} env — worker env (CATALOG_DB for Printify available list)
+ * @param {object} opts
+ * @param {string} opts.manufacturerId
+ * @param {string} [opts.providerExternalId] — Printify print_provider_id
+ * @param {'available'|'online'|'preview'|'offline'} opts.filter
+ */
+export async function getCatalogStudioProducts(db, env, { manufacturerId, providerExternalId, filter }) {
+  if (!manufacturerId) return { ok: false, error: "manufacturer_id_required" };
+
+  let resolvedManufacturerId = manufacturerId;
+  let partner = await getPartnerByIdOrSlug(db, manufacturerId);
+  let providerId = providerExternalId != null && providerExternalId !== "" ? String(providerExternalId) : null;
+  const incomingSlug = String(partner?.slug || "").toLowerCase();
+  if (incomingSlug === SPREAD_EU_PARTNER_SLUG || resolvedManufacturerId === SPREAD_EU_PARTNER_ID) {
+    resolvedManufacturerId = SPREADSHIRT_PARTNER_ID;
+    partner = (await getPartnerByIdOrSlug(db, SPREADSHIRT_PARTNER_ID)) || partner;
+    if (!providerId) providerId = SPREAD_EU_FULFILLMENT_EXTERNAL_ID;
+  }
+  manufacturerId = resolvedManufacturerId;
+
+  const isSpreadshirt = partnerUsesFlatProviders(partner?.slug) || manufacturerId === SPREADSHIRT_PARTNER_ID;
+
+  try {
+    if (isSpreadshirt || incomingSlug === SPREAD_EU_PARTNER_SLUG) {
+      const { ensureSpreadEuCatalogSynced } = await import("../adapters/spreadconnect/spreadEuCatalogSync.js");
+      await ensureSpreadEuCatalogSynced(env, { force: false });
+    }
+  } catch (e) {
+    console.warn("[catalog-studio] spread eu sync:", e?.message || e);
+  }
+
+  if (isSpreadshirt && isSpreadUsFulfillmentId(providerId)) {
+    return buildProductsResponse(filter, [], {
+      empty_hint: SPREAD_US_EMPTY_HINT,
+      placeholder: true,
+    });
+  }
+
+  if (filter === "available" && isSpreadshirt) {
+    let products = await listSpreadshirtEazpireProducts(db, manufacturerId, null);
+    products = applySpreadshirtProviderFilter(products, providerId);
+    const items = await mapEazpireProductsToStudioItems(db, env, products);
+    return buildProductsResponse(filter, items);
+  }
+
+  if (filter === "available") {
+    const isPrintify = String(partner?.slug || "").toLowerCase() === PRINTIFY_PARTNER_SLUG;
+    const rows =
+      isPrintify && env?.CATALOG_DB
+        ? await listAvailablePrintifyBlueprints(env, db, manufacturerId, providerId)
+        : await listAvailableBlueprints(db, manufacturerId);
+    const items = rows.map((row) => slimAvailableListItem(row));
+    return buildProductsResponse(filter, items);
+  }
+
+  const status = filter === "online" || filter === "preview" || filter === "offline" ? filter : "online";
+  let products = isSpreadshirt
+    ? await listSpreadshirtEazpireProducts(db, manufacturerId, status)
+    : shouldUseCatalogOps(env) && env?.CATALOG_DB
+      ? await listCatalogOpsStudioProductsAsEazpire(env, { manufacturerId, catalogStatus: status })
+      : await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
+
+  // Partner-direct products (Todify / KNL): union manufacturer rows ONLY when they have no
+  // product_catalog row yet. Never read eazpire.catalog_status for listing — sole SoT is
+  // product_catalog.is_active (Admin, Catalog Studio, shop-create).
+  if (!isSpreadshirt && shouldUseCatalogOps(env) && env?.CATALOG_DB && db) {
+    const mfgProducts = await listEazpireProducts(db, { manufacturerId, catalogStatus: status });
+    if (mfgProducts.length) {
+      const seen = new Set(products.map((p) => p.product_key));
+      const missingKeys = mfgProducts.map((p) => p.product_key).filter((k) => !seen.has(k));
+      if (missingKeys.length) {
+        const placeholders = missingKeys.map(() => "?").join(",");
+        const existingCatalog = await env.CATALOG_DB.prepare(
+          `SELECT product_key FROM product_catalog WHERE product_key IN (${placeholders})`
+        )
+          .bind(...missingKeys)
+          .all();
+        const inCatalog = new Set((existingCatalog?.results || []).map((r) => r.product_key));
+        for (const p of mfgProducts) {
+          if (seen.has(p.product_key) || inCatalog.has(p.product_key)) continue;
+          products.push(p);
+          seen.add(p.product_key);
+        }
+      }
+    }
+  }
+
+  // Partner opaque ids (e.g. Todify "ma-1") are not numeric Printify provider ids.
+  // product_active_print_providers only stores integers — always include manufacturer version keys.
+  if (isSpreadshirt) {
+    products = applySpreadshirtProviderFilter(products, providerId);
+  } else if (providerId) {
+    const numericPid = Number(providerId);
+    const isNumericProvider =
+      Number.isFinite(numericPid) && String(numericPid) === String(providerId).trim();
+    const catalogKeys =
+      isNumericProvider && shouldUseCatalogOps(env) && env?.CATALOG_DB
+        ? await productKeysForProviderFromCatalog(env.CATALOG_DB, providerId)
+        : [];
+    const mfgKeys = await productKeysForProvider(db, manufacturerId, providerId);
+    const keySet = new Set([...catalogKeys, ...mfgKeys]);
+    products = products.filter((p) => keySet.has(p.product_key));
+  }
+
+  const items = await mapEazpireProductsToStudioItems(db, env, products);
 
   // Partner submissions awaiting admin review appear under Offline (not yet curated).
   if (status === "offline") {
@@ -1967,4 +2061,6 @@ export {
   mergeEnrichment,
   resolveStudioCategory,
   extractPrintAreaNamesFromPrintifyBlueprint,
+  isHiddenCatalogStudioPartner,
+  applySpreadshirtProviderFilter,
 };

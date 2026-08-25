@@ -641,7 +641,7 @@ export function resolvePrintAreaUseMockups(ctx, data) {
   return fromBundle === true || fromBundle === 1 || fromBundle === "1";
 }
 
-const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify", "spreadconnect_eu"]);
+const PARTNER_SOURCE_SYSTEMS = new Set(["todify", "direct_shopify", "spreadconnect_eu", "spreadconnect_us"]);
 
 function collectSourceSystemCandidates(ctx, data) {
   const out = [];
@@ -681,7 +681,7 @@ export function isPartnerOrTodifyProduct(ctx, data = null) {
     ctx?.bundle?.product?.manufacturer_id || ctx?.partnerReview?.product?.manufacturer_id || ""
   ).toLowerCase();
   if (mfg === "mfg_todify" || mfg.includes("todify")) return true;
-  if (mfg === "mfg_spread_eu" || mfg.startsWith("mfg_spread_")) return true;
+  if (mfg === "mfg_spreadshirt" || mfg === "mfg_spread_eu" || mfg.startsWith("mfg_spread_")) return true;
 
   const imgs = data?.mockup_images || [];
   if (imgs.some((i) => String(i?._source || "").toLowerCase().includes("partner"))) return true;
