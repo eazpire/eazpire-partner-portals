@@ -3,7 +3,7 @@
  */
 
 import { newId } from "../../db.js";
-import { listSpreadconnectProductTypes } from "../../../utils/spreadconnect.js";
+import { listSpreadconnectProductTypes } from "../../../../utils/spreadconnect.js";
 import { upsertEazpireProduct } from "../../partnerCatalog/eazpireProductService.js";
 import { ensureSpreadEuPartnerSetup } from "../../partnerCatalog/spreadEuPartnerSeed.js";
 import {
