@@ -3,7 +3,7 @@
  */
 
 import { newId } from "../../db.js";
-import { listSpreadconnectProductTypes, getSpreadconnectProductTypeViews } from "../../../../utils/spreadconnect.js";
+import { listSpreadconnectProductTypes, getSpreadconnectProductTypeViews, getSpreadconnectProductTypeCategories } from "../../../../utils/spreadconnect.js";
 import { upsertEazpireProduct, getEazpireProduct } from "../../partnerCatalog/eazpireProductService.js";
 import { upsertProductVersion } from "../../partnerCatalog/eazpireProductVersionService.js";
 import { ensureSpreadshirtPartnerSetup } from "../../partnerCatalog/spreadEuPartnerSeed.js";
@@ -19,6 +19,7 @@ import {
   buildSpreadEuCatalogProductData,
   shouldImportSpreadEuProductType,
   spreadconnectProductTypeName,
+  spreadEuCatalogCategory,
   spreadEuProductKey,
   SPREAD_EU_COUNTRY_CODES as EU_CODES,
 } from "./spreadEuCatalogMap.js";
@@ -52,6 +53,34 @@ export function pickSpreadEuTypesToImport(types, existingKeys, opts = {}) {
   };
 }
 
+async function recategorizeExistingSpreadEuProducts(mfgDb, types, existingKeys, skipKeys) {
+  const skip = skipKeys instanceof Set ? skipKeys : new Set();
+  let updated = 0;
+  for (const type of Array.isArray(types) ? types : []) {
+    if (updated >= 80) break;
+    const productKey = spreadEuProductKey(type.id);
+    if (!productKey || !existingKeys.has(productKey) || skip.has(productKey)) continue;
+    if (!shouldImportSpreadEuProductType(type)) continue;
+    const category = spreadEuCatalogCategory(type);
+    if (!category.group || !category.leaf) continue;
+    try {
+      const res = await mfgDb
+        .prepare(
+          `UPDATE eazpire_products SET catalog_category_group = ?, catalog_category_leaf = ?, updated_at = ?
+           WHERE product_key = ? AND (
+             catalog_category_group IS NULL OR catalog_category_group = '' OR catalog_category_group = 'Kleidung'
+           )`
+        )
+        .bind(category.group, category.leaf, Date.now(), productKey)
+        .run();
+      if (Number(res?.meta?.changes || 0) > 0) updated += 1;
+    } catch {
+      /* optional */
+    }
+  }
+  return updated;
+}
+
 async function fetchViewsForTypes(env, types) {
   const out = new Map();
   const list = Array.isArray(types) ? types : [];
@@ -61,14 +90,17 @@ async function fetchViewsForTypes(env, types) {
     const results = await Promise.all(
       batch.map(async (type) => {
         try {
-          const views = await getSpreadconnectProductTypeViews(env, type.id);
-          return [String(type.id), views];
+          const [views, categories] = await Promise.all([
+            getSpreadconnectProductTypeViews(env, type.id).catch(() => null),
+            getSpreadconnectProductTypeCategories(env, type.id).catch(() => null),
+          ]);
+          return [String(type.id), { views, categories }];
         } catch {
-          return [String(type.id), null];
+          return [String(type.id), { views: null, categories: null }];
         }
       })
     );
-    for (const [id, views] of results) out.set(id, views);
+    for (const [id, extras] of results) out.set(id, extras);
   }
   return out;
 }
@@ -435,6 +467,8 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
       skipped: true,
       imported: 0,
       existing: existingKeys.size,
+      remaining: 0,
+      complete: false,
       warning: "spreadconnect_api_key_not_configured",
       partner_id: partnerId,
     };
@@ -452,6 +486,8 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
       imported: 0,
       existing: existingKeys.size,
       eligible: picked.eligible.length,
+      remaining: 0,
+      complete: true,
       scanned: types.length,
       partner_id: partnerId,
     };
@@ -507,6 +543,7 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     existing: existingKeys.size,
     eligible: picked.eligible.length,
     remaining: picked.remaining_after_chunk,
+    complete: picked.remaining_after_chunk === 0,
     scanned: types.length,
     errors: errors.slice(0, 8),
     partner_id: partnerId,

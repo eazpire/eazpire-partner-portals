@@ -35,15 +35,36 @@ export function spreadconnectHasFrontPrintArea(type) {
   });
 }
 
+/** Any printable area with size — bags/buttons often have no FRONT view. */
+export function spreadconnectHasUsablePrintArea(type) {
+  const areas = Array.isArray(type?.printAreas) ? type.printAreas : [];
+  return areas.some((a) => printAreaWidth(a) > 0 && printAreaHeight(a) > 0);
+}
+
+function typeNameLower(typeOrTitle) {
+  if (typeof typeOrTitle === "string") return typeOrTitle.toLowerCase();
+  return spreadconnectProductTypeName(typeOrTitle).toLowerCase();
+}
+
+/**
+ * Non-clothing (bags, teddy, buttons, home, drinkware, tech).
+ * Socks/aprons stay apparel. Hats/caps are accessories.
+ */
 export function spreadconnectIsNonApparel(type) {
-  const n = spreadconnectProductTypeName(type).toLowerCase();
-  return /mug|tasse|cup|becher|bottle|flasche|tumbler|glass|poster|canvas|sticker|phone|hülle|huelle|case|pillow|kissen|tote|bag|sock|mouse\s*pad|flag|puzzle|magnet|hat|cap|beanie|apron/.test(
+  const n = typeNameLower(type);
+  if (!n) return false;
+  if (/\b(buttons?|pins?|anstecker)\b/.test(n) && !/shirt|blouse|jacke|jacket/.test(n)) return true;
+  if (/teddy|plüsch|pluesch|plush/.test(n)) return true;
+  if (/tote|backpack|rucksack|handbag|handtasche|stoffbeutel|turnbeutel|\b(bag|tasche|beutel|pouch)\b/.test(n)) {
+    return true;
+  }
+  return /mug|tasse|cup|becher|bottle|flasche|tumbler|\bglass\b|\bglas\b|poster|canvas|leinwand|sticker|aufkleber|phone|handy|hülle|huelle|\bcase\b|pillow|kissen|mouse\s*pad|mauspad|flag|fahne|puzzle|magnet|hat|\bcap\b|mütze|muetze|beanie|kappe/.test(
     n
   );
 }
 
 export function spreadconnectApparelKind(type) {
-  const n = spreadconnectProductTypeName(type).toLowerCase();
+  const n = typeNameLower(type);
   if (spreadconnectIsNonApparel(type)) return null;
   if (/hoodie|kapuzen/.test(n) && /zip|reiß|reiss/.test(n)) return "zip-hoodie";
   if (/hoodie|kapuzen/.test(n)) return "hoodie";
@@ -56,11 +77,16 @@ export function spreadconnectApparelKind(type) {
   if (/sweat|crewneck|pullover/.test(n)) return "sweat";
   if (/short/.test(n)) return "shorts";
   if (/jogger|sweatpant/.test(n)) return "joggers";
+  if (/legging/.test(n)) return "leggings";
+  if (/\b(body|onesie|romper|babybody)\b/.test(n)) return "body";
+  if (/bodysuit/.test(n)) return "bodysuit";
+  if (/sock|socken/.test(n)) return "socks";
+  if (/apron|schürze|schuerze/.test(n)) return "apron";
   if (/(women|ladies|damen|femme|frauen)/.test(n) && /t[- ]?shirt|tee\b/.test(n)) return "womens-tee";
   if (/(men|herren|homme)/.test(n) && /t[- ]?shirt|tee\b/.test(n)) return "mens-tee";
   if (/t[- ]?shirt|tee\b/.test(n)) return "tee";
   if (/shirt/.test(n)) return "shirt";
-  return "tee";
+  return null;
 }
 
 export function spreadconnectDefaultD2cPrice(type) {
@@ -85,7 +111,7 @@ export function spreadconnectSyntheticVariantId(typeId, appearanceId, sizeId) {
 export function buildSpreadEuCatalogProductData(type, extras = {}) {
   const typeId = type?.id;
   const appearances = Array.isArray(type?.appearances) ? type.appearances : [];
-  const sizes = Array.isArray(type?.sizes) ? type.sizes : [];
+  const sizes = typeSizes(type);
   const d2c = spreadconnectDefaultD2cPrice(type);
   const costCents = Math.round(d2c * 100);
 
@@ -240,34 +266,73 @@ export function spreadconnectMockImageUrls(type, viewsPayload = null) {
   return urls.slice(0, 12);
 }
 
+function typeSizes(type) {
+  const sizes = Array.isArray(type?.sizes) ? type.sizes : [];
+  if (sizes.length) return sizes;
+  return [{ id: 1, name: "One Size" }];
+}
+
 export function spreadconnectPrintAreaKeys(type) {
   return spreadconnectPrintAreaDetails(type).map((a) => a.name);
 }
 
+function printAreaViewLabel(area) {
+  return String(area?.view || area?.name || area?.key || "").trim();
+}
+
+function sortPrintAreasFrontFirst(areas) {
+  const list = Array.isArray(areas) ? areas.slice() : [];
+  list.sort((a, b) => {
+    const av = printAreaViewLabel(a).toUpperCase();
+    const bv = printAreaViewLabel(b).toUpperCase();
+    if (av === "FRONT" && bv !== "FRONT") return -1;
+    if (bv === "FRONT" && av !== "FRONT") return 1;
+    const aDef = a?.default === true || a?.isDefault === true;
+    const bDef = b?.default === true || b?.isDefault === true;
+    if (aDef && !bDef) return -1;
+    if (bDef && !aDef) return 1;
+    return 0;
+  });
+  return list;
+}
+
 export function spreadconnectPrintAreaDetails(type) {
-  const areas = Array.isArray(type?.printAreas) ? type.printAreas : [];
+  const areas = sortPrintAreasFrontFirst(type?.printAreas);
   const out = [];
   const seen = new Set();
   for (const area of areas) {
-    const view = String(area?.view || area?.name || area?.key || "").trim();
-    if (!view) continue;
+    const w = printAreaWidth(area);
+    const h = printAreaHeight(area);
+    if (w <= 0 || h <= 0) continue;
+    const view = printAreaViewLabel(area) || "default";
     const name = view.toLowerCase();
     if (seen.has(name)) continue;
     seen.add(name);
     out.push({
       name,
       view: view.toUpperCase(),
-      width_mm: printAreaWidth(area),
-      height_mm: printAreaHeight(area),
+      width_mm: w,
+      height_mm: h,
     });
   }
   return out;
 }
 
-const SPREAD_API_GROUP_TO_STUDIO = {
-  Bekleidung: "Kleidung",
+/** Catalog Studio top-level buckets for Spread EU apparel (not Printify Kleidung). */
+export const SPREAD_EU_AUDIENCE_GROUPS = ["Unisex", "Male", "Female", "Kids", "Toddler"];
+
+const SPREAD_NON_APPAREL_GROUP_TO_STUDIO = {
   Accessoires: "Accessoires",
+  Accessories: "Accessoires",
+  Taschen: "Taschen",
+  Bags: "Taschen",
   "Home & Living": "Home",
+  Home: "Home",
+  Drinkware: "Drinkware",
+  "Wall Art": "Wall Art",
+  Tech: "Tech",
+  Papier: "Papier",
+  Paper: "Papier",
 };
 
 const SPREAD_API_LEAF_TO_STUDIO = {
@@ -278,8 +343,22 @@ const SPREAD_API_LEAF_TO_STUDIO = {
   Poloshirts: "Polo Shirt",
   "Tank Tops": "Tank Top",
   "Hosen & Shorts": "Shorts",
-  Babykleidung: "T-Shirt",
+  Babykleidung: "Body",
+  Taschen: "Bag",
+  Bags: "Bag",
+  Buttons: "Pin / Button",
 };
+
+function collectSpreadTranslations(nodes, acc = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    const t = String(node?.translation || node?.name || "").trim();
+    if (t) acc.push(t);
+    if (Array.isArray(node?.children) && node.children.length) {
+      collectSpreadTranslations(node.children, acc);
+    }
+  }
+  return acc;
+}
 
 function deepestSpreadCategoryLeaves(nodes, acc = []) {
   for (const node of Array.isArray(nodes) ? nodes : []) {
@@ -303,33 +382,127 @@ function studioLeafFromKind(kind) {
   if (kind === "crop") return "Crop Top";
   if (kind === "shorts") return "Shorts";
   if (kind === "joggers") return "Joggers";
+  if (kind === "leggings") return "Leggings";
+  if (kind === "body") return "Body";
+  if (kind === "bodysuit") return "Bodysuit";
+  if (kind === "socks") return "Socks";
+  if (kind === "apron") return "Apron";
   if (kind === "shirt") return "Shirt";
   if (kind === "womens-tee" || kind === "mens-tee" || kind === "tee") return "T-Shirt";
   return null;
 }
 
+function nonApparelGroupAndLeaf(n, apiGroupRaw, apiLeafRaw) {
+  if (/teddy|plüsch|pluesch|plush/.test(n)) return { group: "Accessoires", leaf: "Teddy" };
+  if (/\b(buttons?|pins?|anstecker)\b/.test(n) && !/shirt|blouse/.test(n)) {
+    return { group: "Accessoires", leaf: "Pin / Button" };
+  }
+  if (/hat|\bcap\b|mütze|muetze|beanie|kappe/.test(n)) return { group: "Accessoires", leaf: "Hat / Cap" };
+  if (/backpack|rucksack/.test(n)) return { group: "Taschen", leaf: "Backpack" };
+  if (/tote|stoffbeutel|turnbeutel/.test(n)) return { group: "Taschen", leaf: "Tote Bag" };
+  if (/handbag|handtasche/.test(n)) return { group: "Taschen", leaf: "Handbag" };
+  if (/\b(bag|tasche|beutel|pouch)\b/.test(n)) return { group: "Taschen", leaf: "Bag" };
+  if (/mug|tasse|becher/.test(n)) return { group: "Drinkware", leaf: "Mug" };
+  if (/tumbler/.test(n)) return { group: "Drinkware", leaf: "Tumbler" };
+  if (/bottle|flasche/.test(n)) return { group: "Drinkware", leaf: "Water Bottle" };
+  if (/\b(glass|glas)\b/.test(n)) return { group: "Drinkware", leaf: "Glass" };
+  if (/poster/.test(n)) return { group: "Wall Art", leaf: "Poster" };
+  if (/canvas|leinwand/.test(n)) return { group: "Wall Art", leaf: "Canvas" };
+  if (/flag|fahne|banner/.test(n)) return { group: "Wall Art", leaf: "Flag / Banner" };
+  if (/pillow|kissen/.test(n)) return { group: "Home", leaf: "Pillow" };
+  if (/blanket|decke/.test(n)) return { group: "Home", leaf: "Blanket" };
+  if (/magnet/.test(n)) return { group: "Home", leaf: "Magnet" };
+  if (/sticker|aufkleber/.test(n)) return { group: "Papier", leaf: "Sticker" };
+  if (/puzzle/.test(n)) return { group: "Papier", leaf: "Puzzle" };
+  if (/mouse\s*pad|mauspad/.test(n)) return { group: "Tech", leaf: "Mouse Pad" };
+  if (/phone|handy|hülle|huelle|\bcase\b/.test(n)) return { group: "Tech", leaf: "Phone Case" };
+
+  const group = SPREAD_NON_APPAREL_GROUP_TO_STUDIO[apiGroupRaw] || "Accessoires";
+  const leaf = SPREAD_API_LEAF_TO_STUDIO[apiLeafRaw] || apiLeafRaw || "Other";
+  return { group, leaf };
+}
+
 /**
- * Map Spread Connect type (+ optional /categories payload) onto Catalog Studio groups.
- * Leaves must match admin CATEGORY_GROUPS names (T-Shirt, Long Sleeve, Polo Shirt, …).
+ * Audience from Spread /categories genders (when present), else type name.
+ * Conservative: girl/boy → Kids; women/damen → Female; men/herren → Male;
+ * baby/toddler/onesie → Toddler; no gender on adult apparel → Unisex.
  */
-export function spreadEuCatalogCategory(type, apiCategories = null) {
+export function spreadconnectAudienceGroup(type, apiCategories = null) {
+  const genderTexts = collectSpreadTranslations(apiCategories?.genders).map((t) => t.toLowerCase());
+  const featureTexts = collectSpreadTranslations(apiCategories?.features).map((t) => t.toLowerCase());
+  const categoryTexts = collectSpreadTranslations(apiCategories?.categories).map((t) => t.toLowerCase());
+  const apiBlob = [...genderTexts, ...featureTexts, ...categoryTexts].join(" ");
+  const n = `${typeNameLower(type)} ${apiBlob}`.trim();
+
+  if (/\b(baby|toddler|infant|newborn|new[\s-]?born|onesie|romper|säugling|saeugling|neugeboren|babybody|babykleidung)\b/.test(n)) {
+    return "Toddler";
+  }
+  if (/\b(kids?|child|children|youth|junior|kinder)\b/.test(n)) return "Kids";
+  if (/\b(girls?|boys?|junge|jungen|mädchen|maedchen)\b/.test(n) && !/\b(wom[ae]n|ladies|damen|herren|men'?s)\b/.test(n)) {
+    return "Kids";
+  }
+
+  const apiHasWomen = genderTexts.some((g) => /\b(wom[ae]n|female|damen|femme|ladies)\b/.test(g));
+  const apiHasMen = genderTexts.some((g) => /\b(men|male|herren|homme)\b/.test(g));
+  const apiHasUnisex = genderTexts.some((g) => /\bunisex\b/.test(g));
+  const apiHasKids = genderTexts.some((g) => /\b(kids?|child|children|youth|kinder)\b/.test(g));
+  if (apiHasKids) return "Kids";
+  if (apiHasUnisex || (apiHasWomen && apiHasMen)) return "Unisex";
+  if (apiHasWomen && !apiHasMen) return "Female";
+  if (apiHasMen && !apiHasWomen) return "Male";
+
+  if (/\bunisex\b/.test(n)) return "Unisex";
+  if (/\b(wom[ae]n'?s?|ladies|lady|damen|femme|frauen|weiblich|female)\b/.test(n)) return "Female";
+  if (/\b(men'?s?|herren|homme|männlich|maennlich|\bmale\b)\b/.test(n)) return "Male";
+  return "Unisex";
+}
+
+function apparelLeaf(type, apiLeafRaw) {
   const kind = spreadconnectApparelKind(type);
   const fromKind = studioLeafFromKind(kind);
+  if (apiLeafRaw === "Pullover & Hoodies") {
+    return kind === "sweat" ? "Sweatshirt" : fromKind || "Hoodie";
+  }
+  if (fromKind) return fromKind;
+  if (apiLeafRaw && SPREAD_API_LEAF_TO_STUDIO[apiLeafRaw]) return SPREAD_API_LEAF_TO_STUDIO[apiLeafRaw];
+  if (apiLeafRaw && apiLeafRaw !== "Bekleidung" && apiLeafRaw !== "Babykleidung") return apiLeafRaw;
+  return "T-Shirt";
+}
+
+/**
+ * Map Spread Connect type (+ optional /categories payload) onto Catalog Studio groups.
+ * Apparel: Unisex / Male / Female / Kids / Toddler → product type.
+ * Non-clothing: Accessoires / Taschen / Home / … → product type (never forced into gender buckets).
+ */
+export function spreadEuCatalogCategory(type, apiCategories = null) {
   const groups = Array.isArray(apiCategories?.categories) ? apiCategories.categories : [];
   const apiGroupRaw = String(groups[0]?.translation || "").trim();
   const apiLeafRaw = String(deepestSpreadCategoryLeaves(groups)[0]?.translation || "").trim();
+  const n = typeNameLower(type);
 
-  let leaf = fromKind;
-  if (apiLeafRaw === "Pullover & Hoodies") {
-    leaf = kind === "sweat" ? "Sweatshirt" : fromKind || "Hoodie";
-  } else if (!leaf && apiLeafRaw) {
-    leaf = SPREAD_API_LEAF_TO_STUDIO[apiLeafRaw] || null;
+  if (spreadconnectIsNonApparel(type)) {
+    return nonApparelGroupAndLeaf(n, apiGroupRaw, apiLeafRaw);
   }
 
   return {
-    group: SPREAD_API_GROUP_TO_STUDIO[apiGroupRaw] || "Kleidung",
-    leaf: leaf || "T-Shirt",
+    group: spreadconnectAudienceGroup(type, apiCategories),
+    leaf: apparelLeaf(type, apiLeafRaw),
   };
+}
+
+/** Display fallback when D1 still has legacy group "Kleidung". */
+export function spreadEuCatalogCategoryFromTitle(title, stored = {}) {
+  const fake = { customerName: String(title || "").trim() };
+  const mapped = spreadEuCatalogCategory(fake);
+  const storedGroup = String(stored.group || "").trim();
+  const storedLeaf = String(stored.leaf || "").trim();
+  if (SPREAD_EU_AUDIENCE_GROUPS.includes(storedGroup) && storedLeaf) {
+    return { group: storedGroup, leaf: storedLeaf };
+  }
+  if (storedGroup && storedGroup !== "Kleidung" && storedLeaf && !SPREAD_EU_AUDIENCE_GROUPS.includes(storedGroup)) {
+    return { group: storedGroup, leaf: storedLeaf };
+  }
+  return mapped;
 }
 
 /** EU shipping countries used for Spread EU catalog plans. */
@@ -365,9 +538,7 @@ export const SPREAD_EU_COUNTRY_CODES = [
 
 export function shouldImportSpreadEuProductType(type) {
   if (!type?.id) return false;
-  if (!spreadconnectHasFrontPrintArea(type)) return false;
-  if (spreadconnectIsNonApparel(type)) return false;
+  if (!spreadconnectHasUsablePrintArea(type)) return false;
   const appearances = Array.isArray(type.appearances) ? type.appearances : [];
-  const sizes = Array.isArray(type.sizes) ? type.sizes : [];
-  return appearances.length > 0 && sizes.length > 0;
+  return appearances.length > 0;
 }

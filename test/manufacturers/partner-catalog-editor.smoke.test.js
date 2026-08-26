@@ -241,6 +241,10 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(studioSrc).toContain("cs-auto-pill--amazon");
     expect(studioSrc).toContain("data-cs-amz-countries");
     expect(studioSrc).toContain("wireAmazonAutomationPopovers");
+    expect(studioSrc).toContain("lastGoodStudioProducts");
+    expect(studioSrc).toContain("continueSpreadEuBackgroundImport");
+    expect(studioSrc).toContain("spread_eu_catalog_complete");
+    expect(studioSrc).not.toContain("spread_eu_auto_sync_n");
   });
 
   it("provider-print-technical exports PAT merge helpers", () => {

@@ -9,6 +9,10 @@ import {
 } from "./catalog-editor/provider-country-groups.js";
 
 let isSpreadEuSyncRunning = false;
+/** Last successful Catalog Studio list per partner/provider/filter — keep visible on refresh/error. */
+const lastGoodStudioProducts = new Map();
+const SPREAD_EU_COMPLETE_KEY = "spread_eu_catalog_complete";
+const SPREAD_EU_AUTO_MAX_BATCHES = 20;
 
 const PRINTIFY_AUTO_ICON = "https://printify.com/pfh/assets/png/favicon-300x300.png";
 const SHOPIFY_AUTO_ICON = `<svg class="cs-auto-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#95BF47" d="M16.6 5.1s-1.6-1.2-1.8-1.3c-.2-.1-.6-.1-.6-.1l-.3-1.1c0-.3-.2-.6-.5-.7-.1 0-.8-.2-1.5.4-.6.5-1.1 1.6-1.2 2.2-1.2.4-2 .6-2 .6S6.8 3.6 6.2 3.6c-.5 0-.6.4-.6.4L3 20.3l11.2 2.1 5.6-1.2s-1.7-15.6-1.8-16.1c0-.3-.3-.5-.4-.5-.3 0-1.7.4-1.7.4h.3c.4 0 .7.3.8.7l.4 2.2s-2.2-.7-4.1-.7c-2.1 0-2.2 1.4-2.2 1.7 0 1.2 3.3 1.6 3.3 4 0 2-1.6 3.2-3.6 3.2-2.3 0-3.5-1.1-3.5-1.1l.6-2s1.2.8 2.2.8c.6 0 1.1-.4 1.1-1 0-1.6-2.8-1.7-2.8-3.9 0-2 1.5-4 4.6-4 1.3 0 2.4.3 2.4.3l.6-2.2z"/></svg>`;
@@ -158,6 +162,24 @@ function isSpreadshirtPartner(partner) {
   return String(partner?.slug || "").toLowerCase() === "spreadshirt";
 }
 
+function studioProductsCacheKey(partnerId, providerId, filter) {
+  return `${partnerId || ""}|${providerId || ""}|${filter || ""}`;
+}
+
+function applyStudioProductData(container, productData, filter, reload) {
+  if (!productData || !container) return;
+  const allItems = productData.items || [];
+  const categoryTree = productData.category_tree || [];
+  refreshProductsPanel(container, allItems, categoryTree, filter, reload, productData.empty_hint || "");
+}
+
+function paintCachedStudioProducts(container, cacheKey, filter, reload) {
+  const cached = lastGoodStudioProducts.get(cacheKey);
+  if (!cached?.items?.length) return false;
+  applyStudioProductData(container, cached, filter, reload);
+  return true;
+}
+
 function getPartnerId() {
   return sessionStorage.getItem(STORAGE.partnerId) || "";
 }
@@ -261,12 +283,15 @@ function chevronSvg() {
 
 function filterByCategory(items, catFilter, categoryTree) {
   if (!catFilter) return items;
-  if (catFilter.sub) return items.filter((p) => p.category === catFilter.sub);
+  if (catFilter.sub) {
+    return items.filter(
+      (p) => p.parent_group === catFilter.group && p.category === catFilter.sub
+    );
+  }
   if (catFilter.group) {
     const grp = categoryTree.find((g) => g.name === catFilter.group);
     if (!grp) return items;
-    const subs = (grp.children || []).map((c) => c.name);
-    return items.filter((p) => subs.includes(p.category));
+    return items.filter((p) => p.parent_group === catFilter.group);
   }
   return items;
 }
@@ -286,7 +311,7 @@ function renderCategorySidebar(sidebar, categoryTree, items, catFilter, openGrou
     html += `<button type="button" class="cs-cat-label">${escapeHtml(g.name)}<span class="cs-cat-label__count">${g.count}</span></button></div>`;
     html += `<div class="cs-cat-children">`;
     (g.children || []).forEach((ch) => {
-      const chActive = catFilter?.sub === ch.name;
+      const chActive = catFilter?.group === g.name && catFilter?.sub === ch.name;
       html += `<button type="button" class="cs-cat-child${chActive ? " cs-cat-child--active" : ""}" data-group="${escapeHtml(g.name)}" data-sub="${escapeHtml(ch.name)}">${escapeHtml(ch.name)}<span class="cs-cat-child__count">${ch.count}</span></button>`;
     });
     html += `</div></div>`;
@@ -1080,6 +1105,81 @@ function bindTreeEvents(root, onSelect) {
   });
 }
 
+async function loadStudioProductList(container, { partnerId, providerId, filter, reload, keepVisibleOnError = true }) {
+  const productsEl = container.querySelector("#catalog-studio-products");
+  const cacheKey = studioProductsCacheKey(partnerId, providerId, filter);
+  try {
+    const productData = await partnerFetch("admin-catalog-studio-products", {
+      query: {
+        manufacturer_id: partnerId,
+        provider_id: providerId || undefined,
+        filter,
+      },
+    });
+    lastGoodStudioProducts.set(cacheKey, productData);
+    applyStudioProductData(container, productData, filter, reload);
+    return productData;
+  } catch (err) {
+    const cached = lastGoodStudioProducts.get(cacheKey);
+    if (keepVisibleOnError && cached?.items?.length) {
+      showToast("Could not refresh products", err.message || String(err));
+      applyStudioProductData(container, cached, filter, reload);
+      return cached;
+    }
+    if (productsEl) {
+      productsEl.innerHTML = `<div class="empty-state"><h3>Could not load products</h3><p>${escapeHtml(err.message || String(err))}</p><button type="button" class="btn btn-primary" id="btn-catalog-retry">Retry</button></div>`;
+      productsEl.querySelector("#btn-catalog-retry")?.addEventListener("click", reload);
+    }
+    const catTreeEl = container.querySelector("#catalog-studio-category-tree");
+    if (catTreeEl && !cached?.items?.length) catTreeEl.innerHTML = `<p class="text-muted">—</p>`;
+    return null;
+  }
+}
+
+async function continueSpreadEuBackgroundImport(container, ctx) {
+  if (!isSpreadshirtPartner(ctx.partner) || !isSpreadEuProviderId(ctx.providerId)) return;
+  if (ctx.filter && ctx.filter !== "available") return;
+  if (sessionStorage.getItem(SPREAD_EU_COMPLETE_KEY) === "1") return;
+  if (isSpreadEuSyncRunning) return;
+
+  isSpreadEuSyncRunning = true;
+  let announced = false;
+  try {
+    for (let i = 0; i < SPREAD_EU_AUTO_MAX_BATCHES; i += 1) {
+      const result = await partnerFetch("admin-spreadconnect-eu-catalog-sync", {
+        method: "POST",
+        body: { force: false },
+      });
+      if (result.warning === "spreadconnect_api_key_not_configured") {
+        showToast("Spread EU", "API key is missing on the partner worker. Types cannot be imported.");
+        return;
+      }
+      const remaining = Number(result.remaining || 0);
+      const imported = Number(result.imported || 0);
+      if (remaining <= 0) {
+        sessionStorage.setItem(SPREAD_EU_COMPLETE_KEY, "1");
+        if (imported > 0) {
+          await loadStudioProductList(container, { ...ctx, keepVisibleOnError: true });
+        }
+        return;
+      }
+      if (!announced) {
+        announced = true;
+        showToast("Spread EU", `Importing remaining types (${remaining} left)…`);
+      }
+      if (imported > 0) {
+        await loadStudioProductList(container, { ...ctx, keepVisibleOnError: true });
+      } else {
+        break;
+      }
+    }
+  } catch (err) {
+    showToast("Spread EU sync failed", err.message || String(err));
+  } finally {
+    isSpreadEuSyncRunning = false;
+  }
+}
+
 export async function mountCatalogStudio(container) {
   const collapsed = isStudioSidebarCollapsed();
   const filterCollapsed = isFilterSidebarCollapsed();
@@ -1133,6 +1233,8 @@ export async function mountCatalogStudio(container) {
 
   const studioEl = container.querySelector(".catalog-studio");
   const filter = getFilter();
+  const reload = () => mountCatalogStudio(container);
+  paintCachedStudioProducts(container, studioProductsCacheKey(getPartnerId(), getProviderId(), filter), filter, reload);
 
   container.querySelector("#catalog-status-tabs").innerHTML = STATUS_FILTERS.map(
     (t) =>
@@ -1186,10 +1288,11 @@ export async function mountCatalogStudio(container) {
     const partner = partners.find((p) => p.id === partnerId);
     if (isSpreadshirtPartner(partner)) {
       try {
-        showToast("Syncing Spread EU…", "Importing apparel types");
+        sessionStorage.removeItem(SPREAD_EU_COMPLETE_KEY);
+        showToast("Syncing Spread EU…", "Importing missing apparel types");
         let remaining = 1;
         let imported = 0;
-        for (let i = 0; i < 20 && remaining > 0; i += 1) {
+        for (let i = 0; i < SPREAD_EU_AUTO_MAX_BATCHES && remaining > 0; i += 1) {
           const result = await partnerFetch("admin-spreadconnect-eu-catalog-sync", {
             method: "POST",
             body: { force: false },
@@ -1200,11 +1303,28 @@ export async function mountCatalogStudio(container) {
           }
           imported += Number(result.imported || 0);
           remaining = Number(result.remaining || 0);
+          if (imported > 0) {
+            setFilter("available");
+            await loadStudioProductList(container, {
+              partnerId,
+              providerId: getProviderId(),
+              filter: "available",
+              reload: () => mountCatalogStudio(container),
+              keepVisibleOnError: true,
+            });
+          }
           if (!Number(result.imported || 0) && remaining > 0) break;
         }
+        if (remaining <= 0) sessionStorage.setItem(SPREAD_EU_COMPLETE_KEY, "1");
         setFilter("available");
         showToast("Spread EU sync", `${imported} type(s) imported this run`);
-        await mountCatalogStudio(container);
+        await loadStudioProductList(container, {
+          partnerId,
+          providerId: getProviderId(),
+          filter: "available",
+          reload: () => mountCatalogStudio(container),
+          keepVisibleOnError: true,
+        });
       } catch (e) {
         showToast("Sync failed", e.message || String(e));
       }
@@ -1257,45 +1377,19 @@ export async function mountCatalogStudio(container) {
     return;
   }
 
-  const productData = await partnerFetch("admin-catalog-studio-products", {
-    query: {
-      manufacturer_id: partnerId,
-      provider_id: providerId || undefined,
-      filter,
-    },
-  }).catch((err) => {
-    productsEl.innerHTML = `<div class="empty-state"><h3>Could not load products</h3><p>${escapeHtml(err.message || String(err))}</p><button type="button" class="btn btn-primary" id="btn-catalog-retry">Retry</button></div>`;
-    productsEl.querySelector("#btn-catalog-retry")?.addEventListener("click", () => mountCatalogStudio(container));
-    const catTreeEl = container.querySelector("#catalog-studio-category-tree");
-    if (catTreeEl) catTreeEl.innerHTML = `<p class="text-muted">—</p>`;
-    return null;
+  await loadStudioProductList(container, {
+    partnerId,
+    providerId,
+    filter,
+    reload,
+    keepVisibleOnError: true,
   });
 
-  if (!productData) return;
-
-  const allItems = productData.items || [];
-  const categoryTree = productData.category_tree || [];
-  const reload = () => mountCatalogStudio(container);
-  refreshProductsPanel(container, allItems, categoryTree, filter, reload, productData.empty_hint || "");
-
-  const remaining = Number(productData.sync?.remaining || 0);
-  const syncWarning = productData.sync?.warning || "";
-  const autoKey = "spread_eu_auto_sync_n";
-  if (remaining <= 0) sessionStorage.removeItem(autoKey);
-  const autoCount = Number(sessionStorage.getItem(autoKey) || 0);
-  if (syncWarning === "spreadconnect_api_key_not_configured" && isSpreadEuProviderId(providerId)) {
-    showToast("Spread EU", "API key is missing on the partner worker. Types cannot be imported.");
-  } else if (remaining > 0 && isSpreadshirtPartner(partner) && !isSpreadEuSyncRunning && autoCount < 20) {
-    isSpreadEuSyncRunning = true;
-    sessionStorage.setItem(autoKey, String(autoCount + 1));
-    showToast("Spread EU", `Importing remaining types (${remaining} left)…`);
-    partnerFetch("admin-spreadconnect-eu-catalog-sync", { method: "POST", body: { force: false } })
-      .catch((err) => {
-        showToast("Spread EU sync failed", err.message || String(err));
-      })
-      .finally(() => {
-        isSpreadEuSyncRunning = false;
-        mountCatalogStudio(container);
-      });
-  }
+  continueSpreadEuBackgroundImport(container, {
+    partner,
+    partnerId,
+    providerId,
+    filter,
+    reload,
+  }).catch(() => {});
 }

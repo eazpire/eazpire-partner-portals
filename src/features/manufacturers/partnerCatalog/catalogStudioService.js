@@ -2,7 +2,7 @@
  * Catalog Studio — partner / provider tree + product list for admin UI
  */
 
-import { buildCategoryTree, CAT_REVERSE, CATEGORY_GROUPS } from "../../admin/catalogConstants.js";
+import { buildNestedCategoryTree, CAT_REVERSE, CATEGORY_GROUPS } from "../../admin/catalogConstants.js";
 import { listPartnersForAdmin, getPartnerByIdOrSlug } from "./printifyPartnerSeed.js";
 import { listFulfillmentProviders } from "./fulfillmentProviderService.js";
 import { listEazpireProducts, updateEazpireProduct, getEazpireProduct } from "./eazpireProductService.js";
@@ -13,7 +13,12 @@ import {
   productKeysForProviderFromCatalog,
 } from "./catalogOpsReadService.js";
 import { parseJson } from "../db.js";
-import { SPREAD_EU_COUNTRY_CODES } from "../adapters/spreadconnect/spreadEuCatalogMap.js";
+import { D1_IN_CHUNK, chunkIds } from "../../../utils/d1InChunk.js";
+import {
+  SPREAD_EU_AUDIENCE_GROUPS,
+  SPREAD_EU_COUNTRY_CODES,
+  spreadEuCatalogCategoryFromTitle,
+} from "../adapters/spreadconnect/spreadEuCatalogMap.js";
 import {
   PRINTIFY_PARTNER_SLUG,
   PRINTIFY_ICON_URL,
@@ -51,7 +56,8 @@ import {
 } from "./aggregateProviderVersions.js";
 
 const BLUEPRINT_API_CONCURRENCY = 5;
-const BLUEPRINT_ID_CHUNK = 100;
+/** D1 bind cap is ~100; keep IN-lists under 80 even when an extra bind precedes them. */
+const BLUEPRINT_ID_CHUNK = D1_IN_CHUNK;
 /** List view must not fan out to Printify (subrequest / CPU limits with ~1000+ blueprints). */
 const BLUEPRINT_API_LIST_FALLBACK_MAX = 0;
 /** Skip manufacturer raw_json enrichment above this count (Worker CPU/memory). */
@@ -82,8 +88,6 @@ const SPREAD_US_EMPTY_HINT =
   "Spread US is a placeholder. Add the API token later to import the US catalog.";
 const SPREAD_EU_AVAILABLE_HINT =
   "Imported Spread EU types appear under Available until you set them to Preview or Online.";
-const SPREAD_EU_API_KEY_HINT =
-  "Spread Connect API key is not configured on the partner worker, so types cannot be imported.";
 
 const VALID_CATALOG_STATUSES = new Set(["online", "preview", "offline"]);
 
@@ -142,6 +146,24 @@ async function queryAllSafe(db, sql, ...binds) {
   } catch {
     return [];
   }
+}
+
+/**
+ * Run `sqlForPlaceholders(?,?,…)` once per id chunk. `extraBinds` are bound before the IN list.
+ * Never exceeds D1_IN_CHUNK total variables per statement.
+ */
+async function queryAllChunked(db, ids, sqlForPlaceholders, extraBinds = []) {
+  const out = [];
+  const list = Array.isArray(ids) ? ids.filter((id) => id != null && String(id).length) : [];
+  if (!list.length || !db) return out;
+  const extra = Array.isArray(extraBinds) ? extraBinds : [];
+  const size = Math.max(1, D1_IN_CHUNK - extra.length);
+  for (const chunk of chunkIds(list, size)) {
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await queryAll(db, sqlForPlaceholders(placeholders), ...extra, ...chunk);
+    out.push(...rows);
+  }
+  return out;
 }
 
 function pushAutomationRow(grouped, productKey, row) {
@@ -562,9 +584,36 @@ function normalizePrintifyCategoryName(raw) {
   return s;
 }
 
+function isSpreadEuStudioItem(item) {
+  return String(item?.product_key || "").startsWith("spread-eu-");
+}
+
+function resolveSpreadEuStudioCategory(item, rawLeaf, rawGroup) {
+  const leaf = rawLeaf ? normalizePrintifyCategoryName(rawLeaf) || rawLeaf : "";
+  if (SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup) && leaf) {
+    return { category: leaf, parent_group: rawGroup };
+  }
+  if (rawGroup && rawGroup !== "Kleidung" && leaf && !SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup)) {
+    const parent = normalizeGroupName(rawGroup) || rawGroup;
+    return { category: leaf, parent_group: parent };
+  }
+  const inferred = spreadEuCatalogCategoryFromTitle(item.title || item.blueprint_title || "", {
+    group: rawGroup,
+    leaf: rawLeaf,
+  });
+  return {
+    category: inferred.leaf || leaf || "Sonstiges",
+    parent_group: inferred.group || "Unisex",
+  };
+}
+
 function resolveStudioCategory(item) {
   const rawLeaf = String(item.catalog_category_leaf || item.category || item.blueprint_category || "").trim();
   const rawGroup = String(item.catalog_category_group || item.parent_group || "").trim();
+
+  if (isSpreadEuStudioItem(item) || SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup)) {
+    return resolveSpreadEuStudioCategory(item, rawLeaf, rawGroup);
+  }
 
   let category = null;
 
@@ -649,7 +698,7 @@ function buildProductsResponse(filter, items, extra = {}) {
     filter,
     items: enriched,
     total: enriched.length,
-    category_tree: buildCategoryTree(enriched),
+    category_tree: buildNestedCategoryTree(enriched, SPREAD_EU_AUDIENCE_GROUPS),
     ...extra,
   };
 }
@@ -802,15 +851,14 @@ async function loadShippingCountriesByProductKey(db, env, products) {
   if (!products.length) return map;
 
   const productKeys = products.map((p) => p.product_key);
-  const placeholders = productKeys.map(() => "?").join(",");
 
-  const providerRows = await queryAll(
+  const providerRows = await queryAllChunked(
     db,
-    `SELECT DISTINCT v.product_key, fp.ships_to_json
+    productKeys,
+    (ph) => `SELECT DISTINCT v.product_key, fp.ships_to_json
      FROM eazpire_product_versions v
      INNER JOIN manufacturer_fulfillment_providers fp ON fp.id = v.fulfillment_provider_id
-     WHERE v.product_key IN (${placeholders})`,
-    ...productKeys
+     WHERE v.product_key IN (${ph})`
   );
 
   for (const row of providerRows) {
@@ -821,14 +869,14 @@ async function loadShippingCountriesByProductKey(db, env, products) {
   }
 
   if (env?.CATALOG_DB) {
-    const blueprintLinks = await queryAll(
+    const blueprintLinks = await queryAllChunked(
       db,
-      `SELECT ep.product_key, pb.external_blueprint_id
+      productKeys,
+      (ph) => `SELECT ep.product_key, pb.external_blueprint_id
        FROM eazpire_products ep
        INNER JOIN manufacturer_eazpire_blueprints eb ON eb.id = ep.source_blueprint_id
        INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
-       WHERE ep.product_key IN (${placeholders})`,
-      ...productKeys
+       WHERE ep.product_key IN (${ph})`
     );
     const externalIds = blueprintLinks.map((r) => String(r.external_blueprint_id)).filter(Boolean);
     const shippingByExternalId = await loadBlueprintShippingByExternalIds(env.CATALOG_DB, externalIds);
@@ -853,14 +901,13 @@ async function loadMockImagesByProductKey(db, productKeys) {
   const map = new Map();
   if (!productKeys.length) return map;
 
-  const placeholders = productKeys.map(() => "?").join(",");
-  const rows = await queryAll(
+  const rows = await queryAllChunked(
     db,
-    `SELECT product_key, image_url, is_default, created_at
+    productKeys,
+    (ph) => `SELECT product_key, image_url, is_default, created_at
      FROM eazpire_product_mockup_images
-     WHERE product_key IN (${placeholders})
-     ORDER BY is_default DESC, created_at ASC`,
-    ...productKeys
+     WHERE product_key IN (${ph})
+     ORDER BY is_default DESC, created_at ASC`
   );
 
   for (const row of rows) {
@@ -879,18 +926,17 @@ async function loadPartnerPreviewImagesByProductKey(db, env, productKeys) {
   const map = new Map();
   if (!productKeys.length || !db) return map;
 
-  const placeholders = productKeys.map(() => "?").join(",");
   let rows = [];
   try {
-    rows = await queryAll(
+    rows = await queryAllChunked(
       db,
-      `SELECT mp.eazpire_product_key AS product_key, mt.image_r2_key, mt.image_url, mt.view_key, mt.created_at
+      productKeys,
+      (ph) => `SELECT mp.eazpire_product_key AS product_key, mt.image_r2_key, mt.image_url, mt.view_key, mt.created_at
        FROM manufacturer_mockup_templates mt
        INNER JOIN manufacturer_products mp ON mp.id = mt.manufacturer_product_id
-       WHERE mp.eazpire_product_key IN (${placeholders})
+       WHERE mp.eazpire_product_key IN (${ph})
          AND COALESCE(mt.mockup_set, '') = 'preview_images'
-       ORDER BY mt.created_at ASC, mt.view_key ASC`,
-      ...productKeys
+       ORDER BY mt.created_at ASC, mt.view_key ASC`
     );
   } catch (e) {
     // Column/table may be missing on older DBs — Catalog Studio list still works without lifestyle thumbs.
@@ -918,24 +964,23 @@ async function loadPrintAreasByProductKey(db, productKeys) {
   const map = new Map();
   if (!productKeys.length) return map;
 
-  const placeholders = productKeys.map(() => "?").join(",");
-  const defaults = await queryAll(
+  const defaults = await queryAllChunked(
     db,
-    `SELECT DISTINCT product_key, print_area_key FROM eazpire_product_mockup_defaults
-     WHERE product_key IN (${placeholders})`,
-    ...productKeys
+    productKeys,
+    (ph) => `SELECT DISTINCT product_key, print_area_key FROM eazpire_product_mockup_defaults
+     WHERE product_key IN (${ph})`
   );
-  const variantAreas = await queryAll(
+  const variantAreas = await queryAllChunked(
     db,
-    `SELECT DISTINCT product_key, print_area_key FROM eazpire_product_variant_print_areas
-     WHERE product_key IN (${placeholders})`,
-    ...productKeys
+    productKeys,
+    (ph) => `SELECT DISTINCT product_key, print_area_key FROM eazpire_product_variant_print_areas
+     WHERE product_key IN (${ph})`
   );
-  const profiles = await queryAll(
+  const profiles = await queryAllChunked(
     db,
-    `SELECT product_key, print_areas_config_json FROM eazpire_product_publish_profiles
-     WHERE product_key IN (${placeholders})`,
-    ...productKeys
+    productKeys,
+    (ph) => `SELECT product_key, print_areas_config_json FROM eazpire_product_publish_profiles
+     WHERE product_key IN (${ph})`
   );
 
   const addKey = (productKey, areaKey) => {
@@ -1031,12 +1076,11 @@ async function fetchPrintAreasByExternalIds(env, externalIds, maxCount = PRINT_A
 async function loadPrintAreasFromTemplateProducts(db, productKeys) {
   const map = new Map();
   if (!productKeys.length) return map;
-  const placeholders = productKeys.map(() => "?").join(",");
-  const rows = await queryAll(
+  const rows = await queryAllChunked(
     db,
-    `SELECT product_key, print_areas_json FROM eazpire_template_products
-     WHERE product_key IN (${placeholders}) AND print_areas_json IS NOT NULL AND TRIM(print_areas_json) != ''`,
-    ...productKeys
+    productKeys,
+    (ph) => `SELECT product_key, print_areas_json FROM eazpire_template_products
+     WHERE product_key IN (${ph}) AND print_areas_json IS NOT NULL AND TRIM(print_areas_json) != ''`
   );
   for (const row of rows) {
     const areas = printAreasFromTemplateJson(row.print_areas_json);
@@ -1054,16 +1098,15 @@ async function loadPrintifyBlueprintExternalIdsForProducts(db, env, products) {
   if (!products.length) return map;
 
   const productKeys = products.map((p) => p.product_key);
-  const placeholders = productKeys.map(() => "?").join(",");
 
-  const mfgLinks = await queryAll(
+  const mfgLinks = await queryAllChunked(
     db,
-    `SELECT ep.product_key, pb.external_blueprint_id
+    productKeys,
+    (ph) => `SELECT ep.product_key, pb.external_blueprint_id
      FROM eazpire_products ep
      INNER JOIN manufacturer_eazpire_blueprints eb ON eb.id = ep.source_blueprint_id
      INNER JOIN manufacturer_provider_blueprints pb ON pb.id = eb.provider_blueprint_id
-     WHERE ep.product_key IN (${placeholders})`,
-    ...productKeys
+     WHERE ep.product_key IN (${ph})`
   );
   for (const row of mfgLinks) {
     if (row.external_blueprint_id != null) map.set(row.product_key, String(row.external_blueprint_id));
@@ -1071,12 +1114,12 @@ async function loadPrintifyBlueprintExternalIdsForProducts(db, env, products) {
 
   if (env?.CATALOG_DB) {
     try {
-      const catalogLinks = await queryAll(
+      const catalogLinks = await queryAllChunked(
         env.CATALOG_DB,
-        `SELECT product_key, blueprint_id FROM product_publish_profiles
-         WHERE product_key IN (${placeholders}) AND blueprint_id IS NOT NULL
-         GROUP BY product_key`,
-        ...productKeys
+        productKeys,
+        (ph) => `SELECT product_key, blueprint_id FROM product_publish_profiles
+         WHERE product_key IN (${ph}) AND blueprint_id IS NOT NULL
+         GROUP BY product_key`
       );
       for (const row of catalogLinks) {
         if (!map.has(row.product_key) && row.blueprint_id != null) {
@@ -1313,19 +1356,18 @@ export async function getCatalogStudioTree(db, env) {
 async function loadManufacturerProductMockImages(db, env, productIds) {
   const map = new Map();
   if (!productIds.length) return map;
-  const placeholders = productIds.map(() => "?").join(",");
   let rows = [];
   try {
-    rows = await queryAll(
+    rows = await queryAllChunked(
       db,
-      `SELECT manufacturer_product_id, image_r2_key, image_url, mockup_set, created_at
+      productIds,
+      (ph) => `SELECT manufacturer_product_id, image_r2_key, image_url, mockup_set, created_at
        FROM manufacturer_mockup_templates
-       WHERE manufacturer_product_id IN (${placeholders})
+       WHERE manufacturer_product_id IN (${ph})
        ORDER BY CASE WHEN COALESCE(mockup_set, '') = 'preview_images' THEN 0
                      WHEN COALESCE(mockup_set, '') = 'shop_preview' THEN 1
                      ELSE 2 END,
-                created_at ASC`,
-      ...productIds
+                created_at ASC`
     );
   } catch (e) {
     if (!String(e?.message || e).includes("no such")) throw e;
@@ -1536,15 +1578,9 @@ function isUnpublishedSpreadStudioProduct(product) {
   return status !== "online" && status !== "preview";
 }
 
-function spreadEuEmptyHint(filter, syncMeta, itemCount) {
-  if (syncMeta?.warning === "spreadconnect_api_key_not_configured") return SPREAD_EU_API_KEY_HINT;
+function spreadEuEmptyHint(filter, itemCount) {
   if (itemCount > 0) return "";
-  if (filter === "available") {
-    if (Number(syncMeta?.remaining || 0) > 0) {
-      return "Import is still running. Click Sync or wait — remaining types will appear under Available.";
-    }
-    return SPREAD_EU_AVAILABLE_HINT;
-  }
+  if (filter === "available") return SPREAD_EU_AVAILABLE_HINT;
   return SPREAD_EU_AVAILABLE_HINT;
 }
 
@@ -1572,22 +1608,14 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   const isSpreadshirt = partnerUsesFlatProviders(partner?.slug) || manufacturerId === SPREADSHIRT_PARTNER_ID;
 
-  let spreadSync = null;
-  try {
-    if (isSpreadshirt || incomingSlug === SPREAD_EU_PARTNER_SLUG) {
-      const { ensureSpreadEuCatalogSynced } = await import("../adapters/spreadconnect/spreadEuCatalogSync.js");
-      spreadSync = await ensureSpreadEuCatalogSynced(env, { force: false });
-    }
-  } catch (e) {
-    console.warn("[catalog-studio] spread eu sync:", e?.message || e);
-    spreadSync = { ok: false, error: String(e?.message || e) };
-  }
+  // Do not import Spread EU types on list — that blocked the Available view, retriggered
+  // sync on every poll, and then bound 300+ product_keys in one IN (?) (D1 variable limit).
+  // Import stays on admin-spreadconnect-eu-catalog-sync (manual Sync + background batches).
 
   if (isSpreadshirt && isSpreadUsFulfillmentId(providerId)) {
     return buildProductsResponse(filter, [], {
       empty_hint: SPREAD_US_EMPTY_HINT,
       placeholder: true,
-      sync: spreadSync,
     });
   }
 
@@ -1599,8 +1627,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       catalog_status: "available",
     }));
     return buildProductsResponse(filter, items, {
-      empty_hint: spreadEuEmptyHint(filter, spreadSync, items.length),
-      sync: spreadSync,
+      empty_hint: spreadEuEmptyHint(filter, items.length),
     });
   }
 
@@ -1630,13 +1657,12 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
       const seen = new Set(products.map((p) => p.product_key));
       const missingKeys = mfgProducts.map((p) => p.product_key).filter((k) => !seen.has(k));
       if (missingKeys.length) {
-        const placeholders = missingKeys.map(() => "?").join(",");
-        const existingCatalog = await env.CATALOG_DB.prepare(
-          `SELECT product_key FROM product_catalog WHERE product_key IN (${placeholders})`
-        )
-          .bind(...missingKeys)
-          .all();
-        const inCatalog = new Set((existingCatalog?.results || []).map((r) => r.product_key));
+        const existingCatalog = await queryAllChunked(
+          env.CATALOG_DB,
+          missingKeys,
+          (ph) => `SELECT product_key FROM product_catalog WHERE product_key IN (${ph})`
+        );
+        const inCatalog = new Set(existingCatalog.map((r) => r.product_key));
         for (const p of mfgProducts) {
           if (seen.has(p.product_key) || inCatalog.has(p.product_key)) continue;
           products.push(p);
@@ -1673,8 +1699,7 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   if (isSpreadshirt) {
     return buildProductsResponse(status, items, {
-      empty_hint: spreadEuEmptyHint(status, spreadSync, items.length),
-      sync: spreadSync,
+      empty_hint: spreadEuEmptyHint(status, items.length),
     });
   }
 
