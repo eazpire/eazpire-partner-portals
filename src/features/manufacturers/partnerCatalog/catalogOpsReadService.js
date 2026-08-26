@@ -572,9 +572,8 @@ export async function getCatalogOpsVariantsBundle(env, productKey, printProvider
   const creatorDb = env.CREATOR_DB;
   if (!catalogDb) return { ok: false, error: "catalog_db_unavailable" };
 
-  const pidRaw = Number(printProviderId);
-  const pid = Number.isFinite(pidRaw) ? pidRaw : NaN;
-  const variantPid = coerceVariantConfigProviderId(printProviderId);
+  const pid = coerceVariantConfigProviderId(printProviderId);
+  const variantPid = pid;
 
   let profile = Number.isFinite(pid)
     ? await catalogDb

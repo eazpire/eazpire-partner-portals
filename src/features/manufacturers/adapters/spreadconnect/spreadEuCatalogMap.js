@@ -2,6 +2,11 @@
  * Pure mapping helpers for Spread EU catalog import (IDEA-085).
  */
 
+import {
+  getCategoryIdForCategoryName,
+  getTaxonomyDataForCategory,
+} from "../../../../utils/taxonomy.js";
+
 export function spreadEuProductKey(typeId) {
   const id = String(typeId || "").trim();
   return id ? `spread-eu-${id}` : "";
@@ -96,6 +101,68 @@ export function spreadconnectDefaultD2cPrice(type) {
   return 19.99;
 }
 
+/** Spread EU warehouse origin (Leipzig / Gutenborn — not US). */
+export const SPREAD_EU_COUNTRY_OF_ORIGIN = "DE";
+
+const MAX_MOCKUP_ENTRIES = 80;
+
+function moneyToCents(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object") {
+    return moneyToCents(value.amount ?? value.price ?? value.value ?? value.b2bPrice ?? value.d2cPrice);
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 500) return Math.round(n);
+  return Math.round(n * 100);
+}
+
+function normalizeHex(raw) {
+  const h = String(raw || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(h)) return h.toLowerCase();
+  if (/^[0-9a-fA-F]{6}$/.test(h)) return `#${h.toLowerCase()}`;
+  if (/^#[0-9a-fA-F]{3}$/.test(h)) {
+    const s = h.slice(1);
+    return `#${s[0]}${s[0]}${s[1]}${s[1]}${s[2]}${s[2]}`.toLowerCase();
+  }
+  return null;
+}
+
+export function spreadconnectAppearanceHex(appearance) {
+  if (!appearance || typeof appearance !== "object") return null;
+  const candidates = [
+    appearance.colorHex,
+    appearance.color_hex,
+    appearance.hex,
+    appearance.appearanceColorValue,
+    appearance.colorValue,
+    appearance.color,
+    Array.isArray(appearance.colors) ? appearance.colors[0] : null,
+    appearance.rgb,
+    appearance.rgbHex,
+  ];
+  for (const raw of candidates) {
+    const hex = normalizeHex(raw);
+    if (hex) return hex;
+  }
+  return null;
+}
+
+export function spreadconnectVariantCostCents(type, appearance = null, size = null) {
+  const fromApi = moneyToCents(
+    size?.price ??
+      size?.b2bPrice ??
+      size?.d2cPrice ??
+      appearance?.price ??
+      appearance?.b2bPrice ??
+      type?.b2bPrice ??
+      type?.price ??
+      type?.d2cPrice
+  );
+  if (fromApi != null) return fromApi;
+  return Math.round(spreadconnectDefaultD2cPrice(type) * 100);
+}
+
 export function spreadconnectSyntheticVariantId(typeId, appearanceId, sizeId) {
   const t = Number(typeId) || 0;
   const a = Number(appearanceId) || 0;
@@ -112,14 +179,18 @@ export function buildSpreadEuCatalogProductData(type, extras = {}) {
   const typeId = type?.id;
   const appearances = Array.isArray(type?.appearances) ? type.appearances : [];
   const sizes = typeSizes(type);
-  const d2c = spreadconnectDefaultD2cPrice(type);
-  const costCents = Math.round(d2c * 100);
+  const viewsPayload = extras.views;
+  const categoriesPayload = extras.categories ?? extras.views?.categories ?? null;
 
   const colorValues = appearances
-    .map((a) => ({
-      id: Number(a.id),
-      title: String(a.name || a.id).trim() || String(a.id),
-    }))
+    .map((a) => {
+      const hex = spreadconnectAppearanceHex(a);
+      return {
+        id: Number(a.id),
+        title: String(a.name || a.id).trim() || String(a.id),
+        colors: hex ? [hex] : [],
+      };
+    })
     .filter((v) => Number.isFinite(v.id) && v.id > 0);
   const sizeValues = sizes
     .map((s) => ({
@@ -130,6 +201,8 @@ export function buildSpreadEuCatalogProductData(type, extras = {}) {
 
   const variants = [];
   const configVariants = {};
+  const pricesJson = [];
+  let firstCost = null;
   for (const appearance of appearances) {
     const appearanceId = Number(appearance.id);
     const colorName = String(appearance.name || appearanceId).trim() || String(appearanceId);
@@ -138,26 +211,38 @@ export function buildSpreadEuCatalogProductData(type, extras = {}) {
       if (!Number.isFinite(appearanceId) || !Number.isFinite(sizeId)) continue;
       const id = spreadconnectSyntheticVariantId(typeId, appearanceId, sizeId);
       const sizeName = String(size.name || sizeId).trim() || String(sizeId);
+      const cost = spreadconnectVariantCostCents(type, appearance, size);
+      if (firstCost == null) firstCost = cost;
       variants.push({
         id,
         title: `${colorName} / ${sizeName}`,
         options: [appearanceId, sizeId],
-        cost: costCents,
+        cost,
         is_enabled: true,
         sku: `${typeId}-P${appearanceId}S${sizeId}`,
       });
       configVariants[String(id)] = { enabled: true };
+      pricesJson.push({ variant_id: id, price: cost });
     }
   }
 
   const printAreaKeys = spreadconnectPrintAreaKeys(type);
   const printAreas = spreadconnectPrintAreaDetails(type);
-  const mockImages = spreadconnectMockImageUrls(type, extras.views);
+  const mockupEntries = spreadconnectMockupEntries(type, viewsPayload);
+  const mockImages = [];
+  for (const entry of mockupEntries) pushHttpUrl(mockImages, entry.image_url);
+  for (const url of spreadconnectMockImageUrls(type, viewsPayload)) pushHttpUrl(mockImages, url);
+  const catalogCategory = spreadEuCatalogCategory(type, categoriesPayload);
+  const taxonomy = spreadEuShopifyTaxonomy(type, catalogCategory);
+  const description = String(type?.customerDescription || type?.merchantDescription || "").trim();
+  const creatorPreviewUrl = mockupEntries.find((e) => e.is_default)?.image_url || mockImages[0] || "";
 
   return {
     product_data: {
       id: String(typeId || ""),
       title: spreadconnectProductTypeName(type) || `Spread EU ${typeId}`,
+      description,
+      brand: type?.brand != null ? String(type.brand) : "",
       options: [
         { name: "Color", type: "color", values: colorValues },
         { name: "Size", type: "size", values: sizeValues },
@@ -167,11 +252,12 @@ export function buildSpreadEuCatalogProductData(type, extras = {}) {
       images: mockImages,
     },
     variants_json: variants,
+    prices_json: pricesJson,
     variant_config: {
       global: { profit_mode: "percent", profit_value: 0, branding: "none" },
       variants: configVariants,
     },
-    d2c_price: d2c,
+    d2c_price: firstCost != null ? firstCost / 100 : spreadconnectDefaultD2cPrice(type),
     print_area_keys: printAreaKeys,
     print_areas_config: Object.fromEntries(
       printAreas.map((area) => [
@@ -179,8 +265,14 @@ export function buildSpreadEuCatalogProductData(type, extras = {}) {
         { width_mm: area.width_mm, height_mm: area.height_mm, view: area.view },
       ])
     ),
-    mock_images: mockImages,
-    catalog_category: spreadEuCatalogCategory(type, extras.categories),
+    mock_images: mockImages.slice(0, 12),
+    mockup_entries: mockupEntries,
+    catalog_category: catalogCategory,
+    shopify_category_id: taxonomy.shopify_category_id,
+    shopify_category_name: taxonomy.shopify_category_name,
+    country_of_origin: SPREAD_EU_COUNTRY_OF_ORIGIN,
+    creator_preview_url: creatorPreviewUrl,
+    product_features: description || null,
   };
 }
 
@@ -264,6 +356,74 @@ export function spreadconnectMockImageUrls(type, viewsPayload = null) {
     }
   }
   return urls.slice(0, 12);
+}
+
+function extractViewsList(viewsPayload) {
+  if (Array.isArray(viewsPayload?.views)) return viewsPayload.views;
+  if (Array.isArray(viewsPayload)) return viewsPayload;
+  return [];
+}
+
+/** Mockups grouped by print area (view) and variant color. */
+export function spreadconnectMockupEntries(type, viewsPayload = null) {
+  const appearances = Array.isArray(type?.appearances) ? type.appearances : [];
+  const sizes = typeSizes(type);
+  const printAreas = spreadconnectPrintAreaDetails(type);
+  const views = extractViewsList(viewsPayload);
+  const viewIdByName = new Map();
+  const imageByViewAppearance = new Map();
+  for (const view of views) {
+    const name = String(view?.name || view?.key || "").trim().toLowerCase();
+    if (name && view?.id != null) viewIdByName.set(name, String(view.id));
+    for (const img of Array.isArray(view?.images) ? view.images : []) {
+      const aid = String(img?.appearanceId ?? img?.appearance_id ?? "").trim();
+      const url = String(img?.image || img?.url || img?.src || img?.imageUrl || "").trim();
+      if (!aid || !/^https?:\/\//i.test(url)) continue;
+      imageByViewAppearance.set(`${name || "front"}:${aid}`, url);
+    }
+  }
+  const areas = printAreas.length ? printAreas : [{ name: "front", view: "FRONT" }];
+  const defaultViewId = spreadconnectFrontViewId(viewsPayload);
+  const entries = [];
+  const seen = new Set();
+  let isDefault = 1;
+  const pushEntry = (area, appearance) => {
+    const appearanceId = appearance?.id;
+    if (appearanceId == null || appearanceId === "") return;
+    const viewKey = String(area.name || "front").trim() || "front";
+    const colorName = String(appearance.name || appearanceId).trim() || String(appearanceId);
+    const dedupeKey = `${viewKey}::${colorName}`;
+    if (seen.has(dedupeKey)) return;
+    const viewId = viewIdByName.get(viewKey) || viewIdByName.get(String(area.view || "").toLowerCase()) || defaultViewId;
+    const url =
+      imageByViewAppearance.get(`${viewKey}:${appearanceId}`) ||
+      spreadconnectCdnPreviewUrl(type.id, appearanceId, viewId);
+    if (!url) return;
+    seen.add(dedupeKey);
+    const variantIds = sizes
+      .map((s) => spreadconnectSyntheticVariantId(type.id, appearanceId, s.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    entries.push({
+      view_key: viewKey,
+      color_name: colorName,
+      color_hex: spreadconnectAppearanceHex(appearance),
+      image_url: url,
+      printify_variant_ids: JSON.stringify(variantIds),
+      is_default: isDefault,
+    });
+    isDefault = 0;
+  };
+  for (const appearance of appearances) {
+    if (entries.length >= MAX_MOCKUP_ENTRIES) break;
+    pushEntry(areas[0], appearance);
+  }
+  for (const area of areas.slice(1)) {
+    for (const appearance of appearances) {
+      if (entries.length >= MAX_MOCKUP_ENTRIES) break;
+      pushEntry(area, appearance);
+    }
+  }
+  return entries;
 }
 
 function typeSizes(type) {
@@ -505,36 +665,48 @@ export function spreadEuCatalogCategoryFromTitle(title, stored = {}) {
   return mapped;
 }
 
-/** EU shipping countries used for Spread EU catalog plans. */
+export function spreadEuShopifyTaxonomy(type, category = null) {
+  const cat = category && category.leaf ? category : spreadEuCatalogCategory(type);
+  const leaf = String(cat?.leaf || spreadconnectProductTypeName(type) || "").trim();
+  const shortId = getCategoryIdForCategoryName(leaf, leaf) || getCategoryIdForCategoryName(typeNameLower(type), leaf);
+  if (!shortId) {
+    return {
+      shopify_category_id: "gid://shopify/TaxonomyCategory/aa-1",
+      shopify_category_name: "Clothing",
+    };
+  }
+  const data = getTaxonomyDataForCategory(shortId, leaf);
+  return {
+    shopify_category_id: data?.categoryId || `gid://shopify/TaxonomyCategory/${shortId}`,
+    shopify_category_name: data?.categoryName || leaf,
+  };
+}
+
+/**
+ * Countries Spreadshirt / Spread Connect EU ships to from the EU warehouse.
+ * Documented default (no catalog shipping-countries API). Not US-only.
+ */
 export const SPREAD_EU_COUNTRY_CODES = [
-  "AT",
-  "BE",
-  "BG",
-  "HR",
-  "CY",
-  "CZ",
-  "DK",
-  "EE",
-  "FI",
-  "FR",
-  "DE",
-  "GR",
-  "HU",
-  "IE",
-  "IT",
-  "LV",
-  "LT",
-  "LU",
-  "MT",
-  "NL",
-  "PL",
-  "PT",
-  "RO",
-  "SK",
-  "SI",
-  "ES",
-  "SE",
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT",
+  "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+  "GB", "CH", "NO", "IS", "LI", "AD", "MC", "SM", "VA", "BA", "RS", "ME", "MK", "AL", "UA", "MD", "TR",
+  "US", "CA", "MX", "BR", "AR", "CL", "CO", "PE", "UY", "CR", "PA",
+  "JP", "KR", "SG", "HK", "TW", "IN", "TH", "MY", "PH", "ID", "VN", "AU", "NZ",
+  "AE", "IL", "SA", "QA", "KW", "ZA", "EG", "MA", "TN", "NG", "KE", "GH",
 ];
+
+const SPREAD_EU_NEAR_ORIGIN = new Set([
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT",
+  "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+  "GB", "CH", "NO", "IS", "LI",
+]);
+
+export function spreadEuDefaultShippingRateCents(countryCode) {
+  const cc = String(countryCode || "").trim().toUpperCase();
+  if (cc === "DE") return { first: 349, additional: 149 };
+  if (SPREAD_EU_NEAR_ORIGIN.has(cc)) return { first: 449, additional: 199 };
+  return { first: 699, additional: 299 };
+}
 
 export function shouldImportSpreadEuProductType(type) {
   if (!type?.id) return false;

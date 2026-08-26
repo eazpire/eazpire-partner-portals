@@ -30,6 +30,8 @@ import {
 import { resolveVariantProductDataForUi } from "../variantTemplateSync.js";
 import { parseJson, newId } from "../../db.js";
 import { regionCodesFromCountryCodes, expandToIsoCountryCodes } from "../../../catalog/resolvePlanCountries.js";
+import { SPREAD_EU_COUNTRY_CODES } from "../../adapters/spreadconnect/spreadEuCatalogMap.js";
+import { coerceVariantConfigProviderId } from "../constants.js";
 import {
   filterImagesByMockupSet,
   MOCKUP_SET_CLEAN,
@@ -280,6 +282,10 @@ export async function getProvidersBundle(env, productKey) {
 async function loadPartnerAvailableCountries(env, productKey) {
   const key = String(productKey || "").trim();
   if (!key) return { mode: "full", countries: [] };
+
+  if (key.startsWith("spread-eu-")) {
+    return { mode: "partner", countries: SPREAD_EU_COUNTRY_CODES.slice() };
+  }
 
   const db = env.MANUFACTURER_DB;
   let row = null;
@@ -1044,7 +1050,7 @@ export async function getVariantsBundle(env, productKey, printProviderId) {
     return getCatalogOpsVariantsBundle(env, productKey, printProviderId);
   }
   const db = env.MANUFACTURER_DB;
-  const pid = Number(printProviderId);
+  const pid = coerceVariantConfigProviderId(printProviderId);
   let variantConfig = Number.isFinite(pid)
     ? await queryFirst(
         db,

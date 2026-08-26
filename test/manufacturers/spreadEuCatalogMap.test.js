@@ -10,6 +10,8 @@ import {
   spreadconnectDefaultD2cPrice,
   spreadconnectMockImageUrls,
   spreadconnectSyntheticVariantId,
+  SPREAD_EU_COUNTRY_CODES,
+  SPREAD_EU_COUNTRY_OF_ORIGIN,
 } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogMap.js";
 
 function teeType(overrides = {}) {
@@ -58,6 +60,75 @@ describe("spreadEuCatalogMap", () => {
     expect(mapped.print_areas_config.front.width_mm).toBe(300);
   });
 
+  it("uses Spread API purchase price per variant instead of the 19.99 kind default", () => {
+    const mapped = buildSpreadEuCatalogProductData(
+      teeType({
+        price: 8.5,
+        appearances: [
+          { id: 1, name: "Schwarz", appearanceColorValue: "#111111" },
+          { id: 2, name: "Weiß", colorHex: "ffffff" },
+        ],
+        sizes: [
+          { id: 10, name: "S", price: 8.5 },
+          { id: 11, name: "XXL", price: 10.9 },
+        ],
+      })
+    );
+    expect(mapped.variants_json).toHaveLength(4);
+    expect(mapped.variants_json[0].cost).toBe(850);
+    expect(mapped.variants_json[1].cost).toBe(1090);
+    expect(mapped.prices_json[0]).toEqual({ variant_id: mapped.variants_json[0].id, price: 850 });
+    expect(mapped.d2c_price).not.toBe(19.99);
+    expect(mapped.product_data.options[0].values[0].colors[0]).toBe("#111111");
+    expect(mapped.product_data.options[0].values[1].colors[0]).toBe("#ffffff");
+    expect(mapped.country_of_origin).toBe("DE");
+    expect(mapped.shopify_category_id).toMatch(/TaxonomyCategory/);
+    expect(mapped.shopify_category_name).toBeTruthy();
+    expect(mapped.mockup_entries.some((e) => e.view_key === "front" && e.color_name === "Schwarz")).toBe(true);
+    expect(mapped.creator_preview_url).toContain("productTypes/813");
+    expect(mapped.print_area_keys).toEqual(["front"]);
+  });
+
+  it("groups mockups by print area and color variant", () => {
+    const mapped = buildSpreadEuCatalogProductData(
+      teeType({
+        appearances: [
+          { id: 1, name: "Navy", colorHex: "#001f3f" },
+          { id: 2, name: "White", colorHex: "#ffffff" },
+        ],
+        printAreas: [
+          { view: "FRONT", widthMm: 300, heightMm: 400 },
+          { view: "BACK", widthMm: 280, heightMm: 360 },
+        ],
+      }),
+      {
+        views: [
+          { id: 1, name: "FRONT" },
+          { id: 2, name: "BACK" },
+        ],
+      }
+    );
+    expect(mapped.print_area_keys).toEqual(["front", "back"]);
+    const keys = mapped.mockup_entries.map((e) => `${e.view_key}:${e.color_name}`);
+    expect(keys).toEqual(expect.arrayContaining(["front:Navy", "front:White", "back:Navy", "back:White"]));
+    expect(mapped.mockup_entries.find((e) => e.view_key === "back").image_url).toContain("/views/2/");
+  });
+
+  it("maps bag types to accessories taxonomy and non-FRONT print areas", () => {
+    const mapped = buildSpreadEuCatalogProductData({
+      id: 900,
+      customerName: "Tote Bag",
+      appearances: [{ id: 4, name: "Natural", colorHex: "#e8dcc8" }],
+      sizes: [{ id: 1, name: "One Size" }],
+      printAreas: [{ view: "SIDE", widthMm: 250, heightMm: 250 }],
+    });
+    expect(mapped.catalog_category).toEqual({ group: "Taschen", leaf: "Tote Bag" });
+    expect(mapped.shopify_category_id).toMatch(/TaxonomyCategory/);
+    expect(mapped.print_area_keys).toEqual(["side"]);
+    expect(mapped.variants_json).toHaveLength(1);
+    expect(mapped.product_data.options[0].values[0].colors[0]).toBe("#e8dcc8");
+  });
+
   it("collects appearance preview images", () => {
     const mapped = buildSpreadEuCatalogProductData(
       teeType({
@@ -102,6 +173,9 @@ describe("spreadEuCatalogMap", () => {
       group: "Unisex",
       leaf: "Polo Shirt",
     });
+    expect(SPREAD_EU_COUNTRY_OF_ORIGIN).toBe("DE");
+    expect(SPREAD_EU_COUNTRY_CODES).toEqual(expect.arrayContaining(["DE", "FR", "GB", "US", "ZA", "JP", "AU"]));
+    expect(SPREAD_EU_COUNTRY_CODES.length).toBeGreaterThan(40);
     expect(
       spreadEuCatalogCategory(teeType({ customerName: "Crewneck" }), {
         categories: [

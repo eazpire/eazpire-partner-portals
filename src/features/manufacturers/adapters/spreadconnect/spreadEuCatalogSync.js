@@ -16,6 +16,10 @@ import {
 } from "../../partnerCatalog/constants.js";
 import { syncPublishIndexVisibility } from "../../partnerCatalog/catalogOpsWriteService.js";
 import {
+  fillSpreadEuCatalogProduct,
+  listSpreadEuKeysNeedingRepair,
+} from "./spreadEuCatalogFill.js";
+import {
   buildSpreadEuCatalogProductData,
   shouldImportSpreadEuProductType,
   spreadconnectProductTypeName,
@@ -479,11 +483,24 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     force: !!opts.force,
     chunkSize: SPREAD_EU_IMPORT_CHUNK,
   });
-  if (!picked.toImport.length) {
+  const needRepair = opts.force ? new Set() : await listSpreadEuKeysNeedingRepair(env, existingKeys);
+  const toProcess = picked.toImport.slice();
+  if (!opts.force) {
+    const have = new Set(toProcess.map((t) => spreadEuProductKey(t.id)));
+    for (const type of picked.eligible) {
+      if (toProcess.length >= SPREAD_EU_IMPORT_CHUNK) break;
+      const key = spreadEuProductKey(type.id);
+      if (!key || have.has(key) || !needRepair.has(key)) continue;
+      toProcess.push(type);
+      have.add(key);
+    }
+  }
+  if (!toProcess.length) {
     return {
       ok: true,
       skipped: true,
       imported: 0,
+      repaired: 0,
       existing: existingKeys.size,
       eligible: picked.eligible.length,
       remaining: 0,
@@ -493,18 +510,23 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     };
   }
 
-  const viewsByTypeId = await fetchViewsForTypes(env, picked.toImport);
+  const viewsByTypeId = await fetchViewsForTypes(env, toProcess);
 
   let imported = 0;
+  let repaired = 0;
   const errors = [];
   const fpId = setup.fulfillment_provider?.id || null;
+  const processedKeys = new Set();
 
-  for (const type of picked.toImport) {
+  for (const type of toProcess) {
     const productKey = spreadEuProductKey(type.id);
     const title = spreadconnectProductTypeName(type) || productKey;
+    const wasExisting = existingKeys.has(productKey);
     try {
+      const extras = viewsByTypeId.get(String(type.id)) || {};
       const mapped = buildSpreadEuCatalogProductData(type, {
-        views: viewsByTypeId.get(String(type.id)) || null,
+        views: extras.views || extras,
+        categories: extras.categories || null,
       });
       const category = mapped.catalog_category || {};
       await upsertProviderBlueprint(mfgDb, type, partnerId);
@@ -519,8 +541,8 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
         catalog_category_leaf: category.leaf || existingProduct?.catalog_category_leaf || null,
       });
       await ensureCatalogRows(env, { productKey, title, mapped });
+      await fillSpreadEuCatalogProduct(env, { productKey, title, mapped });
       await ensureMockupDefaults(mfgDb, productKey, mapped.product_data?.print_areas || []);
-      await ensureMockupImages(mfgDb, productKey, mapped.mock_images || []);
       if (fpId) {
         await upsertProductVersion(mfgDb, {
           product_key: productKey,
@@ -530,20 +552,28 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
           publish_enabled: 0,
         }).catch(() => {});
       }
-      imported += 1;
+      processedKeys.add(productKey);
+      if (wasExisting) repaired += 1;
+      else imported += 1;
     } catch (e) {
       errors.push({ product_key: productKey, error: e?.message || String(e) });
     }
   }
 
+  const remainingMissing = picked.remaining_after_chunk;
+  const remainingRepair = opts.force
+    ? Math.max(0, picked.eligible.length - toProcess.length)
+    : Math.max(0, [...needRepair].filter((k) => !processedKeys.has(k)).length);
+
   return {
     ok: true,
     skipped: false,
     imported,
+    repaired,
     existing: existingKeys.size,
     eligible: picked.eligible.length,
-    remaining: picked.remaining_after_chunk,
-    complete: picked.remaining_after_chunk === 0,
+    remaining: remainingMissing + remainingRepair,
+    complete: remainingMissing + remainingRepair === 0,
     scanned: types.length,
     errors: errors.slice(0, 8),
     partner_id: partnerId,
