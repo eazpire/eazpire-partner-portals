@@ -10,6 +10,9 @@ import {
   applyPublishBrandingSemanticsToSlotsByPosition,
   catalogVariantIds,
   normalizePatPositionKey,
+  hasAnyPlaceholderSlotCounts,
+  keepPreviousPlaceholderSlotsIfCollectWouldWipe,
+  derivePlaceholderSlotsFromEazEditor,
 } from "./provider-print-technical.js";
 
 const EMPTY_PLACEHOLDER_SLOTS = { qr: 0, logo: 0, creator_design: 0, additional_design: 0 };
@@ -25,7 +28,7 @@ function versionTemplateRow(version) {
   };
 }
 
-function versionConfigForUi(version, positions) {
+function versionConfigForUi(version, positions, printAreasConfig = null) {
   const tpl = versionTemplateRow(version);
   const merged = mergePatDisplayConfigFromTemplate(tpl);
   const norm = normalizePatProductVersionConfig(version?.product_version_config ?? merged);
@@ -39,6 +42,15 @@ function versionConfigForUi(version, positions) {
     use_main_source_provider: norm.use_main_source_provider,
     is_print_settings_main_source: norm.is_print_settings_main_source,
   };
+
+  if (!hasAnyPlaceholderSlotCounts(cfg.placeholders_by_position)) {
+    const fromEditor = derivePlaceholderSlotsFromEazEditor(
+      printAreasConfig || version?.print_areas_config_json || version?.studio_config?.print_areas_config
+    );
+    for (const [pos, slot] of Object.entries(fromEditor)) {
+      cfg.placeholders_by_position[pos] = { ...EMPTY_PLACEHOLDER_SLOTS, ...slot };
+    }
+  }
 
   for (const ph of positions) {
     const pos = String(ph.position || "")
@@ -67,7 +79,7 @@ export function renderVersionConfigPanel(version, catalogDetail = {}) {
   const variants = catalogDetail.variants || [];
   const vpa = catalogDetail.variant_print_areas || [];
   const positions = unionPatPlaceholderPositions(variants, {});
-  const cfg = versionConfigForUi(version, positions);
+  const cfg = versionConfigForUi(version, positions, catalogDetail.print_areas_config_json);
   positions.length = 0;
   positions.push(...unionPatPlaceholderPositions(variants, cfg.placeholders_by_position));
 
@@ -92,8 +104,8 @@ export function renderVersionConfigPanel(version, catalogDetail = {}) {
               return `<option value="${q}"${sel}>${q}</option>`;
             }).join("");
             return `<span class="ce-prov-ph-row">
-              <span class="ce-prov-ph-label">${escapeHtml(pt.label)}</span>
-              <select class="input input-sm ce-prov-ph-qty" data-version-id="${escapeHtml(String(versionId))}" data-position="${escapeHtml(pos)}" data-ph-key="${escapeHtml(pt.key)}">${opts}</select>
+              <span class="ce-prov-ph-label">${escapeHtml(pt.label)} <strong class="ce-prov-ph-count">${cur}</strong></span>
+              <select class="input input-sm ce-prov-ph-qty" aria-label="${escapeHtml(pt.label)} count" data-version-id="${escapeHtml(String(versionId))}" data-position="${escapeHtml(pos)}" data-ph-key="${escapeHtml(pt.key)}">${opts}</select>
             </span>`;
           }).join("");
           return `<div class="ce-prov-pos-card" data-position="${escapeHtml(pos)}">
@@ -153,7 +165,7 @@ export function getVersionPlaceholderConfig(version, catalogDetail = {}) {
   const variants = catalogDetail?.variants || catalogDetail?.variants_json || [];
   const variantList = Array.isArray(variants) ? variants : [];
   const positions = unionPatPlaceholderPositions(variantList, {});
-  const cfg = versionConfigForUi(version, positions);
+  const cfg = versionConfigForUi(version, positions, catalogDetail?.print_areas_config_json);
   return cfg.placeholders_by_position || {};
 }
 
@@ -224,7 +236,13 @@ export function collectVersionConfigPanel(root, prevConfig = null, versionId = n
   });
 
   // Only overwrite when the panel actually rendered controls — otherwise keep prev (avoids wipe).
-  if (qtyEls.length) cfg.placeholders_by_position = byPos;
+  // All-zero collects from unreadably narrow selects used to wipe a saved slot map.
+  if (qtyEls.length) {
+    cfg.placeholders_by_position = keepPreviousPlaceholderSlotsIfCollectWouldWipe(
+      cfg.placeholders_by_position,
+      byPos
+    );
+  }
   if (dtEls.length) cfg.design_types = designTypes;
   Object.assign(cfg, readStoredMainSourceFlags(prevConfig));
 

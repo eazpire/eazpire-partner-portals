@@ -253,6 +253,15 @@ describe("partner catalog editor assets (smoke)", () => {
     expect(src).toContain("derivePatProductVersionConfigFromSnapshot");
     expect(src).toContain("patVersionDesignTypesForAdminUi");
     expect(src).toContain("mapPlaceholderNameToPatKey");
+    expect(src).toContain("derivePlaceholderSlotsFromEazEditor");
+    expect(src).toContain("keepPreviousPlaceholderSlotsIfCollectWouldWipe");
+  });
+
+  it("version config panel shows a visible slot count next to each placeholder label", () => {
+    const src = readFileSync(join(portal, "version-config-panel.js"), "utf8");
+    expect(src).toContain("ce-prov-ph-count");
+    expect(src).toContain("keepPreviousPlaceholderSlotsIfCollectWouldWipe");
+    expect(src).toContain("print_areas_config_json");
   });
 
   it("migration 0015 defines shadow tables", () => {

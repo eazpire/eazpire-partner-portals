@@ -5695,7 +5695,7 @@ body.catalog-editor-open #partner-toast {
 }
 .ce-prov-ph-row {
   display: grid;
-  grid-template-columns: 1fr 3.25rem;
+  grid-template-columns: minmax(0, 1fr) 4.75rem;
   align-items: center;
   gap: 8px;
   font-size: 0.8rem;
@@ -5703,14 +5703,31 @@ body.catalog-editor-open #partner-toast {
 .ce-prov-ph-label {
   min-width: 0;
   line-height: 1.25;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ce-prov-ph-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--text);
 }
 .ce-prov-ph-qty {
-  width: 3.25rem;
-  min-width: 3.25rem;
-  max-width: 3.25rem;
+  width: 4.75rem;
+  min-width: 4.75rem;
+  max-width: 4.75rem;
+  min-height: 36px;
   justify-self: end;
-  padding-left: 0.35rem;
-  padding-right: 1.35rem;
+  padding: 0 1.65rem 0 0.55rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background-color: #fff;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23475569' d='M1.2 1.4 6 6.2l4.8-4.8'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 0.75rem;
 }
 .ce-prov-dt-grid {
   display: flex;

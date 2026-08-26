@@ -341,6 +341,33 @@ async function loadPartnerAvailableCountries(env, productKey) {
   };
 }
 
+async function loadProviderPrintAreasConfigJson(env, productKey, printProviderId) {
+  const key = String(productKey || "").trim();
+  if (!key || printProviderId == null || printProviderId === "") return null;
+  const pidBind = Number.isFinite(Number(printProviderId)) ? Number(printProviderId) : String(printProviderId);
+  try {
+    if (shouldUseCatalogOps(env) && env.CATALOG_DB) {
+      const row = await env.CATALOG_DB.prepare(
+        `SELECT print_areas_config_json FROM product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`
+      )
+        .bind(key, pidBind)
+        .first();
+      return parseJson(row?.print_areas_config_json, null);
+    }
+    if (env.MANUFACTURER_DB) {
+      const row = await env.MANUFACTURER_DB.prepare(
+        `SELECT print_areas_config_json FROM eazpire_product_publish_profiles WHERE product_key = ? AND print_provider_id = ? LIMIT 1`
+      )
+        .bind(key, pidBind)
+        .first();
+      return parseJson(row?.print_areas_config_json, null);
+    }
+  } catch (e) {
+    console.warn("[provider-catalog-detail] print_areas_config:", e?.message || e);
+  }
+  return null;
+}
+
 export async function getProviderCatalogDetail(env, productKey, printProviderId) {
   const db = env.MANUFACTURER_DB;
   if (!db && !shouldUseCatalogOps(env)) return { ok: false, error: "manufacturer_db_unavailable" };
@@ -437,6 +464,7 @@ export async function getProviderCatalogDetail(env, productKey, printProviderId)
     variants_source,
     variant_print_areas: variantPrintAreas,
     versions,
+    print_areas_config_json: await loadProviderPrintAreasConfigJson(env, productKey, pidKey),
   };
 }
 

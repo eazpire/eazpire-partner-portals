@@ -283,6 +283,43 @@ function patSlotHasAny(s) {
   return !!(s && (s.qr > 0 || s.logo > 0 || s.creator_design > 0 || s.additional_design > 0));
 }
 
+/** True when any position has qr/logo/creator_design/additional_design > 0. */
+export function hasAnyPlaceholderSlotCounts(placeholdersByPosition) {
+  if (!placeholdersByPosition || typeof placeholdersByPosition !== "object") return false;
+  return Object.values(placeholdersByPosition).some((slot) => patSlotHasAny(slot));
+}
+
+/**
+ * Saving the Provider tab with every qty at 0 used to wipe a real slot map.
+ * Keep the previous map when the collected panel is all zeros but the stored config is not.
+ */
+export function keepPreviousPlaceholderSlotsIfCollectWouldWipe(prevPbp, collectedPbp) {
+  if (hasAnyPlaceholderSlotCounts(collectedPbp)) return collectedPbp;
+  if (hasAnyPlaceholderSlotCounts(prevPbp)) return prevPbp;
+  return collectedPbp || prevPbp || {};
+}
+
+/**
+ * Slot counts from the visual print-area editor (`eaz_admin.by_version.*.eaz_editor`),
+ * not from legacy edit_mode (which can still list a back creator box).
+ */
+export function derivePlaceholderSlotsFromEazEditor(printAreasConfig) {
+  const acc = {};
+  const snap = parseJsonLoose(printAreasConfig);
+  const ea = snap?.eaz_admin;
+  if (!ea?.by_version || typeof ea.by_version !== "object") return acc;
+  for (const ver of Object.values(ea.by_version)) {
+    const inner = ver?.by_design_type;
+    if (!inner || typeof inner !== "object") continue;
+    for (const ed of Object.values(inner)) {
+      const pbp = ed?.eaz_editor?.placeholders_by_position;
+      if (pbp) mergePatPhMapIntoAcc(acc, pbp);
+    }
+  }
+  applyPublishBrandingSemanticsToSlotsByPosition(acc);
+  return acc;
+}
+
 export function normalizePatPositionKey(k) {
   const s = String(k || "")
     .trim()
