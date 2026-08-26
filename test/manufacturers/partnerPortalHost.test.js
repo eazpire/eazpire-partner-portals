@@ -26,6 +26,8 @@ describe("partnerPortalHost routing", () => {
     expect(isPartnerPortalHost("admin.eazpire.com", "/audience/plan")).toBe(true);
     expect(isPartnerPortalHost("admin.eazpire.com", "/system")).toBe(true);
     expect(isPartnerPortalHost("admin.eazpire.com", "/system/generator")).toBe(true);
+    expect(isPartnerPortalHost("admin.eazpire.com", "/marketing")).toBe(true);
+    expect(isPartnerPortalHost("admin.eazpire.com", "/marketing/amazon-ads")).toBe(true);
     expect(isPartnerPortalHost("admin.eazpire.com", "/")).toBe(true);
   });
 });

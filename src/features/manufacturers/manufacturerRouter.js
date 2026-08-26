@@ -379,6 +379,9 @@ const ADMIN_OPS = new Set([
   "audience-gap",
   "admin-system-generator-config-get",
   "admin-system-generator-config-save",
+  "admin-marketing-amazon-ads-campaigns",
+  "admin-marketing-amazon-ads-campaign-state",
+  "admin-marketing-amazon-ads-campaign-budget",
 ]);
 
 export function isManufacturerOp(op) {
@@ -1924,6 +1927,18 @@ export async function handleManufacturerRouter(request, env, ctx) {
     if (op === "admin-system-generator-config-save" && request.method === "POST") {
       const { handleSystemGeneratorConfigSave } = await import("../admin/systemGeneratorConfig.js");
       return handleSystemGeneratorConfigSave(request, env);
+    }
+    if (op === "admin-marketing-amazon-ads-campaigns" && request.method === "GET") {
+      const { handleAdminMarketingAmazonAdsCampaigns } = await import("../admin/adminMarketingAdsOps.js");
+      return handleAdminMarketingAmazonAdsCampaigns(request, env);
+    }
+    if (op === "admin-marketing-amazon-ads-campaign-state" && request.method === "POST") {
+      const { handleAdminMarketingAmazonAdsCampaignState } = await import("../admin/adminMarketingAdsOps.js");
+      return handleAdminMarketingAmazonAdsCampaignState(request, env);
+    }
+    if (op === "admin-marketing-amazon-ads-campaign-budget" && request.method === "POST") {
+      const { handleAdminMarketingAmazonAdsCampaignBudget } = await import("../admin/adminMarketingAdsOps.js");
+      return handleAdminMarketingAmazonAdsCampaignBudget(request, env);
     }
 
     return json({ ok: false, error: "unknown_admin_op" }, 404, cors);

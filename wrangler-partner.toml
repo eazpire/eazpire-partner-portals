@@ -17,6 +17,8 @@
 #   Amazon SP-API (Admin Creations → Channels dry-run): AMAZON_LWA_*, AMAZON_REFRESH_TOKEN_EU/NA,
 #     AMAZON_SPAPI_ROLE_ARN, AWS_* — copy from creator-engine:
 #     node scripts/partner/sync-amazon-secrets-to-partner.cjs
+#   Amazon Ads API (Admin Marketing Hub): AMAZON_ADS_LWA_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN
+#     — same script copies Ads secrets together with SP-API secrets.
 
 name = "eazpire-partner-portals"
 main = "src/partner-worker.js"
@@ -55,6 +57,11 @@ AMAZON_MARKETPLACE_ID_DE = "A1PA6795UKMFR9"
 AMAZON_SELLER_ID = "A235MZXJBWCPSO"
 AMAZON_SELLER_ID_NA = "AYLAZL4RLI2T3"
 AMAZON_DEFAULT_MARKETPLACES = "A1PA6795UKMFR9"
+# Amazon Ads API (Admin Marketing Hub — DE Seller cockpit). Secrets: AMAZON_ADS_LWA_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN
+AMAZON_ADS_LWA_CLIENT_ID = "amzn1.application-oa2-client.886a8087f7d4413e8f951293d00932c8"
+AMAZON_ADS_API_HOST = "advertising-api-eu.amazon.com"
+AMAZON_ADS_DE_SELLER_PROFILE_ID = "443862402969380"
+AMAZON_ADS_MAX_DAILY_BUDGET = "50"
 
 [[kv_namespaces]]
 binding = "JOBS"
@@ -100,7 +107,7 @@ database_id = "0e1f5a29-8d34-45ae-a9eb-f98a6ba7f0fd"
 [assets]
 binding = "PARTNER_ASSETS"
 directory = "partner-static"
-run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*", "/system", "/system/*"]
+run_worker_first = ["/partner", "/partner/*", "/creations", "/creations/*", "/brands", "/brands/*", "/audience", "/audience/*", "/system", "/system/*", "/marketing", "/marketing/*"]
 
 # Same Workers AI binding as creator-engine (admin metadata regenerate, etc.)
 [ai]

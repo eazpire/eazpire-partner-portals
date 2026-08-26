@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" data-portal="admin">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Eazpire Marketing</title>
+  <link rel="icon" href="/marketing/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700;750;800;850&display=swap" rel="stylesheet" />
+  <style>
+    [hidden]{display:none!important}
+    .muted{color:var(--muted);line-height:1.45}
+    .mkt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+    .mkt-card{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:var(--radius,18px);padding:18px;text-align:left;color:var(--text);text-decoration:none;display:block;box-shadow:var(--shadow-sm)}
+    .mkt-card:hover{border-color:rgba(180,83,9,.45)}
+    .mkt-card[aria-disabled="true"]{opacity:.72;cursor:not-allowed}
+    .mkt-card[aria-disabled="true"]:hover{border-color:var(--line,#e2e8f0)}
+    .mkt-card h2{margin:0 0 6px;font-size:1.05rem;color:var(--text)}
+    .mkt-card p{margin:0;color:var(--muted);line-height:1.45}
+    .mkt-card__meta{margin-top:10px;font-size:.8rem;color:var(--muted)}
+    .mkt-kpis{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
+    .mkt-kpi{background:var(--surface,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;padding:10px 14px}
+    .mkt-kpi strong{display:block;font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    .budget-row{display:flex;gap:8px;align-items:center}
+    .budget-row input{width:96px}
+    .state-enabled{color:#047857;font-weight:700}
+    .state-paused{color:#b45309;font-weight:700}
+    .state-archived{color:var(--muted)}
+  </style>
+  <link rel="stylesheet" href="/marketing/shared/css/partner-ui.css" />
+</head>
+<body>
+  <div id="app-shell" class="app-root" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="sidebar-content">
+          <div class="brand-block">
+            <button type="button" class="app-drawer-trigger" id="app-drawer-trigger" aria-label="Eazpire apps" aria-expanded="false" aria-controls="app-drawer"></button>
+            <div>
+              <div class="brand-name" data-i18n="admin.marketing.title">Marketing</div>
+              <div class="brand-sub" data-i18n="admin.marketing.brand_sub">Paid ads · Social · Internal</div>
+            </div>
+          </div>
+          <div id="app-drawer" class="app-drawer" hidden></div>
+          <nav id="partner-nav"></nav>
+          <div class="sidebar-card">
+            <h4 data-i18n="admin.marketing.sidebar_title">Marketing Ops</h4>
+            <p data-i18n="admin.marketing.sidebar_body">Cockpit for paid ads. Pause, enable, and set daily budget. No autopilot spending.</p>
+          </div>
+        </div>
+        <button type="button" class="sidebar-rail" id="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <span class="sidebar-rail__arrow-zone" aria-hidden="true"><span class="sidebar-rail__arrow">‹</span></span>
+          <span class="sidebar-rail__labels">
+            <span class="sidebar-rail__section" data-i18n="admin.marketing.menu">Menu</span>
+            <span class="sidebar-rail__action" data-i18n="admin.marketing.collapse">Collapse</span>
+          </span>
+        </button>
+      </div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <header class="topbar">
+      <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="partner-nav">☰</button>
+      <div class="topbar-start">
+        <h1 class="page-title" id="page-title">Marketing</h1>
+      </div>
+      <div class="topbar-actions">
+        <div id="topbar-extra"></div>
+        <button type="button" class="btn btn-secondary" id="btn-logout">Sign out</button>
+      </div>
+    </header>
+    <main class="main">
+      <section class="view active layout-stage" data-route="/marketing" id="view-hub"></section>
+      <section class="view layout-stage" data-route="/marketing/amazon-ads" id="view-amazon"></section>
+      <section class="view layout-stage" data-route="/marketing/social" id="view-social"></section>
+      <section class="view layout-stage" data-route="/marketing/internal" id="view-internal"></section>
+    </main>
+  </div>
+
+  <div id="app-login" class="partner-screen" hidden>
+    <div class="login-card admin-login-card" id="login-panel">
+      <div class="brand-block login-brand">
+        <button type="button" class="app-drawer-trigger app-drawer-trigger--static" disabled aria-hidden="true"></button>
+        <div>
+          <div class="brand-name" style="color:var(--text)">Eazpire Marketing</div>
+          <div class="brand-sub" style="color:var(--muted)">Admin Ops</div>
+        </div>
+      </div>
+      <h1 id="login-title">Sign in to Marketing</h1>
+      <p id="login-body">Enter your authorized admin email. We will send a secure magic link — no Shopify login required.</p>
+      <form id="login-form">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input class="input" id="login-email" type="email" required autocomplete="email" placeholder="you@eazpire.com" />
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%" id="login-submit">Send magic link</button>
+      </form>
+      <p id="login-message" class="login-message"></p>
+      <p class="muted" id="login-hint" style="margin-top:12px;font-size:0.85rem">First-time magic links open Partner Ops; then use the app drawer → Marketing. Existing sessions work immediately.</p>
+    </div>
+  </div>
+
+  <div id="app-loading" class="partner-screen" hidden>
+    <div class="login-card admin-login-card">
+      <h1>Marketing</h1>
+      <p>Checking admin session…</p>
+    </div>
+  </div>
+
+  <div id="partner-toast" class="toast"><strong></strong><span></span></div>
+  <script>window.__PARTNER_API_BASE__ = window.location.origin + "/marketing";</script>
+  <script type="module" src="/marketing/js/app.js"></script>
+</body>
+</html>

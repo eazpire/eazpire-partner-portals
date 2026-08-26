@@ -34,6 +34,8 @@ describe("manufacturerRouter ops", () => {
     expect(isManufacturerOp("get-publish-progress")).toBe(true);
     expect(isManufacturerOp("admin-design-unpublish")).toBe(true);
     expect(isManufacturerOp("admin-design-set-library-status")).toBe(true);
+    expect(isManufacturerOp("admin-marketing-amazon-ads-campaigns")).toBe(true);
+    expect(isManufacturerOp("admin-marketing-amazon-ads-campaign-state")).toBe(true);
     expect(isManufacturerOp("unknown-op")).toBe(false);
   });
 });
