@@ -43,7 +43,7 @@ describe("spreadEuCatalogMap", () => {
       shouldImportSpreadEuProductType(
         teeType({ customerName: "Kaffeebecher", printAreas: [{ view: "FRONT", widthMm: 80, heightMm: 80 }] })
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("builds Printify-shaped variant matrix data", () => {
@@ -89,17 +89,17 @@ describe("spreadEuCatalogMap", () => {
   });
 
   it("maps Spread categories onto Catalog Studio groups", () => {
-    expect(spreadEuCatalogCategory(teeType())).toEqual({ group: "Kleidung", leaf: "T-Shirt" });
+    expect(spreadEuCatalogCategory(teeType())).toEqual({ group: "Female", leaf: "T-Shirt" });
     expect(spreadEuCatalogCategory(teeType({ customerName: "Männer Premium Hoodie" }))).toEqual({
-      group: "Kleidung",
+      group: "Unisex",
       leaf: "Hoodie",
     });
     expect(spreadEuCatalogCategory(teeType({ customerName: "Langarmshirt" }))).toEqual({
-      group: "Kleidung",
+      group: "Unisex",
       leaf: "Long Sleeve",
     });
     expect(spreadEuCatalogCategory(teeType({ customerName: "Polo" }))).toEqual({
-      group: "Kleidung",
+      group: "Unisex",
       leaf: "Polo Shirt",
     });
     expect(

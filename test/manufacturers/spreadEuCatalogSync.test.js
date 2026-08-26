@@ -136,9 +136,9 @@ describe("Spreadshirt catalog studio helpers", () => {
     expect(result.items.map((i) => i.product_key)).toEqual(["spread-eu-812"]);
     expect(result.items[0].catalog_status).toBe("available");
     expect(result.items[0].category).toBe("T-Shirt");
-    expect(result.items[0].parent_group).toBe("Kleidung");
+    expect(result.items[0].parent_group).toBe("Unisex");
     expect(result.items[0].mock_images[0]).toContain("productTypes/812");
-    expect(result.category_tree.some((g) => g.name === "Kleidung")).toBe(true);
+    expect(result.category_tree.some((g) => g.name === "Unisex")).toBe(true);
     expect(resolveStudioCategory({ catalog_category_leaf: "Long Sleeve" }).category).toBe("Long Sleeve");
   });
 });
