@@ -27,6 +27,7 @@ import {
   spreadEuProductKey,
   SPREAD_EU_COUNTRY_CODES as EU_CODES,
 } from "./spreadEuCatalogMap.js";
+import { D1_IN_CHUNK } from "../../../../utils/d1InChunk.js";
 
 /** Modest chunk so Catalog Studio GET/Sync stay inside Worker time limits; remaining types import on the next pass. */
 export const SPREAD_EU_IMPORT_CHUNK = 25;
@@ -57,32 +58,56 @@ export function pickSpreadEuTypesToImport(types, existingKeys, opts = {}) {
   };
 }
 
-async function recategorizeExistingSpreadEuProducts(mfgDb, types, existingKeys, skipKeys) {
-  const skip = skipKeys instanceof Set ? skipKeys : new Set();
+/**
+ * Rewrite leftover wrong paths (Kleidung / Unisex+T-Shirt) from the product title.
+ * Does not touch Online/Offline, prices, automations, or markets.
+ * Chunk 80 so one Sync stays inside Worker time + D1 limits.
+ */
+export async function recategorizeExistingSpreadEuProducts(mfgDb, limit = 80) {
+  const cap = Number(limit) > 0 ? Number(limit) : D1_IN_CHUNK;
+  let rows = [];
+  try {
+    const res = await mfgDb
+      .prepare(
+        `SELECT product_key, title, catalog_category_group, catalog_category_leaf
+         FROM eazpire_products WHERE product_key LIKE 'spread-eu-%'`
+      )
+      .all();
+    rows = res?.results || [];
+  } catch {
+    return { updated: 0, remaining: 0 };
+  }
+
   let updated = 0;
-  for (const type of Array.isArray(types) ? types : []) {
-    if (updated >= 80) break;
-    const productKey = spreadEuProductKey(type.id);
-    if (!productKey || !existingKeys.has(productKey) || skip.has(productKey)) continue;
-    if (!shouldImportSpreadEuProductType(type)) continue;
-    const category = spreadEuCatalogCategory(type);
-    if (!category.group || !category.leaf) continue;
+  let remaining = 0;
+  const now = Date.now();
+  for (const row of rows) {
+    const productKey = String(row.product_key || "").trim();
+    if (!productKey) continue;
+    const mapped = spreadEuCatalogCategory({ customerName: row.title || "" });
+    if (!mapped.group || !mapped.leaf) continue;
+    const sameGroup = String(row.catalog_category_group || "") === mapped.group;
+    const sameLeaf = String(row.catalog_category_leaf || "") === mapped.leaf;
+    if (sameGroup && sameLeaf) continue;
+    if (updated >= cap) {
+      remaining += 1;
+      continue;
+    }
     try {
       const res = await mfgDb
         .prepare(
           `UPDATE eazpire_products SET catalog_category_group = ?, catalog_category_leaf = ?, updated_at = ?
-           WHERE product_key = ? AND (
-             catalog_category_group IS NULL OR catalog_category_group = '' OR catalog_category_group = 'Kleidung'
-           )`
+           WHERE product_key = ?`
         )
-        .bind(category.group, category.leaf, Date.now(), productKey)
+        .bind(mapped.group, mapped.leaf, now, productKey)
         .run();
       if (Number(res?.meta?.changes || 0) > 0) updated += 1;
+      else remaining += 1;
     } catch {
-      /* optional */
+      remaining += 1;
     }
   }
-  return updated;
+  return { updated, remaining };
 }
 
 async function fetchViewsForTypes(env, types) {
@@ -464,15 +489,17 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
   const setup = await ensureSpreadshirtPartnerSetup(mfgDb);
   const partnerId = setup.partner_id;
   const existingKeys = await listExistingSpreadEuProductKeys(mfgDb, partnerId);
+  const recat = await recategorizeExistingSpreadEuProducts(mfgDb, D1_IN_CHUNK);
 
   if (!String(env?.SPREADCONNECT_API_KEY || "").trim()) {
     return {
       ok: true,
       skipped: true,
       imported: 0,
+      recategorized: recat.updated,
       existing: existingKeys.size,
-      remaining: 0,
-      complete: false,
+      remaining: recat.remaining,
+      complete: recat.remaining === 0,
       warning: "spreadconnect_api_key_not_configured",
       partner_id: partnerId,
     };
@@ -501,10 +528,11 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
       skipped: true,
       imported: 0,
       repaired: 0,
+      recategorized: recat.updated,
       existing: existingKeys.size,
       eligible: picked.eligible.length,
-      remaining: 0,
-      complete: true,
+      remaining: recat.remaining,
+      complete: recat.remaining === 0,
       scanned: types.length,
       partner_id: partnerId,
     };
@@ -570,10 +598,11 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     skipped: false,
     imported,
     repaired,
+    recategorized: recat.updated,
     existing: existingKeys.size,
     eligible: picked.eligible.length,
-    remaining: remainingMissing + remainingRepair,
-    complete: remainingMissing + remainingRepair === 0,
+    remaining: remainingMissing + remainingRepair + recat.remaining,
+    complete: remainingMissing + remainingRepair === 0 && recat.remaining === 0,
     scanned: types.length,
     errors: errors.slice(0, 8),
     partner_id: partnerId,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickSpreadEuTypesToImport } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogSync.js";
+import { pickSpreadEuTypesToImport, recategorizeExistingSpreadEuProducts } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogSync.js";
 import { spreadEuProductKey } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogMap.js";
 import {
   isSpreadEuFulfillmentId,
@@ -136,9 +136,55 @@ describe("Spreadshirt catalog studio helpers", () => {
     expect(result.items.map((i) => i.product_key)).toEqual(["spread-eu-812"]);
     expect(result.items[0].catalog_status).toBe("available");
     expect(result.items[0].category).toBe("T-Shirt");
-    expect(result.items[0].parent_group).toBe("Unisex");
+    expect(result.items[0].parent_group).toBe("Male");
     expect(result.items[0].mock_images[0]).toContain("productTypes/812");
-    expect(result.category_tree.some((g) => g.name === "Unisex")).toBe(true);
+    expect(result.category_tree.some((g) => g.name === "Male")).toBe(true);
     expect(resolveStudioCategory({ catalog_category_leaf: "Long Sleeve" }).category).toBe("Long Sleeve");
+  });
+});
+
+describe("recategorizeExistingSpreadEuProducts", () => {
+  it("rewrites leftover Unisex/T-Shirt without touching status", async () => {
+    const rows = [
+      {
+        product_key: "spread-eu-1",
+        title: "Brotdose",
+        catalog_category_group: "Unisex",
+        catalog_category_leaf: "T-Shirt",
+      },
+      {
+        product_key: "spread-eu-2",
+        title: "Männer Premium T-Shirt",
+        catalog_category_group: "Kleidung",
+        catalog_category_leaf: "T-Shirt",
+      },
+    ];
+    const updates = [];
+    const mfgDb = {
+      prepare(sql) {
+        const binds = [];
+        return {
+          bind(...args) {
+            binds.push(...args);
+            return this;
+          },
+          async all() {
+            return { results: rows };
+          },
+          async run() {
+            updates.push({ sql, binds: binds.slice() });
+            return { meta: { changes: 1 } };
+          },
+        };
+      },
+    };
+    const result = await recategorizeExistingSpreadEuProducts(mfgDb, 80);
+    expect(result.updated).toBe(2);
+    expect(result.remaining).toBe(0);
+    expect(updates[0].sql).not.toContain("Kleidung");
+    expect(updates[0].binds[0]).toBe("Home");
+    expect(updates[0].binds[1]).toBe("Lunch Box");
+    expect(updates[1].binds[0]).toBe("Male");
+    expect(updates[1].binds[1]).toBe("T-Shirt");
   });
 });

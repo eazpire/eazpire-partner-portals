@@ -589,21 +589,23 @@ function isSpreadEuStudioItem(item) {
 }
 
 function resolveSpreadEuStudioCategory(item, rawLeaf, rawGroup) {
-  const leaf = rawLeaf ? normalizePrintifyCategoryName(rawLeaf) || rawLeaf : "";
-  if (SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup) && leaf) {
-    return { category: leaf, parent_group: rawGroup };
-  }
-  if (rawGroup && rawGroup !== "Kleidung" && leaf && !SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup)) {
-    const parent = normalizeGroupName(rawGroup) || rawGroup;
-    return { category: leaf, parent_group: parent };
-  }
   const inferred = spreadEuCatalogCategoryFromTitle(item.title || item.blueprint_title || "", {
     group: rawGroup,
     leaf: rawLeaf,
   });
+  if (inferred?.leaf && inferred?.group) {
+    return { category: inferred.leaf, parent_group: inferred.group };
+  }
+  const leaf = rawLeaf ? normalizePrintifyCategoryName(rawLeaf) || rawLeaf : "";
+  if (rawGroup && rawGroup !== "Kleidung" && leaf) {
+    const parent = SPREAD_EU_AUDIENCE_GROUPS.includes(rawGroup)
+      ? rawGroup
+      : normalizeGroupName(rawGroup) || rawGroup;
+    return { category: leaf, parent_group: parent };
+  }
   return {
-    category: inferred.leaf || leaf || "Sonstiges",
-    parent_group: inferred.group || "Unisex",
+    category: leaf || "Sonstiges",
+    parent_group: "Unisex",
   };
 }
 

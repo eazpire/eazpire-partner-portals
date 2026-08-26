@@ -162,7 +162,7 @@ describe("spreadEuCatalogMap", () => {
   it("maps Spread categories onto Catalog Studio groups", () => {
     expect(spreadEuCatalogCategory(teeType())).toEqual({ group: "Female", leaf: "T-Shirt" });
     expect(spreadEuCatalogCategory(teeType({ customerName: "Männer Premium Hoodie" }))).toEqual({
-      group: "Unisex",
+      group: "Male",
       leaf: "Hoodie",
     });
     expect(spreadEuCatalogCategory(teeType({ customerName: "Langarmshirt" }))).toEqual({
@@ -186,5 +186,62 @@ describe("spreadEuCatalogMap", () => {
         ],
       }).leaf
     ).toBe("Sweatshirt");
+  });
+
+  it("does not dump non-shirts into T-Shirt", () => {
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Brotdose" }))).toEqual({
+      group: "Home",
+      leaf: "Lunch Box",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Bandana" }))).toEqual({
+      group: "Accessoires",
+      leaf: "Bandana",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "CRAFT ADV Unify Freizeithose" }))).toEqual({
+      group: "Unisex",
+      leaf: "Pants",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Bierkrug" }))).toEqual({
+      group: "Drinkware",
+      leaf: "Mug",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Teddy" })).group).toBe("Accessoires");
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Stoffbeutel" })).group).toBe("Taschen");
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Männer Jeanshemd Organic von Stanley/Stella" }))).toEqual({
+      group: "Male",
+      leaf: "Shirt",
+    });
+  });
+
+  it("puts Männer/Herren apparel in Male and Damen/Frauen in Female, not Unisex", () => {
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Männer Premium T-Shirt" }))).toEqual({
+      group: "Male",
+      leaf: "T-Shirt",
+    });
+    expect(
+      spreadEuCatalogCategory(teeType({ customerName: "Männer Tank Top" }), {
+        genders: [{ translation: "Unisex" }],
+      })
+    ).toEqual({ group: "Male", leaf: "Tank Top" });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "JAKO Damen T-Shirt Light Flow" }))).toEqual({
+      group: "Female",
+      leaf: "T-Shirt",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Kinder Premium T-Shirt" }))).toEqual({
+      group: "Kids",
+      leaf: "T-Shirt",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Baby Bio-Kurzarm-Body" }))).toEqual({
+      group: "Toddler",
+      leaf: "Body",
+    });
+  });
+
+  it("never uses T-Shirt as the unknown-apparel dump", () => {
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Mysterious Widget 9000" }))).toEqual({
+      group: "Unisex",
+      leaf: "Other apparel",
+    });
+    expect(spreadconnectApparelKind(teeType({ customerName: "Brotdose" }))).toBeNull();
   });
 });
