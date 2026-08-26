@@ -19,11 +19,20 @@ export function spreadconnectProductTypeName(type) {
   return String(type?.customerName || type?.merchantName || type?.name || "").trim();
 }
 
+function printAreaWidth(area) {
+  return Number(area?.widthMm || area?.width_mm || area?.width) || 0;
+}
+
+function printAreaHeight(area) {
+  return Number(area?.heightMm || area?.height_mm || area?.height) || 0;
+}
+
 export function spreadconnectHasFrontPrintArea(type) {
   const areas = Array.isArray(type?.printAreas) ? type.printAreas : [];
-  return areas.some(
-    (a) => String(a.view || "").toUpperCase() === "FRONT" && Number(a.widthMm) > 0 && Number(a.heightMm) > 0
-  );
+  return areas.some((a) => {
+    const view = String(a?.view || a?.name || a?.key || "").toUpperCase();
+    return view === "FRONT" && printAreaWidth(a) > 0 && printAreaHeight(a) > 0;
+  });
 }
 
 export function spreadconnectIsNonApparel(type) {
@@ -41,11 +50,17 @@ export function spreadconnectApparelKind(type) {
   if (/tank|singlet|ärmellos|aermellos/.test(n)) return "tank";
   if (/long\s*sleeve|longsleeve|langarm/.test(n)) return "longsleeve";
   if (/polo/.test(n)) return "polo";
+  if (/jacke|jacket|blouson/.test(n)) return "jacket";
+  if (/weste|vest\b/.test(n)) return "vest";
+  if (/crop/.test(n)) return "crop";
   if (/sweat|crewneck|pullover/.test(n)) return "sweat";
+  if (/short/.test(n)) return "shorts";
+  if (/jogger|sweatpant/.test(n)) return "joggers";
   if (/(women|ladies|damen|femme|frauen)/.test(n) && /t[- ]?shirt|tee\b/.test(n)) return "womens-tee";
   if (/(men|herren|homme)/.test(n) && /t[- ]?shirt|tee\b/.test(n)) return "mens-tee";
   if (/t[- ]?shirt|tee\b/.test(n)) return "tee";
-  return null;
+  if (/shirt/.test(n)) return "shirt";
+  return "tee";
 }
 
 export function spreadconnectDefaultD2cPrice(type) {
@@ -65,8 +80,9 @@ export function spreadconnectSyntheticVariantId(typeId, appearanceId, sizeId) {
 /**
  * Printify-shaped product_data for Catalog Editor variant matrix.
  * @param {object} type Spread Connect product type
+ * @param {{ views?: object, categories?: object }} [extras]
  */
-export function buildSpreadEuCatalogProductData(type) {
+export function buildSpreadEuCatalogProductData(type, extras = {}) {
   const typeId = type?.id;
   const appearances = Array.isArray(type?.appearances) ? type.appearances : [];
   const sizes = Array.isArray(type?.sizes) ? type.sizes : [];
@@ -110,7 +126,7 @@ export function buildSpreadEuCatalogProductData(type) {
 
   const printAreaKeys = spreadconnectPrintAreaKeys(type);
   const printAreas = spreadconnectPrintAreaDetails(type);
-  const mockImages = spreadconnectMockImageUrls(type);
+  const mockImages = spreadconnectMockImageUrls(type, extras.views);
 
   return {
     product_data: {
@@ -138,7 +154,7 @@ export function buildSpreadEuCatalogProductData(type) {
       ])
     ),
     mock_images: mockImages,
-    catalog_category: spreadEuCatalogCategory(type),
+    catalog_category: spreadEuCatalogCategory(type, extras.categories),
   };
 }
 
@@ -160,7 +176,7 @@ function collectUrlDeep(urls, node, depth = 0) {
     return;
   }
   if (typeof node !== "object") return;
-  for (const key of ["url", "src", "image_url", "imageUrl", "previewImage", "preview_url", "href"]) {
+  for (const key of ["url", "src", "image", "image_url", "imageUrl", "previewImage", "preview_url", "href"]) {
     pushHttpUrl(urls, node[key]);
   }
   for (const key of ["images", "previews", "resources", "appearancePreviews", "productImages"]) {
@@ -168,9 +184,44 @@ function collectUrlDeep(urls, node, depth = 0) {
   }
 }
 
-/** Preview / appearance images from a Spread Connect product type. */
-export function spreadconnectMockImageUrls(type) {
+/** Public Spreadshirt image-server mockup (no API key). View 1 is FRONT for apparel types. */
+export function spreadconnectCdnPreviewUrl(typeId, appearanceId, viewId = 1, size = 800) {
+  const t = String(typeId || "").trim();
+  const a = String(appearanceId || "").trim();
+  const v = String(viewId || 1).trim() || "1";
+  if (!t || !a) return "";
+  const dim = Number(size) > 0 ? Number(size) : 800;
+  return `https://image.spreadshirtmedia.net/image-server/v1/productTypes/${encodeURIComponent(t)}/views/${encodeURIComponent(v)}/appearances/${encodeURIComponent(a)},width=${dim},height=${dim}`;
+}
+
+export function spreadconnectFrontViewId(viewsPayload) {
+  const views = Array.isArray(viewsPayload?.views)
+    ? viewsPayload.views
+    : Array.isArray(viewsPayload)
+      ? viewsPayload
+      : [];
+  const front = views.find((v) => String(v?.name || "").toUpperCase() === "FRONT") || views[0];
+  const id = front?.id;
+  return id == null || id === "" ? "1" : String(id);
+}
+
+function collectViewsImageUrls(urls, viewsPayload) {
+  const views = Array.isArray(viewsPayload?.views)
+    ? viewsPayload.views
+    : Array.isArray(viewsPayload)
+      ? viewsPayload
+      : [];
+  const front = views.find((v) => String(v?.name || "").toUpperCase() === "FRONT");
+  const ordered = front ? [front, ...views.filter((v) => v !== front)] : views;
+  for (const view of ordered) {
+    collectUrlDeep(urls, view?.images);
+  }
+}
+
+/** Preview / appearance images from a product type, /views payload, or CDN fallback. */
+export function spreadconnectMockImageUrls(type, viewsPayload = null) {
   const urls = [];
+  collectViewsImageUrls(urls, viewsPayload);
   collectUrlDeep(urls, type?.images);
   collectUrlDeep(urls, type?.image);
   collectUrlDeep(urls, type?.imageUrl);
@@ -179,6 +230,12 @@ export function spreadconnectMockImageUrls(type) {
   const appearances = Array.isArray(type?.appearances) ? type.appearances : [];
   for (const appearance of appearances) {
     collectUrlDeep(urls, appearance);
+  }
+  if (!urls.length && type?.id) {
+    const viewId = spreadconnectFrontViewId(viewsPayload);
+    for (const appearance of appearances.slice(0, 4)) {
+      pushHttpUrl(urls, spreadconnectCdnPreviewUrl(type.id, appearance?.id, viewId));
+    }
   }
   return urls.slice(0, 12);
 }
@@ -200,21 +257,79 @@ export function spreadconnectPrintAreaDetails(type) {
     out.push({
       name,
       view: view.toUpperCase(),
-      width_mm: Number(area.widthMm || area.width_mm || area.width) || 0,
-      height_mm: Number(area.heightMm || area.height_mm || area.height) || 0,
+      width_mm: printAreaWidth(area),
+      height_mm: printAreaHeight(area),
     });
   }
   return out;
 }
 
-export function spreadEuCatalogCategory(type) {
+const SPREAD_API_GROUP_TO_STUDIO = {
+  Bekleidung: "Kleidung",
+  Accessoires: "Accessoires",
+  "Home & Living": "Home",
+};
+
+const SPREAD_API_LEAF_TO_STUDIO = {
+  "T-Shirts": "T-Shirt",
+  "Pullover & Hoodies": "Hoodie",
+  "Jacken & Westen": "Jacket",
+  Langarmshirts: "Long Sleeve",
+  Poloshirts: "Polo Shirt",
+  "Tank Tops": "Tank Top",
+  "Hosen & Shorts": "Shorts",
+  Babykleidung: "T-Shirt",
+};
+
+function deepestSpreadCategoryLeaves(nodes, acc = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (Array.isArray(node?.children) && node.children.length) {
+      deepestSpreadCategoryLeaves(node.children, acc);
+    } else if (node?.translation) {
+      acc.push(node);
+    }
+  }
+  return acc;
+}
+
+function studioLeafFromKind(kind) {
+  if (kind === "hoodie" || kind === "zip-hoodie") return "Hoodie";
+  if (kind === "sweat") return "Sweatshirt";
+  if (kind === "tank") return "Tank Top";
+  if (kind === "longsleeve") return "Long Sleeve";
+  if (kind === "polo") return "Polo Shirt";
+  if (kind === "jacket") return "Jacket";
+  if (kind === "vest") return "Vest";
+  if (kind === "crop") return "Crop Top";
+  if (kind === "shorts") return "Shorts";
+  if (kind === "joggers") return "Joggers";
+  if (kind === "shirt") return "Shirt";
+  if (kind === "womens-tee" || kind === "mens-tee" || kind === "tee") return "T-Shirt";
+  return null;
+}
+
+/**
+ * Map Spread Connect type (+ optional /categories payload) onto Catalog Studio groups.
+ * Leaves must match admin CATEGORY_GROUPS names (T-Shirt, Long Sleeve, Polo Shirt, …).
+ */
+export function spreadEuCatalogCategory(type, apiCategories = null) {
   const kind = spreadconnectApparelKind(type);
-  if (kind === "hoodie" || kind === "zip-hoodie") return { group: "Kleidung", leaf: "Hoodie" };
-  if (kind === "sweat") return { group: "Kleidung", leaf: "Sweatshirt" };
-  if (kind === "tank") return { group: "Kleidung", leaf: "Tank Top" };
-  if (kind === "longsleeve") return { group: "Kleidung", leaf: "Longsleeve" };
-  if (kind === "polo") return { group: "Kleidung", leaf: "Polo" };
-  return { group: "Kleidung", leaf: "T-Shirt" };
+  const fromKind = studioLeafFromKind(kind);
+  const groups = Array.isArray(apiCategories?.categories) ? apiCategories.categories : [];
+  const apiGroupRaw = String(groups[0]?.translation || "").trim();
+  const apiLeafRaw = String(deepestSpreadCategoryLeaves(groups)[0]?.translation || "").trim();
+
+  let leaf = fromKind;
+  if (apiLeafRaw === "Pullover & Hoodies") {
+    leaf = kind === "sweat" ? "Sweatshirt" : fromKind || "Hoodie";
+  } else if (!leaf && apiLeafRaw) {
+    leaf = SPREAD_API_LEAF_TO_STUDIO[apiLeafRaw] || null;
+  }
+
+  return {
+    group: SPREAD_API_GROUP_TO_STUDIO[apiGroupRaw] || "Kleidung",
+    leaf: leaf || "T-Shirt",
+  };
 }
 
 /** EU shipping countries used for Spread EU catalog plans. */

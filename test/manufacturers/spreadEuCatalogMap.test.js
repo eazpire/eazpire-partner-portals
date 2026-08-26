@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildSpreadEuCatalogProductData,
   shouldImportSpreadEuProductType,
+  spreadEuCatalogCategory,
   spreadEuProductKey,
   spreadconnectArticleIdFromHandle,
   spreadconnectApparelKind,
+  spreadconnectCdnPreviewUrl,
   spreadconnectDefaultD2cPrice,
+  spreadconnectMockImageUrls,
   spreadconnectSyntheticVariantId,
 } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogMap.js";
 
@@ -66,5 +69,48 @@ describe("spreadEuCatalogMap", () => {
     );
     expect(mapped.mock_images).toContain("https://cdn.example.com/black.png");
     expect(mapped.mock_images).toContain("https://cdn.example.com/white.png");
+  });
+
+  it("builds CDN fallback previews and reads /views image URLs", () => {
+    const cdn = spreadconnectCdnPreviewUrl(812, 1247, 1, 800);
+    expect(cdn).toContain("productTypes/812/views/1/appearances/1247");
+    const fromCdn = spreadconnectMockImageUrls(teeType());
+    expect(fromCdn[0]).toContain("productTypes/813/views/1/appearances/1");
+    const fromViews = spreadconnectMockImageUrls(teeType(), {
+      views: [
+        {
+          name: "FRONT",
+          id: "1",
+          images: [{ appearanceId: "1", image: "https://image.spreadshirtmedia.net/front-black.png" }],
+        },
+      ],
+    });
+    expect(fromViews).toContain("https://image.spreadshirtmedia.net/front-black.png");
+  });
+
+  it("maps Spread categories onto Catalog Studio groups", () => {
+    expect(spreadEuCatalogCategory(teeType())).toEqual({ group: "Kleidung", leaf: "T-Shirt" });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Männer Premium Hoodie" }))).toEqual({
+      group: "Kleidung",
+      leaf: "Hoodie",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Langarmshirt" }))).toEqual({
+      group: "Kleidung",
+      leaf: "Long Sleeve",
+    });
+    expect(spreadEuCatalogCategory(teeType({ customerName: "Polo" }))).toEqual({
+      group: "Kleidung",
+      leaf: "Polo Shirt",
+    });
+    expect(
+      spreadEuCatalogCategory(teeType({ customerName: "Crewneck" }), {
+        categories: [
+          {
+            translation: "Bekleidung",
+            children: [{ translation: "Pullover & Hoodies", children: [] }],
+          },
+        ],
+      }).leaf
+    ).toBe("Sweatshirt");
   });
 });

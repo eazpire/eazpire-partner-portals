@@ -823,7 +823,7 @@ export async function handleManufacturerRouter(request, env, ctx) {
         const { ensureSpreadEuCatalogSynced } = await import(
           "./adapters/spreadconnect/spreadEuCatalogSync.js"
         );
-        const result = await ensureSpreadEuCatalogSynced(env, { force: body?.force !== false });
+        const result = await ensureSpreadEuCatalogSynced(env, { force: body?.force === true });
         if (!result.ok) return json(result, 400, cors);
         return json(result, 200, cors);
       } catch (err) {

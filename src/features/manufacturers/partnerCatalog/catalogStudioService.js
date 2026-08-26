@@ -80,6 +80,10 @@ const PROVIDER_LOGO_BY_PARTNER_SLUG = {
 
 const SPREAD_US_EMPTY_HINT =
   "Spread US is a placeholder. Add the API token later to import the US catalog.";
+const SPREAD_EU_AVAILABLE_HINT =
+  "Imported Spread EU types appear under Available until you set them to Preview or Online.";
+const SPREAD_EU_API_KEY_HINT =
+  "Spread Connect API key is not configured on the partner worker, so types cannot be imported.";
 
 const VALID_CATALOG_STATUSES = new Set(["online", "preview", "offline"]);
 
@@ -479,6 +483,10 @@ const PRINTIFY_CATEGORY_ALIASES = {
   bags: "Bag",
   sweatshirts: "Sweatshirt",
   sweatshirt: "Sweatshirt",
+  "long sleeve": "Long Sleeve",
+  longsleeve: "Long Sleeve",
+  "polo shirt": "Polo Shirt",
+  polo: "Polo Shirt",
   "tank tops": "Tank Top",
   "tank top": "Tank Top",
   "phone cases": "Phone Case",
@@ -493,6 +501,7 @@ const PRINTIFY_CATEGORY_ALIASES = {
 const GROUP_ALIASES = {
   clothing: "Kleidung",
   kleidung: "Kleidung",
+  bekleidung: "Kleidung",
   accessories: "Accessoires",
   accessoires: "Accessoires",
   bags: "Taschen",
@@ -1522,6 +1531,23 @@ function applySpreadshirtProviderFilter(products, providerId) {
   return products.filter((p) => String(p.product_key || "").startsWith("spread-eu-"));
 }
 
+function isUnpublishedSpreadStudioProduct(product) {
+  const status = String(product?.catalog_status || "offline").toLowerCase();
+  return status !== "online" && status !== "preview";
+}
+
+function spreadEuEmptyHint(filter, syncMeta, itemCount) {
+  if (syncMeta?.warning === "spreadconnect_api_key_not_configured") return SPREAD_EU_API_KEY_HINT;
+  if (itemCount > 0) return "";
+  if (filter === "available") {
+    if (Number(syncMeta?.remaining || 0) > 0) {
+      return "Import is still running. Click Sync or wait — remaining types will appear under Available.";
+    }
+    return SPREAD_EU_AVAILABLE_HINT;
+  }
+  return SPREAD_EU_AVAILABLE_HINT;
+}
+
 /**
  * @param {object} db — MANUFACTURER_DB
  * @param {object} env — worker env (CATALOG_DB for Printify available list)
@@ -1546,27 +1572,36 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
 
   const isSpreadshirt = partnerUsesFlatProviders(partner?.slug) || manufacturerId === SPREADSHIRT_PARTNER_ID;
 
+  let spreadSync = null;
   try {
     if (isSpreadshirt || incomingSlug === SPREAD_EU_PARTNER_SLUG) {
       const { ensureSpreadEuCatalogSynced } = await import("../adapters/spreadconnect/spreadEuCatalogSync.js");
-      await ensureSpreadEuCatalogSynced(env, { force: false });
+      spreadSync = await ensureSpreadEuCatalogSynced(env, { force: false });
     }
   } catch (e) {
     console.warn("[catalog-studio] spread eu sync:", e?.message || e);
+    spreadSync = { ok: false, error: String(e?.message || e) };
   }
 
   if (isSpreadshirt && isSpreadUsFulfillmentId(providerId)) {
     return buildProductsResponse(filter, [], {
       empty_hint: SPREAD_US_EMPTY_HINT,
       placeholder: true,
+      sync: spreadSync,
     });
   }
 
   if (filter === "available" && isSpreadshirt) {
     let products = await listSpreadshirtEazpireProducts(db, manufacturerId, null);
-    products = applySpreadshirtProviderFilter(products, providerId);
-    const items = await mapEazpireProductsToStudioItems(db, env, products);
-    return buildProductsResponse(filter, items);
+    products = applySpreadshirtProviderFilter(products, providerId).filter(isUnpublishedSpreadStudioProduct);
+    const items = (await mapEazpireProductsToStudioItems(db, env, products)).map((item) => ({
+      ...item,
+      catalog_status: "available",
+    }));
+    return buildProductsResponse(filter, items, {
+      empty_hint: spreadEuEmptyHint(filter, spreadSync, items.length),
+      sync: spreadSync,
+    });
   }
 
   if (filter === "available") {
@@ -1634,6 +1669,13 @@ export async function getCatalogStudioProducts(db, env, { manufacturerId, provid
   if (status === "offline") {
     const pendingItems = await listPendingPartnerProductsAsOffline(db, env, manufacturerId, providerId);
     items.unshift(...pendingItems);
+  }
+
+  if (isSpreadshirt) {
+    return buildProductsResponse(status, items, {
+      empty_hint: spreadEuEmptyHint(status, spreadSync, items.length),
+      sync: spreadSync,
+    });
   }
 
   return buildProductsResponse(status, items);

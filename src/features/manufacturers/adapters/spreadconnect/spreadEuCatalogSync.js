@@ -3,7 +3,7 @@
  */
 
 import { newId } from "../../db.js";
-import { listSpreadconnectProductTypes } from "../../../../utils/spreadconnect.js";
+import { listSpreadconnectProductTypes, getSpreadconnectProductTypeViews } from "../../../../utils/spreadconnect.js";
 import { upsertEazpireProduct, getEazpireProduct } from "../../partnerCatalog/eazpireProductService.js";
 import { upsertProductVersion } from "../../partnerCatalog/eazpireProductVersionService.js";
 import { ensureSpreadshirtPartnerSetup } from "../../partnerCatalog/spreadEuPartnerSeed.js";
@@ -23,8 +23,8 @@ import {
   SPREAD_EU_COUNTRY_CODES as EU_CODES,
 } from "./spreadEuCatalogMap.js";
 
-/** High cap so Catalog Studio can import the full FRONT-apparel catalog in a few requests. */
-export const SPREAD_EU_IMPORT_CHUNK = 500;
+/** Modest chunk so Catalog Studio GET/Sync stay inside Worker time limits; remaining types import on the next pass. */
+export const SPREAD_EU_IMPORT_CHUNK = 25;
 const PRINT_PROVIDER_ID = OPAQUE_VARIANT_PROVIDER_IDS[SPREAD_EU_FULFILLMENT_EXTERNAL_ID];
 
 function productTypeList(raw) {
@@ -52,18 +52,25 @@ export function pickSpreadEuTypesToImport(types, existingKeys, opts = {}) {
   };
 }
 
-async function countSpreadEuMockupDefaults(mfgDb) {
-  try {
-    const row = await mfgDb
-      .prepare(
-        `SELECT COUNT(*) AS n FROM eazpire_product_mockup_defaults
-         WHERE product_key LIKE 'spread-eu-%'`
-      )
-      .first();
-    return Number(row?.n || 0);
-  } catch {
-    return 0;
+async function fetchViewsForTypes(env, types) {
+  const out = new Map();
+  const list = Array.isArray(types) ? types : [];
+  const batchSize = 5;
+  for (let i = 0; i < list.length; i += batchSize) {
+    const batch = list.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (type) => {
+        try {
+          const views = await getSpreadconnectProductTypeViews(env, type.id);
+          return [String(type.id), views];
+        } catch {
+          return [String(type.id), null];
+        }
+      })
+    );
+    for (const [id, views] of results) out.set(id, views);
   }
+  return out;
 }
 
 async function listExistingSpreadEuProductKeys(mfgDb, partnerId) {
@@ -434,10 +441,8 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
   }
 
   const types = productTypeList(await listSpreadconnectProductTypes(env));
-  const defaultsCount = await countSpreadEuMockupDefaults(mfgDb);
-  const needsBackfill = existingKeys.size > 0 && defaultsCount < existingKeys.size;
   const picked = pickSpreadEuTypesToImport(types, existingKeys, {
-    force: !!opts.force || needsBackfill,
+    force: !!opts.force,
     chunkSize: SPREAD_EU_IMPORT_CHUNK,
   });
   if (!picked.toImport.length) {
@@ -452,6 +457,8 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     };
   }
 
+  const viewsByTypeId = await fetchViewsForTypes(env, picked.toImport);
+
   let imported = 0;
   const errors = [];
   const fpId = setup.fulfillment_provider?.id || null;
@@ -460,7 +467,9 @@ export async function ensureSpreadEuCatalogSynced(env, opts = {}) {
     const productKey = spreadEuProductKey(type.id);
     const title = spreadconnectProductTypeName(type) || productKey;
     try {
-      const mapped = buildSpreadEuCatalogProductData(type);
+      const mapped = buildSpreadEuCatalogProductData(type, {
+        views: viewsByTypeId.get(String(type.id)) || null,
+      });
       const category = mapped.catalog_category || {};
       await upsertProviderBlueprint(mfgDb, type, partnerId);
       const existingProduct = await getEazpireProduct(mfgDb, productKey);

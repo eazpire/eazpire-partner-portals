@@ -61,4 +61,84 @@ describe("Spreadshirt catalog studio helpers", () => {
     expect(isSpreadEuFulfillmentId("spread-eu-1")).toBe(true);
     expect(isSpreadUsFulfillmentId("910003")).toBe(true);
   });
+
+  it("lists unpublished Spread EU types under Available with categories and preview images", async () => {
+    const { getCatalogStudioProducts, resolveStudioCategory } = await import(
+      "../../src/features/manufacturers/partnerCatalog/catalogStudioService.js"
+    );
+    const rows = [
+      {
+        product_key: "spread-eu-812",
+        title: "Männer Premium T-Shirt",
+        catalog_status: "offline",
+        catalog_category_leaf: "T-Shirt",
+        catalog_category_group: "Kleidung",
+        version_count: 0,
+        manufacturer_name: "Spreadshirt",
+        blueprint_title: null,
+        blueprint_category: null,
+        updated_at: 1,
+      },
+      {
+        product_key: "spread-eu-900",
+        title: "Männer Premium Hoodie",
+        catalog_status: "online",
+        catalog_category_leaf: "Hoodie",
+        catalog_category_group: "Kleidung",
+        version_count: 1,
+        manufacturer_name: "Spreadshirt",
+        blueprint_title: null,
+        blueprint_category: null,
+        updated_at: 1,
+      },
+    ];
+    const mfgDb = {
+      prepare: (sql) => {
+        const handler = {
+          bind: (...args) => {
+            handler._args = args;
+            return handler;
+          },
+          first: async () => {
+            if (sql.includes("FROM manufacturers")) {
+              return { id: "mfg_spreadshirt", slug: "spreadshirt", name: "Spreadshirt" };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM eazpire_products")) return { results: rows };
+            if (sql.includes("eazpire_product_mockup_images")) {
+              return {
+                results: [
+                  {
+                    product_key: "spread-eu-812",
+                    image_url:
+                      "https://image.spreadshirtmedia.net/image-server/v1/productTypes/812/views/1/appearances/1,width=800,height=800",
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+          run: async () => ({}),
+        };
+        return handler;
+      },
+    };
+
+    const result = await getCatalogStudioProducts(
+      mfgDb,
+      {},
+      { manufacturerId: "mfg_spreadshirt", providerExternalId: "spread-eu-1", filter: "available" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.items.map((i) => i.product_key)).toEqual(["spread-eu-812"]);
+    expect(result.items[0].catalog_status).toBe("available");
+    expect(result.items[0].category).toBe("T-Shirt");
+    expect(result.items[0].parent_group).toBe("Kleidung");
+    expect(result.items[0].mock_images[0]).toContain("productTypes/812");
+    expect(result.category_tree.some((g) => g.name === "Kleidung")).toBe(true);
+    expect(resolveStudioCategory({ catalog_category_leaf: "Long Sleeve" }).category).toBe("Long Sleeve");
+  });
 });
