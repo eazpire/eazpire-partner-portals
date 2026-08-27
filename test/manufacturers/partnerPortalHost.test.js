@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPartnerPortalHost } from "../../src/features/manufacturers/partnerPortalHost.js";
+import { handlePartnerPortalRequest, isPartnerPortalHost } from "../../src/features/manufacturers/partnerPortalHost.js";
 import { rewritePartnerApiV1Request } from "../../src/features/manufacturers/partnerApiV1.js";
 
 describe("partnerPortalHost routing", () => {
@@ -12,6 +12,18 @@ describe("partnerPortalHost routing", () => {
     const out = rewritePartnerApiV1Request(new Request("https://partner.eazpire.com/api/v1/overview"));
     expect(out).toBeTruthy();
     expect(new URL(out.url).searchParams.get("op")).toBe("partner-api-overview");
+  });
+
+  it("serves cursor-agent CSS with CORS for creator.eazpire.com", async () => {
+    const req = new Request("https://admin.eazpire.com/creations/shared/admin-cursor-agent/shell.css", {
+      headers: { Origin: "https://creator.eazpire.com" },
+    });
+    const res = await handlePartnerPortalRequest(req, {});
+    expect(res).toBeTruthy();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/css");
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://creator.eazpire.com");
+    expect(res.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
   });
 
   it("detects admin partner path and root landing", () => {

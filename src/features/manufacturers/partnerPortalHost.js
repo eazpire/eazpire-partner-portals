@@ -4,6 +4,37 @@
 
 import { getPartnerStaticFallback } from "./partnerStaticFallback.js";
 import { withAdminCursorAgentInjection } from "../../utils/adminCursorAgentInject.js";
+import { getCorsHeaders } from "../../utils/response.js";
+
+/**
+ * Cursor-agent CSS/JS are loaded from admin.eazpire.com onto other portals
+ * (creator.eazpire.com, wear, play, …) with crossorigin="anonymous".
+ * Without ACAO the browser blocks the stylesheet and the shell looks empty.
+ */
+export function applyPartnerAssetCors(request, res) {
+  if (!res) return res;
+  const cors = getCorsHeaders(request);
+  const headers = new Headers(res.headers);
+  for (const [key, value] of Object.entries(cors)) {
+    if (key.toLowerCase() === "vary") {
+      const prev = headers.get("Vary") || "";
+      headers.set("Vary", prev && !/\bOrigin\b/i.test(prev) ? `${prev}, Origin` : prev || value);
+      continue;
+    }
+    headers.set(key, value);
+  }
+  const ct = String(headers.get("content-type") || "");
+  if (
+    ct.includes("text/css") ||
+    ct.includes("javascript") ||
+    ct.includes("image/") ||
+    ct.includes("font/") ||
+    ct.includes("application/json")
+  ) {
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
 
 function cursorPortalForHost(hostname, pathname) {
   if (hostname === "partner.eazpire.com" || hostname === "partner.local.eazpire.com") return "partner";
@@ -182,6 +213,7 @@ export async function handlePartnerPortalRequest(request, env) {
   const url = new URL(request.url);
   if (url.searchParams.get("op")) return null;
   if (!isPartnerPortalHost(url.hostname, url.pathname)) return null;
+  const send = (res) => applyPartnerAssetCors(request, res);
 
   if (isPartnerHost(url.hostname) && url.pathname === "/auth/verify") {
     const { handlePartnerAuthVerify } = await import("./partnerAuth.js");
@@ -251,34 +283,38 @@ export async function handlePartnerPortalRequest(request, env) {
   </div>
 </body>
 </html>`;
-    return maybeInjectCursor(
-      new Response(html, {
-        status: 200,
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      }),
-      url.hostname,
-      url.pathname
+    return send(
+      await maybeInjectCursor(
+        new Response(html, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        }),
+        url.hostname,
+        url.pathname
+      )
     );
   }
 
   const key = resolveAssetKey(url.hostname, url.pathname);
-  if (!key) return new Response("Not found", { status: 404 });
+  if (!key) return send(new Response("Not found", { status: 404 }));
 
   // Inline bundle first — avoids PARTNER_ASSETS hangs that caused Cloudflare 522s.
   const fallback = getPartnerStaticFallback(key);
   if (fallback) {
-    return maybeInjectCursor(
-      new Response(fallback.body, {
-        status: 200,
-        headers: {
-          "content-type": fallback.contentType,
-          "cache-control": key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
-            ? "no-store"
-            : "public, max-age=300",
-        },
-      }),
-      url.hostname,
-      url.pathname
+    return send(
+      await maybeInjectCursor(
+        new Response(fallback.body, {
+          status: 200,
+          headers: {
+            "content-type": fallback.contentType,
+            "cache-control": key.endsWith(".html") || key.endsWith(".js") || key.endsWith(".css")
+              ? "no-store"
+              : "public, max-age=300",
+          },
+        }),
+        url.hostname,
+        url.pathname
+      )
     );
   }
 
@@ -293,16 +329,18 @@ export async function handlePartnerPortalRequest(request, env) {
         ? "no-store"
         : "public, max-age=300"
     );
-    return maybeInjectCursor(
-      new Response(assetRes.body, { status: assetRes.status, headers }),
-      url.hostname,
-      url.pathname
+    return send(
+      await maybeInjectCursor(
+        new Response(assetRes.body, { status: assetRes.status, headers }),
+        url.hostname,
+        url.pathname
+      )
     );
   }
 
   if (key.endsWith(".ico")) {
-    return new Response(null, { status: 204, headers: { "cache-control": "public, max-age=86400" } });
+    return send(new Response(null, { status: 204, headers: { "cache-control": "public, max-age=86400" } }));
   }
 
-  return new Response("Partner portal asset missing", { status: 404 });
+  return send(new Response("Partner portal asset missing", { status: 404 }));
 }
