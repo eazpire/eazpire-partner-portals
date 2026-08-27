@@ -6,6 +6,25 @@ import {
   getCategoryIdForCategoryName,
   getTaxonomyDataForCategory,
 } from "../../../../utils/taxonomy.js";
+import {
+  SPREAD_EU_DEFAULT_MARKET_COUNTRY_CODES,
+  SPREAD_EU_HOODIE_RATE_TYPE_IDS,
+  SPREAD_EU_SHIPPING_RATES_DEFAULT,
+  SPREAD_EU_SHIPPING_RATES_HOODIE,
+} from "./spreadEuShippingFixture.js";
+
+export {
+  SPREAD_EU_AVAILABLE_COUNTRY_CODES,
+  SPREAD_EU_DEFAULT_MARKET_COUNTRY_CODES,
+  SPREAD_EU_HOODIE_RATE_TYPE_IDS,
+  SPREAD_EU_NO_SHIP_COUNTRY_CODES,
+  SPREAD_EU_SHIPPABLE_COUNTRY_CODES,
+  SPREAD_EU_SHIPPING_PROBE,
+  SPREAD_EU_SHIPPING_RATES_DEFAULT,
+  SPREAD_EU_SHIPPING_RATES_HOODIE,
+  SPREAD_EU_SHIPPING_SYNC_SOURCE,
+  SPREAD_EU_TODIFY_MARKET_EXCEPTION,
+} from "./spreadEuShippingFixture.js";
 
 export function spreadEuProductKey(typeId) {
   const id = String(typeId || "").trim();
@@ -176,7 +195,7 @@ export function spreadconnectDefaultD2cPrice(type) {
   return 19.99;
 }
 
-/** Spread EU warehouse origin (Leipzig / Gutenborn — not US). */
+/** Spread EU production origin: Spreadshirt Manufacturing, Gießerstraße 27, 04229 Leipzig (not Gutenborn; API fromAddress is merchant CH). */
 export const SPREAD_EU_COUNTRY_OF_ORIGIN = "DE";
 
 const MAX_MOCKUP_ENTRIES = 80;
@@ -746,30 +765,40 @@ export function spreadEuShopifyTaxonomy(type, category = null) {
   };
 }
 
-/**
- * Countries Spreadshirt / Spread Connect EU ships to from the EU warehouse.
- * Documented default (no catalog shipping-countries API). Not US-only.
- */
-export const SPREAD_EU_COUNTRY_CODES = [
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT",
-  "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
-  "GB", "CH", "NO", "IS", "LI", "AD", "MC", "SM", "VA", "BA", "RS", "ME", "MK", "AL", "UA", "MD", "TR",
-  "US", "CA", "MX", "BR", "AR", "CL", "CO", "PE", "UY", "CR", "PA",
-  "JP", "KR", "SG", "HK", "TW", "IN", "TH", "MY", "PH", "ID", "VN", "AU", "NZ",
-  "AE", "IL", "SA", "QA", "KW", "ZA", "EG", "MA", "TN", "NG", "KE", "GH",
-];
+/** Catalog Studio default selected markets (70). MA is shippable but Todify-owned — not preselected. */
+export const SPREAD_EU_COUNTRY_CODES = SPREAD_EU_DEFAULT_MARKET_COUNTRY_CODES;
 
-const SPREAD_EU_NEAR_ORIGIN = new Set([
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT",
-  "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
-  "GB", "CH", "NO", "IS", "LI",
-]);
+export function spreadEuTypeIdFromProductKey(productKey) {
+  const m = String(productKey || "").trim().match(/^spread-eu-(\d+)$/i);
+  return m ? m[1] : "";
+}
 
-export function spreadEuDefaultShippingRateCents(countryCode) {
+export function spreadEuUsesHoodieShippingRates(productKey, type) {
+  const id = spreadEuTypeIdFromProductKey(productKey);
+  if (id && SPREAD_EU_HOODIE_RATE_TYPE_IDS.includes(id)) return true;
+  const kind = spreadconnectApparelKind(type || { customerName: "" });
+  return kind === "hoodie" || kind === "zip-hoodie";
+}
+
+export function spreadEuRateCentsForCountry(countryCode, productKey, type) {
   const cc = String(countryCode || "").trim().toUpperCase();
-  if (cc === "DE") return { first: 349, additional: 149 };
-  if (SPREAD_EU_NEAR_ORIGIN.has(cc)) return { first: 449, additional: 199 };
-  return { first: 699, additional: 299 };
+  const hoodie = spreadEuUsesHoodieShippingRates(productKey, type);
+  const row = (hoodie && SPREAD_EU_SHIPPING_RATES_HOODIE[cc]) || SPREAD_EU_SHIPPING_RATES_DEFAULT[cc];
+  return row ? { first: row.first, additional: row.additional } : null;
+}
+
+export function spreadEuShippingRatesForProduct(productKey, type) {
+  return Object.keys(SPREAD_EU_SHIPPING_RATES_DEFAULT)
+    .sort()
+    .map((code) => {
+      const cents = spreadEuRateCentsForCountry(code, productKey, type);
+      return { country_code: code, first: cents.first, additional: cents.additional };
+    });
+}
+
+/** @deprecated use spreadEuRateCentsForCountry — kept for callers that still pass only ISO. */
+export function spreadEuDefaultShippingRateCents(countryCode, productKey, type) {
+  return spreadEuRateCentsForCountry(countryCode, productKey, type) || { first: 0, additional: 0 };
 }
 
 export function shouldImportSpreadEuProductType(type) {

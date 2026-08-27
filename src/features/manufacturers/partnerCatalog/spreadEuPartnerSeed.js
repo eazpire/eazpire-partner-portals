@@ -22,6 +22,7 @@ import {
   SPREAD_US_PARTNER_SLUG,
   SPREAD_US_PROVIDER_DISPLAY_NAME,
 } from "./constants.js";
+import { SPREAD_EU_SHIPPABLE_COUNTRY_CODES } from "../adapters/spreadconnect/spreadEuCatalogMap.js";
 
 async function safeRun(db, sql, ...binds) {
   try {
@@ -199,7 +200,7 @@ export async function ensureSpreadshirtPartnerSetup(db) {
     label: SPREAD_EU_PROVIDER_DISPLAY_NAME,
     country: "DE",
     city: "Leipzig",
-    shipsTo: ["EU"],
+    shipsTo: [...SPREAD_EU_SHIPPABLE_COUNTRY_CODES],
   });
   const usLocationId = await ensureLocation(db, {
     id: SPREAD_US_LOCATION_ID,
@@ -232,7 +233,7 @@ export async function ensureSpreadshirtPartnerSetup(db) {
       logo_url: SPREAD_EU_ICON_URL,
       location_id: euLocationId,
     },
-    ships_to: ["EU"],
+    ships_to: [...SPREAD_EU_SHIPPABLE_COUNTRY_CODES],
     production_days_min: 2,
     production_days_max: 5,
     status: "active",

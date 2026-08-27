@@ -30,7 +30,7 @@ import {
 import { resolveVariantProductDataForUi } from "../variantTemplateSync.js";
 import { parseJson, newId } from "../../db.js";
 import { regionCodesFromCountryCodes, expandToIsoCountryCodes } from "../../../catalog/resolvePlanCountries.js";
-import { SPREAD_EU_COUNTRY_CODES } from "../../adapters/spreadconnect/spreadEuCatalogMap.js";
+import { SPREAD_EU_AVAILABLE_COUNTRY_CODES } from "../../adapters/spreadconnect/spreadEuCatalogMap.js";
 import { coerceVariantConfigProviderId } from "../constants.js";
 import {
   filterImagesByMockupSet,
@@ -284,7 +284,7 @@ async function loadPartnerAvailableCountries(env, productKey) {
   if (!key) return { mode: "full", countries: [] };
 
   if (key.startsWith("spread-eu-")) {
-    return { mode: "partner", countries: SPREAD_EU_COUNTRY_CODES.slice() };
+    return { mode: "partner", countries: SPREAD_EU_AVAILABLE_COUNTRY_CODES.slice() };
   }
 
   const db = env.MANUFACTURER_DB;

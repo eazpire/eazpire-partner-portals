@@ -10,6 +10,7 @@ import {
 } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogFill.js";
 import {
   SPREAD_EU_COUNTRY_CODES,
+  SPREAD_EU_SHIPPABLE_COUNTRY_CODES,
   buildSpreadEuCatalogProductData,
 } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogMap.js";
 import { getProductProviderShipping } from "../../src/features/catalog/productProviderShipping.js";
@@ -44,7 +45,7 @@ function memoryCatalogDb() {
             return row || null;
           }
           if (s.includes("FROM product_publish_profiles")) {
-            return profiles.find((p) => p.product_key === binds[0] && p.print_provider_id === binds[1]) || null;
+            return profiles.find((p) => p.product_key === binds[0] && (binds.length < 2 || p.print_provider_id === binds[1])) || null;
           }
           if (s.includes("FROM product_publish_map")) {
             return maps.find((m) => m.product_key === binds[0]) || null;
@@ -64,9 +65,13 @@ function memoryCatalogDb() {
         },
         async all() {
           if (s.includes("FROM product_provider_shipping_rates")) {
-            return {
-              results: rates.filter((r) => r.product_key === binds[0] && r.print_provider_id === binds[1]),
-            };
+            let rows = rates;
+            if (s.includes("product_key = ?") && s.includes("print_provider_id = ?")) {
+              rows = rates.filter((r) => r.product_key === binds[0] && r.print_provider_id === binds[1]);
+            } else if (s.includes("print_provider_id = ?")) {
+              rows = rates.filter((r) => r.print_provider_id === binds[0]);
+            }
+            return { results: rows };
           }
           if (s.includes("FROM product_publish_map") && s.includes("LIKE")) {
             return { results: maps };
@@ -80,7 +85,11 @@ function memoryCatalogDb() {
           return { results: [] };
         },
         async run() {
-          if (s.includes("INSERT") && s.includes("product_provider_shipping_rates")) {
+          if (s.includes("DELETE") && s.includes("product_provider_shipping_rates")) {
+            for (let i = rates.length - 1; i >= 0; i--) {
+              if (rates[i].product_key === binds[0] && rates[i].print_provider_id === binds[1]) rates.splice(i, 1);
+            }
+          } else if (s.includes("INSERT") && s.includes("product_provider_shipping_rates")) {
             rates.push({
               product_key: binds[0],
               print_provider_id: binds[1],
@@ -99,10 +108,17 @@ function memoryCatalogDb() {
               network_origins_json: "[]",
               currency: "EUR",
               last_synced_at: binds[3],
-              sync_source: "spreadconnect_eu",
+              sync_source: binds[4],
               sync_error: null,
-              updated_at: binds[5] ?? binds[3],
+              updated_at: binds[6] ?? binds[3],
             });
+          } else if (s.includes("UPDATE") && s.includes("product_provider_shipping") && !s.includes("rates")) {
+            const row = headers.get(`${binds[4]}:${binds[5]}`);
+            if (row) {
+              row.ships_from_json = binds[0];
+              row.sync_source = binds[2];
+              row.updated_at = binds[3];
+            }
           } else if (s.includes("INSERT") && s.includes("product_publish_profiles")) {
             profiles.push({
               id: profiles.length + 1,
@@ -207,8 +223,16 @@ describe("spreadEuCatalogFill", () => {
     expect(result.print_provider_id).toBe(910002);
     expect(result.currency).toBe("EUR");
     expect(result.ships_from.some((s) => s.code === "DE")).toBe(true);
-    expect(result.rates_count).toBe(SPREAD_EU_COUNTRY_CODES.length);
+    expect(result.rates_count).toBe(SPREAD_EU_SHIPPABLE_COUNTRY_CODES.length);
     expect(result.continents.some((c) => (c.countries || []).length > 0)).toBe(true);
+    const deRate = (result.continents || [])
+      .flatMap((c) => c.countries || [])
+      .find((c) => String(c.code || "").toUpperCase() === "DE");
+    expect(deRate.shipping_first_cents).toBe(399);
+    expect(deRate.shipping_additional_cents).toBe(61);
+    expect(result.sync_source).toBe("spreadconnect_order_shipping_types");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("MA");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("US");
   });
 
   it("fills markets, origin, mockups, prices, meta, and EAZV per variant", async () => {
@@ -237,6 +261,12 @@ describe("spreadEuCatalogFill", () => {
     expect(catalogDb.maps[0].country_of_origin).toBe("DE");
     const countries = JSON.parse(catalogDb.maps[0].country_codes_json);
     expect(countries).toEqual(expect.arrayContaining(["DE", "FR", "ZA", "JP"]));
+    expect(countries).not.toContain("US");
+    expect(countries).not.toContain("MA");
+    expect(countries).not.toContain("CH");
+    expect(countries).not.toContain("NO");
+    expect(countries).not.toContain("AU");
+    expect(countries).toHaveLength(SPREAD_EU_COUNTRY_CODES.length);
     expect(JSON.parse(catalogDb.profiles[0].prices_json)[0].price).toBe(740);
     expect(catalogDb.profiles[0].shopify_category_id).toMatch(/TaxonomyCategory/);
     expect(catalogDb.mockups.length).toBeGreaterThanOrEqual(2);
@@ -289,6 +319,54 @@ describe("ensureSpreadEuShippingRows", () => {
     const first = catalogDb.rates.length;
     await ensureSpreadEuShippingRows({ CATALOG_DB: catalogDb }, "spread-eu-10");
     expect(catalogDb.rates.length).toBe(first);
-    expect(first).toBe(SPREAD_EU_COUNTRY_CODES.length);
+    expect(first).toBe(SPREAD_EU_SHIPPABLE_COUNTRY_CODES.length);
+  });
+
+  it("replaces placeholder 3.49 DE rates and drops US", async () => {
+    const catalogDb = memoryCatalogDb();
+    catalogDb.rates.push({
+      product_key: "spread-eu-6",
+      print_provider_id: 910002,
+      country_code: "DE",
+      shipping_first_cents: 349,
+      shipping_additional_cents: 149,
+    });
+    catalogDb.rates.push({
+      product_key: "spread-eu-6",
+      print_provider_id: 910002,
+      country_code: "US",
+      shipping_first_cents: 699,
+      shipping_additional_cents: 299,
+    });
+    await ensureSpreadEuShippingRows({ CATALOG_DB: catalogDb }, "spread-eu-6");
+    expect(catalogDb.rates.some((r) => r.country_code === "US")).toBe(false);
+    const de = catalogDb.rates.find((r) => r.country_code === "DE");
+    expect(de.shipping_first_cents).toBe(399);
+    expect(de.shipping_additional_cents).toBe(61);
+    expect(catalogDb.rates).toHaveLength(SPREAD_EU_SHIPPABLE_COUNTRY_CODES.length);
+    expect(catalogDb.rates.some((r) => r.country_code === "MA")).toBe(true);
+  });
+
+  it("stores hoodie type 20 overrides per product_key", async () => {
+    const mapped = buildSpreadEuCatalogProductData({
+      id: 20,
+      customerName: "Männer Premium Hoodie",
+      price: 25.6,
+      appearances: [{ id: 2, name: "Schwarz", appearanceColorValue: "#111111" }],
+      sizes: [{ id: 3, name: "M", price: 25.6 }],
+      printAreas: [{ view: "FRONT", widthMm: 300, heightMm: 400 }],
+    });
+    const catalogDb = memoryCatalogDb();
+    await fillSpreadEuCatalogProduct(
+      { CATALOG_DB: catalogDb },
+      { productKey: "spread-eu-20", title: mapped.product_data.title, mapped }
+    );
+    const de = catalogDb.rates.find((r) => r.country_code === "DE");
+    const jp = catalogDb.rates.find((r) => r.country_code === "JP");
+    const cz = catalogDb.rates.find((r) => r.country_code === "CZ");
+    expect(de.shipping_first_cents).toBe(460);
+    expect(de.shipping_additional_cents).toBe(190);
+    expect(jp.shipping_first_cents).toBe(1699);
+    expect(cz.shipping_first_cents).toBe(699);
   });
 });

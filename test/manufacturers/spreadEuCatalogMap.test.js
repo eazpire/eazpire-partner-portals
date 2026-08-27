@@ -12,6 +12,8 @@ import {
   spreadconnectSyntheticVariantId,
   SPREAD_EU_COUNTRY_CODES,
   SPREAD_EU_COUNTRY_OF_ORIGIN,
+  spreadEuRateCentsForCountry,
+  spreadEuUsesHoodieShippingRates,
 } from "../../src/features/manufacturers/adapters/spreadconnect/spreadEuCatalogMap.js";
 
 function teeType(overrides = {}) {
@@ -174,8 +176,13 @@ describe("spreadEuCatalogMap", () => {
       leaf: "Polo Shirt",
     });
     expect(SPREAD_EU_COUNTRY_OF_ORIGIN).toBe("DE");
-    expect(SPREAD_EU_COUNTRY_CODES).toEqual(expect.arrayContaining(["DE", "FR", "GB", "US", "ZA", "JP", "AU"]));
-    expect(SPREAD_EU_COUNTRY_CODES.length).toBeGreaterThan(40);
+    expect(SPREAD_EU_COUNTRY_CODES).toEqual(expect.arrayContaining(["DE", "FR", "GB", "ZA", "JP"]));
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("US");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("CH");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("NO");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("AU");
+    expect(SPREAD_EU_COUNTRY_CODES).not.toContain("MA");
+    expect(SPREAD_EU_COUNTRY_CODES).toHaveLength(70);
     expect(
       spreadEuCatalogCategory(teeType({ customerName: "Crewneck" }), {
         categories: [
@@ -243,5 +250,18 @@ describe("spreadEuCatalogMap", () => {
       leaf: "Other apparel",
     });
     expect(spreadconnectApparelKind(teeType({ customerName: "Brotdose" }))).toBeNull();
+  });
+
+  it("uses live tee Standard cents (DE 3.99 / 0.61), not 3.49 placeholders", () => {
+    expect(spreadEuRateCentsForCountry("DE")).toEqual({ first: 399, additional: 61 });
+    expect(spreadEuRateCentsForCountry("FR")).toEqual({ first: 465, additional: 134 });
+    expect(spreadEuRateCentsForCountry("US")).toBeNull();
+  });
+
+  it("uses hoodie type 20 overrides", () => {
+    expect(spreadEuUsesHoodieShippingRates("spread-eu-20")).toBe(true);
+    expect(spreadEuRateCentsForCountry("DE", "spread-eu-20")).toEqual({ first: 460, additional: 190 });
+    expect(spreadEuRateCentsForCountry("JP", "spread-eu-20")).toEqual({ first: 1699, additional: 0 });
+    expect(spreadEuRateCentsForCountry("CZ", "spread-eu-20")).toEqual({ first: 699, additional: 0 });
   });
 });

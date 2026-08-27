@@ -17,7 +17,13 @@ import {
 import {
   SPREAD_EU_COUNTRY_CODES as EU_CODES,
   SPREAD_EU_COUNTRY_OF_ORIGIN,
-  spreadEuDefaultShippingRateCents,
+  SPREAD_EU_NO_SHIP_COUNTRY_CODES,
+  SPREAD_EU_SHIPPABLE_COUNTRY_CODES,
+  SPREAD_EU_SHIPPING_SYNC_SOURCE,
+  SPREAD_EU_TODIFY_MARKET_EXCEPTION,
+  spreadEuRateCentsForCountry,
+  spreadEuShippingRatesForProduct,
+  spreadEuTypeIdFromProductKey,
 } from "./spreadEuCatalogMap.js";
 
 export const SPREAD_EU_PRINT_PROVIDER_ID = OPAQUE_VARIANT_PROVIDER_IDS[SPREAD_EU_FULFILLMENT_EXTERNAL_ID];
@@ -287,12 +293,29 @@ export async function fillSpreadEuPublishPlan(catalogDb, { productKey, title, ma
   }
 }
 
-export async function ensureSpreadEuShippingRows(env, productKey) {
+async function loadSpreadEuShippingTypeHint(catalogDb, productKey, mapped) {
+  const title = String(
+    mapped?.product_data?.title || mapped?.customerName || mapped?.title || ""
+  ).trim();
+  if (title) return { id: Number(spreadEuTypeIdFromProductKey(productKey)) || mapped?.id, customerName: title };
+  const row = await catalogDb
+    .prepare(`SELECT title FROM product_publish_profiles WHERE product_key = ? LIMIT 1`)
+    .bind(productKey)
+    .first()
+    .catch(() => null);
+  return {
+    id: Number(spreadEuTypeIdFromProductKey(productKey)),
+    customerName: String(row?.title || "").trim(),
+  };
+}
+
+export async function ensureSpreadEuShippingRows(env, productKey, mapped) {
   const catalogDb = env?.CATALOG_DB;
   const pk = String(productKey || "").trim();
   if (!catalogDb || !pk) return { ok: false, error: "catalog_db_unavailable" };
   await ensureProductProviderShippingSchema(catalogDb);
   const now = Date.now();
+  const typeHint = await loadSpreadEuShippingTypeHint(catalogDb, pk, mapped);
   const shipsFromJson = JSON.stringify([{ code: SPREAD_EU_COUNTRY_OF_ORIGIN, label: "Germany" }]);
   const header = await catalogDb
     .prepare(
@@ -309,39 +332,38 @@ export async function ensureSpreadEuShippingRows(env, productKey) {
         `INSERT INTO product_provider_shipping
           (product_key, print_provider_id, ships_from_json, network_origins_json, currency,
            last_synced_at, sync_source, sync_error, created_at, updated_at)
-         VALUES (?, ?, ?, '[]', 'EUR', ?, 'spreadconnect_eu', NULL, ?, ?)`
+         VALUES (?, ?, ?, '[]', 'EUR', ?, ?, NULL, ?, ?)`
       )
-      .bind(pk, SPREAD_EU_PRINT_PROVIDER_ID, shipsFromJson, now, now, now)
+      .bind(pk, SPREAD_EU_PRINT_PROVIDER_ID, shipsFromJson, now, SPREAD_EU_SHIPPING_SYNC_SOURCE, now, now)
       .run()
       .catch(() => {});
   } else {
     await catalogDb
       .prepare(
         `UPDATE product_provider_shipping SET
-          ships_from_json = CASE
-            WHEN ships_from_json IS NULL OR ships_from_json = '' OR ships_from_json = '[]' THEN ?
-            ELSE ships_from_json END,
-          currency = COALESCE(NULLIF(currency, ''), 'EUR'),
+          ships_from_json = ?,
+          currency = 'EUR',
+          last_synced_at = ?,
+          sync_source = ?,
+          sync_error = NULL,
           updated_at = ?
          WHERE product_key = ? AND print_provider_id = ?`
       )
-      .bind(shipsFromJson, now, pk, SPREAD_EU_PRINT_PROVIDER_ID)
+      .bind(shipsFromJson, now, SPREAD_EU_SHIPPING_SYNC_SOURCE, now, pk, SPREAD_EU_PRINT_PROVIDER_ID)
       .run()
       .catch(() => {});
   }
 
-  const existingRates = await catalogDb
+  await catalogDb
     .prepare(
-      `SELECT country_code FROM product_provider_shipping_rates
+      `DELETE FROM product_provider_shipping_rates
        WHERE product_key = ? AND print_provider_id = ? AND profile_key = 'default'`
     )
     .bind(pk, SPREAD_EU_PRINT_PROVIDER_ID)
-    .all()
-    .catch(() => ({ results: [] }));
-  const have = new Set((existingRates?.results || []).map((r) => String(r.country_code || "").toUpperCase()));
-  for (const code of EU_CODES) {
-    if (have.has(code)) continue;
-    const cents = spreadEuDefaultShippingRateCents(code);
+    .run()
+    .catch(() => {});
+
+  for (const row of spreadEuShippingRatesForProduct(pk, typeHint)) {
     await catalogDb
       .prepare(
         `INSERT INTO product_provider_shipping_rates
@@ -349,7 +371,7 @@ export async function ensureSpreadEuShippingRows(env, productKey) {
            shipping_first_cents, shipping_additional_cents, profile_key, speed, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, 'default', 'Standard', ?)`
       )
-      .bind(pk, SPREAD_EU_PRINT_PROVIDER_ID, code, destinationLabel(code), cents.first, cents.additional, now)
+      .bind(pk, SPREAD_EU_PRINT_PROVIDER_ID, row.country_code, destinationLabel(row.country_code), row.first, row.additional, now)
       .run()
       .catch(() => {});
   }
@@ -451,8 +473,25 @@ export async function fillSpreadEuCatalogProduct(env, { productKey, title, mappe
       .catch(() => {});
   }
   await fillSpreadEuMockupImages(env, productKey, mapped);
-  await ensureSpreadEuShippingRows(env, productKey);
+  await ensureSpreadEuShippingRows(env, productKey, mapped);
   await fillSpreadEuCreatorSettings(env, productKey, mapped);
+}
+
+function isoSet(codes) {
+  return new Set((Array.isArray(codes) ? codes : []).map((c) => String(c || "").trim().toUpperCase()).filter(Boolean));
+}
+
+function spreadEuMarketsNeedRepair(codes) {
+  const have = isoSet(codes);
+  if (have.has(SPREAD_EU_TODIFY_MARKET_EXCEPTION)) return true;
+  for (const blocked of SPREAD_EU_NO_SHIP_COUNTRY_CODES) {
+    if (have.has(blocked)) return true;
+  }
+  if (have.size !== EU_CODES.length) return true;
+  for (const code of EU_CODES) {
+    if (!have.has(code)) return true;
+  }
+  return false;
 }
 
 export async function listSpreadEuKeysNeedingRepair(env, existingKeys) {
@@ -475,7 +514,7 @@ export async function listSpreadEuKeysNeedingRepair(env, existingKeys) {
       } catch {
         codes = [];
       }
-      if (!Array.isArray(codes) || codes.length < 10 || !String(row.country_of_origin || "").trim()) {
+      if (!Array.isArray(codes) || spreadEuMarketsNeedRepair(codes) || !String(row.country_of_origin || "").trim()) {
         if (key) need.add(key);
       } else if (key) {
         complete.add(key);
@@ -487,7 +526,7 @@ export async function listSpreadEuKeysNeedingRepair(env, existingKeys) {
   try {
     const profiles = await catalogDb
       .prepare(
-        `SELECT product_key, prices_json FROM product_publish_profiles
+        `SELECT product_key, prices_json, title FROM product_publish_profiles
          WHERE product_key LIKE 'spread-eu-%' AND print_provider_id = ?`
       )
       .bind(SPREAD_EU_PRINT_PROVIDER_ID)
@@ -521,6 +560,53 @@ export async function listSpreadEuKeysNeedingRepair(env, existingKeys) {
     }
   } catch {
     for (const key of existingKeys) need.add(key);
+  }
+  try {
+    const rateRows = await catalogDb
+      .prepare(
+        `SELECT product_key, country_code, shipping_first_cents, shipping_additional_cents
+         FROM product_provider_shipping_rates
+         WHERE print_provider_id = ? AND profile_key = 'default' AND product_key LIKE 'spread-eu-%'`
+      )
+      .bind(SPREAD_EU_PRINT_PROVIDER_ID)
+      .all();
+    const byKey = new Map();
+    for (const row of rateRows?.results || []) {
+      const key = String(row.product_key || "").trim();
+      if (!key) continue;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(row);
+    }
+    const titles = new Map();
+    try {
+      const profileRows = await catalogDb
+        .prepare(
+          `SELECT product_key, title FROM product_publish_profiles
+           WHERE product_key LIKE 'spread-eu-%' AND print_provider_id = ?`
+        )
+        .bind(SPREAD_EU_PRINT_PROVIDER_ID)
+        .all();
+      for (const row of profileRows?.results || []) {
+        titles.set(String(row.product_key || "").trim(), row.title || "");
+      }
+    } catch {
+      /* optional */
+    }
+    for (const key of existingKeys) {
+      const rows = byKey.get(key) || [];
+      if (rows.length !== SPREAD_EU_SHIPPABLE_COUNTRY_CODES.length) {
+        need.add(key);
+        continue;
+      }
+      const typeHint = { customerName: titles.get(key) || "" };
+      const de = rows.find((r) => String(r.country_code || "").toUpperCase() === "DE");
+      const expected = spreadEuRateCentsForCountry("DE", key, typeHint);
+      if (!de || Number(de.shipping_first_cents) !== expected.first || Number(de.shipping_additional_cents) !== expected.additional) {
+        need.add(key);
+      }
+    }
+  } catch {
+    /* optional */
   }
   for (const key of existingKeys) {
     if (!complete.has(key)) need.add(key);
