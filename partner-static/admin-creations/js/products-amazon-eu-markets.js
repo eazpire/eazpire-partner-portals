@@ -67,11 +67,12 @@ export function normalizeAmazonEuMarketCodes(codes) {
 }
 
 /**
- * Default selection: all content-ready EU markets.
+ * Default selection: content-ready EU markets except paused Sweden (SE).
+ * Softstyle Channels/Automations SE is off for new publishes; check SE manually to re-include.
  * @returns {string[]}
  */
 export function defaultAmazonEuMarketCodes() {
-  return AMAZON_EU_CONTENT_READY_CODES.slice();
+  return AMAZON_EU_CONTENT_READY_CODES.filter((c) => c !== "SE");
 }
 
 /**

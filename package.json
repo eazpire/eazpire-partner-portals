@@ -318,6 +318,8 @@
     "android:repo-setup": "powershell -ExecutionPolicy Bypass -File scripts/android/setup-android-repo.ps1",
     "android:create-repo": "node scripts/android/create-android-repo.js",
     "android:sync": "node scripts/android/sync-to-android-repo.js",
+    "android-shop:create-repo": "node scripts/android-shop/create-android-shop-repo.js",
+    "android-shop:sync": "node scripts/android-shop/sync-to-android-shop-repo.js",
     "android:setup-play-production": "node scripts/android/setup-play-production.js",
     "android:setup-play-production:trigger": "node scripts/android/setup-play-production.js --trigger",
     "android:build": "powershell -ExecutionPolicy Bypass -File scripts/android/build-android.ps1",
